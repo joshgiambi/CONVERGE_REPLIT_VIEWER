@@ -232,22 +232,30 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    e.stopPropagation();
+    
+    console.log('Mouse down - starting windowing');
+    
     const startX = e.clientX;
     const startY = e.clientY;
     const startWindow = windowLevel.width;
     const startCenter = windowLevel.center;
 
     const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
       const deltaX = moveEvent.clientX - startX;
       const deltaY = moveEvent.clientY - startY;
       
-      const newWidth = Math.max(1, startWindow + deltaX * 3);
-      const newCenter = startCenter - deltaY * 2;
+      const newWidth = Math.max(1, startWindow + deltaX * 2);
+      const newCenter = startCenter - deltaY * 1.5;
       
+      console.log(`Windowing: W=${newWidth.toFixed(0)} L=${newCenter.toFixed(0)}`);
       setWindowLevel({ width: newWidth, center: newCenter });
     };
 
-    const handleWindowLevelEnd = () => {
+    const handleWindowLevelEnd = (endEvent: MouseEvent) => {
+      endEvent.preventDefault();
+      console.log('Mouse up - ending windowing');
       document.removeEventListener('mousemove', handleWindowLevelDrag);
       document.removeEventListener('mouseup', handleWindowLevelEnd);
     };
@@ -353,10 +361,11 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
             width={512}
             height={512}
             onMouseDown={handleCanvasMouseDown}
-            className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-crosshair"
+            className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
             style={{ 
               backgroundColor: 'black',
-              imageRendering: 'pixelated'
+              imageRendering: 'pixelated',
+              userSelect: 'none'
             }}
           />
           {/* Controls overlay */}
