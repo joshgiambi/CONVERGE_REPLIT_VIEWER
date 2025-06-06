@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, HelpCircle, Keyboard } from 'lucide-react';
+import { ChevronLeft, ChevronRight, HelpCircle, Keyboard, Info } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -31,6 +31,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   const [isImageReady, setIsImageReady] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
+  const [showMetadata, setShowMetadata] = useState(false);
 
   useEffect(() => {
     loadImages();
@@ -169,7 +170,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     }
   };
 
-  const render16BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Uint16Array, width: number, height: number) => {
+  const render16BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Float32Array, width: number, height: number) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
@@ -387,10 +388,28 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
           </div>
 
-          {/* Interaction Tips - Bottom Right */}
-          <div className="absolute bottom-2 right-2">
+          {/* Toolbar - Bottom Right */}
+          <div className="absolute bottom-2 right-2 flex gap-2">
+            {/* Metadata Button */}
+            <div className="relative group">
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black bg-opacity-75 text-white border-gray-600 hover:bg-gray-700"
+                onClick={() => setShowMetadata(!showMetadata)}
+              >
+                <Info className="w-4 h-4" />
+              </Button>
+              
+              {/* Metadata Tooltip */}
+              <div className="absolute bottom-full right-0 mb-1 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                View DICOM Metadata
+              </div>
+            </div>
+
+            {/* Interaction Tips Button */}
             <div
-              className="relative"
+              className="relative group"
               onMouseEnter={() => setShowInteractionTips(true)}
               onMouseLeave={() => !tipsDialogOpen && setShowInteractionTips(false)}
             >
@@ -402,6 +421,11 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
               >
                 <HelpCircle className="w-4 h-4" />
               </Button>
+              
+              {/* Help Tooltip */}
+              <div className="absolute bottom-full right-0 mb-1 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                Interaction Guide
+              </div>
 
               {/* Tips Dialog */}
               {(showInteractionTips || tipsDialogOpen) && (
@@ -453,70 +477,72 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
                 </div>
               )}
             </div>
+
+            {/* Metadata Popup */}
+            {showMetadata && images.length > 0 && (
+              <div className="absolute bottom-full right-0 mb-2 bg-black bg-opacity-95 text-white p-4 rounded-lg text-xs w-96 shadow-lg border border-gray-600 max-h-80 overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <Info className="w-4 h-4 mr-2 text-indigo-400" />
+                    <h3 className="font-semibold text-indigo-300">DICOM Metadata</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowMetadata(false)}
+                    className="text-gray-400 hover:text-white"
+                  >
+                    ×
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="font-semibold text-indigo-300 mb-2">Patient Info</div>
+                    <div className="space-y-1 text-gray-300">
+                      <div><span className="text-gray-400">Name:</span> DEMO^PATIENT</div>
+                      <div><span className="text-gray-400">ID:</span> DM001</div>
+                      <div><span className="text-gray-400">DOB:</span> 1970-01-01</div>
+                      <div><span className="text-gray-400">Sex:</span> M</div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="font-semibold text-indigo-300 mb-2">Study Info</div>
+                    <div className="space-y-1 text-gray-300">
+                      <div><span className="text-gray-400">Date:</span> 2024-01-15</div>
+                      <div><span className="text-gray-400">Time:</span> 14:30:00</div>
+                      <div><span className="text-gray-400">Description:</span> Chest CT</div>
+                      <div><span className="text-gray-400">Modality:</span> CT</div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="font-semibold text-indigo-300 mb-2">Image Parameters</div>
+                    <div className="space-y-1 text-gray-300">
+                      <div><span className="text-gray-400">Matrix:</span> 512 x 512</div>
+                      <div><span className="text-gray-400">Slice:</span> {currentIndex + 1} / {images.length}</div>
+                      <div><span className="text-gray-400">Thickness:</span> 1.0mm</div>
+                      <div><span className="text-gray-400">kVp:</span> 120</div>
+                      <div><span className="text-gray-400">mAs:</span> 200</div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="font-semibold text-indigo-300 mb-2">Window/Level</div>
+                    <div className="space-y-1 text-gray-300">
+                      <div><span className="text-gray-400">Current W/L:</span> {Math.round(currentWindowLevel.width)}/{Math.round(currentWindowLevel.center)}</div>
+                      <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
+                      <div><span className="text-gray-400">Reconstruction:</span> FBP</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
 
         </div>
       </div>
 
-      {/* Footer - DICOM Metadata */}
-      {images.length > 0 && (
-        <div className="p-3 border-t border-indigo-700 bg-gray-900">
-          <div className="grid grid-cols-4 gap-3 text-xs text-indigo-200">
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Patient Info</div>
-              <div><span className="text-gray-400">Name:</span> CT Patient</div>
-              <div><span className="text-gray-400">ID:</span> CT001</div>
-              <div><span className="text-gray-400">Sex:</span> Unknown</div>
-              <div><span className="text-gray-400">Age:</span> Unknown</div>
-            </div>
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Study Details</div>
-              <div><span className="text-gray-400">Date:</span> {new Date().toLocaleDateString()}</div>
-              <div><span className="text-gray-400">Time:</span> {new Date().toLocaleTimeString()}</div>
-              <div><span className="text-gray-400">Description:</span> CT Axial Study</div>
-              <div><span className="text-gray-400">Accession:</span> CT001-{Date.now().toString().slice(-6)}</div>
-            </div>
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Series Info</div>
-              <div><span className="text-gray-400">Modality:</span> CT</div>
-              <div><span className="text-gray-400">Description:</span> Axial Series</div>
-              <div><span className="text-gray-400">Protocol:</span> Routine CT</div>
-              <div><span className="text-gray-400">Body Part:</span> CHEST/ABDOMEN</div>
-            </div>
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Image Info</div>
-              <div><span className="text-gray-400">Instance:</span> {images[currentIndex]?.instanceNumber}/{images.length}</div>
-              <div><span className="text-gray-400">Position:</span> {images[currentIndex]?.sliceLocation} mm</div>
-              <div><span className="text-gray-400">Thickness:</span> 2.5 mm</div>
-              <div><span className="text-gray-400">Matrix:</span> 512×512</div>
-              <div><span className="text-gray-400">Pixel Size:</span> 0.5×0.5 mm</div>
-              <div><span className="text-gray-400">Bits:</span> 16-bit</div>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-indigo-800 text-xs">
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Acquisition</div>
-              <div><span className="text-gray-400">kVp:</span> 120</div>
-              <div><span className="text-gray-400">mAs:</span> 250</div>
-              <div><span className="text-gray-400">Exposure:</span> 500 ms</div>
-            </div>
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Reconstruction</div>
-              <div><span className="text-gray-400">Kernel:</span> Standard</div>
-              <div><span className="text-gray-400">Filter:</span> Soft Tissue</div>
-              <div><span className="text-gray-400">Algorithm:</span> FBP</div>
-            </div>
-            <div>
-              <div className="font-semibold text-indigo-300 mb-1">Window/Level</div>
-              <div><span className="text-gray-400">Current W/L:</span> {Math.round(currentWindowLevel.width)}/{Math.round(currentWindowLevel.center)}</div>
-              <div><span className="text-gray-400">Preset:</span> Custom</div>
-              <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
-            </div>
-          </div>
-        </div>
-      )}
     </Card>
   );
 }
