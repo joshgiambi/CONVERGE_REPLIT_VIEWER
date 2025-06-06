@@ -204,6 +204,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   };
 
   const render16BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Float32Array, width: number, height: number) => {
+    // Create image data at original size
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
@@ -234,7 +235,30 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       data[pixelIndex + 3] = 255;  // A
     }
 
-    ctx.putImageData(imageData, 0, 0);
+    // Create a temporary canvas for the original image
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    
+    tempCtx.putImageData(imageData, 0, 0);
+    
+    // Scale and draw to the main canvas
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
+    
+    // Calculate scaling to fit the image in the canvas while maintaining aspect ratio
+    const scale = Math.min(canvasWidth / width, canvasHeight / height);
+    const scaledWidth = width * scale;
+    const scaledHeight = height * scale;
+    
+    // Center the image
+    const x = (canvasWidth - scaledWidth) / 2;
+    const y = (canvasHeight - scaledHeight) / 2;
+    
+    ctx.imageSmoothingEnabled = false; // Keep crisp pixels for medical imaging
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
   const render8BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Uint8Array, width: number, height: number) => {
