@@ -60,8 +60,15 @@ export class CornerstoneConfig {
       cornerstoneWADOImageLoader.configure({
         beforeSend: (xhr: XMLHttpRequest) => {
           xhr.setRequestHeader('Accept', 'application/dicom');
+        },
+        errorInterceptor: (error: any) => {
+          console.warn('DICOM loading error:', error);
         }
       });
+
+      // Register image loader for DICOM files
+      cornerstone.registerImageLoader('wadouri', cornerstoneWADOImageLoader.wadouri.loadImage);
+      cornerstone.registerImageLoader('dicomweb', cornerstoneWADOImageLoader.wadouri.loadImage);
 
       this.initialized = true;
       console.log('Cornerstone initialized successfully');
