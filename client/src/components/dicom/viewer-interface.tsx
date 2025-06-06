@@ -1,0 +1,231 @@
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { SeriesSelector } from './series-selector';
+import { OrthogonalViewer } from './orthogonal-viewer';
+import { ViewerToolbar } from './viewer-toolbar';
+import { ErrorModal } from './error-modal';
+import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
+import { cornerstoneConfig } from '@/lib/cornerstone-config';
+
+interface ViewerInterfaceProps {
+  studyData: any;
+}
+
+export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
+  const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
+  const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
+  const [error, setError] = useState<any>(null);
+  const [series, setSeries] = useState<DICOMSeries[]>([]);
+
+  // Fetch series data for the study
+  const { data: studyDetails, isLoading } = useQuery({
+    queryKey: ['/api/studies', studyData.studies[0]?.id],
+    enabled: !!studyData.studies?.[0]?.id,
+  });
+
+  useEffect(() => {
+    if (studyDetails) {
+      setSeries(studyDetails.series || []);
+      
+      // Auto-select first series
+      if (studyDetails.series?.length > 0 && !selectedSeries) {
+        handleSeriesSelect(studyDetails.series[0]);
+      }
+    }
+  }, [studyDetails, selectedSeries]);
+
+  const handleSeriesSelect = async (seriesData: DICOMSeries) => {
+    try {
+      // Fetch images for the selected series
+      const response = await fetch(`/api/series/${seriesData.id}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch series images');
+      }
+      
+      const seriesWithImages = await response.json();
+      setSelectedSeries(seriesWithImages);
+      
+      // Apply default window/level if available from first image
+      if (seriesWithImages.images?.length > 0) {
+        const firstImage = seriesWithImages.images[0];
+        if (firstImage.windowCenter && firstImage.windowWidth) {
+          setWindowLevel({
+            level: parseFloat(firstImage.windowCenter),
+            window: parseFloat(firstImage.windowWidth)
+          });
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error selecting series:', error);
+      setError({
+        title: 'Error Loading Series',
+        message: 'Failed to load the selected series.',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+
+  const handleZoomIn = () => {
+    adjustZoom(1.25);
+  };
+
+  const handleZoomOut = () => {
+    adjustZoom(0.8);
+  };
+
+  const handleResetZoom = () => {
+    try {
+      const cornerstone = cornerstoneConfig.getCornerstone();
+      const elements = document.querySelectorAll('.cornerstone-viewport');
+      
+      elements.forEach((element: any) => {
+        if (element) {
+          cornerstone.fitToWindow(element);
+        }
+      });
+    } catch (error) {
+      console.warn('Error resetting zoom:', error);
+    }
+  };
+
+  const adjustZoom = (factor: number) => {
+    try {
+      const cornerstone = cornerstoneConfig.getCornerstone();
+      const elements = document.querySelectorAll('.cornerstone-viewport');
+      
+      elements.forEach((element: any) => {
+        if (element) {
+          const viewport = cornerstone.getViewport(element);
+          if (viewport) {
+            viewport.scale *= factor;
+            cornerstone.setViewport(element, viewport);
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('Error adjusting zoom:', error);
+    }
+  };
+
+  const setActiveTool = (toolName: string) => {
+    try {
+      const cornerstoneTools = cornerstoneConfig.getCornerstoneTools();
+      const elements = document.querySelectorAll('.cornerstone-viewport');
+      
+      elements.forEach((element: any) => {
+        if (element) {
+          cornerstoneTools.setToolActiveForElement(element, toolName, { mouseButtonMask: 1 });
+        }
+      });
+    } catch (error) {
+      console.warn('Error setting active tool:', error);
+    }
+  };
+
+  const handlePanTool = () => setActiveTool('Pan');
+  const handleMeasureTool = () => setActiveTool('Length');
+  const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
+
+  const handleRotate = () => {
+    try {
+      const cornerstone = cornerstoneConfig.getCornerstone();
+      const elements = document.querySelectorAll('.cornerstone-viewport');
+      
+      elements.forEach((element: any) => {
+        if (element) {
+          const viewport = cornerstone.getViewport(element);
+          if (viewport) {
+            viewport.rotation += 90;
+            cornerstone.setViewport(element, viewport);
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('Error rotating image:', error);
+    }
+  };
+
+  const handleFlip = () => {
+    try {
+      const cornerstone = cornerstoneConfig.getCornerstone();
+      const elements = document.querySelectorAll('.cornerstone-viewport');
+      
+      elements.forEach((element: any) => {
+        if (element) {
+          const viewport = cornerstone.getViewport(element);
+          if (viewport) {
+            viewport.hflip = !viewport.hflip;
+            cornerstone.setViewport(element, viewport);
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('Error flipping image:', error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="w-8 h-8 border border-dicom-yellow border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-dicom-yellow">Loading study...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 animate-in fade-in-50 duration-500">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 12rem)' }}>
+        
+        {/* Series Selector */}
+        <div className="lg:col-span-1">
+          <SeriesSelector
+            series={series}
+            selectedSeries={selectedSeries}
+            onSeriesSelect={handleSeriesSelect}
+            windowLevel={windowLevel}
+            onWindowLevelChange={setWindowLevel}
+          />
+        </div>
+
+        {/* Orthogonal Viewer */}
+        <div className="lg:col-span-3">
+          <OrthogonalViewer
+            series={selectedSeries}
+            windowLevel={windowLevel}
+          />
+        </div>
+      </div>
+
+      {/* Floating Toolbar */}
+      {selectedSeries && (
+        <ViewerToolbar
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onResetZoom={handleResetZoom}
+          onPanTool={handlePanTool}
+          onMeasureTool={handleMeasureTool}
+          onAnnotateTool={handleAnnotateTool}
+          onRotate={handleRotate}
+          onFlip={handleFlip}
+        />
+      )}
+
+      {/* Error Modal */}
+      <ErrorModal
+        isOpen={!!error}
+        onClose={() => setError(null)}
+        onRetry={() => {
+          setError(null);
+          if (selectedSeries) {
+            handleSeriesSelect(selectedSeries);
+          }
+        }}
+        error={error || { title: '', message: '' }}
+      />
+    </div>
+  );
+}
