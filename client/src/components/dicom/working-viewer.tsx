@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, HelpCircle, Keyboard, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -29,9 +29,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
   const [isImageReady, setIsImageReady] = useState(false);
-  const [showInteractionTips, setShowInteractionTips] = useState(false);
-  const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
-  const [showMetadata, setShowMetadata] = useState(false);
+
 
   useEffect(() => {
     loadImages();

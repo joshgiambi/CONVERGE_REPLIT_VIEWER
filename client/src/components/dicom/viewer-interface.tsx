@@ -230,6 +230,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           onAnnotateTool={handleAnnotateTool}
           onRotate={handleRotate}
           onFlip={handleFlip}
+          currentSlice={1}
+          totalSlices={selectedSeries.imageCount}
+          windowLevel={windowLevel}
         />
       )}
 

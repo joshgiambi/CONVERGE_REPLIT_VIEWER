@@ -27,7 +27,7 @@ interface ViewerToolbarProps {
   onFlip: () => void;
   currentSlice?: number;
   totalSlices?: number;
-  windowLevel?: { width: number; center: number };
+  windowLevel?: { window: number; level: number };
 }
 
 export function ViewerToolbar({
@@ -103,7 +103,7 @@ export function ViewerToolbar({
                     }
                   }}
                   onMouseEnter={() => {
-                    if (tool.id === 'help') {
+                    if (tool.id === 'help' && !tipsDialogOpen) {
                       setShowInteractionTips(true);
                     }
                   }}
@@ -176,7 +176,7 @@ export function ViewerToolbar({
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Window/Level</div>
                 <div className="space-y-1 text-gray-300">
-                  <div><span className="text-gray-400">Current W/L:</span> {windowLevel ? `${Math.round(windowLevel.width)}/${Math.round(windowLevel.center)}` : '400/40'}</div>
+                  <div><span className="text-gray-400">Current W/L:</span> {windowLevel ? `${Math.round(windowLevel.window)}/${Math.round(windowLevel.level)}` : '400/40'}</div>
                   <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
                   <div><span className="text-gray-400">Reconstruction:</span> FBP</div>
                 </div>
