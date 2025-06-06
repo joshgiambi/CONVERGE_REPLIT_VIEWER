@@ -72,11 +72,90 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       setImages(sortedImages);
       setCurrentIndex(0);
       
+      // Preload all images immediately
+      preloadAllImages(sortedImages);
+      
     } catch (error: any) {
       setError(error.message);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
+    try {
+      // Load dicom-parser if not already loaded
+      if (!window.dicomParser) {
+        await loadDicomParser();
+      }
+      
+      const byteArray = new Uint8Array(arrayBuffer);
+      const dataSet = window.dicomParser.parseDicom(byteArray);
+      
+      // Extract image data
+      const pixelDataElement = dataSet.elements.x7fe00010;
+      if (!pixelDataElement) {
+        throw new Error('No pixel data found in DICOM file');
+      }
+      
+      const pixelData = new Uint16Array(dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+      
+      // Get image dimensions
+      const rows = dataSet.uint16('x00280010');
+      const cols = dataSet.uint16('x00280011');
+      const bitsStored = dataSet.uint16('x00280101') || 16;
+      const pixelRepresentation = dataSet.uint16('x00280103') || 0;
+      
+      // Convert to signed if needed
+      let processedData: Float32Array;
+      if (pixelRepresentation === 1 && bitsStored === 16) {
+        // Signed 16-bit data
+        const signedData = new Int16Array(pixelData.buffer, pixelData.byteOffset, pixelData.length);
+        processedData = new Float32Array(signedData);
+      } else {
+        // Unsigned data
+        processedData = new Float32Array(pixelData);
+      }
+      
+      return {
+        data: processedData,
+        width: cols || 512,
+        height: rows || 512
+      };
+    } catch (error) {
+      console.error('Error parsing DICOM image:', error);
+      return null;
+    }
+  };
+
+  const preloadAllImages = async (imageList: any[]) => {
+    console.log('Starting to preload all images...');
+    const newCache = new Map();
+    
+    // Load all images in parallel
+    const loadPromises = imageList.map(async (image, index) => {
+      try {
+        const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to load image ${index + 1}`);
+        }
+        
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        const imageData = await parseDicomImage(arrayBuffer);
+        
+        if (imageData) {
+          newCache.set(image.sopInstanceUID, imageData);
+          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to preload image ${index + 1}:`, error);
+      }
+    });
+    
+    // Wait for all images to load
+    await Promise.allSettled(loadPromises);
+    setImageCache(newCache);
+    console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
   };
 
   const displayCurrentImage = async () => {
@@ -97,61 +176,14 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       let imageData = imageCache.get(cacheKey);
       
       if (!imageData) {
-        // Load and cache the image
-        const response = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
-        if (!response.ok) {
-          throw new Error(`Failed to load image: ${response.statusText}`);
-        }
-        
-        const arrayBuffer = await response.arrayBuffer();
-        
-        // Load dicom-parser
-        if (!window.dicomParser) {
-          await loadDicomParser();
-        }
-        
-        // Parse DICOM
-        const byteArray = new Uint8Array(arrayBuffer);
-        const dataSet = window.dicomParser.parseDicom(byteArray);
-        
-        // Extract image data
-        const pixelData = dataSet.elements.x7fe00010;
-        if (!pixelData) {
-          throw new Error('No pixel data found in DICOM');
-        }
-        
-        const rows = dataSet.uint16('x00280010') || 512;
-        const cols = dataSet.uint16('x00280011') || 512;
-        const bitsAllocated = dataSet.uint16('x00280100') || 16;
-        
-        // Get rescale parameters for Hounsfield Units
-        const rescaleSlope = dataSet.floatString('x00281053') || 1;
-        const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
-        
-        // Get pixel data
-        const pixelDataOffset = pixelData.dataOffset;
-        const pixelDataLength = pixelData.length;
-        
-        if (bitsAllocated === 16) {
-          const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
-          // Convert to Hounsfield Units
-          const huPixelArray = new Float32Array(rawPixelArray.length);
-          for (let i = 0; i < rawPixelArray.length; i++) {
-            huPixelArray[i] = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
-          }
-          imageData = { data: huPixelArray, width: cols, height: rows };
-        } else {
-          throw new Error(`Only 16-bit images supported for caching`);
-        }
-        
-        // Cache the processed image data
-        imageCache.set(cacheKey, imageData);
-        setImageCache(new Map(imageCache));
+        // Image should be preloaded, but fallback just in case
+        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
+        throw new Error('Image not available in cache');
       }
       
-      // Set canvas size
-      canvas.width = imageData.width;
-      canvas.height = imageData.height;
+      // Keep fixed canvas size for consistent display
+      canvas.width = 768;
+      canvas.height = 768;
       
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
@@ -371,8 +403,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
         <div className="relative">
           <canvas
             ref={canvasRef}
-            width={512}
-            height={512}
+            width={768}
+            height={768}
             onMouseDown={handleCanvasMouseDown}
             className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
             style={{ 
