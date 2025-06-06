@@ -117,6 +117,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get series by study ID
+  app.get("/api/studies/:id/series", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.id);
+      const seriesData = await storage.getSeriesByStudyId(studyId);
+      
+      res.json(seriesData);
+    } catch (error) {
+      console.error('Error fetching series for study:', error);
+      res.status(500).json({ message: "Failed to fetch series for study" });
+    }
+  });
+
   // Get series by ID with images
   app.get("/api/series/:id", async (req, res) => {
     try {
