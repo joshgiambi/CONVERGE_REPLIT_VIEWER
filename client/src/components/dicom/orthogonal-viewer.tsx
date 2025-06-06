@@ -60,11 +60,7 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
 
   const initializeViewports = async () => {
     try {
-      await cornerstoneConfig.initialize();
-      
-      const cornerstone = cornerstoneConfig.getCornerstone();
-      const cornerstoneTools = cornerstoneConfig.getCornerstoneTools();
-      
+      // Create placeholder viewports for now
       const elements = {
         axial: axialRef.current,
         sagittal: sagittalRef.current,
@@ -72,31 +68,12 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
       };
 
       const newViewports: Record<string, any> = {};
-
       Object.entries(elements).forEach(([key, element]) => {
         if (element) {
-          try {
-            cornerstone.enable(element);
-            newViewports[key] = element;
-            
-            // Add tools
-            cornerstoneTools.addToolForElement(element, cornerstoneTools.PanTool);
-            cornerstoneTools.addToolForElement(element, cornerstoneTools.ZoomTool);
-            cornerstoneTools.addToolForElement(element, cornerstoneTools.WwwcTool);
-            
-            // Set default tool states
-            cornerstoneTools.setToolActiveForElement(element, 'Pan', { mouseButtonMask: 1 });
-            cornerstoneTools.setToolActiveForElement(element, 'Zoom', { mouseButtonMask: 2 });
-            cornerstoneTools.setToolActiveForElement(element, 'Wwwc', { mouseButtonMask: 4 });
-            
-            // Add event listeners for viewport updates
-            element.addEventListener('cornerstoneimagerendered', () => {
-              updateViewportInfo(key, element);
-            });
-            
-          } catch (error) {
-            console.error(`Error enabling ${key} viewport:`, error);
-          }
+          newViewports[key] = element;
+          // Add placeholder content
+          element.style.background = 'linear-gradient(45deg, #1a1a1a 25%, #2d2d2d 25%, #2d2d2d 50%, #1a1a1a 50%, #1a1a1a 75%, #2d2d2d 75%, #2d2d2d)';
+          element.style.backgroundSize = '20px 20px';
         }
       });
 
