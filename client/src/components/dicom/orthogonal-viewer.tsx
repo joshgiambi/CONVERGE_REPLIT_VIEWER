@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Move, RotateCw, Maximize2 } from 'lucide-react';
 import { DICOMSeries, DICOMImage, WindowLevel, createImageId } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
+import { dicomLoader } from '@/lib/dicom-loader';
 
 interface OrthogonalViewerProps {
   series: DICOMSeries | null;
@@ -95,37 +96,61 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
     setIsLoading(true);
     
     try {
-      await cornerstoneConfig.initialize();
-      
       // Sort images by instance number
       const sortedImages = [...series.images].sort((a, b) => 
         (a.instanceNumber || 0) - (b.instanceNumber || 0)
       );
       
-      // Load the first image in the axial viewport
-      if (viewports.axial && window.cornerstone && sortedImages.length > 0) {
+      // Load the first image using direct DICOM loader
+      if (viewports.axial && sortedImages.length > 0) {
         const firstImage = sortedImages[0];
-        const imageId = `wadouri:/api/images/${firstImage.sopInstanceUID}`;
         
         try {
-          const image = await window.cornerstone.loadImage(imageId);
-          await window.cornerstone.displayImage(viewports.axial, image);
+          // Clear the viewport
+          viewports.axial.innerHTML = '';
           
-          // Set up tools for the viewport
-          if (window.cornerstoneTools) {
-            window.cornerstoneTools.addStackStateManager(viewports.axial, ['stack']);
-            window.cornerstoneTools.addToolState(viewports.axial, 'stack', {
-              imageIds: sortedImages.map(img => `wadouri:/api/images/${img.sopInstanceUID}`),
-              currentImageIdIndex: 0
-            });
-            
-            // Enable basic tools
-            window.cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 1 });
-            window.cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 2 });
-            window.cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+          // Load the DICOM image directly
+          const canvas = await dicomLoader.loadDICOMImage(firstImage.sopInstanceUID);
+          canvas.style.width = '100%';
+          canvas.style.height = '100%';
+          canvas.style.objectFit = 'contain';
+          canvas.style.backgroundColor = 'black';
+          
+          viewports.axial.appendChild(canvas);
+          
+          console.log('Successfully loaded DICOM image:', firstImage.fileName);
+          
+          // Load a few more images in other viewports for demonstration
+          if (sortedImages.length > 1 && viewports.sagittal) {
+            const midImage = sortedImages[Math.floor(sortedImages.length / 2)];
+            try {
+              viewports.sagittal.innerHTML = '';
+              const sagCanvas = await dicomLoader.loadDICOMImage(midImage.sopInstanceUID);
+              sagCanvas.style.width = '100%';
+              sagCanvas.style.height = '100%';
+              sagCanvas.style.objectFit = 'contain';
+              sagCanvas.style.backgroundColor = 'black';
+              viewports.sagittal.appendChild(sagCanvas);
+            } catch (sagError) {
+              console.warn('Could not load sagittal view:', sagError);
+            }
           }
           
-          console.log('Successfully loaded DICOM image:', imageId);
+          if (sortedImages.length > 2 && viewports.coronal) {
+            const lastImage = sortedImages[sortedImages.length - 1];
+            try {
+              viewports.coronal.innerHTML = '';
+              const corCanvas = await dicomLoader.loadDICOMImage(lastImage.sopInstanceUID);
+              corCanvas.style.width = '100%';
+              corCanvas.style.height = '100%';
+              corCanvas.style.objectFit = 'contain';
+              corCanvas.style.backgroundColor = 'black';
+              viewports.coronal.appendChild(corCanvas);
+            } catch (corError) {
+              console.warn('Could not load coronal view:', corError);
+            }
+          }
+          
         } catch (imageError) {
           console.error('Error loading DICOM image:', imageError);
           // Show error message
