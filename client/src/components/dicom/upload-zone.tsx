@@ -125,12 +125,12 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       <div
         {...getRootProps()}
         className={`
-          border-2 border-dashed rounded-xl p-8 text-center transition-all duration-500 cursor-pointer relative overflow-hidden
+          border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer
           ${isDragActive 
-            ? 'border-gradient-primary bg-gradient-subtle scale-102 animate-glow' 
-            : 'border-dicom-blue/50 hover:border-gradient-primary hover:bg-gradient-subtle hover:shadow-lg hover:shadow-dicom-yellow/20'
+            ? 'border-dicom-purple bg-dicom-purple/10' 
+            : 'border-dicom-indigo/50 hover:border-dicom-purple hover:bg-dicom-purple/5'
           }
-          ${isUploading ? 'pointer-events-none' : 'hover:-translate-y-1'}
+          ${isUploading ? 'pointer-events-none opacity-50' : ''}
         `}
       >
         <input {...getInputProps()} />
@@ -153,31 +153,33 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           </div>
           
           {!isUploading && !hasResult && (
-            <div className="flex gap-4 items-center">
-              <Button
-                className="btn-animated text-black font-semibold px-6 py-3 rounded-lg inline-flex items-center"
-                onClick={() => document.getElementById('folder-input')?.click()}
-                type="button"
-              >
-                <FolderOpen className="w-5 h-5 mr-2" />
-                Select DICOM Folder
-              </Button>
+            <div className="flex gap-4 items-center pointer-events-auto">
               <input
                 type="file"
                 {...({ webkitdirectory: "" } as any)}
                 multiple
                 onChange={handleFolderSelect}
-                className="hidden"
+                style={{ display: 'none' }}
                 id="folder-input"
               />
-              <Button 
-                variant="outline"
+              <button
+                className="bg-gradient-primary text-white font-semibold px-6 py-3 rounded-lg inline-flex items-center transition-all duration-300 hover:scale-105"
+                onClick={() => {
+                  const input = document.getElementById('folder-input') as HTMLInputElement;
+                  if (input) input.click();
+                }}
+                type="button"
+              >
+                <FolderOpen className="w-5 h-5 mr-2" />
+                Select DICOM Folder
+              </button>
+              <button 
                 className="border-2 border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
                 onClick={handleCreateTestData}
                 type="button"
               >
                 Load Demo Data
-              </Button>
+              </button>
             </div>
           )}
         </div>
