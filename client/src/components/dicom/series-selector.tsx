@@ -41,10 +41,10 @@ export function SeriesSelector({
   };
 
   return (
-    <Card className="h-full bg-dicom-dark/50 backdrop-blur border-dicom-gray">
-      <div className="p-4 h-full flex flex-col">
-        <h3 className="text-lg font-semibold text-dicom-yellow mb-4 flex items-center">
-          <List className="w-5 h-5 mr-2" />
+    <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-blue/30 rounded-2xl overflow-hidden animate-slide-up">
+      <div className="p-6 h-full flex flex-col">
+        <h3 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent mb-6 flex items-center">
+          <List className="w-6 h-6 mr-3 text-dicom-blue" />
           Series
         </h3>
         

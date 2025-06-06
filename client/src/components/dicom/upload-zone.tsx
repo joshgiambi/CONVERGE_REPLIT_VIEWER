@@ -101,12 +101,21 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
     accept: {
       'application/dicom': ['.dcm', '.dicom'],
       'application/octet-stream': ['.ima', '.img'],
-      '*/*': [] // Accept all files for folder upload
+      'image/*': []
     },
     multiple: true,
     noClick: false,
     noKeyboard: false
   });
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setUploadProgress(0);
+      setUploadResult(null);
+      uploadMutation.mutate(files);
+    }
+  };
 
   const isUploading = uploadMutation.isPending;
   const hasResult = uploadResult !== null;
@@ -145,10 +154,23 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           
           {!isUploading && !hasResult && (
             <div className="flex gap-4">
-              <Button className="btn-animated text-black font-semibold px-6 py-3 rounded-lg">
-                <Upload className="w-5 h-5 mr-2" />
-                Browse Folders
-              </Button>
+              <div className="relative">
+                <input
+                  type="file"
+                  webkitdirectory=""
+                  multiple
+                  onChange={handleFolderSelect}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  id="folder-input"
+                />
+                <label
+                  htmlFor="folder-input"
+                  className="btn-animated text-black font-semibold px-6 py-3 rounded-lg cursor-pointer inline-flex items-center"
+                >
+                  <FolderOpen className="w-5 h-5 mr-2" />
+                  Select DICOM Folder
+                </label>
+              </div>
               <Button 
                 variant="outline"
                 className="border-2 border-dicom-blue text-dicom-blue hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"

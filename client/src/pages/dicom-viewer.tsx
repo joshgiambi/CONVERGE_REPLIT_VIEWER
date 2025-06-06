@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { UploadZone } from '@/components/dicom/upload-zone';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
-import { Download, User, Calendar } from 'lucide-react';
+import { Download, User, Calendar, Home } from 'lucide-react';
 
 export default function DICOMViewer() {
   const [studyData, setStudyData] = useState<any>(null);
@@ -49,13 +49,13 @@ export default function DICOMViewer() {
 
   return (
     <div className="min-h-screen bg-dicom-black text-white">
-      {/* Header */}
-      <header className="bg-dicom-dark border-b border-dicom-gray p-4 sticky top-0 z-40 backdrop-blur-sm">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
+      {/* Floating Header */}
+      <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-dicom-blue/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
+        <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
-            <div className="w-10 h-10 bg-dicom-yellow rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-gradient-primary rounded-lg flex items-center justify-center animate-glow">
               <svg 
-                className="w-6 h-6 text-black" 
+                className="w-5 h-5 text-white" 
                 fill="currentColor" 
                 viewBox="0 0 20 20"
               >
@@ -63,29 +63,46 @@ export default function DICOMViewer() {
               </svg>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-dicom-yellow">DICOM Viewer</h1>
-              <p className="text-sm text-gray-400">Medical Imaging Platform</p>
+              <h1 className="text-lg font-bold bg-gradient-primary bg-clip-text text-transparent">DICOM Viewer</h1>
+              <p className="text-xs text-gray-400">Medical Imaging Platform</p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
+            {/* Home Button - shows when viewing study */}
+            {studyData && (
+              <Button 
+                onClick={() => {
+                  setStudyData(null);
+                  setCurrentPatient(null);
+                }}
+                variant="outline"
+                size="sm"
+                className="border-dicom-blue text-dicom-blue hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
+              >
+                <Home className="w-4 h-4 mr-1" />
+                Home
+              </Button>
+            )}
+            
             {/* Patient Info */}
             {currentPatient && (
-              <div className="hidden md:flex items-center space-x-2 text-sm bg-dicom-darker rounded-lg px-4 py-2">
-                <User className="w-4 h-4 text-dicom-yellow" />
-                <span className="text-white">Patient: {currentPatient.name}</span>
+              <div className="hidden md:flex items-center space-x-2 text-sm bg-dicom-darker/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-dicom-blue/20">
+                <User className="w-3 h-3 text-dicom-yellow" />
+                <span className="text-white text-xs">{currentPatient.name}</span>
                 <span className="text-dicom-gray">|</span>
-                <Calendar className="w-4 h-4 text-dicom-yellow" />
-                <span className="text-white">Study: {formatDate(currentPatient.studyDate)}</span>
+                <Calendar className="w-3 h-3 text-dicom-blue" />
+                <span className="text-white text-xs">{formatDate(currentPatient.studyDate)}</span>
               </div>
             )}
             
             {studyData && (
               <Button 
                 onClick={handleExportStudy}
-                className="bg-dicom-yellow text-black hover:bg-dicom-yellow/90 transition-all duration-200 hover:scale-105"
+                size="sm"
+                className="btn-animated text-white font-medium"
               >
-                <Download className="w-4 h-4 mr-2" />
+                <Download className="w-4 h-4 mr-1" />
                 Export
               </Button>
             )}
@@ -94,7 +111,7 @@ export default function DICOMViewer() {
       </header>
 
       {/* Main Content */}
-      <main className="p-4 max-w-7xl mx-auto">
+      <main className="pt-24 px-4 pb-4 max-w-7xl mx-auto">
         {!studyData ? (
           /* Upload Section */
           <div className="max-w-4xl mx-auto py-16">

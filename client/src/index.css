@@ -24,20 +24,20 @@
   --ring: 51 100% 50%; /* #FFD700 - dicom-yellow */
   --radius: 0.5rem;
 
-  /* Custom DICOM colors with blue/yellow gradients */
+  /* Custom DICOM colors with indigo/purple theme */
   --dicom-black: 0 0% 0%; /* #000000 */
-  --dicom-dark: 220 20% 8%; /* #0f1419 */
-  --dicom-darker: 220 25% 12%; /* #1a2332 */
-  --dicom-yellow: 51 100% 50%; /* #FFD700 */
-  --dicom-blue: 220 100% 50%; /* #0080FF */
-  --dicom-blue-dark: 240 100% 40%; /* #0066CC */
-  --dicom-blue-light: 200 100% 60%; /* #33AAFF */
-  --dicom-gradient-primary: linear-gradient(135deg, hsl(51 100% 50%), hsl(220 100% 50%));
-  --dicom-gradient-secondary: linear-gradient(135deg, hsl(220 100% 40%), hsl(51 100% 60%));
-  --dicom-gradient-subtle: linear-gradient(135deg, hsla(220 100% 50% / 0.1), hsla(51 100% 50% / 0.1));
-  --dicom-gray: 220 15% 25%; /* #404040 */
-  --dicom-gray-light: 220 10% 38%; /* #606060 */
-  --dicom-gray-lighter: 220 5% 50%; /* #808080 */
+  --dicom-dark: 240 20% 8%; /* #0f0f19 */
+  --dicom-darker: 245 25% 12%; /* #1a1a32 */
+  --dicom-indigo: 240 100% 60%; /* #6366F1 */
+  --dicom-purple: 270 100% 70%; /* #A855F7 */
+  --dicom-purple-dark: 280 100% 50%; /* #9333EA */
+  --dicom-purple-light: 260 100% 80%; /* #C084FC */
+  --dicom-gradient-primary: linear-gradient(135deg, hsl(240 100% 60%), hsl(270 100% 70%));
+  --dicom-gradient-secondary: linear-gradient(135deg, hsl(280 100% 50%), hsl(240 100% 60%));
+  --dicom-gradient-subtle: linear-gradient(135deg, hsla(240 100% 60% / 0.1), hsla(270 100% 70% / 0.1));
+  --dicom-gray: 240 15% 25%; /* #404040 */
+  --dicom-gray-light: 240 10% 38%; /* #606060 */
+  --dicom-gray-lighter: 240 5% 50%; /* #808080 */
 }
 
 .dark {
