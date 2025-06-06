@@ -29,6 +29,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Uint16Array, width: number, height: number }>>(new Map());
   const [isImageReady, setIsImageReady] = useState(false);
+  const [showInteractionTips, setShowInteractionTips] = useState(false);
+  const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   useEffect(() => {
     loadImages();
@@ -371,11 +373,77 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
               userSelect: 'none'
             }}
           />
-          {/* Controls overlay */}
+          {/* Current Window/Level display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
-            <div>Scroll: Navigate slices</div>
-            <div>Drag: Window/Level</div>
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
+          </div>
+
+          {/* Interaction Tips - Bottom Right */}
+          <div className="absolute bottom-2 right-2">
+            <div
+              className="relative"
+              onMouseEnter={() => setShowInteractionTips(true)}
+              onMouseLeave={() => !tipsDialogOpen && setShowInteractionTips(false)}
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black bg-opacity-75 text-white border-gray-600 hover:bg-gray-700"
+                onClick={() => setTipsDialogOpen(!tipsDialogOpen)}
+              >
+                <HelpCircle className="w-4 h-4" />
+              </Button>
+
+              {/* Tips Dialog */}
+              {(showInteractionTips || tipsDialogOpen) && (
+                <div className="absolute bottom-full right-0 mb-2 bg-black bg-opacity-90 text-white p-4 rounded-lg text-xs w-80 shadow-lg border border-gray-600">
+                  <div className="flex items-center mb-3">
+                    <Keyboard className="w-4 h-4 mr-2 text-indigo-400" />
+                    <h3 className="font-semibold text-indigo-300">Interaction Guide</h3>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <h4 className="font-medium text-yellow-300 mb-1">Navigation</h4>
+                      <div className="grid grid-cols-2 gap-2 text-gray-300">
+                        <div>• Mouse Wheel: Navigate slices</div>
+                        <div>• Arrow Keys: Previous/Next slice</div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <h4 className="font-medium text-yellow-300 mb-1">Window/Level</h4>
+                      <div className="text-gray-300">
+                        <div>• Drag on image: Adjust contrast</div>
+                        <div>• Horizontal: Window width</div>
+                        <div>• Vertical: Window level</div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <h4 className="font-medium text-yellow-300 mb-1">Shortcuts (Coming Soon)</h4>
+                      <div className="grid grid-cols-2 gap-2 text-gray-400">
+                        <div>• R: Reset view</div>
+                        <div>• F: Fit to window</div>
+                        <div>• 1-8: Preset windows</div>
+                        <div>• I: Invert colors</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {tipsDialogOpen && (
+                    <div className="mt-3 pt-2 border-t border-gray-600">
+                      <button
+                        onClick={() => setTipsDialogOpen(false)}
+                        className="text-xs text-indigo-400 hover:text-indigo-300"
+                      >
+                        Click to close
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
 

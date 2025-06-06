@@ -21,22 +21,15 @@ export function SeriesSelector({
   windowLevel,
   onWindowLevelChange
 }: SeriesSelectorProps) {
-  const [windowWidth, setWindowWidth] = useState([windowLevel.window]);
-  const [windowCenter, setWindowCenter] = useState([windowLevel.level]);
-
   const handleWindowChange = (values: number[]) => {
-    setWindowWidth(values);
-    onWindowLevelChange({ window: values[0], level: windowCenter[0] });
+    onWindowLevelChange({ window: values[0], level: windowLevel.level });
   };
 
   const handleLevelChange = (values: number[]) => {
-    setWindowCenter(values);
-    onWindowLevelChange({ window: windowWidth[0], level: values[0] });
+    onWindowLevelChange({ window: windowLevel.window, level: values[0] });
   };
 
   const applyPreset = (preset: WindowLevel) => {
-    setWindowWidth([preset.window]);
-    setWindowCenter([preset.level]);
     onWindowLevelChange(preset);
   };
 
@@ -101,10 +94,10 @@ export function SeriesSelector({
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-gray-400 block mb-2">
-                  Window Width: {windowWidth[0]}
+                  Window Width: {windowLevel.window}
                 </label>
                 <Slider
-                  value={windowWidth}
+                  value={[windowLevel.window]}
                   onValueChange={handleWindowChange}
                   min={1}
                   max={2000}
@@ -115,10 +108,10 @@ export function SeriesSelector({
               
               <div>
                 <label className="text-xs text-gray-400 block mb-2">
-                  Window Level: {windowCenter[0]}
+                  Window Level: {windowLevel.level}
                 </label>
                 <Slider
-                  value={windowCenter}
+                  value={[windowLevel.level]}
                   onValueChange={handleLevelChange}
                   min={-1000}
                   max={1000}
