@@ -28,7 +28,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     }
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
-  const [isImageReady, setIsImageReady] = useState(false);
+  const [isPreloading, setIsPreloading] = useState(false);
 
 
   useEffect(() => {
@@ -36,10 +36,10 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   }, [seriesId]);
 
   useEffect(() => {
-    if (images.length > 0) {
+    if (images.length > 0 && !isPreloading) {
       displayCurrentImage();
     }
-  }, [images, currentIndex, currentWindowLevel]);
+  }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
   const loadImages = async () => {
     try {
@@ -131,6 +131,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
 
   const preloadAllImages = async (imageList: any[]) => {
     console.log('Starting to preload all images...');
+    setIsPreloading(true);
     const newCache = new Map();
     
     // Load all images in parallel
@@ -156,6 +157,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     // Wait for all images to load
     await Promise.allSettled(loadPromises);
     setImageCache(newCache);
+    setIsPreloading(false);
     console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
   };
 
