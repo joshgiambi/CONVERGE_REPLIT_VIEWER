@@ -15,6 +15,19 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
+  const [currentPreset, setCurrentPreset] = useState('Soft Tissue');
+
+  // Standard medical imaging window/level presets
+  const windowPresets = {
+    'Soft Tissue': { width: 400, center: 40 },
+    'Lung': { width: 1500, center: -600 },
+    'Bone': { width: 1800, center: 400 },
+    'Brain': { width: 80, center: 40 },
+    'Liver': { width: 150, center: 30 },
+    'Mediastinum': { width: 350, center: 50 },
+    'Abdomen': { width: 350, center: 40 },
+    'Full Range': { width: 4096, center: 1024 }
+  };
   const [imageCache, setImageCache] = useState<Map<string, { data: Uint16Array, width: number, height: number }>>(new Map());
   const [isImageReady, setIsImageReady] = useState(false);
 
@@ -234,8 +247,6 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     e.preventDefault();
     e.stopPropagation();
     
-    console.log('Mouse down - starting windowing');
-    
     const startX = e.clientX;
     const startY = e.clientY;
     const startWindow = windowLevel.width;
@@ -249,13 +260,12 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
       const newWidth = Math.max(1, startWindow + deltaX * 2);
       const newCenter = startCenter - deltaY * 1.5;
       
-      console.log(`Windowing: W=${newWidth.toFixed(0)} L=${newCenter.toFixed(0)}`);
       setWindowLevel({ width: newWidth, center: newCenter });
+      setCurrentPreset('Custom');
     };
 
     const handleWindowLevelEnd = (endEvent: MouseEvent) => {
       endEvent.preventDefault();
-      console.log('Mouse up - ending windowing');
       document.removeEventListener('mousemove', handleWindowLevelDrag);
       document.removeEventListener('mouseup', handleWindowLevelEnd);
     };
@@ -374,6 +384,8 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
             <div>Drag: Window/Level</div>
             <div>W:{Math.round(windowLevel.width)} L:{Math.round(windowLevel.center)}</div>
           </div>
+
+
         </div>
       </div>
 
@@ -429,7 +441,7 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
             <div>
               <div className="font-semibold text-indigo-300 mb-1">Window/Level</div>
               <div><span className="text-gray-400">Current W/L:</span> {Math.round(windowLevel.width)}/{Math.round(windowLevel.center)}</div>
-              <div><span className="text-gray-400">Preset:</span> Soft Tissue</div>
+              <div><span className="text-gray-400">Preset:</span> {currentPreset}</div>
               <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
             </div>
           </div>
