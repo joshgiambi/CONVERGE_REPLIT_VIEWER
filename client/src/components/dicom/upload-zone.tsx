@@ -19,21 +19,58 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      
       if (files.length === 0) {
         throw new Error('No files selected');
       }
 
-      // Add all files, let server filter DICOM files
-      files.forEach((file, index) => {
-        formData.append('files', file);
-        setCurrentFile(file.name);
-        setUploadProgress((index / files.length) * 90); // Reserve 10% for processing
-      });
+      console.log(`Starting upload of ${files.length} files`);
+      
+      // Process files in batches to avoid overwhelming the server
+      const batchSize = 20;
+      const batches = [];
+      for (let i = 0; i < files.length; i += batchSize) {
+        batches.push(files.slice(i, i + batchSize));
+      }
 
-      const response = await apiRequest('POST', '/api/upload', formData);
-      return response.json();
+      let totalProcessed = 0;
+      let allStudies: any[] = [];
+      let allSeries: any[] = [];
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const formData = new FormData();
+        
+        batch.forEach(file => {
+          formData.append('files', file);
+        });
+
+        setCurrentFile(`Batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+        setUploadProgress((batchIndex / batches.length) * 90);
+
+        const response = await apiRequest('POST', '/api/upload', formData);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Batch ${batchIndex + 1} failed: ${response.status} - ${errorText}`);
+        }
+        
+        const batchResult = await response.json();
+        totalProcessed += batchResult.processed || 0;
+        
+        if (batchResult.studies) {
+          allStudies.push(...batchResult.studies);
+        }
+        if (batchResult.series) {
+          allSeries.push(...batchResult.series);
+        }
+      }
+
+      return {
+        success: true,
+        processed: totalProcessed,
+        errors: 0,
+        studies: allStudies,
+        series: allSeries
+      };
     },
     onSuccess: (data) => {
       setUploadProgress(100);
@@ -104,17 +141,22 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       'image/*': []
     },
     multiple: true,
-    noClick: false,
+    noClick: true, // Disable dropzone click to prevent conflicts
     noKeyboard: false
   });
 
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     const files = Array.from(e.target.files || []);
+    console.log('Files selected:', files.length);
     if (files.length > 0) {
       setUploadProgress(0);
       setUploadResult(null);
       uploadMutation.mutate(files);
     }
+    // Reset the input
+    e.target.value = '';
   };
 
   const isUploading = uploadMutation.isPending;
@@ -153,7 +195,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           </div>
           
           {!isUploading && !hasResult && (
-            <div className="flex gap-4 items-center pointer-events-auto">
+            <div className="flex gap-4 items-center">
               <input
                 type="file"
                 {...({ webkitdirectory: "" } as any)}
@@ -162,24 +204,30 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
                 style={{ display: 'none' }}
                 id="folder-input"
               />
-              <button
-                className="bg-gradient-primary text-white font-semibold px-6 py-3 rounded-lg inline-flex items-center transition-all duration-300 hover:scale-105"
-                onClick={() => {
+              <div
+                className="bg-gradient-primary text-white font-semibold px-6 py-3 rounded-lg inline-flex items-center transition-all duration-300 hover:scale-105 cursor-pointer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   const input = document.getElementById('folder-input') as HTMLInputElement;
-                  if (input) input.click();
+                  if (input) {
+                    input.click();
+                  }
                 }}
-                type="button"
               >
                 <FolderOpen className="w-5 h-5 mr-2" />
                 Select DICOM Folder
-              </button>
-              <button 
-                className="border-2 border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
-                onClick={handleCreateTestData}
-                type="button"
+              </div>
+              <div 
+                className="border-2 border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold cursor-pointer inline-flex items-center"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleCreateTestData();
+                }}
               >
                 Load Demo Data
-              </button>
+              </div>
             </div>
           )}
         </div>
