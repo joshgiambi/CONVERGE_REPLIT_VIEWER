@@ -185,8 +185,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       }
       
       // Keep fixed canvas size for consistent display
-      canvas.width = 768;
-      canvas.height = 768;
+      canvas.width = 1024;
+      canvas.height = 1024;
       
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
@@ -406,8 +406,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
         <div className="relative">
           <canvas
             ref={canvasRef}
-            width={768}
-            height={768}
+            width={1024}
+            height={1024}
             onMouseDown={handleCanvasMouseDown}
             className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
             style={{ 
