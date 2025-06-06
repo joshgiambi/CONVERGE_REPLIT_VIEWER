@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
-import { SimpleViewer } from './simple-viewer';
+import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -194,9 +194,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
         {/* DICOM Viewer */}
         <div className="lg:col-span-3">
           {selectedSeries ? (
-            <SimpleViewer
-              seriesId={selectedSeries.id}
-            />
+            <WorkingViewer seriesId={selectedSeries.id} />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>
