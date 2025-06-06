@@ -21,17 +21,15 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
       
-      // Filter DICOM files
-      const dicomFiles = files.filter(isDICOMFile);
-      
-      if (dicomFiles.length === 0) {
-        throw new Error('No valid DICOM files found');
+      if (files.length === 0) {
+        throw new Error('No files selected');
       }
 
-      dicomFiles.forEach((file, index) => {
+      // Add all files, let server filter DICOM files
+      files.forEach((file, index) => {
         formData.append('files', file);
         setCurrentFile(file.name);
-        setUploadProgress((index / dicomFiles.length) * 90); // Reserve 10% for processing
+        setUploadProgress((index / files.length) * 90); // Reserve 10% for processing
       });
 
       const response = await apiRequest('POST', '/api/upload', formData);
@@ -60,6 +58,43 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       uploadMutation.mutate(acceptedFiles);
     }
   }, [uploadMutation]);
+
+  const handleCreateTestData = async () => {
+    try {
+      setUploadProgress(0);
+      setUploadResult(null);
+      setCurrentFile('Creating test data...');
+      setUploadProgress(50);
+      
+      const response = await apiRequest('POST', '/api/create-test-data', {});
+      const data = await response.json();
+      
+      setUploadProgress(100);
+      setUploadResult({
+        success: true,
+        processed: 3,
+        errors: 0,
+        errorDetails: [],
+        studies: [data.study],
+        series: data.series
+      });
+      
+      setTimeout(() => {
+        onUploadComplete({
+          success: true,
+          studies: [data.study],
+          series: data.series
+        });
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error creating test data:', error);
+      setUploadResult({ 
+        success: false, 
+        error: 'Failed to create test data' 
+      });
+    }
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -105,10 +140,19 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           </div>
           
           {!isUploading && !hasResult && (
-            <Button className="bg-dicom-yellow text-black hover:bg-dicom-yellow/90 transition-all duration-200 hover:scale-105">
-              <Upload className="w-4 h-4 mr-2" />
-              Browse Folders
-            </Button>
+            <div className="flex gap-4">
+              <Button className="bg-dicom-yellow text-black hover:bg-dicom-yellow/90 transition-all duration-200 hover:scale-105">
+                <Upload className="w-4 h-4 mr-2" />
+                Browse Files
+              </Button>
+              <Button 
+                variant="outline"
+                className="border-dicom-yellow text-dicom-yellow hover:bg-dicom-yellow hover:text-black transition-all duration-200 hover:scale-105"
+                onClick={handleCreateTestData}
+              >
+                Load Demo Data
+              </Button>
+            </div>
           )}
         </div>
         
