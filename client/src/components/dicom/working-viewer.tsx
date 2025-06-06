@@ -14,6 +14,8 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
+  const [imageCache, setImageCache] = useState<Map<string, any>>(new Map());
 
   useEffect(() => {
     loadImages();
@@ -76,12 +78,6 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
       // Clear canvas
       ctx.fillStyle = 'black';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Show loading text
-      ctx.fillStyle = 'white';
-      ctx.font = '16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Loading...', canvas.width / 2, canvas.height / 2);
       
       // Load DICOM file directly
       const response = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
