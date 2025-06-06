@@ -2,35 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Move, RotateCw, Maximize2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { dicomLoader } from '@/lib/dicom-loader';
+import { ChevronLeft, ChevronRight, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface MPRViewerProps {
   seriesId: number;
 }
 
 interface VolumeData {
-  imageStack: ImageData[];
-  dimensions: { width: number; height: number; depth: number };
-  spacing: { x: number; y: number; z: number };
-}
-
-interface CrosshairPosition {
-  x: number;
-  y: number;
-  z: number;
+  width: number;
+  height: number;
+  depth: number;
+  data: Uint16Array;
+  spacing: [number, number, number];
+  origin: [number, number, number];
 }
 
 export function MPRViewer({ seriesId }: MPRViewerProps) {
-  const axialRef = useRef<HTMLCanvasElement>(null);
-  const sagittalRef = useRef<HTMLCanvasElement>(null);
-  const coronalRef = useRef<HTMLCanvasElement>(null);
+  const axialCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   
   const [volumeData, setVolumeData] = useState<VolumeData | null>(null);
-  const [crosshair, setCrosshair] = useState<CrosshairPosition>({ x: 256, y: 256, z: 10 });
+  const [crosshair, setCrosshair] = useState({ x: 256, y: 256, z: 10 });
+  const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [windowLevel, setWindowLevel] = useState({ center: 40, width: 400 });
 
   useEffect(() => {
     loadVolumeData();
@@ -38,7 +34,7 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
 
   useEffect(() => {
     if (volumeData) {
-      renderAllPlanes();
+      renderAllViews();
     }
   }, [volumeData, crosshair, windowLevel]);
 
@@ -46,6 +42,11 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
     try {
       setIsLoading(true);
       setError(null);
+      
+      // Load dicom-parser if not available
+      if (!window.dicomParser) {
+        await loadDicomParser();
+      }
       
       const response = await fetch(`/api/series/${seriesId}`);
       if (!response.ok) {
@@ -57,44 +58,66 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
         (a.instanceNumber || 0) - (b.instanceNumber || 0)
       );
       
-      // Load all DICOM images and extract pixel data
-      const imageStack: ImageData[] = [];
-      let dimensions = { width: 512, height: 512, depth: sortedImages.length };
+      if (sortedImages.length === 0) {
+        throw new Error('No images found in series');
+      }
       
-      for (const image of sortedImages) {
-        try {
-          const canvas = await dicomLoader.loadDICOMImage(image.sopInstanceUID);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            imageStack.push(imageData);
-            
-            // Update dimensions from first image
-            if (imageStack.length === 1) {
-              dimensions.width = canvas.width;
-              dimensions.height = canvas.height;
-            }
-          }
-        } catch (error) {
-          console.warn(`Failed to load image ${image.sopInstanceUID}:`, error);
+      // Load first image to get dimensions
+      const firstImageResponse = await fetch(`/api/images/${sortedImages[0].sopInstanceUID}`);
+      const firstImageBuffer = await firstImageResponse.arrayBuffer();
+      const firstByteArray = new Uint8Array(firstImageBuffer);
+      const firstDataSet = window.dicomParser.parseDicom(firstByteArray);
+      
+      const width = firstDataSet.uint16('x00280011') || 512;
+      const height = firstDataSet.uint16('x00280010') || 512;
+      const depth = sortedImages.length;
+      
+      // Get pixel spacing and slice thickness
+      const pixelSpacing = firstDataSet.string('x00280030')?.split('\\') || ['1', '1'];
+      const sliceThickness = parseFloat(firstDataSet.string('x00180050') || '1');
+      
+      const spacing: [number, number, number] = [
+        parseFloat(pixelSpacing[0]),
+        parseFloat(pixelSpacing[1]),
+        sliceThickness
+      ];
+      
+      // Initialize volume data
+      const volumeArray = new Uint16Array(width * height * depth);
+      
+      // Load all slices
+      for (let i = 0; i < sortedImages.length; i++) {
+        const imageResponse = await fetch(`/api/images/${sortedImages[i].sopInstanceUID}`);
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const byteArray = new Uint8Array(imageBuffer);
+        const dataSet = window.dicomParser.parseDicom(byteArray);
+        
+        const pixelData = dataSet.elements.x7fe00010;
+        if (!pixelData) continue;
+        
+        const bitsAllocated = dataSet.uint16('x00280100') || 16;
+        
+        if (bitsAllocated === 16) {
+          const slicePixels = new Uint16Array(imageBuffer, pixelData.dataOffset, pixelData.length / 2);
+          const sliceOffset = i * width * height;
+          volumeArray.set(slicePixels, sliceOffset);
         }
       }
       
-      if (imageStack.length === 0) {
-        throw new Error('No images could be loaded');
-      }
-      
       const volume: VolumeData = {
-        imageStack,
-        dimensions,
-        spacing: { x: 1, y: 1, z: 2.5 } // Typical CT spacing
+        width,
+        height,
+        depth,
+        data: volumeArray,
+        spacing,
+        origin: [0, 0, 0]
       };
       
       setVolumeData(volume);
-      setCrosshair({
-        x: Math.floor(dimensions.width / 2),
-        y: Math.floor(dimensions.height / 2),
-        z: Math.floor(dimensions.depth / 2)
+      setCrosshair({ 
+        x: Math.floor(width / 2), 
+        y: Math.floor(height / 2), 
+        z: Math.floor(depth / 2) 
       });
       
     } catch (error: any) {
@@ -105,159 +128,159 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
     }
   };
 
-  const renderAllPlanes = () => {
+  const loadDicomParser = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (window.dicomParser) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
+      document.head.appendChild(script);
+    });
+  };
+
+  const renderAllViews = () => {
     if (!volumeData) return;
     
-    renderAxialPlane();
-    renderSagittalPlane();
-    renderCoronalPlane();
+    renderAxialView();
+    renderSagittalView();
+    renderCoronalView();
   };
 
-  const renderAxialPlane = () => {
-    if (!volumeData || !axialRef.current) return;
+  const renderAxialView = () => {
+    const canvas = axialCanvasRef.current;
+    if (!canvas || !volumeData) return;
     
-    const canvas = axialRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Get the axial slice at current Z position
-    const sliceIndex = Math.min(crosshair.z, volumeData.imageStack.length - 1);
-    const sourceImageData = volumeData.imageStack[sliceIndex];
+    canvas.width = volumeData.width;
+    canvas.height = volumeData.height;
     
-    if (sourceImageData) {
-      // Apply window/level and draw
-      const processedData = applyWindowLevel(sourceImageData, windowLevel);
-      ctx.putImageData(processedData, 0, 0);
-      
-      // Draw crosshairs
-      drawCrosshairs(ctx, crosshair.x, crosshair.y, canvas.width, canvas.height);
+    const imageData = ctx.createImageData(volumeData.width, volumeData.height);
+    const data = imageData.data;
+    
+    const sliceOffset = crosshair.z * volumeData.width * volumeData.height;
+    
+    for (let y = 0; y < volumeData.height; y++) {
+      for (let x = 0; x < volumeData.width; x++) {
+        const volumeIndex = sliceOffset + y * volumeData.width + x;
+        const pixelValue = volumeData.data[volumeIndex];
+        
+        const windowed = applyWindowLevel(pixelValue);
+        const pixelIndex = (y * volumeData.width + x) * 4;
+        
+        data[pixelIndex] = windowed;     // R
+        data[pixelIndex + 1] = windowed; // G
+        data[pixelIndex + 2] = windowed; // B
+        data[pixelIndex + 3] = 255;      // A
+      }
     }
+    
+    ctx.putImageData(imageData, 0, 0);
+    drawCrosshair(ctx, crosshair.x, crosshair.y, 'red');
   };
 
-  const renderSagittalPlane = () => {
-    if (!volumeData || !sagittalRef.current) return;
+  const renderSagittalView = () => {
+    const canvas = sagittalCanvasRef.current;
+    if (!canvas || !volumeData) return;
     
-    const canvas = sagittalRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Create sagittal reconstruction
-    const width = volumeData.dimensions.depth;
-    const height = volumeData.dimensions.height;
-    const imageData = ctx.createImageData(width, height);
+    canvas.width = volumeData.depth;
+    canvas.height = volumeData.height;
     
-    // Sample along sagittal plane (constant X)
-    const x = crosshair.x;
-    for (let z = 0; z < volumeData.dimensions.depth && z < volumeData.imageStack.length; z++) {
-      const sourceSlice = volumeData.imageStack[z];
-      if (!sourceSlice) continue;
-      
-      for (let y = 0; y < height; y++) {
-        if (y >= sourceSlice.height || x >= sourceSlice.width) continue;
+    const imageData = ctx.createImageData(volumeData.depth, volumeData.height);
+    const data = imageData.data;
+    
+    for (let y = 0; y < volumeData.height; y++) {
+      for (let z = 0; z < volumeData.depth; z++) {
+        const volumeIndex = z * volumeData.width * volumeData.height + y * volumeData.width + crosshair.x;
+        const pixelValue = volumeData.data[volumeIndex];
         
-        const sourceIndex = (y * sourceSlice.width + x) * 4;
-        const targetIndex = (y * width + z) * 4;
+        const windowed = applyWindowLevel(pixelValue);
+        const pixelIndex = (y * volumeData.depth + z) * 4;
         
-        imageData.data[targetIndex] = sourceSlice.data[sourceIndex];
-        imageData.data[targetIndex + 1] = sourceSlice.data[sourceIndex + 1];
-        imageData.data[targetIndex + 2] = sourceSlice.data[sourceIndex + 2];
-        imageData.data[targetIndex + 3] = sourceSlice.data[sourceIndex + 3];
+        data[pixelIndex] = windowed;     // R
+        data[pixelIndex + 1] = windowed; // G
+        data[pixelIndex + 2] = windowed; // B
+        data[pixelIndex + 3] = 255;      // A
       }
     }
     
-    const processedData = applyWindowLevel(imageData, windowLevel);
-    ctx.putImageData(processedData, 0, 0);
-    
-    // Draw crosshairs
-    drawCrosshairs(ctx, crosshair.z, crosshair.y, width, height);
+    ctx.putImageData(imageData, 0, 0);
+    drawCrosshair(ctx, crosshair.z, crosshair.y, 'green');
   };
 
-  const renderCoronalPlane = () => {
-    if (!volumeData || !coronalRef.current) return;
+  const renderCoronalView = () => {
+    const canvas = coronalCanvasRef.current;
+    if (!canvas || !volumeData) return;
     
-    const canvas = coronalRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Create coronal reconstruction
-    const width = volumeData.dimensions.width;
-    const height = volumeData.dimensions.depth;
-    const imageData = ctx.createImageData(width, height);
+    canvas.width = volumeData.width;
+    canvas.height = volumeData.depth;
     
-    // Sample along coronal plane (constant Y)
-    const y = crosshair.y;
-    for (let z = 0; z < volumeData.dimensions.depth && z < volumeData.imageStack.length; z++) {
-      const sourceSlice = volumeData.imageStack[z];
-      if (!sourceSlice) continue;
-      
-      for (let x = 0; x < width; x++) {
-        if (y >= sourceSlice.height || x >= sourceSlice.width) continue;
+    const imageData = ctx.createImageData(volumeData.width, volumeData.depth);
+    const data = imageData.data;
+    
+    for (let z = 0; z < volumeData.depth; z++) {
+      for (let x = 0; x < volumeData.width; x++) {
+        const volumeIndex = z * volumeData.width * volumeData.height + crosshair.y * volumeData.width + x;
+        const pixelValue = volumeData.data[volumeIndex];
         
-        const sourceIndex = (y * sourceSlice.width + x) * 4;
-        const targetIndex = ((height - 1 - z) * width + x) * 4; // Flip Z for proper orientation
+        const windowed = applyWindowLevel(pixelValue);
+        const pixelIndex = (z * volumeData.width + x) * 4;
         
-        imageData.data[targetIndex] = sourceSlice.data[sourceIndex];
-        imageData.data[targetIndex + 1] = sourceSlice.data[sourceIndex + 1];
-        imageData.data[targetIndex + 2] = sourceSlice.data[sourceIndex + 2];
-        imageData.data[targetIndex + 3] = sourceSlice.data[sourceIndex + 3];
+        data[pixelIndex] = windowed;     // R
+        data[pixelIndex + 1] = windowed; // G
+        data[pixelIndex + 2] = windowed; // B
+        data[pixelIndex + 3] = 255;      // A
       }
     }
     
-    const processedData = applyWindowLevel(imageData, windowLevel);
-    ctx.putImageData(processedData, 0, 0);
-    
-    // Draw crosshairs
-    drawCrosshairs(ctx, crosshair.x, height - 1 - crosshair.z, width, height);
+    ctx.putImageData(imageData, 0, 0);
+    drawCrosshair(ctx, crosshair.x, crosshair.z, 'blue');
   };
 
-  const applyWindowLevel = (imageData: ImageData, wl: { center: number; width: number }): ImageData => {
-    const data = new ImageData(imageData.width, imageData.height);
-    const min = wl.center - wl.width / 2;
-    const max = wl.center + wl.width / 2;
-    const range = max - min;
+  const applyWindowLevel = (pixelValue: number): number => {
+    const { width, center } = windowLevel;
+    const min = center - width / 2;
+    const max = center + width / 2;
     
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      // Convert RGB back to grayscale value (assuming it was stored as grayscale)
-      const gray = imageData.data[i];
-      
-      // Apply window/level
-      let normalized = 0;
-      if (range > 0) {
-        normalized = Math.max(0, Math.min(1, (gray - min) / range));
-      }
-      
-      const value = Math.round(normalized * 255);
-      
-      data.data[i] = value;
-      data.data[i + 1] = value;
-      data.data[i + 2] = value;
-      data.data[i + 3] = imageData.data[i + 3];
-    }
+    if (pixelValue <= min) return 0;
+    if (pixelValue >= max) return 255;
     
-    return data;
+    return Math.round(((pixelValue - min) / width) * 255);
   };
 
-  const drawCrosshairs = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
-    ctx.strokeStyle = '#8B5CF6';
+  const drawCrosshair = (ctx: CanvasRenderingContext2D, x: number, y: number, color: string) => {
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
+    ctx.setLineDash([2, 2]);
     
     // Vertical line
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.lineTo(x, ctx.canvas.height);
     ctx.stroke();
     
     // Horizontal line
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.lineTo(ctx.canvas.width, y);
     ctx.stroke();
     
     ctx.setLineDash([]);
   };
 
-  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>, plane: 'axial' | 'sagittal' | 'coronal') => {
+  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>, view: 'axial' | 'sagittal' | 'coronal') => {
     if (!volumeData) return;
     
     const canvas = event.currentTarget;
@@ -265,128 +288,165 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
-    const clickX = (event.clientX - rect.left) * scaleX;
-    const clickY = (event.clientY - rect.top) * scaleY;
+    const x = Math.floor((event.clientX - rect.left) * scaleX);
+    const y = Math.floor((event.clientY - rect.top) * scaleY);
     
-    let newCrosshair = { ...crosshair };
+    const newCrosshair = { ...crosshair };
     
-    switch (plane) {
+    switch (view) {
       case 'axial':
-        newCrosshair.x = Math.round(clickX);
-        newCrosshair.y = Math.round(clickY);
+        newCrosshair.x = Math.max(0, Math.min(volumeData.width - 1, x));
+        newCrosshair.y = Math.max(0, Math.min(volumeData.height - 1, y));
         break;
       case 'sagittal':
-        newCrosshair.z = Math.round(clickX);
-        newCrosshair.y = Math.round(clickY);
+        newCrosshair.z = Math.max(0, Math.min(volumeData.depth - 1, x));
+        newCrosshair.y = Math.max(0, Math.min(volumeData.height - 1, y));
         break;
       case 'coronal':
-        newCrosshair.x = Math.round(clickX);
-        newCrosshair.z = volumeData.dimensions.depth - 1 - Math.round(clickY);
+        newCrosshair.x = Math.max(0, Math.min(volumeData.width - 1, x));
+        newCrosshair.z = Math.max(0, Math.min(volumeData.depth - 1, y));
         break;
     }
-    
-    // Clamp values
-    newCrosshair.x = Math.max(0, Math.min(volumeData.dimensions.width - 1, newCrosshair.x));
-    newCrosshair.y = Math.max(0, Math.min(volumeData.dimensions.height - 1, newCrosshair.y));
-    newCrosshair.z = Math.max(0, Math.min(volumeData.dimensions.depth - 1, newCrosshair.z));
     
     setCrosshair(newCrosshair);
   };
 
+  const adjustWindowLevel = (deltaWidth: number, deltaCenter: number) => {
+    setWindowLevel(prev => ({
+      width: Math.max(1, prev.width + deltaWidth),
+      center: prev.center + deltaCenter
+    }));
+  };
+
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
+      <Card className="h-full bg-black border-indigo-800 flex items-center justify-center">
         <div className="text-center text-white">
           <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-          <p>Loading DICOM volume...</p>
+          <p>Loading MPR volume...</p>
         </div>
-      </div>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
+      <Card className="h-full bg-black border-indigo-800 flex items-center justify-center">
         <div className="text-center text-red-400">
-          <p className="mb-2">Error loading DICOM volume:</p>
+          <p className="mb-2">Error loading MPR:</p>
           <p className="text-sm">{error}</p>
           <Button onClick={loadVolumeData} className="mt-4 bg-indigo-600 hover:bg-indigo-700">
             Retry
           </Button>
         </div>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="h-full grid grid-cols-2 gap-2 p-2 bg-black border border-indigo-800 rounded-lg">
-      {/* Axial View */}
-      <div className="relative bg-black border border-indigo-700 rounded overflow-hidden">
-        <div className="absolute top-2 left-2 z-10">
+    <Card className="h-full bg-black border-indigo-800">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-indigo-700">
+        <div className="flex items-center space-x-2">
           <Badge className="bg-indigo-900 text-indigo-200">
-            Axial (Z: {crosshair.z + 1})
+            Multi-Planar Reconstruction
           </Badge>
-        </div>
-        <canvas
-          ref={axialRef}
-          width={volumeData?.dimensions.width || 512}
-          height={volumeData?.dimensions.height || 512}
-          className="w-full h-full object-contain cursor-crosshair"
-          onClick={(e) => handleCanvasClick(e, 'axial')}
-          style={{ imageRendering: 'pixelated' }}
-        />
-      </div>
-      
-      {/* Sagittal View */}
-      <div className="relative bg-black border border-indigo-700 rounded overflow-hidden">
-        <div className="absolute top-2 left-2 z-10">
-          <Badge className="bg-indigo-900 text-indigo-200">
-            Sagittal (X: {crosshair.x + 1})
-          </Badge>
-        </div>
-        <canvas
-          ref={sagittalRef}
-          width={volumeData?.dimensions.depth || 20}
-          height={volumeData?.dimensions.height || 512}
-          className="w-full h-full object-contain cursor-crosshair"
-          onClick={(e) => handleCanvasClick(e, 'sagittal')}
-          style={{ imageRendering: 'pixelated' }}
-        />
-      </div>
-      
-      {/* Coronal View */}
-      <div className="relative bg-black border border-indigo-700 rounded overflow-hidden">
-        <div className="absolute top-2 left-2 z-10">
-          <Badge className="bg-indigo-900 text-indigo-200">
-            Coronal (Y: {crosshair.y + 1})
-          </Badge>
-        </div>
-        <canvas
-          ref={coronalRef}
-          width={volumeData?.dimensions.width || 512}
-          height={volumeData?.dimensions.depth || 20}
-          className="w-full h-full object-contain cursor-crosshair"
-          onClick={(e) => handleCanvasClick(e, 'coronal')}
-          style={{ imageRendering: 'pixelated' }}
-        />
-      </div>
-      
-      {/* Volume Info */}
-      <div className="relative bg-black border border-indigo-700 rounded flex items-center justify-center">
-        <div className="text-center text-indigo-400">
-          <div className="w-16 h-16 mx-auto mb-2 border-2 border-indigo-600 rounded-lg flex items-center justify-center">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded opacity-70"></div>
-          </div>
-          <p className="text-sm font-medium">Volume Info</p>
           {volumeData && (
-            <div className="text-xs mt-2 space-y-1">
-              <p>{volumeData.dimensions.width} × {volumeData.dimensions.height} × {volumeData.dimensions.depth}</p>
-              <p>Position: ({crosshair.x}, {crosshair.y}, {crosshair.z})</p>
-              <p>W/L: {windowLevel.width}/{windowLevel.center}</p>
-            </div>
+            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+              {volumeData.width}×{volumeData.height}×{volumeData.depth}
+            </Badge>
           )}
         </div>
+        
+        <div className="flex items-center space-x-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => adjustWindowLevel(-50, 0)}
+            className="border-indigo-600 hover:bg-indigo-800"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => adjustWindowLevel(50, 0)}
+            className="border-indigo-600 hover:bg-indigo-800"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </Button>
+          <span className="text-xs text-indigo-300">
+            W:{windowLevel.width} L:{windowLevel.center}
+          </span>
+        </div>
       </div>
-    </div>
+
+      {/* MPR Views */}
+      <div className="flex-1 p-4 grid grid-cols-2 gap-4">
+        {/* Axial View */}
+        <div className="relative bg-black border border-indigo-700 rounded">
+          <div className="absolute top-2 left-2 z-10">
+            <Badge className="bg-red-900 text-red-200">Axial</Badge>
+          </div>
+          <canvas
+            ref={axialCanvasRef}
+            onClick={(e) => handleCanvasClick(e, 'axial')}
+            className="w-full h-full object-contain cursor-crosshair"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        </div>
+        
+        {/* Sagittal View */}
+        <div className="relative bg-black border border-indigo-700 rounded">
+          <div className="absolute top-2 left-2 z-10">
+            <Badge className="bg-green-900 text-green-200">Sagittal</Badge>
+          </div>
+          <canvas
+            ref={sagittalCanvasRef}
+            onClick={(e) => handleCanvasClick(e, 'sagittal')}
+            className="w-full h-full object-contain cursor-crosshair"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        </div>
+        
+        {/* Coronal View */}
+        <div className="relative bg-black border border-indigo-700 rounded">
+          <div className="absolute top-2 left-2 z-10">
+            <Badge className="bg-blue-900 text-blue-200">Coronal</Badge>
+          </div>
+          <canvas
+            ref={coronalCanvasRef}
+            onClick={(e) => handleCanvasClick(e, 'coronal')}
+            className="w-full h-full object-contain cursor-crosshair"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        </div>
+        
+        {/* Info Panel */}
+        <div className="relative bg-black border border-indigo-700 rounded flex items-center justify-center">
+          <div className="text-center text-indigo-300">
+            {volumeData && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Volume Info</h3>
+                <div className="text-sm space-y-1">
+                  <p>Dimensions: {volumeData.width} × {volumeData.height} × {volumeData.depth}</p>
+                  <p>Spacing: {volumeData.spacing.map(s => s.toFixed(1)).join(' × ')} mm</p>
+                  <p>Position: ({crosshair.x}, {crosshair.y}, {crosshair.z})</p>
+                  <p className="text-xs text-indigo-400 mt-4">
+                    Click on any view to change crosshair position
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
+}
+
+declare global {
+  interface Window {
+    dicomParser: any;
+  }
 }
