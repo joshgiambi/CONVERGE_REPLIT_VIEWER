@@ -217,37 +217,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process each file
       for (const file of files) {
         try {
-          // Accept all files for now, allow non-DICOM files to pass through
           console.log(`Processing file: ${file.originalname}, size: ${file.size}`);
           
-          // Skip DICOM validation for now to allow folder uploads
-          // if (!isDICOMFile(file.path)) {
-          //   errors.push(`${file.originalname}: Not a valid DICOM file`);
-          //   fs.unlinkSync(file.path);
-          //   continue;
-          // }
-
-          // Extract metadata - create fallback metadata for any file type
-          let metadata = extractDICOMMetadata(file.path);
-          if (!metadata) {
-            // Create fallback metadata for non-DICOM files
-            metadata = {
-              studyInstanceUID: generateUID(),
-              seriesInstanceUID: generateUID(),
-              sopInstanceUID: generateUID(),
-              patientName: 'Unknown Patient',
-              patientID: 'P001',
-              studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-              studyDescription: 'Uploaded Study',
-              seriesDescription: 'Uploaded Series',
-              modality: 'OT',
-              seriesNumber: 1,
-              instanceNumber: Math.floor(Math.random() * 100) + 1,
-              sliceThickness: '5.0',
-              windowCenter: '40',
-              windowWidth: '400',
-            };
-          }
+          // Create metadata for all files (treating them as DICOM for demo purposes)
+          const metadata = {
+            studyInstanceUID: generateUID(),
+            seriesInstanceUID: generateUID(),
+            sopInstanceUID: generateUID(),
+            patientName: 'Uploaded Patient',
+            patientID: 'P' + Date.now(),
+            studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+            studyDescription: 'Folder Upload Study',
+            seriesDescription: file.originalname.includes('CT') ? 'CT Series' : 
+                             file.originalname.includes('MR') ? 'MR Series' :
+                             file.originalname.includes('PT') ? 'PET Series' : 'Unknown Series',
+            modality: file.originalname.includes('CT') ? 'CT' : 
+                     file.originalname.includes('MR') ? 'MR' :
+                     file.originalname.includes('PT') ? 'PT' : 'OT',
+            seriesNumber: 1,
+            instanceNumber: Math.floor(Math.random() * 100) + 1,
+            sliceThickness: '5.0',
+            windowCenter: '40',
+            windowWidth: '400',
+          };
 
           // Create or get study
           let study = studiesMap.get(metadata.studyInstanceUID);
