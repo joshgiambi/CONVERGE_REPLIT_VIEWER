@@ -153,28 +153,28 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
           </div>
           
           {!isUploading && !hasResult && (
-            <div className="flex gap-4">
-              <div className="relative">
-                <input
-                  type="file"
-                  {...({ webkitdirectory: "" } as any)}
-                  multiple
-                  onChange={handleFolderSelect}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  id="folder-input"
-                />
-                <label
-                  htmlFor="folder-input"
-                  className="btn-animated text-black font-semibold px-6 py-3 rounded-lg cursor-pointer inline-flex items-center"
-                >
-                  <FolderOpen className="w-5 h-5 mr-2" />
-                  Select DICOM Folder
-                </label>
-              </div>
+            <div className="flex gap-4 items-center">
+              <Button
+                className="btn-animated text-black font-semibold px-6 py-3 rounded-lg inline-flex items-center"
+                onClick={() => document.getElementById('folder-input')?.click()}
+                type="button"
+              >
+                <FolderOpen className="w-5 h-5 mr-2" />
+                Select DICOM Folder
+              </Button>
+              <input
+                type="file"
+                {...({ webkitdirectory: "" } as any)}
+                multiple
+                onChange={handleFolderSelect}
+                className="hidden"
+                id="folder-input"
+              />
               <Button 
                 variant="outline"
                 className="border-2 border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
                 onClick={handleCreateTestData}
+                type="button"
               >
                 Load Demo Data
               </Button>

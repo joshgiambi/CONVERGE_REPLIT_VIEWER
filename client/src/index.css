@@ -176,7 +176,7 @@
 
   .btn-animated:hover {
     @apply -translate-y-1 scale-105;
-    box-shadow: 0 12px 40px rgba(255, 215, 0, 0.4), 0 4px 15px rgba(0, 128, 255, 0.3);
+    box-shadow: 0 12px 40px rgba(163, 113, 248, 0.4), 0 4px 15px rgba(99, 102, 241, 0.3);
     filter: brightness(1.1);
   }
 
