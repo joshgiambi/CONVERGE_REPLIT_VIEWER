@@ -65,12 +65,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         }
       }
 
+      console.log(`Upload completed: ${totalProcessed} files processed across ${batches.length} batches`);
+      
       return {
         success: true,
         processed: totalProcessed,
         errors: 0,
         studies: allStudies,
-        series: allSeries
+        series: allSeries,
+        totalFiles: files.length,
+        batches: batches.length
       };
     },
     onSuccess: (data) => {
@@ -288,7 +292,13 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               
               {uploadResult.success && (
                 <div className="text-sm text-gray-400">
-                  <p>Processed {uploadResult.processed} files</p>
+                  <p>Processed {uploadResult.processed} files{uploadResult.totalFiles ? ` of ${uploadResult.totalFiles}` : ''}</p>
+                  {uploadResult.batches && (
+                    <p>Uploaded in {uploadResult.batches} batches</p>
+                  )}
+                  {uploadResult.studies && uploadResult.studies.length > 0 && (
+                    <p>Created {uploadResult.studies.length} studies with {uploadResult.series?.length || 0} series</p>
+                  )}
                   {uploadResult.errors > 0 && (
                     <p className="text-yellow-500">
                       {uploadResult.errors} files had errors
