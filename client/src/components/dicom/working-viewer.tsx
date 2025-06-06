@@ -248,12 +248,12 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
     
-    // Calculate scaling to fit the image in the canvas while maintaining aspect ratio
-    const scale = Math.min(canvasWidth / width, canvasHeight / height);
+    // Calculate scaling to fill the entire canvas (crop if necessary)
+    const scale = Math.max(canvasWidth / width, canvasHeight / height);
     const scaledWidth = width * scale;
     const scaledHeight = height * scale;
     
-    // Center the image
+    // Center the image (may crop edges to fill canvas completely)
     const x = (canvasWidth - scaledWidth) / 2;
     const y = (canvasHeight - scaledHeight) / 2;
     
