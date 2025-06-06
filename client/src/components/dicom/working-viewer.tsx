@@ -98,30 +98,31 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
         throw new Error('No pixel data found in DICOM file');
       }
       
-      const pixelData = new Uint16Array(dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+      // Get image dimensions and parameters
+      const rows = dataSet.uint16('x00280010') || 512;
+      const cols = dataSet.uint16('x00280011') || 512;
+      const bitsAllocated = dataSet.uint16('x00280100') || 16;
       
-      // Get image dimensions
-      const rows = dataSet.uint16('x00280010');
-      const cols = dataSet.uint16('x00280011');
-      const bitsStored = dataSet.uint16('x00280101') || 16;
-      const pixelRepresentation = dataSet.uint16('x00280103') || 0;
+      // Get rescale parameters for Hounsfield Units
+      const rescaleSlope = dataSet.floatString('x00281053') || 1;
+      const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
       
-      // Convert to signed if needed
-      let processedData: Float32Array;
-      if (pixelRepresentation === 1 && bitsStored === 16) {
-        // Signed 16-bit data
-        const signedData = new Int16Array(pixelData.buffer, pixelData.byteOffset, pixelData.length);
-        processedData = new Float32Array(signedData);
+      if (bitsAllocated === 16) {
+        const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+        // Convert to Hounsfield Units
+        const huPixelArray = new Float32Array(rawPixelArray.length);
+        for (let i = 0; i < rawPixelArray.length; i++) {
+          huPixelArray[i] = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
+        }
+        
+        return {
+          data: huPixelArray,
+          width: cols,
+          height: rows
+        };
       } else {
-        // Unsigned data
-        processedData = new Float32Array(pixelData);
+        throw new Error('Only 16-bit images supported');
       }
-      
-      return {
-        data: processedData,
-        width: cols || 512,
-        height: rows || 512
-      };
     } catch (error) {
       console.error('Error parsing DICOM image:', error);
       return null;
