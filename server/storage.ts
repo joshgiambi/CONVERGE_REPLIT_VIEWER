@@ -21,6 +21,9 @@ export interface IStorage {
   
   // Update operations
   updateSeriesImageCount(seriesId: number, count: number): Promise<void>;
+  
+  // Clear all data
+  clearAll(): void;
 }
 
 export class MemStorage implements IStorage {
@@ -149,6 +152,15 @@ export class MemStorage implements IStorage {
       seriesData.imageCount = count;
       this.series.set(seriesId, seriesData);
     }
+  }
+
+  clearAll(): void {
+    this.studies.clear();
+    this.series.clear();
+    this.images.clear();
+    this.currentStudyId = 1;
+    this.currentSeriesId = 1;
+    this.currentImageId = 1;
   }
 }
 

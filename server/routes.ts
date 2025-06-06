@@ -139,58 +139,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create test DICOM data using actual DICOM files
+  // Create demo data using the 20 provided DICOM files
   app.post("/api/create-test-data", async (req, res) => {
     try {
-      const testFiles = fs.readdirSync('uploads/test').filter(f => f.endsWith('.dcm'));
+      // Clear existing data first
+      storage.clearAll();
+      
+      // Get the 20 original DICOM files from attached_assets
+      const attachedPath = 'attached_assets';
+      if (!fs.existsSync(attachedPath)) {
+        return res.status(400).json({ message: "attached_assets directory not found" });
+      }
+      
+      const testFiles = fs.readdirSync(attachedPath).filter(f => f.endsWith('.dcm')).slice(0, 20);
       
       if (testFiles.length === 0) {
-        return res.status(400).json({ message: "No test DICOM files found" });
+        return res.status(400).json({ message: "No DICOM demo files found in attached_assets" });
       }
 
-      // Create a test study
+      // Create demo study with the real CT data
       const study = await storage.createStudy({
-        studyInstanceUID: `1.2.3.${Date.now()}.1`,
-        patientName: 'Test Patient',
-        patientID: 'P001',
+        studyInstanceUID: `1.2.3.${Date.now()}.demo`,
+        patientName: 'Demo Patient',
+        patientID: 'DEMO001',
         studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-        studyDescription: 'Test CT Study - Real DICOM',
-        accessionNumber: 'ACC001',
+        studyDescription: 'Demo CT Study - Real Medical Data',
+        accessionNumber: 'DEMO_ACC_001',
       });
 
-      // Create a test series
+      // Create demo series
       const series = await storage.createSeries({
         studyId: study.id,
-        seriesInstanceUID: `1.2.3.${Date.now()}.2`,
-        seriesDescription: 'CT Scan Series',
+        seriesInstanceUID: `1.2.3.${Date.now()}.demo.series`,
+        seriesDescription: 'CT Axial Series',
         modality: 'CT',
         seriesNumber: 1,
         imageCount: testFiles.length,
         sliceThickness: '2.5',
-        metadata: {},
+        metadata: { source: 'demo_data' },
       });
 
-      // Create images from actual test files
+      // Process each of the 20 DICOM files
       const images = [];
+      const demoDir = 'uploads/demo';
+      
+      // Ensure demo directory exists
+      if (!fs.existsSync(demoDir)) {
+        fs.mkdirSync(demoDir, { recursive: true });
+      }
+
       for (let i = 0; i < testFiles.length; i++) {
         const fileName = testFiles[i];
-        const filePath = `uploads/test/${fileName}`;
-        const fileStats = fs.statSync(filePath);
+        const sourcePath = `${attachedPath}/${fileName}`;
+        const demoPath = `${demoDir}/${fileName}`;
+        
+        // Copy file to demo directory
+        fs.copyFileSync(sourcePath, demoPath);
+        const fileStats = fs.statSync(demoPath);
+        
+        // Extract DICOM metadata
+        let metadata: any = {};
+        try {
+          metadata = extractDICOMMetadata(demoPath) || {};
+        } catch (metaError: any) {
+          console.warn(`Could not extract metadata from ${fileName}:`, metaError?.message || 'Unknown error');
+        }
         
         const image = await storage.createImage({
           seriesId: series.id,
-          sopInstanceUID: `1.2.3.${Date.now()}.3.${i + 1}`,
+          sopInstanceUID: `1.2.3.${Date.now()}.demo.${i + 1}`,
           instanceNumber: i + 1,
-          filePath: filePath,
+          filePath: demoPath,
           fileName: fileName,
           fileSize: fileStats.size,
           imagePosition: null,
           imageOrientation: null,
           pixelSpacing: null,
           sliceLocation: `${(i + 1) * 2.5}`,
-          windowCenter: '40',
-          windowWidth: '400',
-          metadata: {},
+          windowCenter: metadata.windowCenter || '40',
+          windowWidth: metadata.windowWidth || '400',
+          metadata: metadata,
         });
         images.push(image);
       }
@@ -199,14 +227,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        message: `Test data created with ${testFiles.length} real DICOM files`,
+        message: `Demo data created with ${testFiles.length} real DICOM files`,
         study,
         series: [{ ...series, images }]
       });
 
     } catch (error) {
-      console.error('Error creating test data:', error);
-      res.status(500).json({ message: "Failed to create test data" });
+      console.error('Error creating demo data:', error);
+      res.status(500).json({ message: "Failed to create demo data" });
     }
   });
 
