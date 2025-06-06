@@ -60,7 +60,8 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
 
   const initializeViewports = async () => {
     try {
-      // Create placeholder viewports for now
+      await cornerstoneConfig.initialize();
+      
       const elements = {
         axial: axialRef.current,
         sagittal: sagittalRef.current,
@@ -68,14 +69,19 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
       };
 
       const newViewports: Record<string, any> = {};
-      Object.entries(elements).forEach(([key, element]) => {
-        if (element) {
+      
+      for (const [key, element] of Object.entries(elements)) {
+        if (element && window.cornerstone) {
+          // Enable the element for Cornerstone
+          window.cornerstone.enable(element);
           newViewports[key] = element;
-          // Add placeholder content
-          element.style.background = 'linear-gradient(45deg, #1a1a1a 25%, #2d2d2d 25%, #2d2d2d 50%, #1a1a1a 50%, #1a1a1a 75%, #2d2d2d 75%, #2d2d2d)';
-          element.style.backgroundSize = '20px 20px';
+          
+          // Set initial viewport properties
+          element.style.width = '100%';
+          element.style.height = '100%';
+          element.style.backgroundColor = 'black';
         }
-      });
+      }
 
       setViewports(newViewports);
     } catch (error) {
@@ -89,34 +95,48 @@ export function OrthogonalViewer({ series, windowLevel }: OrthogonalViewerProps)
     setIsLoading(true);
     
     try {
+      await cornerstoneConfig.initialize();
+      
       // Sort images by instance number
       const sortedImages = [...series.images].sort((a, b) => 
         (a.instanceNumber || 0) - (b.instanceNumber || 0)
       );
       
-      // Create simulated medical imaging patterns for each viewport
-      Object.entries(viewports).forEach(([viewportName, element]) => {
-        if (element) {
-          // Clear any existing content
-          element.innerHTML = '';
+      // Load the first image in the axial viewport
+      if (viewports.axial && window.cornerstone && sortedImages.length > 0) {
+        const firstImage = sortedImages[0];
+        const imageId = `wadouri:/api/images/${firstImage.sopInstanceUID}`;
+        
+        try {
+          const image = await window.cornerstone.loadImage(imageId);
+          await window.cornerstone.displayImage(viewports.axial, image);
           
-          // Create a canvas for each viewport showing different anatomical views
-          const canvas = document.createElement('canvas');
-          canvas.width = element.clientWidth || 512;
-          canvas.height = element.clientHeight || 512;
-          canvas.style.width = '100%';
-          canvas.style.height = '100%';
-          canvas.style.objectFit = 'contain';
-          
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            // Create different patterns for each view
-            drawMedicalPattern(ctx, canvas.width, canvas.height, viewportName, series.modality);
+          // Set up tools for the viewport
+          if (window.cornerstoneTools) {
+            window.cornerstoneTools.addStackStateManager(viewports.axial, ['stack']);
+            window.cornerstoneTools.addToolState(viewports.axial, 'stack', {
+              imageIds: sortedImages.map(img => `wadouri:/api/images/${img.sopInstanceUID}`),
+              currentImageIdIndex: 0
+            });
+            
+            // Enable basic tools
+            window.cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 1 });
+            window.cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 2 });
+            window.cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
           }
           
-          element.appendChild(canvas);
+          console.log('Successfully loaded DICOM image:', imageId);
+        } catch (imageError) {
+          console.error('Error loading DICOM image:', imageError);
+          // Show error message
+          const errorDiv = document.createElement('div');
+          errorDiv.style.color = 'white';
+          errorDiv.style.padding = '20px';
+          errorDiv.style.textAlign = 'center';
+          errorDiv.innerHTML = `<p>Failed to load DICOM image</p><p>Image: ${firstImage.fileName}</p>`;
+          viewports.axial.appendChild(errorDiv);
         }
-      });
+      }
       
       // Update viewport info with series data
       setViewportInfo(prev => ({
