@@ -7,6 +7,7 @@ import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
+import { Button } from '@/components/ui/button';
 
 interface ViewerInterfaceProps {
   studyData: any;

@@ -36,9 +36,22 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
       }
       
       const seriesData = await response.json();
-      const sortedImages = seriesData.images.sort((a: any, b: any) => 
-        (a.instanceNumber || 0) - (b.instanceNumber || 0)
-      );
+      
+      // Sort by slice location first, then by instance number
+      const sortedImages = seriesData.images.sort((a: any, b: any) => {
+        // Try slice location first (more reliable for CT ordering)
+        if (a.sliceLocation !== undefined && b.sliceLocation !== undefined) {
+          return parseFloat(a.sliceLocation) - parseFloat(b.sliceLocation);
+        }
+        
+        // Fall back to instance number
+        if (a.instanceNumber !== undefined && b.instanceNumber !== undefined) {
+          return parseInt(a.instanceNumber) - parseInt(b.instanceNumber);
+        }
+        
+        // Fall back to filename comparison
+        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+      });
       
       setImages(sortedImages);
       setCurrentIndex(0);
@@ -200,12 +213,29 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') goToPrevious();
-      if (e.key === 'ArrowRight') goToNext();
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') goToPrevious();
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goToNext();
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      // Only handle wheel events if mouse is over the canvas
+      if (canvasRef.current && canvasRef.current.contains(e.target as Node)) {
+        e.preventDefault();
+        if (e.deltaY > 0) {
+          goToNext();
+        } else {
+          goToPrevious();
+        }
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('wheel', handleWheel);
+    };
   }, [currentIndex, images]);
 
   if (isLoading) {
@@ -272,16 +302,22 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center">
-        <canvas
-          ref={canvasRef}
-          width={512}
-          height={512}
-          className="max-w-full max-h-full object-contain border border-indigo-700 rounded"
-          style={{ 
-            backgroundColor: 'black',
-            imageRendering: 'pixelated'
-          }}
-        />
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            width={512}
+            height={512}
+            className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-crosshair"
+            style={{ 
+              backgroundColor: 'black',
+              imageRendering: 'pixelated'
+            }}
+          />
+          {/* Scroll indicator */}
+          <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+            Scroll to navigate
+          </div>
+        </div>
       </div>
 
       {/* Footer */}
