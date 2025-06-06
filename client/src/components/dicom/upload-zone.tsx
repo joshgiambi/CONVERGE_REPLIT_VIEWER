@@ -63,12 +63,10 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      'application/dicom': ['.dcm', '.dicom'],
-      'application/octet-stream': ['.ima', '.img'],
-      '*': [] // Allow files without extensions
-    },
-    multiple: true
+    accept: undefined, // Accept all files, filter on server
+    multiple: true,
+    noClick: false,
+    noKeyboard: false
   });
 
   const isUploading = uploadMutation.isPending;

@@ -249,7 +249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Update series image counts
-      for (const series of seriesMap.values()) {
+      for (const series of Array.from(seriesMap.values())) {
         const images = await storage.getImagesBySeriesId(series.id);
         await storage.updateSeriesImageCount(series.id, images.length);
       }

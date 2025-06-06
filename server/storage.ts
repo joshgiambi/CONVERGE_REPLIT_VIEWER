@@ -43,8 +43,13 @@ export class MemStorage implements IStorage {
   async createStudy(insertStudy: InsertStudy): Promise<Study> {
     const id = this.currentStudyId++;
     const study: Study = {
-      ...insertStudy,
       id,
+      studyInstanceUID: insertStudy.studyInstanceUID,
+      patientName: insertStudy.patientName || null,
+      patientID: insertStudy.patientID || null,
+      studyDate: insertStudy.studyDate || null,
+      studyDescription: insertStudy.studyDescription || null,
+      accessionNumber: insertStudy.accessionNumber || null,
       createdAt: new Date(),
     };
     this.studies.set(id, study);
@@ -68,8 +73,15 @@ export class MemStorage implements IStorage {
   async createSeries(insertSeries: InsertSeries): Promise<Series> {
     const id = this.currentSeriesId++;
     const seriesData: Series = {
-      ...insertSeries,
       id,
+      studyId: insertSeries.studyId,
+      seriesInstanceUID: insertSeries.seriesInstanceUID,
+      seriesDescription: insertSeries.seriesDescription || null,
+      modality: insertSeries.modality,
+      seriesNumber: insertSeries.seriesNumber || null,
+      imageCount: insertSeries.imageCount || 0,
+      sliceThickness: insertSeries.sliceThickness || null,
+      metadata: insertSeries.metadata || {},
       createdAt: new Date(),
     };
     this.series.set(id, seriesData);
@@ -95,8 +107,20 @@ export class MemStorage implements IStorage {
   async createImage(insertImage: InsertImage): Promise<DicomImage> {
     const id = this.currentImageId++;
     const image: DicomImage = {
-      ...insertImage,
       id,
+      seriesId: insertImage.seriesId,
+      sopInstanceUID: insertImage.sopInstanceUID,
+      instanceNumber: insertImage.instanceNumber || null,
+      filePath: insertImage.filePath,
+      fileName: insertImage.fileName,
+      fileSize: insertImage.fileSize || null,
+      imagePosition: insertImage.imagePosition || null,
+      imageOrientation: insertImage.imageOrientation || null,
+      pixelSpacing: insertImage.pixelSpacing || null,
+      sliceLocation: insertImage.sliceLocation || null,
+      windowCenter: insertImage.windowCenter || null,
+      windowWidth: insertImage.windowWidth || null,
+      metadata: insertImage.metadata || {},
       createdAt: new Date(),
     };
     this.images.set(id, image);

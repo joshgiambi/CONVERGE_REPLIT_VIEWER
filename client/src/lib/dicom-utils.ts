@@ -46,12 +46,17 @@ export const WINDOW_LEVEL_PRESETS: Record<string, WindowLevel> = {
 export function isDICOMFile(file: File): boolean {
   // Check file extension
   const validExtensions = ['.dcm', '.dicom', '.ima', '.img'];
-  const hasValidExtension = validExtensions.some(ext => 
-    file.name.toLowerCase().endsWith(ext)
-  );
+  const fileName = file.name.toLowerCase();
+  const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
   
-  // Files without extension might still be DICOM
-  return hasValidExtension || file.name.indexOf('.') === -1;
+  // Files without extension might still be DICOM (common in medical imaging)
+  const hasNoExtension = fileName.indexOf('.') === -1;
+  
+  // Also check for numeric filenames (common DICOM pattern)
+  const isNumericFilename = /^\d+$/.test(file.name);
+  
+  // Accept if has valid extension, no extension, or is numeric filename
+  return hasValidExtension || hasNoExtension || isNumericFilename;
 }
 
 export function createImageId(sopInstanceUID: string): string {
