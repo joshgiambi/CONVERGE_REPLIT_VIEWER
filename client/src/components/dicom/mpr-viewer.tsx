@@ -381,12 +381,16 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
         </div>
       </div>
 
-      {/* MPR Views */}
-      <div className="flex-1 p-4 grid grid-cols-2 gap-4">
-        {/* Axial View */}
-        <div className="relative bg-black border border-indigo-700 rounded">
+      {/* Axial View Only */}
+      <div className="flex-1 p-4">
+        <div className="relative bg-black border border-indigo-700 rounded h-full">
           <div className="absolute top-2 left-2 z-10">
-            <Badge className="bg-red-900 text-red-200">Axial</Badge>
+            <Badge className="bg-red-900 text-red-200">Axial View</Badge>
+          </div>
+          <div className="absolute top-2 right-2 z-10">
+            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+              Slice {crosshair.z + 1} / {volumeData?.depth || 0}
+            </Badge>
           </div>
           <canvas
             ref={axialCanvasRef}
@@ -394,51 +398,14 @@ export function MPRViewer({ seriesId }: MPRViewerProps) {
             className="w-full h-full object-contain cursor-crosshair"
             style={{ imageRendering: 'pixelated' }}
           />
-        </div>
-        
-        {/* Sagittal View */}
-        <div className="relative bg-black border border-indigo-700 rounded">
-          <div className="absolute top-2 left-2 z-10">
-            <Badge className="bg-green-900 text-green-200">Sagittal</Badge>
-          </div>
-          <canvas
-            ref={sagittalCanvasRef}
-            onClick={(e) => handleCanvasClick(e, 'sagittal')}
-            className="w-full h-full object-contain cursor-crosshair"
-            style={{ imageRendering: 'pixelated' }}
-          />
-        </div>
-        
-        {/* Coronal View */}
-        <div className="relative bg-black border border-indigo-700 rounded">
-          <div className="absolute top-2 left-2 z-10">
-            <Badge className="bg-blue-900 text-blue-200">Coronal</Badge>
-          </div>
-          <canvas
-            ref={coronalCanvasRef}
-            onClick={(e) => handleCanvasClick(e, 'coronal')}
-            className="w-full h-full object-contain cursor-crosshair"
-            style={{ imageRendering: 'pixelated' }}
-          />
-        </div>
-        
-        {/* Info Panel */}
-        <div className="relative bg-black border border-indigo-700 rounded flex items-center justify-center">
-          <div className="text-center text-indigo-300">
-            {volumeData && (
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold">Volume Info</h3>
-                <div className="text-sm space-y-1">
-                  <p>Dimensions: {volumeData.width} × {volumeData.height} × {volumeData.depth}</p>
-                  <p>Spacing: {volumeData.spacing.map(s => s.toFixed(1)).join(' × ')} mm</p>
-                  <p>Position: ({crosshair.x}, {crosshair.y}, {crosshair.z})</p>
-                  <p className="text-xs text-indigo-400 mt-4">
-                    Click on any view to change crosshair position
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+          
+          {/* Volume Info Overlay */}
+          {volumeData && (
+            <div className="absolute bottom-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+              <div>Size: {volumeData.width} × {volumeData.height} × {volumeData.depth}</div>
+              <div>Spacing: {volumeData.spacing.map(s => s.toFixed(1)).join(' × ')} mm</div>
+            </div>
+          )}
         </div>
       </div>
     </Card>

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
-import { MPRViewer } from './mpr-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -207,39 +206,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
         {/* DICOM Viewer */}
         <div className="lg:col-span-3">
           {selectedSeries ? (
-            <div className="h-full space-y-2">
-              {/* View Mode Toggle */}
-              <div className="flex items-center justify-between bg-black border border-indigo-800 rounded p-2">
-                <div className="flex items-center space-x-2">
-                  <span className="text-indigo-300 text-sm">View Mode:</span>
-                  <Button
-                    size="sm"
-                    variant={viewMode === 'single' ? 'default' : 'outline'}
-                    onClick={() => setViewMode('single')}
-                    className={viewMode === 'single' ? 'bg-indigo-600' : 'border-indigo-600 hover:bg-indigo-800'}
-                  >
-                    Single Slice
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={viewMode === 'mpr' ? 'default' : 'outline'}
-                    onClick={() => setViewMode('mpr')}
-                    className={viewMode === 'mpr' ? 'bg-indigo-600' : 'border-indigo-600 hover:bg-indigo-800'}
-                  >
-                    Multi-Planar
-                  </Button>
-                </div>
-              </div>
-              
-              {/* Viewer Content */}
-              <div className="flex-1 h-[calc(100%-3rem)]">
-                {viewMode === 'single' ? (
-                  <WorkingViewer seriesId={selectedSeries.id} />
-                ) : (
-                  <MPRViewer seriesId={selectedSeries.id} />
-                )}
-              </div>
-            </div>
+            <WorkingViewer seriesId={selectedSeries.id} />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>
