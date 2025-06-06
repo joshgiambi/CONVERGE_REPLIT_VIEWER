@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, HelpCircle, Keyboard } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -38,7 +38,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     if (images.length > 0) {
       displayCurrentImage();
     }
-  }, [images, currentIndex, windowLevel]);
+  }, [images, currentIndex, currentWindowLevel]);
 
   const loadImages = async () => {
     try {
@@ -163,7 +163,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     const data = imageData.data;
 
     // Apply window/level settings
-    const { width: windowWidth, center: windowCenter } = windowLevel;
+    const { width: windowWidth, center: windowCenter } = currentWindowLevel;
     const min = windowCenter - windowWidth / 2;
     const max = windowCenter + windowWidth / 2;
     
@@ -235,12 +235,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     }
   };
 
-  const adjustWindowLevel = (deltaWidth: number, deltaCenter: number) => {
-    setWindowLevel(prev => ({
-      width: Math.max(1, prev.width + deltaWidth),
-      center: prev.center + deltaCenter
-    }));
-  };
+
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -380,7 +375,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>Scroll: Navigate slices</div>
             <div>Drag: Window/Level</div>
-            <div>W:{Math.round(windowLevel.width)} L:{Math.round(windowLevel.center)}</div>
+            <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
           </div>
 
 
@@ -438,8 +433,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
             </div>
             <div>
               <div className="font-semibold text-indigo-300 mb-1">Window/Level</div>
-              <div><span className="text-gray-400">Current W/L:</span> {Math.round(windowLevel.width)}/{Math.round(windowLevel.center)}</div>
-              <div><span className="text-gray-400">Preset:</span> {currentPreset}</div>
+              <div><span className="text-gray-400">Current W/L:</span> {Math.round(currentWindowLevel.width)}/{Math.round(currentWindowLevel.center)}</div>
+              <div><span className="text-gray-400">Preset:</span> Custom</div>
               <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
             </div>
           </div>
