@@ -27,7 +27,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       onWindowLevelChange({ window: newWindowLevel.width, level: newWindowLevel.center });
     }
   };
-  const [imageCache, setImageCache] = useState<Map<string, { data: Uint16Array, width: number, height: number }>>(new Map());
+  const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
   const [isImageReady, setIsImageReady] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
@@ -125,13 +125,22 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
         const cols = dataSet.uint16('x00280011') || 512;
         const bitsAllocated = dataSet.uint16('x00280100') || 16;
         
+        // Get rescale parameters for Hounsfield Units
+        const rescaleSlope = dataSet.floatString('x00281053') || 1;
+        const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
+        
         // Get pixel data
         const pixelDataOffset = pixelData.dataOffset;
         const pixelDataLength = pixelData.length;
         
         if (bitsAllocated === 16) {
-          const pixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
-          imageData = { data: pixelArray, width: cols, height: rows };
+          const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
+          // Convert to Hounsfield Units
+          const huPixelArray = new Float32Array(rawPixelArray.length);
+          for (let i = 0; i < rawPixelArray.length; i++) {
+            huPixelArray[i] = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
+          }
+          imageData = { data: huPixelArray, width: cols, height: rows };
         } else {
           throw new Error(`Only 16-bit images supported for caching`);
         }

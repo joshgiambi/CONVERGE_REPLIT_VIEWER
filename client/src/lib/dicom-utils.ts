@@ -35,12 +35,14 @@ export interface WindowLevel {
 }
 
 export const WINDOW_LEVEL_PRESETS: Record<string, WindowLevel> = {
-  lung: { window: 1500, level: -600 },
-  bone: { window: 2000, level: 300 },
-  brain: { window: 100, level: 50 },
-  abdomen: { window: 400, level: 50 },
-  mediastinum: { window: 350, level: 50 },
-  liver: { window: 150, level: 90 },
+  'soft tissue': { window: 400, level: 40 },
+  'lung': { window: 1500, level: -600 },
+  'bone': { window: 1800, level: 400 },
+  'brain': { window: 80, level: 40 },
+  'liver': { window: 150, level: 30 },
+  'mediastinum': { window: 350, level: 50 },
+  'abdomen': { window: 350, level: 40 },
+  'full range': { window: 4096, level: 1024 }
 };
 
 export function isDICOMFile(file: File): boolean {
