@@ -206,7 +206,11 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
         {/* DICOM Viewer */}
         <div className="lg:col-span-3">
           {selectedSeries ? (
-            <WorkingViewer seriesId={selectedSeries.id} />
+            <WorkingViewer 
+              seriesId={selectedSeries.id} 
+              windowLevel={windowLevel}
+              onWindowLevelChange={setWindowLevel}
+            />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>

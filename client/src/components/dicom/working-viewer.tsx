@@ -6,27 +6,26 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
+  windowLevel?: { window: number; level: number };
+  onWindowLevelChange?: (windowLevel: { window: number; level: number }) => void;
 }
 
-export function WorkingViewer({ seriesId }: WorkingViewerProps) {
+export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
-  const [currentPreset, setCurrentPreset] = useState('Soft Tissue');
+  // Convert external window/level format to internal width/center format
+  const currentWindowLevel = externalWindowLevel 
+    ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
+    : { width: 400, center: 40 };
 
-  // Standard medical imaging window/level presets
-  const windowPresets = {
-    'Soft Tissue': { width: 400, center: 40 },
-    'Lung': { width: 1500, center: -600 },
-    'Bone': { width: 1800, center: 400 },
-    'Brain': { width: 80, center: 40 },
-    'Liver': { width: 150, center: 30 },
-    'Mediastinum': { width: 350, center: 50 },
-    'Abdomen': { width: 350, center: 40 },
-    'Full Range': { width: 4096, center: 1024 }
+  // Function to update external window/level when internal changes
+  const updateWindowLevel = (newWindowLevel: { width: number; center: number }) => {
+    if (onWindowLevelChange) {
+      onWindowLevelChange({ window: newWindowLevel.width, level: newWindowLevel.center });
+    }
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Uint16Array, width: number, height: number }>>(new Map());
   const [isImageReady, setIsImageReady] = useState(false);
@@ -249,8 +248,8 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     
     const startX = e.clientX;
     const startY = e.clientY;
-    const startWindow = windowLevel.width;
-    const startCenter = windowLevel.center;
+    const startWindow = currentWindowLevel.width;
+    const startCenter = currentWindowLevel.center;
 
     const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
       moveEvent.preventDefault();
@@ -260,8 +259,7 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
       const newWidth = Math.max(1, startWindow + deltaX * 2);
       const newCenter = startCenter - deltaY * 1.5;
       
-      setWindowLevel({ width: newWidth, center: newCenter });
-      setCurrentPreset('Custom');
+      updateWindowLevel({ width: newWidth, center: newCenter });
     };
 
     const handleWindowLevelEnd = (endEvent: MouseEvent) => {
