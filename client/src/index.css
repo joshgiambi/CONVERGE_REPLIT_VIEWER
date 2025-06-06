@@ -77,10 +77,10 @@
   .bg-dicom-black { background-color: hsl(var(--dicom-black)); }
   .bg-dicom-dark { background-color: hsl(var(--dicom-dark)); }
   .bg-dicom-darker { background-color: hsl(var(--dicom-darker)); }
-  .bg-dicom-yellow { background-color: hsl(var(--dicom-yellow)); }
-  .bg-dicom-blue { background-color: hsl(var(--dicom-blue)); }
-  .bg-dicom-blue-dark { background-color: hsl(var(--dicom-blue-dark)); }
-  .bg-dicom-blue-light { background-color: hsl(var(--dicom-blue-light)); }
+  .bg-dicom-indigo { background-color: hsl(var(--dicom-indigo)); }
+  .bg-dicom-purple { background-color: hsl(var(--dicom-purple)); }
+  .bg-dicom-purple-dark { background-color: hsl(var(--dicom-purple-dark)); }
+  .bg-dicom-purple-light { background-color: hsl(var(--dicom-purple-light)); }
   .bg-dicom-gray { background-color: hsl(var(--dicom-gray)); }
   .bg-dicom-gray-light { background-color: hsl(var(--dicom-gray-light)); }
   .bg-dicom-gray-lighter { background-color: hsl(var(--dicom-gray-lighter)); }
@@ -94,9 +94,10 @@
   .text-dicom-dark { color: hsl(var(--dicom-dark)); }
   .text-dicom-darker { color: hsl(var(--dicom-darker)); }
   .text-dicom-yellow { color: hsl(var(--dicom-yellow)); }
-  .text-dicom-blue { color: hsl(var(--dicom-blue)); }
-  .text-dicom-blue-dark { color: hsl(var(--dicom-blue-dark)); }
-  .text-dicom-blue-light { color: hsl(var(--dicom-blue-light)); }
+  .text-dicom-indigo { color: hsl(var(--dicom-indigo)); }
+  .text-dicom-purple { color: hsl(var(--dicom-purple)); }
+  .text-dicom-purple-dark { color: hsl(var(--dicom-purple-dark)); }
+  .text-dicom-purple-light { color: hsl(var(--dicom-purple-light)); }
   .text-dicom-gray { color: hsl(var(--dicom-gray)); }
   .text-dicom-gray-light { color: hsl(var(--dicom-gray-light)); }
   .text-dicom-gray-lighter { color: hsl(var(--dicom-gray-lighter)); }
@@ -105,9 +106,10 @@
   .border-dicom-dark { border-color: hsl(var(--dicom-dark)); }
   .border-dicom-darker { border-color: hsl(var(--dicom-darker)); }
   .border-dicom-yellow { border-color: hsl(var(--dicom-yellow)); }
-  .border-dicom-blue { border-color: hsl(var(--dicom-blue)); }
-  .border-dicom-blue-dark { border-color: hsl(var(--dicom-blue-dark)); }
-  .border-dicom-blue-light { border-color: hsl(var(--dicom-blue-light)); }
+  .border-dicom-indigo { border-color: hsl(var(--dicom-indigo)); }
+  .border-dicom-purple { border-color: hsl(var(--dicom-purple)); }
+  .border-dicom-purple-dark { border-color: hsl(var(--dicom-purple-dark)); }
+  .border-dicom-purple-light { border-color: hsl(var(--dicom-purple-light)); }
   .border-dicom-gray { border-color: hsl(var(--dicom-gray)); }
   .border-dicom-gray-light { border-color: hsl(var(--dicom-gray-light)); }
   .border-dicom-gray-lighter { border-color: hsl(var(--dicom-gray-lighter)); }

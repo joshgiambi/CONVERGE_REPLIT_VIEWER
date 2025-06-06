@@ -50,7 +50,7 @@ export default function DICOMViewer() {
   return (
     <div className="min-h-screen bg-dicom-black text-white">
       {/* Floating Header */}
-      <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-dicom-blue/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
+      <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div className="w-8 h-8 bg-gradient-primary rounded-lg flex items-center justify-center animate-glow">
@@ -63,7 +63,7 @@ export default function DICOMViewer() {
               </svg>
             </div>
             <div>
-              <h1 className="text-lg font-bold bg-gradient-primary bg-clip-text text-transparent">DICOM Viewer</h1>
+              <h1 className="text-lg font-bold text-dicom-purple">DICOM Viewer</h1>
               <p className="text-xs text-gray-400">Medical Imaging Platform</p>
             </div>
           </div>
@@ -78,7 +78,7 @@ export default function DICOMViewer() {
                 }}
                 variant="outline"
                 size="sm"
-                className="border-dicom-blue text-dicom-blue hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
+                className="border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
               >
                 <Home className="w-4 h-4 mr-1" />
                 Home

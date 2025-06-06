@@ -41,10 +41,10 @@ export function SeriesSelector({
   };
 
   return (
-    <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-blue/30 rounded-2xl overflow-hidden animate-slide-up">
+    <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
       <div className="p-6 h-full flex flex-col">
-        <h3 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent mb-6 flex items-center">
-          <List className="w-6 h-6 mr-3 text-dicom-blue" />
+        <h3 className="text-xl font-bold text-dicom-purple mb-6 flex items-center">
+          <List className="w-6 h-6 mr-3 text-dicom-indigo" />
           Series
         </h3>
         
@@ -56,8 +56,8 @@ export function SeriesSelector({
               className={`
                 p-3 rounded-lg border cursor-pointer transition-all duration-200
                 ${selectedSeries?.id === seriesItem.id
-                  ? 'border-dicom-yellow bg-dicom-yellow/20 border-l-4'
-                  : 'border-dicom-gray hover:border-dicom-yellow/50 hover:bg-dicom-yellow/10 hover:translate-x-1'
+                  ? 'border-dicom-purple bg-dicom-purple/20 border-l-4'
+                  : 'border-dicom-gray hover:border-dicom-purple/50 hover:bg-dicom-purple/10 hover:translate-x-1'
                 }
               `}
               onClick={() => onSeriesSelect(seriesItem)}
