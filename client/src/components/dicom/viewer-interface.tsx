@@ -190,7 +190,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
 
   return (
     <div className="space-y-4 animate-in fade-in-50 duration-500">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-0" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
         <div className="lg:col-span-1">
