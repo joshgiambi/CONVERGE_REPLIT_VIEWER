@@ -139,16 +139,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create test DICOM data
+  // Create test DICOM data using actual DICOM files
   app.post("/api/create-test-data", async (req, res) => {
     try {
+      const testFiles = fs.readdirSync('uploads/test').filter(f => f.endsWith('.dcm'));
+      
+      if (testFiles.length === 0) {
+        return res.status(400).json({ message: "No test DICOM files found" });
+      }
+
       // Create a test study
       const study = await storage.createStudy({
         studyInstanceUID: `1.2.3.${Date.now()}.1`,
         patientName: 'Test Patient',
         patientID: 'P001',
         studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-        studyDescription: 'Demo CT Study',
+        studyDescription: 'Test CT Study - Real DICOM',
         accessionNumber: 'ACC001',
       });
 
@@ -156,28 +162,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const series = await storage.createSeries({
         studyId: study.id,
         seriesInstanceUID: `1.2.3.${Date.now()}.2`,
-        seriesDescription: 'Axial CT',
+        seriesDescription: 'CT Scan Series',
         modality: 'CT',
         seriesNumber: 1,
-        imageCount: 3,
-        sliceThickness: '5.0',
+        imageCount: testFiles.length,
+        sliceThickness: '2.5',
         metadata: {},
       });
 
-      // Create test images
+      // Create images from actual test files
       const images = [];
-      for (let i = 1; i <= 3; i++) {
+      for (let i = 0; i < testFiles.length; i++) {
+        const fileName = testFiles[i];
+        const filePath = `uploads/test/${fileName}`;
+        const fileStats = fs.statSync(filePath);
+        
         const image = await storage.createImage({
           seriesId: series.id,
-          sopInstanceUID: `1.2.3.${Date.now()}.3.${i}`,
-          instanceNumber: i,
-          filePath: `/test/image_${i}.dcm`,
-          fileName: `image_${i}.dcm`,
-          fileSize: 1024 * 512, // 512KB
+          sopInstanceUID: `1.2.3.${Date.now()}.3.${i + 1}`,
+          instanceNumber: i + 1,
+          filePath: filePath,
+          fileName: fileName,
+          fileSize: fileStats.size,
           imagePosition: null,
           imageOrientation: null,
           pixelSpacing: null,
-          sliceLocation: `${i * 5}`,
+          sliceLocation: `${(i + 1) * 2.5}`,
           windowCenter: '40',
           windowWidth: '400',
           metadata: {},
@@ -189,7 +199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        message: 'Test data created successfully',
+        message: `Test data created with ${testFiles.length} real DICOM files`,
         study,
         series: [{ ...series, images }]
       });
@@ -197,6 +207,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error creating test data:', error);
       res.status(500).json({ message: "Failed to create test data" });
+    }
+  });
+
+  // Serve DICOM files
+  app.get("/api/images/:sopInstanceUID", async (req, res) => {
+    try {
+      const sopInstanceUID = req.params.sopInstanceUID;
+      const image = await storage.getImageByUID(sopInstanceUID);
+      
+      if (!image) {
+        return res.status(404).json({ message: "Image not found" });
+      }
+      
+      // Check if file exists
+      if (!fs.existsSync(image.filePath)) {
+        return res.status(404).json({ message: "Image file not found on disk" });
+      }
+      
+      // Set appropriate headers for DICOM files
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+      
+      // Stream the file
+      const fileStream = fs.createReadStream(image.filePath);
+      fileStream.pipe(res);
+      
+    } catch (error) {
+      console.error('Error serving DICOM file:', error);
+      res.status(500).json({ message: "Failed to serve image" });
     }
   });
 
