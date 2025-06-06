@@ -111,7 +111,7 @@ export default function DICOMViewer() {
       </header>
 
       {/* Main Content */}
-      <main className="pt-24 px-4 pb-4 max-w-7xl mx-auto">
+      <main className="pt-24">
         {!studyData ? (
           /* Upload Section */
           <div className="max-w-4xl mx-auto py-16">
