@@ -41,6 +41,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         const formData = new FormData();
         
         batch.forEach(file => {
+          console.log(`Adding file to batch: ${file.name}, size: ${file.size}`);
           formData.append('files', file);
         });
 
@@ -148,8 +149,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    const files = Array.from(e.target.files || []);
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) {
+      console.error('No files in file list');
+      return;
+    }
+    
+    const files = Array.from(fileList);
     console.log('Files selected:', files.length);
+    console.log('First few files:', files.slice(0, 3).map(f => ({ name: f.name, size: f.size, type: f.type })));
+    
     if (files.length > 0) {
       setUploadProgress(0);
       setUploadResult(null);
@@ -253,15 +262,28 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         {hasResult && (
           <div className="mt-6 animate-in slide-in-from-bottom-2 duration-300">
             <div className={`rounded-lg p-4 ${uploadResult.success ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-              <div className="flex items-center mb-2">
-                {uploadResult.success ? (
-                  <CheckCircle className="w-5 h-5 text-green-500 mr-2" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
-                )}
-                <span className="font-medium">
-                  {uploadResult.success ? 'Upload Successful' : 'Upload Failed'}
-                </span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  {uploadResult.success ? (
+                    <CheckCircle className="w-5 h-5 text-green-500 mr-2" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
+                  )}
+                  <span className="font-medium">
+                    {uploadResult.success ? 'Upload Successful' : 'Upload Failed'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    setUploadResult(null);
+                    setUploadProgress(0);
+                    setCurrentFile('');
+                  }}
+                  className="text-gray-400 hover:text-white transition-colors duration-200 p-1 rounded hover:bg-gray-600"
+                  title="Clear message"
+                >
+                  ✕
+                </button>
               </div>
               
               {uploadResult.success && (
@@ -276,9 +298,10 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               )}
               
               {!uploadResult.success && (
-                <p className="text-sm text-red-400">
-                  {uploadResult.error}
-                </p>
+                <div className="text-sm text-red-400">
+                  <p>{uploadResult.error}</p>
+                  <p className="mt-2 text-xs text-gray-500">Click the × to try again</p>
+                </div>
               )}
             </div>
           </div>
