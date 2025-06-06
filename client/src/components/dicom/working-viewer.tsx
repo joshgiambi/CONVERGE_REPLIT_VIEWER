@@ -15,10 +15,8 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
-  const [imageCache, setImageCache] = useState<Map<string, any>>(new Map());
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [toolbarPosition, setToolbarPosition] = useState({ x: 20, y: 20 });
+  const [imageCache, setImageCache] = useState<Map<string, { data: Uint16Array, width: number, height: number }>>(new Map());
+  const [isImageReady, setIsImageReady] = useState(false);
 
   useEffect(() => {
     loadImages();
@@ -28,7 +26,7 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     if (images.length > 0) {
       displayCurrentImage();
     }
-  }, [images, currentIndex]);
+  }, [images, currentIndex, windowLevel]);
 
   const loadImages = async () => {
     try {
@@ -77,55 +75,64 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     
     try {
       const currentImage = images[currentIndex];
+      const cacheKey = currentImage.sopInstanceUID;
       
       // Clear canvas
       ctx.fillStyle = 'black';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Load DICOM file directly
-      const response = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
-      if (!response.ok) {
-        throw new Error(`Failed to load image: ${response.statusText}`);
+      let imageData = imageCache.get(cacheKey);
+      
+      if (!imageData) {
+        // Load and cache the image
+        const response = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load image: ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        
+        // Load dicom-parser
+        if (!window.dicomParser) {
+          await loadDicomParser();
+        }
+        
+        // Parse DICOM
+        const byteArray = new Uint8Array(arrayBuffer);
+        const dataSet = window.dicomParser.parseDicom(byteArray);
+        
+        // Extract image data
+        const pixelData = dataSet.elements.x7fe00010;
+        if (!pixelData) {
+          throw new Error('No pixel data found in DICOM');
+        }
+        
+        const rows = dataSet.uint16('x00280010') || 512;
+        const cols = dataSet.uint16('x00280011') || 512;
+        const bitsAllocated = dataSet.uint16('x00280100') || 16;
+        
+        // Get pixel data
+        const pixelDataOffset = pixelData.dataOffset;
+        const pixelDataLength = pixelData.length;
+        
+        if (bitsAllocated === 16) {
+          const pixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
+          imageData = { data: pixelArray, width: cols, height: rows };
+        } else {
+          throw new Error(`Only 16-bit images supported for caching`);
+        }
+        
+        // Cache the processed image data
+        imageCache.set(cacheKey, imageData);
+        setImageCache(new Map(imageCache));
       }
       
-      const arrayBuffer = await response.arrayBuffer();
+      // Set canvas size
+      canvas.width = imageData.width;
+      canvas.height = imageData.height;
       
-      // Load dicom-parser
-      if (!window.dicomParser) {
-        await loadDicomParser();
-      }
-      
-      // Parse DICOM
-      const byteArray = new Uint8Array(arrayBuffer);
-      const dataSet = window.dicomParser.parseDicom(byteArray);
-      
-      // Extract image data
-      const pixelData = dataSet.elements.x7fe00010;
-      if (!pixelData) {
-        throw new Error('No pixel data found in DICOM');
-      }
-      
-      const rows = dataSet.uint16('x00280010') || 512;
-      const cols = dataSet.uint16('x00280011') || 512;
-      const bitsAllocated = dataSet.uint16('x00280100') || 16;
-      
-      // Set canvas size to match DICOM
-      canvas.width = cols;
-      canvas.height = rows;
-      
-      // Get pixel data
-      const pixelDataOffset = pixelData.dataOffset;
-      const pixelDataLength = pixelData.length;
-      
-      if (bitsAllocated === 16) {
-        const pixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
-        render16BitImage(ctx, pixelArray, cols, rows);
-      } else if (bitsAllocated === 8) {
-        const pixelArray = new Uint8Array(arrayBuffer, pixelDataOffset, pixelDataLength);
-        render8BitImage(ctx, pixelArray, cols, rows);
-      } else {
-        throw new Error(`Unsupported bits allocated: ${bitsAllocated}`);
-      }
+      // Render with current window/level settings
+      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
     } catch (error: any) {
       console.error('Error displaying image:', error);
@@ -214,6 +221,39 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     if (currentIndex < images.length - 1) {
       setCurrentIndex(currentIndex + 1);
     }
+  };
+
+  const adjustWindowLevel = (deltaWidth: number, deltaCenter: number) => {
+    setWindowLevel(prev => ({
+      width: Math.max(1, prev.width + deltaWidth),
+      center: prev.center + deltaCenter
+    }));
+  };
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startWindow = windowLevel.width;
+    const startCenter = windowLevel.center;
+
+    const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      
+      const newWidth = Math.max(1, startWindow + deltaX * 3);
+      const newCenter = startCenter - deltaY * 2;
+      
+      setWindowLevel({ width: newWidth, center: newCenter });
+    };
+
+    const handleWindowLevelEnd = () => {
+      document.removeEventListener('mousemove', handleWindowLevelDrag);
+      document.removeEventListener('mouseup', handleWindowLevelEnd);
+    };
+
+    document.addEventListener('mousemove', handleWindowLevelDrag);
+    document.addEventListener('mouseup', handleWindowLevelEnd);
   };
 
   useEffect(() => {
@@ -312,31 +352,40 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
             ref={canvasRef}
             width={512}
             height={512}
+            onMouseDown={handleCanvasMouseDown}
             className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-crosshair"
             style={{ 
               backgroundColor: 'black',
               imageRendering: 'pixelated'
             }}
           />
-          {/* Scroll indicator */}
+          {/* Controls overlay */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
-            Scroll to navigate
+            <div>Scroll: Navigate slices</div>
+            <div>Drag: Window/Level</div>
+            <div>W:{Math.round(windowLevel.width)} L:{Math.round(windowLevel.center)}</div>
           </div>
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Footer - DICOM Metadata */}
       {images.length > 0 && (
         <div className="p-4 border-t border-indigo-700">
-          <div className="flex items-center justify-between text-sm text-indigo-200">
+          <div className="grid grid-cols-3 gap-4 text-sm text-indigo-200">
             <div>
-              <span className="text-indigo-300">File:</span> {images[currentIndex]?.fileName}
+              <div><span className="text-indigo-300">Patient:</span> CT Patient</div>
+              <div><span className="text-indigo-300">Study:</span> CT Axial Study</div>
+              <div><span className="text-indigo-300">Series:</span> CT Axial Series</div>
             </div>
             <div>
-              <span className="text-indigo-300">Size:</span> {Math.round((images[currentIndex]?.fileSize || 0) / 1024)} KB
+              <div><span className="text-indigo-300">Modality:</span> CT</div>
+              <div><span className="text-indigo-300">Slice:</span> {images[currentIndex]?.sliceLocation} mm</div>
+              <div><span className="text-indigo-300">Thickness:</span> 2.5 mm</div>
             </div>
             <div>
-              <span className="text-indigo-300">Instance:</span> {images[currentIndex]?.instanceNumber}
+              <div><span className="text-indigo-300">Instance:</span> {images[currentIndex]?.instanceNumber}</div>
+              <div><span className="text-indigo-300">Size:</span> 512×512</div>
+              <div><span className="text-indigo-300">Bits:</span> 16</div>
             </div>
           </div>
         </div>

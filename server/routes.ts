@@ -218,17 +218,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.warn(`Could not extract metadata from ${fileName}:`, metaError?.message || 'Unknown error');
         }
         
+        // Extract image number from filename for proper ordering
+        const imageMatch = fileName.match(/Image (\d+)/);
+        const imageNumber = imageMatch ? parseInt(imageMatch[1]) : i + 1;
+        
         const image = await storage.createImage({
           seriesId: series.id,
-          sopInstanceUID: `1.2.3.${Date.now()}.demo.${i + 1}`,
-          instanceNumber: i + 1,
+          sopInstanceUID: `1.2.3.${Date.now()}.demo.${imageNumber}`,
+          instanceNumber: imageNumber,
           filePath: demoPath,
           fileName: fileName,
           fileSize: fileStats.size,
           imagePosition: null,
           imageOrientation: null,
           pixelSpacing: null,
-          sliceLocation: `${(i + 1) * 2.5}`,
+          sliceLocation: `${imageNumber * 2.5}`,
           windowCenter: metadata.windowCenter || '40',
           windowWidth: metadata.windowWidth || '400',
           metadata: metadata,
