@@ -201,11 +201,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Upload DICOM files
-  app.post("/api/upload", upload.array('files'), async (req, res) => {
+  app.post("/api/upload", (req, res, next) => {
+    console.log('Upload request received, Content-Type:', req.headers['content-type']);
+    console.log('Request body size:', req.headers['content-length']);
+    next();
+  }, upload.array('files'), async (req, res) => {
     try {
+      console.log('After multer - req.files:', req.files ? (req.files as any[]).length : 'undefined');
+      console.log('req.body:', Object.keys(req.body || {}));
+      
       const files = req.files as Express.Multer.File[];
       
       if (!files || files.length === 0) {
+        console.log('No files received by multer');
         return res.status(400).json({ message: "No files uploaded" });
       }
 
