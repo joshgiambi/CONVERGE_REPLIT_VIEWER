@@ -157,7 +157,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               <div className="relative">
                 <input
                   type="file"
-                  webkitdirectory=""
+                  {...({ webkitdirectory: "" } as any)}
                   multiple
                   onChange={handleFolderSelect}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -173,7 +173,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               </div>
               <Button 
                 variant="outline"
-                className="border-2 border-dicom-blue text-dicom-blue hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
+                className="border-2 border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
                 onClick={handleCreateTestData}
               >
                 Load Demo Data
@@ -188,11 +188,11 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
             <div className="bg-dicom-dark rounded-lg p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">Processing DICOM files...</span>
-                <span className="text-sm text-dicom-yellow">{Math.round(uploadProgress)}%</span>
+                <span className="text-sm text-dicom-purple">{Math.round(uploadProgress)}%</span>
               </div>
               <Progress value={uploadProgress} className="mb-2" />
               <div className="flex items-center text-xs text-gray-400">
-                <div className="w-3 h-3 border border-dicom-yellow border-t-transparent rounded-full animate-spin mr-2" />
+                <div className="w-3 h-3 border border-dicom-purple border-t-transparent rounded-full animate-spin mr-2" />
                 <span>Analyzing {currentFile}</span>
               </div>
             </div>

@@ -68,7 +68,7 @@ export function SeriesSelector({
                 </span>
                 <Badge 
                   variant="secondary" 
-                  className="bg-dicom-yellow text-black text-xs"
+                  className="bg-dicom-purple text-white text-xs"
                 >
                   {seriesItem.modality}
                 </Badge>
