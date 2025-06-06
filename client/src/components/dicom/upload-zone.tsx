@@ -98,7 +98,11 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: undefined, // Accept all files, filter on server
+    accept: {
+      'application/dicom': ['.dcm', '.dicom'],
+      'application/octet-stream': ['.ima', '.img'],
+      '*/*': [] // Accept all files for folder upload
+    },
     multiple: true,
     noClick: false,
     noKeyboard: false
@@ -112,42 +116,42 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       <div
         {...getRootProps()}
         className={`
-          border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer
+          border-2 border-dashed rounded-xl p-8 text-center transition-all duration-500 cursor-pointer relative overflow-hidden
           ${isDragActive 
-            ? 'border-dicom-yellow bg-dicom-yellow/10 scale-102' 
-            : 'border-dicom-yellow/50 hover:border-dicom-yellow hover:bg-dicom-yellow/5'
+            ? 'border-gradient-primary bg-gradient-subtle scale-102 animate-glow' 
+            : 'border-dicom-blue/50 hover:border-gradient-primary hover:bg-gradient-subtle hover:shadow-lg hover:shadow-dicom-yellow/20'
           }
-          ${isUploading ? 'pointer-events-none' : ''}
+          ${isUploading ? 'pointer-events-none' : 'hover:-translate-y-1'}
         `}
       >
         <input {...getInputProps()} />
         
         <div className="flex flex-col items-center space-y-4">
-          <div className="w-16 h-16 bg-dicom-yellow/20 rounded-full flex items-center justify-center">
-            <FolderOpen className="w-8 h-8 text-dicom-yellow" />
+          <div className="w-20 h-20 bg-gradient-primary rounded-full flex items-center justify-center animate-float">
+            <FolderOpen className="w-10 h-10 text-white" />
           </div>
           
           <div>
-            <h3 className="text-xl font-semibold text-dicom-yellow mb-2">
+            <h3 className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent mb-3">
               Upload DICOM Studies
             </h3>
-            <p className="text-gray-400 mb-4">
-              Drop folders containing DICOM files or click to browse
+            <p className="text-gray-300 mb-4 text-lg">
+              Drop entire folders containing DICOM files or browse to select
             </p>
-            <p className="text-sm text-gray-500">
-              Supports: CT, MRI, PET-CT • Auto-filters non-DICOM files
+            <p className="text-sm text-gray-400">
+              Supports: CT, MRI, PET-CT • Automatically organizes by study and series
             </p>
           </div>
           
           {!isUploading && !hasResult && (
             <div className="flex gap-4">
-              <Button className="bg-dicom-yellow text-black hover:bg-dicom-yellow/90 transition-all duration-200 hover:scale-105">
-                <Upload className="w-4 h-4 mr-2" />
-                Browse Files
+              <Button className="btn-animated text-black font-semibold px-6 py-3 rounded-lg">
+                <Upload className="w-5 h-5 mr-2" />
+                Browse Folders
               </Button>
               <Button 
                 variant="outline"
-                className="border-dicom-yellow text-dicom-yellow hover:bg-dicom-yellow hover:text-black transition-all duration-200 hover:scale-105"
+                className="border-2 border-dicom-blue text-dicom-blue hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300 hover:scale-105 px-6 py-3 rounded-lg font-semibold"
                 onClick={handleCreateTestData}
               >
                 Load Demo Data
