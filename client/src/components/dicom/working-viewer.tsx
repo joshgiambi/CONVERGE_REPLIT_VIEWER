@@ -16,6 +16,9 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [windowLevel, setWindowLevel] = useState({ width: 400, center: 40 });
   const [imageCache, setImageCache] = useState<Map<string, any>>(new Map());
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 20, y: 20 });
 
   useEffect(() => {
     loadImages();
@@ -140,18 +143,24 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
-    // Find min/max for auto-windowing
-    let min = pixelArray[0];
-    let max = pixelArray[0];
-    for (let i = 1; i < pixelArray.length; i++) {
-      if (pixelArray[i] < min) min = pixelArray[i];
-      if (pixelArray[i] > max) max = pixelArray[i];
-    }
-
-    const range = max - min;
+    // Apply window/level settings
+    const { width: windowWidth, center: windowCenter } = windowLevel;
+    const min = windowCenter - windowWidth / 2;
+    const max = windowCenter + windowWidth / 2;
     
     for (let i = 0; i < pixelArray.length; i++) {
-      const normalizedValue = range > 0 ? ((pixelArray[i] - min) / range) * 255 : 0;
+      const pixelValue = pixelArray[i];
+      
+      // Apply windowing
+      let normalizedValue;
+      if (pixelValue <= min) {
+        normalizedValue = 0;
+      } else if (pixelValue >= max) {
+        normalizedValue = 255;
+      } else {
+        normalizedValue = ((pixelValue - min) / windowWidth) * 255;
+      }
+      
       const gray = Math.max(0, Math.min(255, normalizedValue));
       
       const pixelIndex = i * 4;

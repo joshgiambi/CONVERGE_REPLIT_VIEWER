@@ -307,24 +307,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           console.log(`Processing file: ${file.originalname}, size: ${file.size}`);
           
-          // Create metadata for all files (treating them as DICOM for demo purposes)
+          // Extract filename for instance number
+          const filename = file.originalname;
+          const imageMatch = filename.match(/Image (\d+)/);
+          const instanceNumber = imageMatch ? parseInt(imageMatch[1]) : 1;
+          
+          // Determine modality from filename
+          const modality = file.originalname.includes('CT') ? 'CT' : 
+                          file.originalname.includes('MR') ? 'MR' :
+                          file.originalname.includes('PT') ? 'PT' : 'OT';
+          
+          // Group files by modality - use same study/series for same modality
+          const studyKey = `UPLOAD_${modality}_STUDY`;
+          const seriesKey = `UPLOAD_${modality}_SERIES`;
+          
           const metadata = {
-            studyInstanceUID: generateUID(),
-            seriesInstanceUID: generateUID(),
+            studyInstanceUID: studyKey,
+            seriesInstanceUID: seriesKey,
             sopInstanceUID: generateUID(),
             patientName: 'Uploaded Patient',
-            patientID: 'P' + Date.now(),
+            patientID: 'UPLOAD001',
             studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-            studyDescription: 'Folder Upload Study',
-            seriesDescription: file.originalname.includes('CT') ? 'CT Series' : 
-                             file.originalname.includes('MR') ? 'MR Series' :
-                             file.originalname.includes('PT') ? 'PET Series' : 'Unknown Series',
-            modality: file.originalname.includes('CT') ? 'CT' : 
-                     file.originalname.includes('MR') ? 'MR' :
-                     file.originalname.includes('PT') ? 'PT' : 'OT',
+            studyDescription: `${modality} Upload Study`,
+            seriesDescription: `${modality} Axial Series`,
+            modality: modality,
             seriesNumber: 1,
-            instanceNumber: Math.floor(Math.random() * 100) + 1,
-            sliceThickness: '5.0',
+            instanceNumber: instanceNumber,
+            sliceLocation: instanceNumber * 2.5,
+            sliceThickness: '2.5',
             windowCenter: '40',
             windowWidth: '400',
           };
@@ -389,7 +399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             imagePosition: null,
             imageOrientation: null,
             pixelSpacing: null,
-            sliceLocation: null,
+            sliceLocation: metadata.sliceLocation.toString(),
             windowCenter: metadata.windowCenter,
             windowWidth: metadata.windowWidth,
             metadata: {},
