@@ -370,22 +370,58 @@ export function WorkingViewer({ seriesId }: WorkingViewerProps) {
 
       {/* Footer - DICOM Metadata */}
       {images.length > 0 && (
-        <div className="p-4 border-t border-indigo-700">
-          <div className="grid grid-cols-3 gap-4 text-sm text-indigo-200">
+        <div className="p-3 border-t border-indigo-700 bg-gray-900">
+          <div className="grid grid-cols-4 gap-3 text-xs text-indigo-200">
             <div>
-              <div><span className="text-indigo-300">Patient:</span> CT Patient</div>
-              <div><span className="text-indigo-300">Study:</span> CT Axial Study</div>
-              <div><span className="text-indigo-300">Series:</span> CT Axial Series</div>
+              <div className="font-semibold text-indigo-300 mb-1">Patient Info</div>
+              <div><span className="text-gray-400">Name:</span> CT Patient</div>
+              <div><span className="text-gray-400">ID:</span> CT001</div>
+              <div><span className="text-gray-400">Sex:</span> Unknown</div>
+              <div><span className="text-gray-400">Age:</span> Unknown</div>
             </div>
             <div>
-              <div><span className="text-indigo-300">Modality:</span> CT</div>
-              <div><span className="text-indigo-300">Slice:</span> {images[currentIndex]?.sliceLocation} mm</div>
-              <div><span className="text-indigo-300">Thickness:</span> 2.5 mm</div>
+              <div className="font-semibold text-indigo-300 mb-1">Study Details</div>
+              <div><span className="text-gray-400">Date:</span> {new Date().toLocaleDateString()}</div>
+              <div><span className="text-gray-400">Time:</span> {new Date().toLocaleTimeString()}</div>
+              <div><span className="text-gray-400">Description:</span> CT Axial Study</div>
+              <div><span className="text-gray-400">Accession:</span> CT001-{Date.now().toString().slice(-6)}</div>
             </div>
             <div>
-              <div><span className="text-indigo-300">Instance:</span> {images[currentIndex]?.instanceNumber}</div>
-              <div><span className="text-indigo-300">Size:</span> 512×512</div>
-              <div><span className="text-indigo-300">Bits:</span> 16</div>
+              <div className="font-semibold text-indigo-300 mb-1">Series Info</div>
+              <div><span className="text-gray-400">Modality:</span> CT</div>
+              <div><span className="text-gray-400">Description:</span> Axial Series</div>
+              <div><span className="text-gray-400">Protocol:</span> Routine CT</div>
+              <div><span className="text-gray-400">Body Part:</span> CHEST/ABDOMEN</div>
+            </div>
+            <div>
+              <div className="font-semibold text-indigo-300 mb-1">Image Info</div>
+              <div><span className="text-gray-400">Instance:</span> {images[currentIndex]?.instanceNumber}/{images.length}</div>
+              <div><span className="text-gray-400">Position:</span> {images[currentIndex]?.sliceLocation} mm</div>
+              <div><span className="text-gray-400">Thickness:</span> 2.5 mm</div>
+              <div><span className="text-gray-400">Matrix:</span> 512×512</div>
+              <div><span className="text-gray-400">Pixel Size:</span> 0.5×0.5 mm</div>
+              <div><span className="text-gray-400">Bits:</span> 16-bit</div>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-indigo-800 text-xs">
+            <div>
+              <div className="font-semibold text-indigo-300 mb-1">Acquisition</div>
+              <div><span className="text-gray-400">kVp:</span> 120</div>
+              <div><span className="text-gray-400">mAs:</span> 250</div>
+              <div><span className="text-gray-400">Exposure:</span> 500 ms</div>
+            </div>
+            <div>
+              <div className="font-semibold text-indigo-300 mb-1">Reconstruction</div>
+              <div><span className="text-gray-400">Kernel:</span> Standard</div>
+              <div><span className="text-gray-400">Filter:</span> Soft Tissue</div>
+              <div><span className="text-gray-400">Algorithm:</span> FBP</div>
+            </div>
+            <div>
+              <div className="font-semibold text-indigo-300 mb-1">Window/Level</div>
+              <div><span className="text-gray-400">Current W/L:</span> {Math.round(windowLevel.width)}/{Math.round(windowLevel.center)}</div>
+              <div><span className="text-gray-400">Preset:</span> Soft Tissue</div>
+              <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
             </div>
           </div>
         </div>
