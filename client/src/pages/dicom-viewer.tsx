@@ -128,18 +128,16 @@ export default function DICOMViewer() {
       <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
-            <div className="w-8 h-8 bg-gradient-primary rounded-lg flex items-center justify-center animate-glow">
-              <svg 
-                className="w-5 h-5 text-white" 
-                fill="currentColor" 
-                viewBox="0 0 20 20"
-              >
-                <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 01-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 012 0v1.586l2.293-2.293a1 1 0 111.414 1.414L6.414 15H8a1 1 0 010 2H4a1 1 0 01-1-1v-4zm13-1a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 010-2h1.586l-2.293-2.293a1 1 0 111.414-1.414L15 13.586V12a1 1 0 011-1z" clipRule="evenodd" />
-              </svg>
-            </div>
             <div>
-              <h1 className="text-lg font-bold text-dicom-purple">DICOM Viewer</h1>
-              <p className="text-xs text-gray-400">Medical Imaging Platform</p>
+              <h1 className="text-lg font-black tracking-wide">
+                <span className="text-red-500">C</span>
+                <span className="text-orange-500">O</span>
+                <span className="text-yellow-500">N</span>
+                <span className="text-green-500">D</span>
+                <span className="text-blue-500">U</span>
+                <span className="text-indigo-500">I</span>
+                <span className="text-purple-500">T</span>
+              </h1>
             </div>
           </div>
           

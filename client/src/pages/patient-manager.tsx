@@ -337,12 +337,15 @@ export default function PatientManager() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
-              DICOM Patient Manager
+            <h1 className="text-4xl font-black tracking-wide mb-2">
+              <span className="text-red-500">C</span>
+              <span className="text-orange-500">O</span>
+              <span className="text-yellow-500">N</span>
+              <span className="text-green-500">D</span>
+              <span className="text-blue-500">U</span>
+              <span className="text-indigo-500">I</span>
+              <span className="text-purple-500">T</span>
             </h1>
-            <p className="text-gray-600 dark:text-gray-300">
-              Manage patients, studies, and PACS connections for medical imaging
-            </p>
           </div>
           <div className="flex gap-2">
             <Dialog>
