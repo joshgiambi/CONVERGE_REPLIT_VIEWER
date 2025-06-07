@@ -337,14 +337,35 @@ export default function PatientManager() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-black tracking-wide mb-2 flex items-center">
-              <span className="text-black dark:text-white border-2 border-red-500 rounded px-1 mx-0.5">C</span>
-              <span className="text-black dark:text-white border-2 border-orange-500 rounded px-1 mx-0.5">O</span>
-              <span className="text-black dark:text-white border-2 border-yellow-500 rounded px-1 mx-0.5">N</span>
-              <span className="text-black dark:text-white border-2 border-green-500 rounded px-1 mx-0.5">D</span>
-              <span className="text-black dark:text-white border-2 border-blue-500 rounded px-1 mx-0.5">U</span>
-              <span className="text-black dark:text-white border-2 border-indigo-500 rounded px-1 mx-0.5">I</span>
-              <span className="text-black dark:text-white border-2 border-purple-500 rounded px-1 mx-0.5">T</span>
+            <h1 className="text-4xl font-black tracking-wide mb-2">
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #ef4444'
+              }}>C</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #f97316'
+              }}>O</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #eab308'
+              }}>N</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #22c55e'
+              }}>D</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #3b82f6'
+              }}>U</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #6366f1'
+              }}>I</span>
+              <span style={{
+                color: 'black',
+                WebkitTextStroke: '2px #a855f7'
+              }}>T</span>
             </h1>
           </div>
           <div className="flex gap-2">
