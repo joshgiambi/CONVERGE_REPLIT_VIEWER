@@ -337,10 +337,7 @@ export default function PatientManager() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ 
-              letterSpacing: '0.3em',
-              fontFamily: '"Orbitron", "Impact", "Arial Black", sans-serif'
-            }}>
+            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
                 color: 'black',
                 WebkitTextStroke: '1px #22c55e',

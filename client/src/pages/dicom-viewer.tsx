@@ -129,10 +129,7 @@ export default function DICOMViewer() {
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div>
-              <h1 className="text-xl font-black tracking-widest" style={{ 
-                letterSpacing: '0.25em',
-                fontFamily: '"Orbitron", "Impact", "Arial Black", sans-serif'
-              }}>
+              <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                 <span style={{
                   color: 'white',
                   WebkitTextStroke: '1px #22c55e',
