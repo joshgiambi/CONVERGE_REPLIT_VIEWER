@@ -29,6 +29,15 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
+  
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [lastPanX, setLastPanX] = useState(0);
+  const [lastPanY, setLastPanY] = useState(0);
 
 
   useEffect(() => {
@@ -244,18 +253,19 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     
     tempCtx.putImageData(imageData, 0, 0);
     
-    // Scale and draw to the main canvas
+    // Scale and draw to the main canvas with zoom and pan
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
     
-    // Calculate scaling to fill the entire canvas (crop if necessary)
-    const scale = Math.max(canvasWidth / width, canvasHeight / height);
-    const scaledWidth = width * scale;
-    const scaledHeight = height * scale;
+    // Calculate base scaling to fill the entire canvas
+    const baseScale = Math.max(canvasWidth / width, canvasHeight / height);
+    const totalScale = baseScale * zoom;
+    const scaledWidth = width * totalScale;
+    const scaledHeight = height * totalScale;
     
-    // Center the image (may crop edges to fill canvas completely)
-    const x = (canvasWidth - scaledWidth) / 2;
-    const y = (canvasHeight - scaledHeight) / 2;
+    // Apply pan offset to centering
+    const x = (canvasWidth - scaledWidth) / 2 + panX;
+    const y = (canvasHeight - scaledHeight) / 2 + panY;
     
     ctx.imageSmoothingEnabled = false; // Keep crisp pixels for medical imaging
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
@@ -310,30 +320,70 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     e.preventDefault();
     e.stopPropagation();
     
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startWindow = currentWindowLevel.width;
-    const startCenter = currentWindowLevel.center;
+    if (e.button === 0) { // Left click for pan
+      setIsDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setLastPanX(panX);
+      setLastPanY(panY);
+    } else if (e.button === 2) { // Right click for window/level
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startWindow = currentWindowLevel.width;
+      const startCenter = currentWindowLevel.center;
 
-    const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
-      moveEvent.preventDefault();
-      const deltaX = moveEvent.clientX - startX;
-      const deltaY = moveEvent.clientY - startY;
-      
-      const newWidth = Math.max(1, startWindow + deltaX * 2);
-      const newCenter = startCenter - deltaY * 1.5;
-      
-      updateWindowLevel({ width: newWidth, center: newCenter });
-    };
+      const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
+        moveEvent.preventDefault();
+        const deltaX = moveEvent.clientX - startX;
+        const deltaY = moveEvent.clientY - startY;
+        
+        const newWidth = Math.max(1, startWindow + deltaX * 2);
+        const newCenter = startCenter - deltaY * 1.5;
+        
+        updateWindowLevel({ width: newWidth, center: newCenter });
+      };
 
-    const handleWindowLevelEnd = (endEvent: MouseEvent) => {
-      endEvent.preventDefault();
-      document.removeEventListener('mousemove', handleWindowLevelDrag);
-      document.removeEventListener('mouseup', handleWindowLevelEnd);
-    };
+      const handleWindowLevelEnd = (endEvent: MouseEvent) => {
+        endEvent.preventDefault();
+        document.removeEventListener('mousemove', handleWindowLevelDrag);
+        document.removeEventListener('mouseup', handleWindowLevelEnd);
+      };
 
-    document.addEventListener('mousemove', handleWindowLevelDrag);
-    document.addEventListener('mouseup', handleWindowLevelEnd);
+      document.addEventListener('mousemove', handleWindowLevelDrag);
+      document.addEventListener('mouseup', handleWindowLevelEnd);
+    }
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDragging) {
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
+      setPanX(lastPanX + deltaX);
+      setPanY(lastPanY + deltaY);
+    }
+  };
+
+  const handleCanvasMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+  };
+
+  const handleZoomIn = () => {
+    setZoom(prev => Math.min(5, prev * 1.2));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(prev => Math.max(0.1, prev / 1.2));
+  };
+
+  const handleResetZoom = () => {
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
   };
 
   useEffect(() => {
@@ -433,6 +483,10 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
             width={1024}
             height={1024}
             onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={handleCanvasWheel}
+            onContextMenu={(e) => e.preventDefault()}
             className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
             style={{ 
               backgroundColor: 'black',
