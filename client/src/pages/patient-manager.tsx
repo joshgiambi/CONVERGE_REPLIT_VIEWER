@@ -339,38 +339,38 @@ export default function PatientManager() {
           <div>
             <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
-                color: '#ef4444',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #ef4444',
                 fontWeight: '900'
               }}>C</span>
               <span style={{
-                color: '#f97316',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #f97316',
                 fontWeight: '900'
               }}>O</span>
               <span style={{
-                color: '#eab308',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #eab308',
                 fontWeight: '900'
               }}>N</span>
               <span style={{
-                color: '#22c55e',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #22c55e',
                 fontWeight: '900'
               }}>D</span>
               <span style={{
-                color: '#3b82f6',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #3b82f6',
                 fontWeight: '900'
               }}>U</span>
               <span style={{
-                color: '#6366f1',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #6366f1',
                 fontWeight: '900'
               }}>I</span>
               <span style={{
-                color: '#a855f7',
-                WebkitTextStroke: '3px black',
+                color: 'black',
+                WebkitTextStroke: '3px #a855f7',
                 fontWeight: '900'
               }}>T</span>
             </h1>
