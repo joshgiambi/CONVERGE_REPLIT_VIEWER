@@ -8,9 +8,12 @@ interface WorkingViewerProps {
   seriesId: number;
   windowLevel?: { window: number; level: number };
   onWindowLevelChange?: (windowLevel: { window: number; level: number }) => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onResetZoom?: () => void;
 }
 
-export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange }: WorkingViewerProps) {
+export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -386,6 +389,22 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     setPanY(0);
   };
 
+  // Expose zoom functions to parent component via imperative handle
+  useEffect(() => {
+    if (onZoomIn || onZoomOut || onResetZoom) {
+      // Store functions globally for toolbar access
+      (window as any).currentViewerZoom = {
+        zoomIn: handleZoomIn,
+        zoomOut: handleZoomOut,
+        resetZoom: handleResetZoom
+      };
+    }
+    
+    return () => {
+      delete (window as any).currentViewerZoom;
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') goToPrevious();
@@ -512,5 +531,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
 declare global {
   interface Window {
     dicomParser: any;
+    workingViewerZoomIn?: () => void;
+    workingViewerZoomOut?: () => void;
+    workingViewerResetZoom?: () => void;
   }
 }

@@ -79,44 +79,32 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   };
 
   const handleZoomIn = () => {
-    adjustZoom(1.25);
+    try {
+      if ((window as any).currentViewerZoom?.zoomIn) {
+        (window as any).currentViewerZoom.zoomIn();
+      }
+    } catch (error) {
+      console.warn('Error zooming in:', error);
+    }
   };
 
   const handleZoomOut = () => {
-    adjustZoom(0.8);
+    try {
+      if ((window as any).currentViewerZoom?.zoomOut) {
+        (window as any).currentViewerZoom.zoomOut();
+      }
+    } catch (error) {
+      console.warn('Error zooming out:', error);
+    }
   };
 
   const handleResetZoom = () => {
     try {
-      const cornerstone = cornerstoneConfig.getCornerstone();
-      const elements = document.querySelectorAll('.cornerstone-viewport');
-      
-      elements.forEach((element: any) => {
-        if (element) {
-          cornerstone.fitToWindow(element);
-        }
-      });
+      if ((window as any).currentViewerZoom?.resetZoom) {
+        (window as any).currentViewerZoom.resetZoom();
+      }
     } catch (error) {
       console.warn('Error resetting zoom:', error);
-    }
-  };
-
-  const adjustZoom = (factor: number) => {
-    try {
-      const cornerstone = cornerstoneConfig.getCornerstone();
-      const elements = document.querySelectorAll('.cornerstone-viewport');
-      
-      elements.forEach((element: any) => {
-        if (element) {
-          const viewport = cornerstone.getViewport(element);
-          if (viewport) {
-            viewport.scale *= factor;
-            cornerstone.setViewport(element, viewport);
-          }
-        }
-      });
-    } catch (error) {
-      console.warn('Error adjusting zoom:', error);
     }
   };
 
