@@ -509,6 +509,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Patient management endpoints
+  app.get("/api/patients", async (_req, res) => {
+    try {
+      const patients = await storage.getAllPatients();
+      res.json(patients);
+    } catch (error) {
+      console.error("Error getting patients:", error);
+      res.status(500).json({ error: "Failed to get patients" });
+    }
+  });
+
+  app.get("/api/patients/:id", async (req, res) => {
+    try {
+      const patient = await storage.getPatient(parseInt(req.params.id));
+      if (!patient) {
+        return res.status(404).json({ error: "Patient not found" });
+      }
+      res.json(patient);
+    } catch (error) {
+      console.error("Error getting patient:", error);
+      res.status(500).json({ error: "Failed to get patient" });
+    }
+  });
+
+  app.get("/api/patients/:id/studies", async (req, res) => {
+    try {
+      const studies = await storage.getStudiesByPatient(parseInt(req.params.id));
+      res.json(studies);
+    } catch (error) {
+      console.error("Error getting patient studies:", error);
+      res.status(500).json({ error: "Failed to get patient studies" });
+    }
+  });
+
+  // PACS connection management
+  app.get("/api/pacs", async (_req, res) => {
+    try {
+      const connections = await storage.getAllPacsConnections();
+      res.json(connections);
+    } catch (error) {
+      console.error("Error getting PACS connections:", error);
+      res.status(500).json({ error: "Failed to get PACS connections" });
+    }
+  });
+
+  app.post("/api/pacs", async (req, res) => {
+    try {
+      const result = insertPacsConnectionSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid PACS connection data", details: result.error.errors });
+      }
+      
+      const connection = await storage.createPacsConnection(result.data);
+      res.status(201).json(connection);
+    } catch (error) {
+      console.error("Error creating PACS connection:", error);
+      res.status(500).json({ error: "Failed to create PACS connection" });
+    }
+  });
+
+  app.patch("/api/pacs/:id", async (req, res) => {
+    try {
+      const updates = req.body;
+      const connection = await storage.updatePacsConnection(parseInt(req.params.id), updates);
+      res.json(connection);
+    } catch (error) {
+      console.error("Error updating PACS connection:", error);
+      res.status(500).json({ error: "Failed to update PACS connection" });
+    }
+  });
+
+  app.delete("/api/pacs/:id", async (req, res) => {
+    try {
+      await storage.deletePacsConnection(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting PACS connection:", error);
+      res.status(500).json({ error: "Failed to delete PACS connection" });
+    }
+  });
+
+  // DICOM networking endpoints
+  app.post("/api/pacs/:id/test", async (req, res) => {
+    try {
+      const connection = await storage.getPacsConnection(parseInt(req.params.id));
+      if (!connection) {
+        return res.status(404).json({ error: "PACS connection not found" });
+      }
+      
+      const isConnected = await dicomNetworkService.testConnection(connection);
+      res.json({ connected: isConnected });
+    } catch (error) {
+      console.error("Error testing PACS connection:", error);
+      res.status(500).json({ error: "Failed to test connection" });
+    }
+  });
+
+  app.post("/api/pacs/:id/query", async (req, res) => {
+    try {
+      const connection = await storage.getPacsConnection(parseInt(req.params.id));
+      if (!connection) {
+        return res.status(404).json({ error: "PACS connection not found" });
+      }
+      
+      const queryParams = req.body;
+      const results = await dicomNetworkService.queryStudies(connection, queryParams);
+      res.json(results);
+    } catch (error) {
+      console.error("Error querying PACS:", error);
+      res.status(500).json({ error: "Failed to query PACS" });
+    }
+  });
+
+  app.post("/api/pacs/:id/retrieve", async (req, res) => {
+    try {
+      const connection = await storage.getPacsConnection(parseInt(req.params.id));
+      if (!connection) {
+        return res.status(404).json({ error: "PACS connection not found" });
+      }
+      
+      const { studyInstanceUID, destinationAE } = req.body;
+      const success = await dicomNetworkService.retrieveStudy(connection, studyInstanceUID, destinationAE);
+      res.json({ success });
+    } catch (error) {
+      console.error("Error retrieving study:", error);
+      res.status(500).json({ error: "Failed to retrieve study" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

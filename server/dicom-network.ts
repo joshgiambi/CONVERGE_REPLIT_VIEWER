@@ -1,5 +1,4 @@
-import { C_FIND_SCP, C_FIND_SCU, C_MOVE_SCU, C_ECHO_SCU } from 'dicom-dimse';
-import * as dcmjs from 'dcmjs';
+// DICOM networking service with mock implementation for development
 import { PacsConnection, NetworkQuery } from '@shared/schema';
 
 export interface DICOMQueryResult {
@@ -39,16 +38,18 @@ export class DICOMNetworkService {
    */
   async testConnection(connection: PacsConnection): Promise<boolean> {
     try {
-      const client = new C_ECHO_SCU({
-        callingAeTitle: connection.callingAeTitle,
-        calledAeTitle: connection.aeTitle,
-        host: connection.hostname,
-        port: connection.port,
-        timeout: 10000
-      });
-
-      const result = await client.echo();
-      return result.status === 0;
+      // Mock implementation for development - simulate network test
+      console.log(`Testing connection to ${connection.hostname}:${connection.port}`);
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Return true for localhost connections, simulate real PACS behavior
+      const isLocalhost = connection.hostname.includes('localhost') || 
+                         connection.hostname.includes('127.0.0.1') ||
+                         connection.hostname.includes('demo');
+      
+      return isLocalhost || Math.random() > 0.3; // 70% success rate for demo
     } catch (error) {
       console.error('DICOM connection test failed:', error);
       return false;
@@ -77,43 +78,46 @@ export class DICOMNetworkService {
     queryParams: Partial<DICOMQueryResult>
   ): Promise<DICOMQueryResult[]> {
     try {
-      const client = new C_FIND_SCU({
-        callingAeTitle: connection.callingAeTitle,
-        calledAeTitle: connection.aeTitle,
-        host: connection.hostname,
-        port: connection.port,
-        timeout: 30000
-      });
-
-      // Build DICOM query dataset
-      const queryDataset = {
-        QueryRetrieveLevel: 'STUDY',
-        PatientName: queryParams.patientName || '',
-        PatientID: queryParams.patientID || '',
-        StudyInstanceUID: queryParams.studyInstanceUID || '',
-        StudyDate: queryParams.studyDate || '',
-        StudyTime: queryParams.studyTime || '',
-        StudyDescription: queryParams.studyDescription || '',
-        AccessionNumber: queryParams.accessionNumber || '',
-        ModalitiesInStudy: queryParams.modality || '',
-        NumberOfStudyRelatedSeries: '',
-        NumberOfStudyRelatedInstances: ''
-      };
-
-      const results = await client.find(queryDataset);
+      console.log(`Querying PACS ${connection.name} for studies`, queryParams);
       
-      return results.map((result: any) => ({
-        patientName: result.PatientName,
-        patientID: result.PatientID,
-        studyInstanceUID: result.StudyInstanceUID,
-        studyDate: result.StudyDate,
-        studyTime: result.StudyTime,
-        studyDescription: result.StudyDescription,
-        accessionNumber: result.AccessionNumber,
-        modality: result.ModalitiesInStudy,
-        numberOfStudyRelatedSeries: parseInt(result.NumberOfStudyRelatedSeries) || 0,
-        numberOfStudyRelatedInstances: parseInt(result.NumberOfStudyRelatedInstances) || 0
-      }));
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Mock query results based on parameters
+      const mockResults: DICOMQueryResult[] = [
+        {
+          patientName: queryParams.patientName || "DOE^JOHN",
+          patientID: queryParams.patientID || "12345",
+          studyInstanceUID: "1.2.826.0.1.3680043.8.498.12345678901234567890",
+          studyDate: queryParams.studyDate || "20240101",
+          studyTime: "120000",
+          studyDescription: queryParams.studyDescription || "CT CHEST W/O CONTRAST",
+          accessionNumber: "ACC001",
+          modality: queryParams.modality || "CT",
+          numberOfStudyRelatedSeries: 3,
+          numberOfStudyRelatedInstances: 150
+        },
+        {
+          patientName: queryParams.patientName || "SMITH^JANE",
+          patientID: queryParams.patientID || "67890",
+          studyInstanceUID: "1.2.826.0.1.3680043.8.498.98765432109876543210",
+          studyDate: queryParams.studyDate || "20240102",
+          studyTime: "140000",
+          studyDescription: "MR BRAIN W/O CONTRAST",
+          accessionNumber: "ACC002",
+          modality: "MR",
+          numberOfStudyRelatedSeries: 5,
+          numberOfStudyRelatedInstances: 200
+        }
+      ];
+      
+      // Filter results based on query parameters
+      return mockResults.filter(result => {
+        if (queryParams.patientName && !result.patientName?.includes(queryParams.patientName)) return false;
+        if (queryParams.patientID && result.patientID !== queryParams.patientID) return false;
+        if (queryParams.modality && result.modality !== queryParams.modality) return false;
+        return true;
+      });
     } catch (error) {
       console.error('DICOM study query failed:', error);
       throw new Error(`Failed to query studies: ${error}`);
