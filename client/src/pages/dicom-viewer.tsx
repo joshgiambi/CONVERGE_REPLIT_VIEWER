@@ -7,6 +7,35 @@ import { UploadZone } from '@/components/dicom/upload-zone';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
 import { Download, User, Calendar, Home, ArrowLeft } from 'lucide-react';
 
+interface Study {
+  id: number;
+  studyInstanceUID: string;
+  patientId: number;
+  patientName: string;
+  patientID: string;
+  studyDate: string;
+  studyDescription: string;
+  accessionNumber?: string;
+  modality: string;
+  numberOfSeries: number;
+  numberOfImages: number;
+  isDemo: boolean;
+  createdAt: string;
+}
+
+interface SeriesData {
+  id: number;
+  studyId: number;
+  seriesInstanceUID: string;
+  seriesDescription: string;
+  modality: string;
+  seriesNumber: number;
+  imageCount: number;
+  sliceThickness: string;
+  metadata: any;
+  createdAt: string;
+}
+
 export default function DICOMViewer() {
   const [studyData, setStudyData] = useState<any>(null);
   const [currentPatient, setCurrentPatient] = useState<any>(null);
@@ -17,7 +46,7 @@ export default function DICOMViewer() {
   const studyId = urlParams.get('studyId');
 
   // Fetch study data if studyId is provided
-  const { data: study, isLoading: studyLoading } = useQuery({
+  const { data: study, isLoading: studyLoading } = useQuery<Study>({
     queryKey: [`/api/studies/${studyId}`],
     queryFn: async () => {
       const response = await fetch(`/api/studies/${studyId}`);
@@ -28,7 +57,7 @@ export default function DICOMViewer() {
   });
 
   // Fetch series data for the study
-  const { data: seriesData, isLoading: seriesLoading } = useQuery({
+  const { data: seriesData, isLoading: seriesLoading } = useQuery<SeriesData[]>({
     queryKey: [`/api/studies/${studyId}/series`],
     queryFn: async () => {
       const response = await fetch(`/api/studies/${studyId}/series`);
