@@ -1,11 +1,20 @@
-import { studies, series, images, type Study, type Series, type DicomImage, type InsertStudy, type InsertSeries, type InsertImage } from "@shared/schema";
+import { studies, series, images, patients, pacsConnections, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
+  // Patient operations
+  createPatient(patient: InsertPatient): Promise<Patient>;
+  getPatient(id: number): Promise<Patient | undefined>;
+  getPatientByID(patientID: string): Promise<Patient | undefined>;
+  getAllPatients(): Promise<Patient[]>;
+
   // Study operations
   createStudy(study: InsertStudy): Promise<Study>;
   getStudy(id: number): Promise<Study | undefined>;
   getStudyByUID(studyInstanceUID: string): Promise<Study | undefined>;
   getAllStudies(): Promise<Study[]>;
+  getStudiesByPatient(patientId: number): Promise<Study[]>;
 
   // Series operations
   createSeries(series: InsertSeries): Promise<Series>;
@@ -19,8 +28,16 @@ export interface IStorage {
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
   
+  // PACS operations
+  createPacsConnection(connection: InsertPacsConnection): Promise<PacsConnection>;
+  getPacsConnection(id: number): Promise<PacsConnection | undefined>;
+  getAllPacsConnections(): Promise<PacsConnection[]>;
+  updatePacsConnection(id: number, updates: Partial<InsertPacsConnection>): Promise<PacsConnection>;
+  deletePacsConnection(id: number): Promise<void>;
+  
   // Update operations
   updateSeriesImageCount(seriesId: number, count: number): Promise<void>;
+  updateStudyCounts(studyId: number, seriesCount: number, imageCount: number): Promise<void>;
   
   // Clear all data
   clearAll(): void;
@@ -164,4 +181,156 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export class DatabaseStorage implements IStorage {
+  // Patient operations
+  async createPatient(insertPatient: InsertPatient): Promise<Patient> {
+    const [patient] = await db
+      .insert(patients)
+      .values(insertPatient)
+      .returning();
+    return patient;
+  }
+
+  async getPatient(id: number): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(eq(patients.id, id));
+    return patient || undefined;
+  }
+
+  async getPatientByID(patientID: string): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(eq(patients.patientID, patientID));
+    return patient || undefined;
+  }
+
+  async getAllPatients(): Promise<Patient[]> {
+    return await db.select().from(patients).orderBy(desc(patients.createdAt));
+  }
+
+  // Study operations
+  async createStudy(insertStudy: InsertStudy): Promise<Study> {
+    const [study] = await db
+      .insert(studies)
+      .values(insertStudy)
+      .returning();
+    return study;
+  }
+
+  async getStudy(id: number): Promise<Study | undefined> {
+    const [study] = await db.select().from(studies).where(eq(studies.id, id));
+    return study || undefined;
+  }
+
+  async getStudyByUID(studyInstanceUID: string): Promise<Study | undefined> {
+    const [study] = await db.select().from(studies).where(eq(studies.studyInstanceUID, studyInstanceUID));
+    return study || undefined;
+  }
+
+  async getAllStudies(): Promise<Study[]> {
+    return await db.select().from(studies).orderBy(desc(studies.createdAt));
+  }
+
+  async getStudiesByPatient(patientId: number): Promise<Study[]> {
+    return await db.select().from(studies).where(eq(studies.patientId, patientId)).orderBy(desc(studies.createdAt));
+  }
+
+  // Series operations
+  async createSeries(insertSeries: InsertSeries): Promise<Series> {
+    const [seriesData] = await db
+      .insert(series)
+      .values(insertSeries)
+      .returning();
+    return seriesData;
+  }
+
+  async getSeries(id: number): Promise<Series | undefined> {
+    const [seriesData] = await db.select().from(series).where(eq(series.id, id));
+    return seriesData || undefined;
+  }
+
+  async getSeriesByUID(seriesInstanceUID: string): Promise<Series | undefined> {
+    const [seriesData] = await db.select().from(series).where(eq(series.seriesInstanceUID, seriesInstanceUID));
+    return seriesData || undefined;
+  }
+
+  async getSeriesByStudyId(studyId: number): Promise<Series[]> {
+    return await db.select().from(series).where(eq(series.studyId, studyId));
+  }
+
+  // Image operations
+  async createImage(insertImage: InsertImage): Promise<DicomImage> {
+    const [image] = await db
+      .insert(images)
+      .values(insertImage)
+      .returning();
+    return image;
+  }
+
+  async getImage(id: number): Promise<DicomImage | undefined> {
+    const [image] = await db.select().from(images).where(eq(images.id, id));
+    return image || undefined;
+  }
+
+  async getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined> {
+    const [image] = await db.select().from(images).where(eq(images.sopInstanceUID, sopInstanceUID));
+    return image || undefined;
+  }
+
+  async getImagesBySeriesId(seriesId: number): Promise<DicomImage[]> {
+    return await db.select().from(images).where(eq(images.seriesId, seriesId));
+  }
+
+  // PACS operations
+  async createPacsConnection(insertConnection: InsertPacsConnection): Promise<PacsConnection> {
+    const [connection] = await db
+      .insert(pacsConnections)
+      .values(insertConnection)
+      .returning();
+    return connection;
+  }
+
+  async getPacsConnection(id: number): Promise<PacsConnection | undefined> {
+    const [connection] = await db.select().from(pacsConnections).where(eq(pacsConnections.id, id));
+    return connection || undefined;
+  }
+
+  async getAllPacsConnections(): Promise<PacsConnection[]> {
+    return await db.select().from(pacsConnections).orderBy(desc(pacsConnections.createdAt));
+  }
+
+  async updatePacsConnection(id: number, updates: Partial<InsertPacsConnection>): Promise<PacsConnection> {
+    const [connection] = await db
+      .update(pacsConnections)
+      .set(updates)
+      .where(eq(pacsConnections.id, id))
+      .returning();
+    return connection;
+  }
+
+  async deletePacsConnection(id: number): Promise<void> {
+    await db.delete(pacsConnections).where(eq(pacsConnections.id, id));
+  }
+
+  // Update operations
+  async updateSeriesImageCount(seriesId: number, count: number): Promise<void> {
+    await db
+      .update(series)
+      .set({ imageCount: count })
+      .where(eq(series.id, seriesId));
+  }
+
+  async updateStudyCounts(studyId: number, seriesCount: number, imageCount: number): Promise<void> {
+    await db
+      .update(studies)
+      .set({ 
+        numberOfSeries: seriesCount,
+        numberOfImages: imageCount 
+      })
+      .where(eq(studies.id, studyId));
+  }
+
+  clearAll(): void {
+    // This would be implemented as database truncation
+    throw new Error('Database clearAll not implemented - use proper migration tools');
+  }
+}
+
+export const storage = new DatabaseStorage();
