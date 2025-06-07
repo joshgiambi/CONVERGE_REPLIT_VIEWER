@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,6 +113,25 @@ export default function PatientManager() {
   const [isQuerying, setIsQuerying] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Auto-populate demo data on component mount
+  useEffect(() => {
+    const populateDemo = async () => {
+      try {
+        const response = await fetch("/api/populate-demo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (response.ok) {
+          queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+        }
+      } catch (error) {
+        console.log("Demo data population skipped:", error);
+      }
+    };
+    populateDemo();
+  }, [queryClient]);
 
   // Fetch patients
   const { data: patients = [], isLoading: patientsLoading } = useQuery<Patient[]>({
@@ -268,6 +287,42 @@ export default function PatientManager() {
     );
   };
 
+  const handleFileUpload = async (files: File[]) => {
+    try {
+      const formData = new FormData();
+      files.forEach((file, index) => {
+        formData.append('files', file);
+      });
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const result = await response.json();
+      
+      toast({
+        title: "Upload successful",
+        description: `Uploaded ${result.processed} files successfully`,
+      });
+
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+      
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload DICOM files",
+        variant: "destructive",
+      });
+    }
+  };
+
   const formatDate = (dateString: string) => {
     if (!dateString) return "Unknown";
     try {
@@ -280,13 +335,65 @@ export default function PatientManager() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900">
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
-            DICOM Patient Manager
-          </h1>
-          <p className="text-gray-600 dark:text-gray-300">
-            Manage patients, studies, and PACS connections for medical imaging
-          </p>
+        <div className="mb-8 flex justify-between items-start">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+              DICOM Patient Manager
+            </h1>
+            <p className="text-gray-600 dark:text-gray-300">
+              Manage patients, studies, and PACS connections for medical imaging
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload DICOM
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Upload DICOM Files</DialogTitle>
+                  <DialogDescription>
+                    Upload DICOM files to create new studies in the patient database.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 mb-2">Drag and drop DICOM files here</p>
+                    <p className="text-sm text-gray-400">or click to browse</p>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".dcm,.dicom"
+                      className="hidden"
+                      id="dicom-upload"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleFileUpload(Array.from(e.target.files));
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={() => document.getElementById('dicom-upload')?.click()}
+                    >
+                      Select Files
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Link href="/dicom-viewer">
+              <Button>
+                <Eye className="h-4 w-4 mr-2" />
+                DICOM Viewer
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Search Bar */}

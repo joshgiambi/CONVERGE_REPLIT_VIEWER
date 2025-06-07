@@ -153,11 +153,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create demo data using the 20 provided DICOM files
-  app.post("/api/create-test-data", async (req, res) => {
+  // Auto-populate demo data endpoint
+  app.post("/api/populate-demo", async (req, res) => {
     try {
-      // Clear existing data first
-      storage.clearAll();
+      // Check if demo data already exists
+      const existingStudies = await storage.getAllStudies();
+      const hasDemo = existingStudies.some(study => study.isDemo);
+      
+      if (hasDemo) {
+        return res.json({ 
+          success: true, 
+          message: "Demo data already exists",
+          studies: existingStudies.filter(s => s.isDemo)
+        });
+      }
+
+      // Create demo patient first
+      let demoPatient;
+      try {
+        demoPatient = await storage.getPatientByID('DEMO001');
+        if (!demoPatient) {
+          demoPatient = await storage.createPatient({
+            patientID: 'DEMO001',
+            patientName: 'Demo^Patient',
+            patientSex: 'M',
+            patientAge: '45',
+            dateOfBirth: '19790101'
+          });
+        }
+      } catch (error) {
+        console.log('Creating new demo patient');
+        demoPatient = await storage.createPatient({
+          patientID: 'DEMO001',
+          patientName: 'Demo^Patient',
+          patientSex: 'M',
+          patientAge: '45',
+          dateOfBirth: '19790101'
+        });
+      }
       
       // Get the 20 original DICOM files from attached_assets
       const attachedPath = 'attached_assets';
@@ -174,11 +207,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create demo study with the real CT data
       const study = await storage.createStudy({
         studyInstanceUID: `1.2.3.${Date.now()}.demo`,
-        patientName: 'Demo Patient',
+        patientId: demoPatient.id,
+        patientName: 'Demo^Patient',
         patientID: 'DEMO001',
         studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
         studyDescription: 'Demo CT Study - Real Medical Data',
         accessionNumber: 'DEMO_ACC_001',
+        modality: 'CT',
+        numberOfSeries: 1,
+        numberOfImages: testFiles.length,
+        isDemo: true,
       });
 
       // Create demo series
