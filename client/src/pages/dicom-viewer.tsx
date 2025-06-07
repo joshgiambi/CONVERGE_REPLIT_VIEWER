@@ -149,22 +149,27 @@ export default function DICOMViewer() {
                   color: 'white',
                   WebkitTextStroke: '1px #2563eb',
                   fontWeight: '900'
-                }}>D</span>
+                }}>V</span>
                 <span style={{
                   color: 'white',
                   WebkitTextStroke: '1px #6366f1',
                   fontWeight: '900'
-                }}>U</span>
+                }}>E</span>
                 <span style={{
                   color: 'white',
                   WebkitTextStroke: '1px #8b5cf6',
                   fontWeight: '900'
-                }}>I</span>
+                }}>R</span>
                 <span style={{
                   color: 'white',
                   WebkitTextStroke: '1px #a855f7',
                   fontWeight: '900'
-                }}>T</span>
+                }}>G</span>
+                <span style={{
+                  color: 'white',
+                  WebkitTextStroke: '1px #22c55e',
+                  fontWeight: '900'
+                }}>E</span>
               </h1>
             </div>
           </div>
