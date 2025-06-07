@@ -205,10 +205,13 @@ export default function PatientManager() {
   // Query PACS mutation
   const queryPacsMutation = useMutation({
     mutationFn: async ({ pacsId, queryParams }: { pacsId: number; queryParams: z.infer<typeof querySchema> }) => {
-      return apiRequest(`/api/pacs/${pacsId}/query`, {
+      const response = await fetch(`/api/pacs/${pacsId}/query`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(queryParams),
       });
+      if (!response.ok) throw new Error("Failed to query PACS");
+      return response.json();
     },
     onSuccess: (data: DICOMQueryResult[]) => {
       setQueryResults(data);
