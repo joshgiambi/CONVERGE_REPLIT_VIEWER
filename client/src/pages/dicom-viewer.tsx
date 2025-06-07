@@ -129,14 +129,14 @@ export default function DICOMViewer() {
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div>
-              <h1 className="text-lg font-black tracking-wide">
-                <span className="text-red-500">C</span>
-                <span className="text-orange-500">O</span>
-                <span className="text-yellow-500">N</span>
-                <span className="text-green-500">D</span>
-                <span className="text-blue-500">U</span>
-                <span className="text-indigo-500">I</span>
-                <span className="text-purple-500">T</span>
+              <h1 className="text-lg font-black tracking-wide flex items-center">
+                <span className="text-white border-2 border-red-500 rounded px-1 mx-0.5">C</span>
+                <span className="text-white border-2 border-orange-500 rounded px-1 mx-0.5">O</span>
+                <span className="text-white border-2 border-yellow-500 rounded px-1 mx-0.5">N</span>
+                <span className="text-white border-2 border-green-500 rounded px-1 mx-0.5">D</span>
+                <span className="text-white border-2 border-blue-500 rounded px-1 mx-0.5">U</span>
+                <span className="text-white border-2 border-indigo-500 rounded px-1 mx-0.5">I</span>
+                <span className="text-white border-2 border-purple-500 rounded px-1 mx-0.5">T</span>
               </h1>
             </div>
           </div>

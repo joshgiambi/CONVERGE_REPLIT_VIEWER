@@ -337,14 +337,14 @@ export default function PatientManager() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-black tracking-wide mb-2">
-              <span className="text-red-500">C</span>
-              <span className="text-orange-500">O</span>
-              <span className="text-yellow-500">N</span>
-              <span className="text-green-500">D</span>
-              <span className="text-blue-500">U</span>
-              <span className="text-indigo-500">I</span>
-              <span className="text-purple-500">T</span>
+            <h1 className="text-4xl font-black tracking-wide mb-2 flex items-center">
+              <span className="text-black dark:text-white border-2 border-red-500 rounded px-1 mx-0.5">C</span>
+              <span className="text-black dark:text-white border-2 border-orange-500 rounded px-1 mx-0.5">O</span>
+              <span className="text-black dark:text-white border-2 border-yellow-500 rounded px-1 mx-0.5">N</span>
+              <span className="text-black dark:text-white border-2 border-green-500 rounded px-1 mx-0.5">D</span>
+              <span className="text-black dark:text-white border-2 border-blue-500 rounded px-1 mx-0.5">U</span>
+              <span className="text-black dark:text-white border-2 border-indigo-500 rounded px-1 mx-0.5">I</span>
+              <span className="text-black dark:text-white border-2 border-purple-500 rounded px-1 mx-0.5">T</span>
             </h1>
           </div>
           <div className="flex gap-2">
