@@ -547,6 +547,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get individual study by ID
+  app.get("/api/studies/:id", async (req, res) => {
+    try {
+      const study = await storage.getStudy(parseInt(req.params.id));
+      if (!study) {
+        return res.status(404).json({ error: "Study not found" });
+      }
+      res.json(study);
+    } catch (error) {
+      console.error("Error getting study:", error);
+      res.status(500).json({ error: "Failed to get study" });
+    }
+  });
+
+  // Get series for a study
+  app.get("/api/studies/:id/series", async (req, res) => {
+    try {
+      const series = await storage.getSeriesByStudyId(parseInt(req.params.id));
+      res.json(series);
+    } catch (error) {
+      console.error("Error getting series:", error);
+      res.status(500).json({ error: "Failed to get series" });
+    }
+  });
+
   // Patient management endpoints
   app.get("/api/patients", async (_req, res) => {
     try {

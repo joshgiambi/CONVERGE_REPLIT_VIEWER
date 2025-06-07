@@ -1,13 +1,59 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { UploadZone } from '@/components/dicom/upload-zone';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
-import { Download, User, Calendar, Home } from 'lucide-react';
+import { Download, User, Calendar, Home, ArrowLeft } from 'lucide-react';
 
 export default function DICOMViewer() {
   const [studyData, setStudyData] = useState<any>(null);
   const [currentPatient, setCurrentPatient] = useState<any>(null);
+  const [location, navigate] = useLocation();
+
+  // Extract studyId from URL parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const studyId = urlParams.get('studyId');
+
+  // Fetch study data if studyId is provided
+  const { data: study, isLoading: studyLoading } = useQuery({
+    queryKey: [`/api/studies/${studyId}`],
+    queryFn: async () => {
+      const response = await fetch(`/api/studies/${studyId}`);
+      if (!response.ok) throw new Error('Failed to fetch study');
+      return response.json();
+    },
+    enabled: !!studyId,
+  });
+
+  // Fetch series data for the study
+  const { data: seriesData, isLoading: seriesLoading } = useQuery({
+    queryKey: [`/api/studies/${studyId}/series`],
+    queryFn: async () => {
+      const response = await fetch(`/api/studies/${studyId}/series`);
+      if (!response.ok) throw new Error('Failed to fetch series');
+      return response.json();
+    },
+    enabled: !!studyId,
+  });
+
+  useEffect(() => {
+    if (study && seriesData) {
+      // Transform API data to match expected format
+      const transformedData = {
+        studies: [study],
+        series: seriesData
+      };
+      setStudyData(transformedData);
+      
+      setCurrentPatient({
+        name: study.patientName || 'Unknown Patient',
+        id: study.patientID || 'Unknown ID',
+        studyDate: study.studyDate || ''
+      });
+    }
+  }, [study, seriesData]);
 
   const handleUploadComplete = (data: any) => {
     setStudyData(data);
@@ -69,21 +115,16 @@ export default function DICOMViewer() {
           </div>
           
           <div className="flex items-center space-x-3">
-            {/* Home Button - shows when viewing study */}
-            {studyData && (
-              <Button 
-                onClick={() => {
-                  setStudyData(null);
-                  setCurrentPatient(null);
-                }}
-                variant="outline"
-                size="sm"
-                className="border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
-              >
-                <Home className="w-4 h-4 mr-1" />
-                Home
-              </Button>
-            )}
+            {/* Back to Patient Manager Button */}
+            <Button 
+              onClick={() => navigate('/')}
+              variant="outline"
+              size="sm"
+              className="border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
+            >
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              Patient Manager
+            </Button>
             
             {/* Patient Info */}
             {currentPatient && (

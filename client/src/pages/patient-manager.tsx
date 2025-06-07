@@ -472,11 +472,22 @@ export default function PatientManager() {
                         variant="outline"
                         size="sm"
                         className="w-full mt-4"
-                        asChild
+                        onClick={() => {
+                          // Filter studies for this patient and show them
+                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                          if (patientStudies.length > 0) {
+                            // Navigate to DICOM viewer with the first study
+                            window.location.href = `/dicom-viewer?studyId=${patientStudies[0].id}`;
+                          } else {
+                            toast({
+                              title: "No studies found",
+                              description: `No studies found for patient ${patient.patientName}`,
+                              variant: "destructive",
+                            });
+                          }
+                        }}
                       >
-                        <Link href={`/patients/${patient.id}/studies`}>
-                          View Studies
-                        </Link>
+                        View Studies
                       </Button>
                     </CardContent>
                   </Card>
@@ -538,12 +549,12 @@ export default function PatientManager() {
                         variant="outline"
                         size="sm"
                         className="w-full mt-4"
-                        asChild
+                        onClick={() => {
+                          window.location.href = `/dicom-viewer?studyId=${study.id}`;
+                        }}
                       >
-                        <Link href={`/dicom-viewer?studyId=${study.id}`}>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Study
-                        </Link>
+                        <Eye className="h-4 w-4 mr-2" />
+                        View Study
                       </Button>
                     </CardContent>
                   </Card>
