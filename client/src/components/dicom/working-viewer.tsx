@@ -391,14 +391,12 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
 
   // Expose zoom functions to parent component via imperative handle
   useEffect(() => {
-    if (onZoomIn || onZoomOut || onResetZoom) {
-      // Store functions globally for toolbar access
-      (window as any).currentViewerZoom = {
-        zoomIn: handleZoomIn,
-        zoomOut: handleZoomOut,
-        resetZoom: handleResetZoom
-      };
-    }
+    // Store functions globally for toolbar access
+    (window as any).currentViewerZoom = {
+      zoomIn: handleZoomIn,
+      zoomOut: handleZoomOut,
+      resetZoom: handleResetZoom
+    };
     
     return () => {
       delete (window as any).currentViewerZoom;
