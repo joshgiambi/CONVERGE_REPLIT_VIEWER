@@ -129,34 +129,41 @@ export default function DICOMViewer() {
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div>
-              <h1 className="text-lg font-black tracking-wide">
+              <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #ef4444'
+                  WebkitTextStroke: '2px #ef4444',
+                  fontWeight: '900'
                 }}>C</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #f97316'
+                  WebkitTextStroke: '2px #f97316',
+                  fontWeight: '900'
                 }}>O</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #eab308'
+                  WebkitTextStroke: '2px #eab308',
+                  fontWeight: '900'
                 }}>N</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #22c55e'
+                  WebkitTextStroke: '2px #22c55e',
+                  fontWeight: '900'
                 }}>D</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #3b82f6'
+                  WebkitTextStroke: '2px #3b82f6',
+                  fontWeight: '900'
                 }}>U</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #6366f1'
+                  WebkitTextStroke: '2px #6366f1',
+                  fontWeight: '900'
                 }}>I</span>
                 <span style={{
                   color: 'white',
-                  WebkitTextStroke: '2px #a855f7'
+                  WebkitTextStroke: '2px #a855f7',
+                  fontWeight: '900'
                 }}>T</span>
               </h1>
             </div>

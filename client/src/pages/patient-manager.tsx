@@ -337,34 +337,41 @@ export default function PatientManager() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-black tracking-wide mb-2">
+            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #ef4444'
+                WebkitTextStroke: '3px #ef4444',
+                fontWeight: '900'
               }}>C</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #f97316'
+                WebkitTextStroke: '3px #f97316',
+                fontWeight: '900'
               }}>O</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #eab308'
+                WebkitTextStroke: '3px #eab308',
+                fontWeight: '900'
               }}>N</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #22c55e'
+                WebkitTextStroke: '3px #22c55e',
+                fontWeight: '900'
               }}>D</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #3b82f6'
+                WebkitTextStroke: '3px #3b82f6',
+                fontWeight: '900'
               }}>U</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #6366f1'
+                WebkitTextStroke: '3px #6366f1',
+                fontWeight: '900'
               }}>I</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '2px #a855f7'
+                WebkitTextStroke: '3px #a855f7',
+                fontWeight: '900'
               }}>T</span>
             </h1>
           </div>
