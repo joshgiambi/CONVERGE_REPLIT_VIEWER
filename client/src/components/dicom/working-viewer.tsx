@@ -260,9 +260,9 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
     
-    // Calculate base scaling to fill the entire canvas
-    const baseScale = Math.max(canvasWidth / width, canvasHeight / height);
-    const totalScale = baseScale * zoom;
+    // Calculate fit-to-window scaling (don't exceed canvas bounds)
+    const fitScale = Math.min(canvasWidth / width, canvasHeight / height);
+    const totalScale = fitScale * zoom;
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
     
@@ -270,7 +270,9 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
-    ctx.imageSmoothingEnabled = false; // Keep crisp pixels for medical imaging
+    // Use high-quality image scaling for better appearance
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
