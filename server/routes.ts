@@ -4,7 +4,8 @@ import { storage } from "./storage";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { insertStudySchema, insertSeriesSchema, insertImageSchema } from "@shared/schema";
+import { insertStudySchema, insertSeriesSchema, insertImageSchema, insertPacsConnectionSchema } from "@shared/schema";
+import { dicomNetworkService } from "./dicom-network";
 import { z } from "zod";
 
 // Configure multer for file uploads

@@ -16,9 +16,9 @@ export const patients = pgTable("patients", {
 export const studies = pgTable("studies", {
   id: serial("id").primaryKey(),
   studyInstanceUID: text("study_instance_uid").notNull().unique(),
-  patientId: integer("patient_id").references(() => patients.id),
+  patientId: integer("patient_id"),
   patientName: text("patient_name"),
-  patientID: text("patient_id"),
+  patientID: text("patient_id_dicom"),
   studyDate: text("study_date"),
   studyDescription: text("study_description"),
   accessionNumber: text("accession_number"),
