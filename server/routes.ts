@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { insertStudySchema, insertSeriesSchema, insertImageSchema, insertPacsConnectionSchema } from "@shared/schema";
 import { dicomNetworkService } from "./dicom-network";
+import { createSampleRTStructureSet, type RTStructureSet } from "./rt-structure-parser";
 import { z } from "zod";
 
 // Configure multer for file uploads
@@ -698,6 +699,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error retrieving study:", error);
       res.status(500).json({ error: "Failed to retrieve study" });
+    }
+  });
+
+  // RT Structure Set endpoints
+  app.get("/api/rt-structures/:studyId", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      
+      // For demo purposes, return sample RT structure set
+      // In production, this would query the database for actual RT structure data
+      const sampleStructureSet = createSampleRTStructureSet();
+      res.json(sampleStructureSet);
+    } catch (error) {
+      console.error("Error fetching RT structures:", error);
+      res.status(500).json({ error: "Failed to fetch RT structures" });
+    }
+  });
+
+  app.post("/api/rt-structures/upload", upload.single('rtStructureFile'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No RT structure file uploaded" });
+      }
+
+      const filePath = req.file.path;
+      
+      // In production, parse the actual DICOM RT structure file
+      // For now, return sample structure set
+      const structureSet = createSampleRTStructureSet();
+      
+      // Clean up uploaded file
+      fs.unlinkSync(filePath);
+      
+      res.json({ 
+        success: true, 
+        message: "RT structure set uploaded successfully",
+        structureSet 
+      });
+    } catch (error) {
+      console.error("Error uploading RT structure:", error);
+      res.status(500).json({ error: "Failed to upload RT structure" });
+    }
+  });
+
+  app.get("/api/rt-structures/:studyId/contours/:sliceLocation", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const sliceLocation = parseFloat(req.params.sliceLocation);
+      
+      // Return contours for specific slice location
+      const structureSet = createSampleRTStructureSet();
+      const contoursForSlice = structureSet.structures.map(structure => ({
+        ...structure,
+        contours: structure.contours.filter(contour => 
+          Math.abs((contour.sliceLocation || 0) - sliceLocation) <= 5.0
+        )
+      })).filter(structure => structure.contours.length > 0);
+      
+      res.json(contoursForSlice);
+    } catch (error) {
+      console.error("Error fetching contours for slice:", error);
+      res.status(500).json({ error: "Failed to fetch contours" });
     }
   });
 
