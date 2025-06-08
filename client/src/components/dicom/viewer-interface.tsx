@@ -4,6 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
+import { WindowLevelPresets } from './window-level-presets';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  const [showWindowLevelPresets, setShowWindowLevelPresets] = useState(false);
+  const [activeToolState, setActiveToolState] = useState<string>('');
+  const [measurementMode, setMeasurementMode] = useState<'distance' | 'angle' | 'area'>('distance');
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -123,9 +127,24 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-  const handlePanTool = () => setActiveTool('Pan');
-  const handleMeasureTool = () => setActiveTool('Length');
-  const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
+  const handlePanTool = () => {
+    setActiveTool('Pan');
+    setActiveToolState('pan');
+  };
+  
+  const handleMeasureTool = () => {
+    setActiveTool('Length');
+    setActiveToolState('measure');
+  };
+  
+  const handleAnnotateTool = () => {
+    setActiveTool('ArrowAnnotate');
+    setActiveToolState('annotate');
+  };
+
+  const handleWindowLevelPresetOpen = () => {
+    setShowWindowLevelPresets(true);
+  };
 
   const handleRotate = () => {
     try {
