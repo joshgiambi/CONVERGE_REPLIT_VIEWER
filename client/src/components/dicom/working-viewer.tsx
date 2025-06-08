@@ -538,11 +538,34 @@ export function WorkingViewer({
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
           </div>
 
+          {/* Professional imaging overlays */}
+          <PixelProbe
+            canvasRef={canvasRef}
+            imageData={currentImageData}
+            isActive={showPixelProbe}
+            windowLevel={{ window: currentWindowLevel.width, level: currentWindowLevel.center }}
+          />
 
-
+          {/* Image Histogram */}
+          <ImageHistogram
+            imageData={currentImageData}
+            windowLevel={{ window: currentWindowLevel.width, level: currentWindowLevel.center }}
+            isVisible={showHistogram}
+            onClose={() => setShowHistogram(false)}
+          />
 
         </div>
       </div>
+
+      {/* Cine Controls for multi-image series */}
+      {showCineControls && images.length > 1 && (
+        <CineControls
+          totalImages={images.length}
+          currentIndex={currentIndex}
+          onImageChange={setCurrentIndex}
+          isVisible={true}
+        />
+      )}
 
     </Card>
   );
