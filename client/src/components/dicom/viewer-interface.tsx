@@ -112,7 +112,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-  const setActiveTool = (toolName: string) => {
+  const setCornerstoneTool = (toolName: string) => {
     try {
       const cornerstoneTools = cornerstoneConfig.getCornerstoneTools();
       const elements = document.querySelectorAll('.cornerstone-viewport');
@@ -128,17 +128,17 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   };
 
   const handlePanTool = () => {
-    setActiveTool('Pan');
+    setCornerstoneTool('Pan');
     setActiveToolState('pan');
   };
   
   const handleMeasureTool = () => {
-    setActiveTool('Length');
+    setCornerstoneTool('Length');
     setActiveToolState('measure');
   };
   
   const handleAnnotateTool = () => {
-    setActiveTool('ArrowAnnotate');
+    setCornerstoneTool('ArrowAnnotate');
     setActiveToolState('annotate');
   };
 
@@ -242,6 +242,14 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           windowLevel={windowLevel}
         />
       )}
+
+      {/* Window/Level Presets Modal */}
+      <WindowLevelPresets
+        currentWindowLevel={windowLevel}
+        onWindowLevelChange={setWindowLevel}
+        isVisible={showWindowLevelPresets}
+        onClose={() => setShowWindowLevelPresets(false)}
+      />
 
       {/* Error Modal */}
       <ErrorModal
