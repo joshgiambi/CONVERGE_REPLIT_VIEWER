@@ -4,6 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MeasurementOverlay } from './measurement-overlay';
+import { PixelProbe } from './pixel-probe';
+import { CineControls } from './cine-controls';
+import { ImageHistogram } from './image-histogram';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -12,9 +15,20 @@ interface WorkingViewerProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onResetZoom?: () => void;
+  showPixelProbe?: boolean;
+  showCineControls?: boolean;
 }
 
-export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
+export function WorkingViewer({ 
+  seriesId, 
+  windowLevel: externalWindowLevel, 
+  onWindowLevelChange, 
+  onZoomIn, 
+  onZoomOut, 
+  onResetZoom,
+  showPixelProbe = false,
+  showCineControls = true 
+}: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -42,6 +56,8 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
+  const [showHistogram, setShowHistogram] = useState(false);
+  const [currentImageData, setCurrentImageData] = useState<{ data: Float32Array; width: number; height: number } | undefined>();
 
 
   useEffect(() => {
@@ -200,6 +216,9 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       // Keep fixed canvas size for consistent display
       canvas.width = 1024;
       canvas.height = 1024;
+      
+      // Store current image data for other components
+      setCurrentImageData(imageData);
       
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
