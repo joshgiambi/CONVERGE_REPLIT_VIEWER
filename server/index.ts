@@ -199,6 +199,42 @@ app.get("/api/studies/:id/series", async (req, res) => {
   }
 });
 
+// Get all series
+app.get("/api/series", async (req, res) => {
+  try {
+    const series = await storage.getAllSeries();
+    res.json(series);
+  } catch (error) {
+    console.error('Error fetching all series:', error);
+    res.status(500).json({ message: "Failed to fetch series" });
+  }
+});
+
+// Series routes
+app.get("/api/series/:id", async (req, res) => {
+  try {
+    const series = await storage.getSeries(parseInt(req.params.id));
+    if (!series) {
+      return res.status(404).json({ message: "Series not found" });
+    }
+    res.json(series);
+  } catch (error) {
+    console.error('Error fetching series:', error);
+    res.status(500).json({ message: "Failed to fetch series" });
+  }
+});
+
+app.get("/api/series/:id/images", async (req, res) => {
+  try {
+    const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
+    console.log(`Returning ${images.length} images for series ${req.params.id}, database-sorted`);
+    res.json(images);
+  } catch (error) {
+    console.error('Error fetching images:', error);
+    res.status(500).json({ message: "Failed to fetch images" });
+  }
+});
+
 // Series routes
 app.get("/api/series/:id", async (req, res) => {
   try {
