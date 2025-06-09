@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 // Copy all 153 CT slices to uploads directory
 const sourceDir = 'attached_assets/HN-ATLAS-84/HN-ATLAS-84/DICOM_CONTRAST';
