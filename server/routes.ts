@@ -350,94 +350,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Auto-populate LIMBIC neuroimaging data if available
-      const limbicPath = path.join(process.cwd(), 'uploads', 'LIMBIC_57');
-      if (fs.existsSync(limbicPath)) {
-        try {
-          // Check if LIMBIC patient already exists
-          let limbicPatient = await storage.getPatientByID("LIMBIC_57");
-          if (!limbicPatient) {
-            limbicPatient = await storage.createPatient({
-              patientID: "LIMBIC_57",
-              patientName: "Limbic Neuroimaging Patient",
-              patientSex: "F",
-              patientAge: "42Y"
-            });
-
-            // Create CT Study
-            const ctStudy = await storage.createStudy({
-              patientId: limbicPatient.id,
-              studyInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021210",
-              patientID: limbicPatient.patientID,
-              patientName: limbicPatient.patientName,
-              studyDate: "20230215",
-              studyDescription: "Brain CT with Contrast",
-              accessionNumber: "LIMBIC_CT_001",
-              modality: "CT",
-              numberOfSeries: 2,
-              numberOfImages: 45,
-              isDemo: true
-            });
-
-            // Create MRI Study
-            const mriStudy = await storage.createStudy({
-              patientId: limbicPatient.id,
-              studyInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021213",
-              patientID: limbicPatient.patientID,
-              patientName: limbicPatient.patientName,
-              studyDate: "20230215",
-              studyDescription: "Brain MRI MPRAGE",
-              accessionNumber: "LIMBIC_MRI_001",
-              modality: "MR",
-              numberOfSeries: 3,
-              numberOfImages: 78,
-              isDemo: true
-            });
-
-            // Create placeholder series for neuroimaging components
-            await storage.createSeries({
-              studyId: ctStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021211",
-              seriesDescription: "Brain CT Axial",
-              modality: "CT",
-              imageCount: 25
-            });
-
-            await storage.createSeries({
-              studyId: ctStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021212",
-              seriesDescription: "CT Structure Set",
-              modality: "RTSTRUCT",
-              imageCount: 20
-            });
-
-            await storage.createSeries({
-              studyId: mriStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021214",
-              seriesDescription: "MRI T1 MPRAGE",
-              modality: "MR",
-              imageCount: 35
-            });
-
-            await storage.createSeries({
-              studyId: mriStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021215",
-              seriesDescription: "MRI Registration",
-              modality: "REG",
-              imageCount: 23
-            });
-
-            await storage.createSeries({
-              studyId: mriStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.12072839.23213054100.618021216",
-              seriesDescription: "MRI Structure Set",
-              modality: "RTSTRUCT",
-              imageCount: 20
-            });
-          }
-        } catch (error) {
-          console.log("LIMBIC neuroimaging data population skipped:", error);
-        }
+      // Auto-populate LIMBIC neuroimaging data from real DICOM files
+      try {
+        const { uploadLimbicScan } = await import('./limbic-uploader');
+        await uploadLimbicScan();
+      } catch (error) {
+        console.log("LIMBIC neuroimaging data population skipped:", error);
       }
 
       res.json({

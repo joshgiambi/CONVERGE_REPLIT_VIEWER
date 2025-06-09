@@ -8,8 +8,11 @@ interface DICOMMetadata {
   studyDate?: string;
   studyTime?: string;
   studyDescription?: string;
+  studyInstanceUID?: string;
   accessionNumber?: string;
   seriesDescription?: string;
+  seriesInstanceUID?: string;
+  sopInstanceUID?: string;
   modality?: string;
   bodyPartExamined?: string;
   protocolName?: string;

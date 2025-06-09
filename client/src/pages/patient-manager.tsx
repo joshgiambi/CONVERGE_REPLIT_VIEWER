@@ -603,58 +603,75 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4">
-                {filteredStudies.map((study) => (
-                  <Card key={study.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-5 w-5" />
-                          {study.studyDescription || "Unnamed Study"}
-                        </div>
-                        <div className="flex gap-2">
-                          <Badge variant="secondary">{study.modality}</Badge>
-                          {study.isDemo && <Badge variant="outline">Demo</Badge>}
-                        </div>
-                      </CardTitle>
-                      <CardDescription>
-                        Patient: {study.patientName} | ID: {study.patientID}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <div className="font-medium">Study Date</div>
-                          <div className="text-gray-500">{formatDate(study.studyDate)}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Series</div>
-                          <div className="text-gray-500">{study.numberOfSeries}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Images</div>
-                          <div className="text-gray-500">{study.numberOfImages}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Accession</div>
-                          <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
-                        </div>
+              <div className="space-y-6">
+                {patients.map((patient) => {
+                  const patientStudies = filteredStudies.filter(study => study.patientId === patient.id);
+                  if (patientStudies.length === 0) return null;
+
+                  return (
+                    <div key={patient.id} className="border border-gray-700 rounded-lg p-4">
+                      <div className="mb-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                          <User className="h-5 w-5" />
+                          {patient.patientName}
+                        </h3>
+                        <p className="text-gray-400 text-sm">ID: {patient.patientID} | {patient.patientSex} | Age: {patient.patientAge}</p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
-                        onClick={() => {
-                          // Navigate to integrated DICOM viewer within patient manager
-                          setSelectedStudy(study);
-                        }}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        View Study
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
+                      
+                      <div className="grid gap-4">
+                        {patientStudies.map((study) => (
+                          <Card key={study.id} className="hover:shadow-lg transition-shadow bg-gray-800/50">
+                            <CardHeader>
+                              <CardTitle className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="h-5 w-5" />
+                                  {study.studyDescription || "Unnamed Study"}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Badge 
+                                    variant="secondary" 
+                                    className={getModalityColor(study.modality)}
+                                  >
+                                    {study.modality}
+                                  </Badge>
+                                  {study.isDemo && <Badge variant="outline">Demo</Badge>}
+                                </div>
+                              </CardTitle>
+                              <CardDescription>
+                                {formatDate(study.studyDate)}
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                <div>
+                                  <div className="font-medium">Series</div>
+                                  <div className="text-gray-500">{study.numberOfSeries}</div>
+                                </div>
+                                <div>
+                                  <div className="font-medium">Images</div>
+                                  <div className="text-gray-500">{study.numberOfImages}</div>
+                                </div>
+                                <div>
+                                  <div className="font-medium">Accession</div>
+                                  <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
+                                onClick={() => setSelectedStudy(study)}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Study
+                              </Button>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </TabsContent>
