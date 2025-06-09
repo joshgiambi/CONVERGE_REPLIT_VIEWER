@@ -390,12 +390,19 @@ export default function PatientManager() {
               <Upload className="h-4 w-4 mr-2" />
               Import DICOM
             </Button>
-            <Link href="/dicom-viewer">
-              <Button>
-                <Eye className="h-4 w-4 mr-2" />
-                DICOM Viewer
-              </Button>
-            </Link>
+            <Button 
+              onClick={() => {
+                // Open the first available study in the viewer
+                if (studies.length > 0) {
+                  window.open(`/dicom-viewer?studyId=${studies[0].id}`, '_blank');
+                } else {
+                  window.open('/dicom-viewer', '_blank');
+                }
+              }}
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              Open Viewer
+            </Button>
           </div>
         </div>
 
