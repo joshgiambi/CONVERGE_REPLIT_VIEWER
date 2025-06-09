@@ -206,7 +206,15 @@ app.get("/api/series/:id", async (req, res) => {
     if (!series) {
       return res.status(404).json({ message: "Series not found" });
     }
-    res.json(series);
+    
+    // Include images in the series response
+    const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
+    const seriesWithImages = {
+      ...series,
+      images: images
+    };
+    
+    res.json(seriesWithImages);
   } catch (error) {
     console.error('Error fetching series:', error);
     res.status(500).json({ message: "Failed to fetch series" });
