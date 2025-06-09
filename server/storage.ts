@@ -1,6 +1,6 @@
 import { studies, series, images, patients, pacsConnections, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Patient operations
@@ -281,7 +281,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getImagesBySeriesId(seriesId: number): Promise<DicomImage[]> {
-    return await db.select().from(images).where(eq(images.seriesId, seriesId));
+    // Get images ordered by instance number - client will handle anatomical sorting
+    const result = await db
+      .select()
+      .from(images)
+      .where(eq(images.seriesId, seriesId))
+      .orderBy(images.instanceNumber);
+    
+    return result;
   }
 
   // PACS operations

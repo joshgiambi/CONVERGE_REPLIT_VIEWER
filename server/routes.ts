@@ -615,40 +615,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
       
-      // Sort images by anatomical position using proper Z-coordinate extraction
-      const sortedImages = [...images].sort((a, b) => {
-        // Extract Z-coordinate from imagePosition JSON
-        const getZPosition = (img: any): number => {
-          if (!img.imagePosition) return img.instanceNumber ?? 0;
-          
-          try {
-            let position;
-            if (typeof img.imagePosition === 'string') {
-              position = JSON.parse(img.imagePosition);
-            } else {
-              position = img.imagePosition;
-            }
-            
-            if (Array.isArray(position) && position.length >= 3) {
-              return parseFloat(position[2]);
-            }
-          } catch (e) {
-            // Continue to fallback
-          }
-          
-          return img.instanceNumber ?? 0;
-        };
-        
-        const aZ = getZPosition(a);
-        const bZ = getZPosition(b);
-        
-        // For head/neck CT: superior to inferior (higher Z to lower Z)
-        return bZ - aZ;
-      });
+      console.log(`Returning ${images.length} images for series ${req.params.id}, database-sorted`);
       
-      console.log(`Returning ${sortedImages.length} images for series ${req.params.id}, sorted by Z-position`);
-      
-      res.json(sortedImages);
+      res.json(images);
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });
