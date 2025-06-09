@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,9 +36,26 @@ interface Study {
 }
 
 function Dashboard() {
+  const [currentTab, setCurrentTab] = useState('patients');
+  const [searchQuery, setSearchQuery] = useState('');
+  
   const { data: patients, isLoading } = useQuery({
     queryKey: ['/api/patients'],
   }) as { data: Patient[] | undefined, isLoading: boolean };
+
+  const handleViewStudy = (studyId: number) => {
+    // Navigate to DICOM viewer with study ID
+    window.location.href = `/dicom-viewer?studyId=${studyId}`;
+  };
+
+  const filteredPatients = patients?.filter(patient => 
+    patient.patientName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    patient.patientID?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    patient.studies.some(study => 
+      study.studyDescription?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      study.modality?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  );
 
   if (isLoading) {
     return (
@@ -59,9 +77,59 @@ function Dashboard() {
               </h1>
               <p className="text-gray-600 mt-1">Medical DICOM Imaging Platform</p>
             </div>
-            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium">
-              Upload DICOM
-            </button>
+            <div className="flex items-center gap-4">
+              <button className="bg-yellow-500 hover:bg-yellow-600 text-black px-4 py-2 rounded-lg font-medium">
+                Open Viewer
+              </button>
+              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium">
+                Import DICOM
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search patients, studies, or modalities..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="bg-gray-900 border-b border-gray-700">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex space-x-8">
+            {[
+              { id: 'patients', label: 'Patients', icon: '👤' },
+              { id: 'import', label: 'Import DICOM', icon: '📤' },
+              { id: 'pacs', label: 'PACS', icon: '🏥' },
+              { id: 'query', label: 'Query', icon: '🔍' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setCurrentTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  currentTab === tab.id
+                    ? 'border-blue-400 text-blue-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -71,9 +139,9 @@ function Dashboard() {
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-gray-900">Patients</h2>
           
-          {patients && patients.length > 0 ? (
+          {currentTab === 'patients' && filteredPatients && filteredPatients.length > 0 ? (
             <div className="space-y-6">
-              {patients.map((patient: Patient) => (
+              {filteredPatients.map((patient: Patient) => (
                 <div key={patient.id} className="bg-white border-l-4 border-l-blue-500 shadow-lg rounded-lg overflow-hidden hover:shadow-xl transition-shadow">
                   <div className="bg-blue-50 border-b px-6 py-4">
                     <div className="flex items-center text-blue-900">
@@ -124,7 +192,10 @@ function Dashboard() {
                                     )}
                                   </div>
                                 </div>
-                                <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2">
+                                <button 
+                                  onClick={() => handleViewStudy(study.id)}
+                                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                                >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
