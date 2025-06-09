@@ -282,11 +282,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateSeriesImageCount(series.id, images.length);
 
+      // Create second demo patient with HN-ATLAS-84 data
+      await createHNAtlasDemo();
+
+      const allPatients = await storage.getAllPatients();
       res.json({
         success: true,
-        message: `Demo data created with ${testFiles.length} real DICOM files`,
-        study,
-        series: [{ ...series, images }]
+        message: `Demo data created with ${testFiles.length} CT files + HN-ATLAS-84 dataset`,
+        patients: allPatients.length,
+        studies: 2
       });
 
     } catch (error) {

@@ -92,29 +92,10 @@ function analyzeExtractedFiles() {
     });
   }
   
-  // Try to parse first DICOM file for metadata
+  // Basic DICOM file analysis
   if (dicomFiles.length > 0) {
-    try {
-      const { DICOMMetadataParser } = await import('./server/dicom-metadata-parser.js');
-      const metadata = DICOMMetadataParser.parseDICOMFile(dicomFiles[0]);
-      
-      console.log('\n=== Sample DICOM Metadata ===');
-      console.log(`Patient Name: ${metadata.patientName || 'Unknown'}`);
-      console.log(`Patient ID: ${metadata.patientID || 'Unknown'}`);
-      console.log(`Modality: ${metadata.modality || 'Unknown'}`);
-      console.log(`Study Date: ${metadata.studyDate || 'Unknown'}`);
-      console.log(`Study Description: ${metadata.studyDescription || 'Unknown'}`);
-      console.log(`Series Description: ${metadata.seriesDescription || 'Unknown'}`);
-      
-      if (metadata.structures && metadata.structures.length > 0) {
-        console.log(`RT Structures: ${metadata.structures.length} found`);
-        metadata.structures.forEach((struct, i) => {
-          console.log(`  ${i + 1}. ${struct.name} (color: ${struct.color || 'none'})`);
-        });
-      }
-      
-    } catch (error) {
-      console.log('Error parsing DICOM metadata:', error.message);
-    }
+    console.log('\n=== Basic DICOM Analysis ===');
+    console.log('Found DICOM files - ready for import into the system');
+    console.log('Use the Import DICOM tab to upload these files for full metadata extraction');
   }
 }
