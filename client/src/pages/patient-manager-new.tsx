@@ -103,7 +103,7 @@ const querySchema = z.object({
   modality: z.string().optional(),
 });
 
-export default function PatientManager() {
+export default function PatientManagerNew() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
