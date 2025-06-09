@@ -270,7 +270,9 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
-    ctx.imageSmoothingEnabled = false; // Keep crisp pixels for medical imaging
+    // Enable smooth scaling for better zoom quality while preserving medical image integrity
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
@@ -509,7 +511,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
             className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
             style={{ 
               backgroundColor: 'black',
-              imageRendering: 'pixelated',
+              imageRendering: 'auto',
               userSelect: 'none'
             }}
           />
