@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DICOMViewer from "@/pages/dicom-viewer";
-import PatientManager from "@/pages/patient-manager-clean";
+import PatientManager from "@/pages/patient-manager-final";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -22,7 +22,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <div key={Date.now()}>
+        <div key={`app-${Date.now()}-${Math.random()}`}>
           <Router />
         </div>
       </TooltipProvider>
