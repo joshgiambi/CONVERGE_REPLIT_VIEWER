@@ -3,17 +3,15 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import DICOMViewer from "@/pages/dicom-viewer";
-import MedicalDashboard from "@/pages/medical-dashboard";
+import Dashboard from "@/pages/dashboard";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={MedicalDashboard} />
-      <Route path="/patients-new" component={MedicalDashboard} />
-      <Route path="/patients" component={MedicalDashboard} />
-      <Route path="/dicom-viewer" component={DICOMViewer} />
+      <Route path="/" component={Dashboard} />
+      <Route path="/patients" component={Dashboard} />
+      <Route path="/patients-new" component={Dashboard} />
       <Route component={NotFound} />
     </Switch>
   );
