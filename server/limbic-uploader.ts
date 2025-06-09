@@ -121,32 +121,46 @@ export async function uploadLimbicScan(): Promise<void> {
       patientAge: patientInfo.patientAge
     });
 
-    // Create the single study
+    // Check if study already exists with this UID
     const totalImages = Array.from(series.values()).reduce((sum, s) => sum + s.files.length, 0);
-    const study = await storage.createStudy({
-      patientId: limbicPatient.id,
-      studyInstanceUID: studyInfo?.studyInstanceUID || generateUID(),
-      studyDate: studyInfo?.studyDate || '20230215',
-      studyDescription: studyInfo?.studyDescription || 'LIMBIC Neuroimaging Study',
-      accessionNumber: studyInfo?.accessionNumber || 'LIMBIC_57_001',
-      modality: 'MR', // Primary modality
-      numberOfSeries: series.size,
-      numberOfImages: totalImages,
-      isDemo: true
-    });
+    const studyUID = studyInfo?.studyInstanceUID || generateUID();
+    
+    let study = await storage.getStudyByUID(studyUID);
+    if (!study) {
+      study = await storage.createStudy({
+        patientId: limbicPatient.id,
+        studyInstanceUID: studyUID,
+        studyDate: studyInfo?.studyDate || '20230215',
+        studyDescription: studyInfo?.studyDescription || 'LIMBIC Neuroimaging Study - Multi-modal Brain Analysis',
+        accessionNumber: studyInfo?.accessionNumber || 'LIMBIC_57_001',
+        modality: 'MR', // Primary modality
+        numberOfSeries: series.size,
+        numberOfImages: totalImages,
+        isDemo: true
+      });
+    } else {
+      // Update existing study with correct counts
+      await storage.updateStudyCounts(study.id, series.size, totalImages);
+    }
 
     console.log(`Created study: ${study.studyDescription} - ${series.size} series, ${totalImages} images`);
 
-    // Create all series
+    // Create all series (check for existing first)
     for (const seriesInfo of Array.from(series.values())) {
-      const seriesData = await storage.createSeries({
-        studyId: study.id,
-        seriesInstanceUID: seriesInfo.seriesInstanceUID,
-        seriesDescription: seriesInfo.seriesDescription,
-        modality: seriesInfo.modality,
-        imageCount: seriesInfo.files.length,
-        seriesNumber: seriesInfo.seriesNumber
-      });
+      let seriesData = await storage.getSeriesByUID(seriesInfo.seriesInstanceUID);
+      if (!seriesData) {
+        seriesData = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: seriesInfo.seriesInstanceUID,
+          seriesDescription: seriesInfo.seriesDescription,
+          modality: seriesInfo.modality,
+          imageCount: seriesInfo.files.length,
+          seriesNumber: seriesInfo.seriesNumber
+        });
+      } else {
+        // Update existing series with correct count
+        await storage.updateSeriesImageCount(seriesData.id, seriesInfo.files.length);
+      }
 
       console.log(`  Series: ${seriesData.seriesDescription} (${seriesData.modality}) - ${seriesInfo.files.length} files`);
 
