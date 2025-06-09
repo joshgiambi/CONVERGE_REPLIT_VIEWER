@@ -171,24 +171,33 @@ export async function uploadLimbicScan(): Promise<void> {
 
       console.log(`  Series: ${seriesData.seriesDescription} (${seriesData.modality}) - ${seriesInfo.files.length} files`);
 
-      // Create images for this series (check for existing first)
-      for (let i = 0; i < seriesInfo.files.length; i++) {
-        const { filePath, metadata } = seriesInfo.files[i];
-        const fileName = path.basename(filePath);
-        const sopUID = metadata.sopInstanceUID || generateUID() + `.${i + 1}`;
+      // For large series, create images in batches to avoid timeouts
+      const batchSize = seriesInfo.modality === 'CT' || seriesInfo.modality === 'MR' ? 50 : 10;
+      console.log(`  Creating ${seriesInfo.files.length} images in batches of ${batchSize}...`);
+      
+      for (let i = 0; i < seriesInfo.files.length; i += batchSize) {
+        const batch = seriesInfo.files.slice(i, i + batchSize);
+        const promises = batch.map(async ({ filePath, metadata }, batchIndex) => {
+          const fileName = path.basename(filePath);
+          const sopUID = metadata.sopInstanceUID || generateUID() + `.${i + batchIndex + 1}`;
+          
+          // Check if image already exists
+          const existingImage = await storage.getImageByUID(sopUID);
+          if (!existingImage) {
+            return storage.createImage({
+              seriesId: seriesData.id,
+              sopInstanceUID: sopUID,
+              filePath,
+              fileName,
+              instanceNumber: metadata.instanceNumber || (i + batchIndex + 1),
+              fileSize: fs.statSync(filePath).size
+            });
+          }
+          return null;
+        });
         
-        // Check if image already exists
-        const existingImage = await storage.getImageByUID(sopUID);
-        if (!existingImage) {
-          await storage.createImage({
-            seriesId: seriesData.id,
-            sopInstanceUID: sopUID,
-            filePath,
-            fileName,
-            instanceNumber: metadata.instanceNumber || (i + 1),
-            fileSize: fs.statSync(filePath).size
-          });
-        }
+        await Promise.all(promises);
+        console.log(`    Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(seriesInfo.files.length/batchSize)} completed`);
       }
     }
 

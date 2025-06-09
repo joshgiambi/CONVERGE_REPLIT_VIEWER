@@ -40,34 +40,9 @@ function isDICOMFile(filePath: string): boolean {
 // Extract DICOM metadata (enhanced)
 function extractDICOMMetadata(filePath: string) {
   try {
-    const buffer = fs.readFileSync(filePath);
-    
-    // Generate reasonable default values based on file info
-    const filename = path.basename(filePath);
-    const timestamp = Date.now().toString();
-    
-    const metadata = {
-      studyInstanceUID: `1.2.3.${timestamp}.1`,
-      seriesInstanceUID: `1.2.3.${timestamp}.2`,
-      sopInstanceUID: `1.2.3.${timestamp}.3.${Math.random().toString(36).substr(2, 9)}`,
-      patientName: 'Test Patient',
-      patientID: 'P001',
-      studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-      studyDescription: 'Uploaded Study',
-      seriesDescription: filename.includes('CT') ? 'CT Series' : 
-                        filename.includes('MR') ? 'MR Series' :
-                        filename.includes('PT') ? 'PET Series' : 'Unknown Series',
-      modality: filename.includes('CT') ? 'CT' : 
-                filename.includes('MR') ? 'MR' :
-                filename.includes('PT') ? 'PT' : 'OT',
-      seriesNumber: 1,
-      instanceNumber: Math.floor(Math.random() * 100) + 1,
-      sliceThickness: '5.0',
-      windowCenter: '40',
-      windowWidth: '400',
-    };
-    
-    return metadata;
+    // Use the corrected DICOM parser that handles all modalities
+    const { parseDICOMMetadata } = require('./dicom-parser');
+    return parseDICOMMetadata(filePath);
   } catch (error) {
     console.error('Error extracting DICOM metadata:', error);
     return null;
