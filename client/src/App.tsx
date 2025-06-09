@@ -23,7 +23,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <div key={Date.now()}>
+          <Router />
+        </div>
       </TooltipProvider>
     </QueryClientProvider>
   );

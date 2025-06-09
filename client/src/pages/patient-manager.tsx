@@ -440,8 +440,8 @@ export default function PatientManager() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Patients Tab */}
-          <TabsContent value="patients" className="space-y-4">
+          {/* Patients Tab - Force Refresh */}
+          <TabsContent value="patients" className="space-y-4" key={`patients-${Date.now()}`}>
             {patientsLoading || studiesLoading ? (
               <div className="text-center py-8">Loading patient data...</div>
             ) : filteredPatients.length === 0 ? (
