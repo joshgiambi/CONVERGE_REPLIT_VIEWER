@@ -420,14 +420,10 @@ export default function PatientManager() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="patients" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Patients
-            </TabsTrigger>
-            <TabsTrigger value="studies" className="flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Studies
             </TabsTrigger>
             <TabsTrigger value="import" className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
@@ -487,11 +483,13 @@ export default function PatientManager() {
                         size="sm"
                         className="w-full mt-4"
                         onClick={() => {
-                          // Filter studies for this patient and show them
+                          // Filter studies for this patient and prioritize CT studies
                           const patientStudies = studies.filter(study => study.patientID === patient.patientID);
                           if (patientStudies.length > 0) {
-                            // Navigate to DICOM viewer with the first study
-                            window.location.href = `/dicom-viewer?studyId=${patientStudies[0].id}`;
+                            // Prioritize CT studies over RT structure sets
+                            const ctStudy = patientStudies.find(study => study.modality === 'CT');
+                            const targetStudy = ctStudy || patientStudies[0];
+                            window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
                           } else {
                             toast({
                               title: "No studies found",
@@ -510,72 +508,7 @@ export default function PatientManager() {
             )}
           </TabsContent>
 
-          {/* Studies Tab */}
-          <TabsContent value="studies" className="space-y-4">
-            {studiesLoading ? (
-              <div className="text-center py-8">Loading studies...</div>
-            ) : filteredStudies.length === 0 ? (
-              <Card>
-                <CardContent className="text-center py-8">
-                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No studies found</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {filteredStudies.map((study) => (
-                  <Card key={study.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-5 w-5" />
-                          {study.studyDescription || "Unnamed Study"}
-                        </div>
-                        <div className="flex gap-2">
-                          <Badge variant="secondary">{study.modality}</Badge>
-                          {study.isDemo && <Badge variant="outline">Demo</Badge>}
-                        </div>
-                      </CardTitle>
-                      <CardDescription>
-                        Patient: {study.patientName} | ID: {study.patientID}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <div className="font-medium">Study Date</div>
-                          <div className="text-gray-500">{formatDate(study.studyDate)}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Series</div>
-                          <div className="text-gray-500">{study.numberOfSeries}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Images</div>
-                          <div className="text-gray-500">{study.numberOfImages}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium">Accession</div>
-                          <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
-                        </div>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full mt-4"
-                        onClick={() => {
-                          window.location.href = `/dicom-viewer?studyId=${study.id}`;
-                        }}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        View Study
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+
 
           {/* Import DICOM Tab */}
           <TabsContent value="import" className="space-y-4">
