@@ -412,7 +412,7 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       resetZoom: handleResetZoom
     };
     
-    console.log('Zoom functions exposed:', (window as any).currentViewerZoom);
+
     
     return () => {
       delete (window as any).currentViewerZoom;
