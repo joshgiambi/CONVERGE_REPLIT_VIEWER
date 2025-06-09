@@ -112,13 +112,15 @@ export async function uploadLimbicScan(): Promise<void> {
     console.log(`Patient: ${patientInfo.patientName} (${patientInfo.patientID})`);
     console.log(`Series found: ${series.size}`);
 
-    // Create patient
-    limbicPatient = await storage.createPatient({
-      patientID: patientInfo.patientID,
-      patientName: patientInfo.patientName,
-      patientSex: patientInfo.patientSex,
-      patientAge: patientInfo.patientAge
-    });
+    // Create patient only if it doesn't exist
+    if (!limbicPatient) {
+      limbicPatient = await storage.createPatient({
+        patientID: patientInfo.patientID,
+        patientName: patientInfo.patientName,
+        patientSex: patientInfo.patientSex,
+        patientAge: patientInfo.patientAge
+      });
+    }
 
     // Check if study already exists with this UID
     const totalImages = Array.from(series.values()).reduce((sum, s) => sum + s.files.length, 0);
