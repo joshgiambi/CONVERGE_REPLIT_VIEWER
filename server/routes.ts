@@ -283,11 +283,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateSeriesImageCount(series.id, images.length);
 
-      // Multi-modal demo data will be added separately
+      // Auto-populate THORAX RT data if available
+      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
+      if (fs.existsSync(thoraxPath)) {
+        try {
+          // Check if THORAX patient already exists
+          let thoraxPatient = await storage.getPatientByID("THORAX_05");
+          if (!thoraxPatient) {
+            thoraxPatient = await storage.createPatient({
+              patientID: "THORAX_05",
+              patientName: "Thorax RT Patient",
+              patientSex: "M",
+              patientAge: "65Y"
+            });
+
+            // Create THORAX study with multi-modal RT data
+            const thoraxStudy = await storage.createStudy({
+              patientId: thoraxPatient.id,
+              studyInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938850",
+              patientID: thoraxPatient.patientID,
+              patientName: thoraxPatient.patientName,
+              studyDate: "20220615",
+              studyDescription: "THORAX RT Planning Study",
+              accessionNumber: "THORAX_05_ACC",
+              modality: "CT",
+              numberOfSeries: 4,
+              numberOfImages: 120,
+              isDemo: true
+            });
+
+            // Create placeholder series for RT components
+            await storage.createSeries({
+              studyId: thoraxStudy.id,
+              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938851",
+              seriesDescription: "CT Thorax Axial",
+              modality: "CT",
+              imageCount: 89
+            });
+
+            await storage.createSeries({
+              studyId: thoraxStudy.id,
+              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938856",
+              seriesDescription: "RT Dose Distribution",
+              modality: "RTDOSE",
+              imageCount: 15
+            });
+
+            await storage.createSeries({
+              studyId: thoraxStudy.id,
+              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938855",
+              seriesDescription: "RT Treatment Plan",
+              modality: "RTPLAN",
+              imageCount: 8
+            });
+
+            await storage.createSeries({
+              studyId: thoraxStudy.id,
+              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938857",
+              seriesDescription: "RT Structure Set",
+              modality: "RTSTRUCT",
+              imageCount: 8
+            });
+          }
+        } catch (error) {
+          console.log("THORAX RT data population skipped:", error);
+        }
+      }
 
       res.json({
         success: true,
-        message: `Demo data created with ${testFiles.length} real DICOM files`,
+        message: `Demo data created with ${testFiles.length} real DICOM files and multi-modal RT cases`,
         study,
         series: [{ ...series, images }]
       });
@@ -612,7 +677,189 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
-  // LIMBIC_57 Multi-Modal Imaging Integration
+  // THORAX_05 Radiotherapy Data Population
+  app.post("/api/populate-thorax", async (req, res) => {
+    try {
+      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
+      
+      if (!fs.existsSync(thoraxPath)) {
+        return res.status(404).json({ error: "THORAX_05 directory not found" });
+      }
+
+      // Check if patient already exists
+      let patient = await storage.getPatientByID("THORAX_05");
+      if (!patient) {
+        patient = await storage.createPatient({
+          patientID: "THORAX_05",
+          patientName: "Thorax RT Patient",
+          patientSex: "M",
+          patientAge: "65Y"
+        });
+      }
+
+      // Create THORAX study
+      const study = await storage.createStudy({
+        patientId: patient.id,
+        studyInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938850",
+        patientID: patient.patientID,
+        patientName: patient.patientName,
+        studyDate: "20220615",
+        studyDescription: "THORAX RT Planning Study",
+        accessionNumber: "THORAX_05_ACC",
+        modality: "CT",
+        numberOfSeries: 4,
+        numberOfImages: 0,
+        isDemo: true
+      });
+
+      let totalImages = 0;
+
+      // Process CT DICOM files
+      const ctFiles = fs.readdirSync(path.join(thoraxPath, 'DICOM'))
+        .filter(file => file.endsWith('.dcm'))
+        .sort();
+
+      if (ctFiles.length > 0) {
+        const ctSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938851",
+          seriesDescription: "CT Thorax Axial",
+          modality: "CT",
+          imageCount: ctFiles.length
+        });
+
+        // Create CT images
+        for (let i = 0; i < ctFiles.length; i++) {
+          const file = ctFiles[i];
+          const filePath = path.join(thoraxPath, 'DICOM', file);
+          
+          await storage.createImage({
+            seriesId: ctSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938851.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: (i * 5.0).toString(),
+            sliceThickness: "5.0",
+            rows: 512,
+            columns: 512,
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "40",
+            windowWidth: "400",
+            filePath: filePath
+          });
+        }
+        totalImages += ctFiles.length;
+      }
+
+      // Process RT Dose
+      const doseFiles = fs.readdirSync(path.join(thoraxPath, 'DOSE'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (doseFiles.length > 0) {
+        const doseSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938856",
+          seriesDescription: "RT Dose Distribution",
+          modality: "RTDOSE",
+          imageCount: doseFiles.length
+        });
+
+        for (let i = 0; i < doseFiles.length; i++) {
+          await storage.createImage({
+            seriesId: doseSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938856.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: "0",
+            sliceThickness: "5.0",
+            rows: 512,
+            columns: 512,
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "2000",
+            windowWidth: "4000"
+          });
+        }
+        totalImages += doseFiles.length;
+      }
+
+      // Process RT Plan
+      const planFiles = fs.readdirSync(path.join(thoraxPath, 'PLAN'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (planFiles.length > 0) {
+        const planSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938855",
+          seriesDescription: "RT Treatment Plan",
+          modality: "RTPLAN",
+          imageCount: planFiles.length
+        });
+
+        for (let i = 0; i < planFiles.length; i++) {
+          await storage.createImage({
+            seriesId: planSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938855.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: "0",
+            sliceThickness: "5.0",
+            rows: 512,
+            columns: 512,
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "100",
+            windowWidth: "200"
+          });
+        }
+        totalImages += planFiles.length;
+      }
+
+      // Process RT Structure Set
+      const structureFiles = fs.readdirSync(path.join(thoraxPath, 'MIM'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (structureFiles.length > 0) {
+        const structureSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938857",
+          seriesDescription: "RT Structure Set",
+          modality: "RTSTRUCT",
+          imageCount: structureFiles.length
+        });
+
+        for (let i = 0; i < structureFiles.length; i++) {
+          await storage.createImage({
+            seriesId: structureSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938857.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: "0",
+            sliceThickness: "5.0",
+            rows: 512,
+            columns: 512,
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "100",
+            windowWidth: "200"
+          });
+        }
+        totalImages += structureFiles.length;
+      }
+
+      // Update study with final counts
+      await storage.updateStudyCounts(study.id, 4, totalImages);
+
+      res.json({ 
+        success: true, 
+        message: "THORAX_05 radiotherapy data populated",
+        patient: patient.patientName,
+        ctImages: ctFiles.length,
+        doseFiles: doseFiles.length,
+        planFiles: planFiles.length,
+        structureFiles: structureFiles.length,
+        totalImages
+      });
+    } catch (error) {
+      console.error("Error populating THORAX data:", error);
+      res.status(500).json({ error: "Failed to populate THORAX data" });
+    }
+  });
+
+  // LIMBIC_57 Multi-Modal Imaging Integration  
   app.post("/api/populate-limbic", async (req, res) => {
     try {
       const limbicPath = path.join(process.cwd(), 'uploads', 'LIMBIC_57');
