@@ -299,6 +299,202 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function createHNAtlasDemo() {
+    try {
+      // Check if HN-ATLAS patient already exists
+      let hnPatient;
+      try {
+        hnPatient = await storage.getPatientByID('HN-ATLAS-84');
+        if (hnPatient) {
+          console.log('HN-ATLAS patient already exists');
+          return;
+        }
+      } catch (error) {
+        // Patient doesn't exist, create new one
+      }
+
+      // Create HN-ATLAS patient
+      hnPatient = await storage.createPatient({
+        patientID: 'HN-ATLAS-84',
+        patientName: 'HN-ATLAS^84',
+        patientSex: 'M',
+        patientAge: '62',
+        dateOfBirth: '19620315'
+      });
+
+      const hnDatasetPath = 'attached_assets/HN-ATLAS-84/HN-ATLAS-84';
+      const contrastPath = path.join(hnDatasetPath, 'DICOM_CONTRAST');
+      const mimPath = path.join(hnDatasetPath, 'MIM');
+
+      if (!fs.existsSync(contrastPath)) {
+        console.log('HN-ATLAS dataset not found');
+        return;
+      }
+
+      // Parse the DICOM_CONTRAST folder for CT images
+      const contrastFiles = fs.readdirSync(contrastPath)
+        .filter(f => f.endsWith('.dcm'))
+        .sort()
+        .slice(0, 20); // Use first 20 slices for demo
+
+      if (contrastFiles.length === 0) {
+        console.log('No DICOM files found in HN-ATLAS contrast folder');
+        return;
+      }
+
+      // Create CT study
+      const ctStudy = await storage.createStudy({
+        studyInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}`,
+        patientId: hnPatient.id,
+        patientName: 'HN-ATLAS^84',
+        patientID: 'HN-ATLAS-84',
+        studyDate: '20200615',
+        studyDescription: 'Head & Neck CT with Contrast',
+        accessionNumber: 'HN84_CT_001',
+        modality: 'CT',
+        numberOfSeries: 1,
+        numberOfImages: contrastFiles.length,
+        isDemo: true,
+      });
+
+      // Create CT series
+      const ctSeries = await storage.createSeries({
+        studyId: ctStudy.id,
+        seriesInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}.ct`,
+        seriesDescription: 'CT Head Neck with Contrast',
+        modality: 'CT',
+        seriesNumber: 1,
+        imageCount: contrastFiles.length,
+        sliceThickness: '3.0',
+        metadata: { 
+          source: 'HN-ATLAS-84',
+          anatomy: 'Head & Neck',
+          contrast: 'IV Contrast Enhanced'
+        },
+      });
+
+      // Copy and process CT images
+      const hnDemoDir = 'uploads/hn-atlas-demo';
+      if (!fs.existsSync(hnDemoDir)) {
+        fs.mkdirSync(hnDemoDir, { recursive: true });
+      }
+
+      const ctImages = [];
+      for (let i = 0; i < contrastFiles.length; i++) {
+        const fileName = contrastFiles[i];
+        const sourcePath = path.join(contrastPath, fileName);
+        const demoPath = path.join(hnDemoDir, fileName);
+        
+        // Copy file to demo directory
+        fs.copyFileSync(sourcePath, demoPath);
+        const fileStats = fs.statSync(demoPath);
+        
+        // Extract instance number from filename
+        const instanceMatch = fileName.match(/\.(\d+)\.dcm$/);
+        const instanceNumber = instanceMatch ? parseInt(instanceMatch[1]) : i + 1;
+        
+        const image = await storage.createImage({
+          seriesId: ctSeries.id,
+          sopInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}.${instanceNumber}`,
+          instanceNumber: instanceNumber,
+          filePath: demoPath,
+          fileName: fileName,
+          fileSize: fileStats.size,
+          imagePosition: null,
+          imageOrientation: null,
+          pixelSpacing: '0.488\\0.488',
+          sliceLocation: `${instanceNumber * 3.0}`,
+          windowCenter: '50',
+          windowWidth: '350',
+          metadata: {
+            source: 'HN-ATLAS-84',
+            anatomy: 'Head & Neck',
+            contrast: true
+          },
+        });
+        ctImages.push(image);
+      }
+
+      await storage.updateSeriesImageCount(ctSeries.id, ctImages.length);
+
+      // Check for RT Structure Set
+      if (fs.existsSync(mimPath)) {
+        const rtFiles = fs.readdirSync(mimPath).filter(f => f.endsWith('.dcm'));
+        
+        if (rtFiles.length > 0) {
+          // Create RT Structure Study
+          const rtStudy = await storage.createStudy({
+            studyInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}.rt`,
+            patientId: hnPatient.id,
+            patientName: 'HN-ATLAS^84',
+            patientID: 'HN-ATLAS-84',
+            studyDate: '20200615',
+            studyDescription: 'RT Structure Set - Organ Contours',
+            accessionNumber: 'HN84_RT_001',
+            modality: 'RTSTRUCT',
+            numberOfSeries: 1,
+            numberOfImages: rtFiles.length,
+            isDemo: true,
+          });
+
+          // Create RT series
+          const rtSeries = await storage.createSeries({
+            studyId: rtStudy.id,
+            seriesInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}.rtstruct`,
+            seriesDescription: 'RT Structure Set - Head & Neck Organs',
+            modality: 'RTSTRUCT',
+            seriesNumber: 1,
+            imageCount: rtFiles.length,
+            sliceThickness: '3.0',
+            metadata: { 
+              source: 'HN-ATLAS-84',
+              structureType: 'Organ Contours',
+              organsSructures: ['Brainstem', 'Spinal Cord', 'Parotid Glands', 'Mandible']
+            },
+          });
+
+          // Process RT Structure files
+          for (let i = 0; i < rtFiles.length; i++) {
+            const fileName = rtFiles[i];
+            const sourcePath = path.join(mimPath, fileName);
+            const demoPath = path.join(hnDemoDir, `rt_${fileName}`);
+            
+            fs.copyFileSync(sourcePath, demoPath);
+            const fileStats = fs.statSync(demoPath);
+            
+            const rtImage = await storage.createImage({
+              seriesId: rtSeries.id,
+              sopInstanceUID: `2.16.840.1.114362.1.11932039.${Date.now()}.rt.${i + 1}`,
+              instanceNumber: i + 1,
+              filePath: demoPath,
+              fileName: `rt_${fileName}`,
+              fileSize: fileStats.size,
+              imagePosition: null,
+              imageOrientation: null,
+              pixelSpacing: null,
+              sliceLocation: null,
+              windowCenter: null,
+              windowWidth: null,
+              metadata: {
+                source: 'HN-ATLAS-84',
+                structureType: 'RT Structure Set'
+              },
+            });
+          }
+
+          await storage.updateSeriesImageCount(rtSeries.id, rtFiles.length);
+          await storage.updateStudyCounts(rtStudy.id, 1, rtFiles.length);
+        }
+      }
+
+      await storage.updateStudyCounts(ctStudy.id, 1, ctImages.length);
+      console.log(`Created HN-ATLAS-84 demo patient with ${ctImages.length} CT images`);
+      
+    } catch (error) {
+      console.error('Error creating HN-ATLAS demo:', error);
+    }
+  }
+
   // Serve DICOM files
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
     try {
