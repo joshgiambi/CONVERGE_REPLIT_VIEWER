@@ -7,6 +7,7 @@ import path from "path";
 import { insertStudySchema, insertSeriesSchema, insertImageSchema, insertPacsConnectionSchema } from "@shared/schema";
 import { dicomNetworkService } from "./dicom-network";
 import { createSampleRTStructureSet, type RTStructureSet } from "./rt-structure-parser";
+import { uploadThoraxScan } from "./thorax-uploader";
 import { z } from "zod";
 
 // Configure multer for file uploads
@@ -604,6 +605,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error getting patient studies:", error);
       res.status(500).json({ error: "Failed to get patient studies" });
+    }
+  });
+
+  // THORAX_05 Radiotherapy Scan Integration
+  app.post("/api/populate-thorax", async (req, res) => {
+    try {
+      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
+      
+      if (!fs.existsSync(thoraxPath)) {
+        return res.status(404).json({ error: "THORAX_05 directory not found" });
+      }
+
+      // Create THORAX patient
+      const patient = await storage.createPatient({
+        patientID: "THORAX_05",
+        patientName: "Thorax RT Patient",
+        patientSex: "M",
+        patientAge: "65Y"
+      });
+
+      // Create THORAX study
+      const study = await storage.createStudy({
+        patientId: patient.id,
+        studyInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938850",
+        studyDate: "20220615",
+        studyDescription: "THORAX RT Planning Study",
+        accessionNumber: "THORAX_05_ACC"
+      });
+
+      // Process CT DICOM files
+      const ctFiles = fs.readdirSync(path.join(thoraxPath, 'DICOM'))
+        .filter(file => file.endsWith('.dcm'))
+        .sort();
+
+      if (ctFiles.length > 0) {
+        const ctSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938851",
+          seriesDescription: "CT Thorax Axial",
+          modality: "CT",
+          imageCount: ctFiles.length
+        });
+
+        // Create CT images
+        for (let i = 0; i < ctFiles.length; i++) {
+          await storage.createImage({
+            seriesId: ctSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938851.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: i * 5.0,
+            sliceThickness: "5.0",
+            rows: "512",
+            columns: "512",
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "40",
+            windowWidth: "400"
+          });
+        }
+      }
+
+      // Process RT Dose
+      const doseFiles = fs.readdirSync(path.join(thoraxPath, 'DOSE'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (doseFiles.length > 0) {
+        const doseSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938856",
+          seriesDescription: "RT Dose Distribution",
+          modality: "RTDOSE",
+          imageCount: doseFiles.length
+        });
+
+        for (let i = 0; i < doseFiles.length; i++) {
+          await storage.createImage({
+            seriesId: doseSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938856.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: 0,
+            sliceThickness: "5.0",
+            rows: "512",
+            columns: "512",
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "2000",
+            windowWidth: "4000"
+          });
+        }
+      }
+
+      // Process RT Plan
+      const planFiles = fs.readdirSync(path.join(thoraxPath, 'PLAN'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (planFiles.length > 0) {
+        const planSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938855",
+          seriesDescription: "RT Treatment Plan",
+          modality: "RTPLAN",
+          imageCount: planFiles.length
+        });
+
+        for (let i = 0; i < planFiles.length; i++) {
+          await storage.createImage({
+            seriesId: planSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938855.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: 0,
+            sliceThickness: "5.0",
+            rows: "512",
+            columns: "512",
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "100",
+            windowWidth: "200"
+          });
+        }
+      }
+
+      // Process RT Structure Set
+      const structureFiles = fs.readdirSync(path.join(thoraxPath, 'MIM'))
+        .filter(file => file.endsWith('.dcm'));
+
+      if (structureFiles.length > 0) {
+        const structureSeries = await storage.createSeries({
+          studyId: study.id,
+          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938857",
+          seriesDescription: "RT Structure Set",
+          modality: "RTSTRUCT",
+          imageCount: structureFiles.length
+        });
+
+        for (let i = 0; i < structureFiles.length; i++) {
+          await storage.createImage({
+            seriesId: structureSeries.id,
+            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938857.${i + 1}`,
+            instanceNumber: i + 1,
+            sliceLocation: 0,
+            sliceThickness: "5.0",
+            rows: "512",
+            columns: "512",
+            pixelSpacing: "0.976562\\0.976562",
+            windowCenter: "100",
+            windowWidth: "200"
+          });
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        message: "THORAX_05 radiotherapy data populated",
+        patient: patient.patientName,
+        ctImages: ctFiles.length,
+        doseFiles: doseFiles.length,
+        planFiles: planFiles.length,
+        structureFiles: structureFiles.length
+      });
+    } catch (error) {
+      console.error("Error populating THORAX data:", error);
+      res.status(500).json({ error: "Failed to populate THORAX data" });
     }
   });
 

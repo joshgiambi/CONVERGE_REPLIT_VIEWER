@@ -65,7 +65,6 @@ export async function uploadThoraxScan(): Promise<void> {
     patientId: patient.id,
     studyInstanceUID: '2.16.840.1.114362.1.11745409.22349166682.494938850',
     studyDate: '20220615',
-    studyTime: '143000',
     studyDescription: 'THORAX RT Planning Study',
     accessionNumber: 'THORAX_05_ACC',
     seriesCount: 0,
@@ -83,9 +82,7 @@ export async function uploadThoraxScan(): Promise<void> {
       seriesInstanceUID: '2.16.840.1.114362.1.11745409.22349166682.494938851',
       seriesDescription: 'CT Thorax Axial',
       modality: 'CT',
-      imageCount: ctFiles.length,
-      bodyPartExamined: 'CHEST',
-      protocolName: 'Thorax CT Protocol'
+      imageCount: ctFiles.length
     });
 
     // Process each CT image
