@@ -10,13 +10,10 @@ import NotFound from "@/pages/not-found";
 function Router() {
   return (
     <Switch>
+      <Route path="/" component={PatientManager} />
       <Route path="/new" component={PatientManager} />
       <Route path="/patients" component={PatientManager} />
       <Route path="/dicom-viewer" component={DICOMViewer} />
-      <Route path="/" component={() => {
-        window.location.href = '/new';
-        return null;
-      }} />
       <Route component={NotFound} />
     </Switch>
   );
