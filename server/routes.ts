@@ -637,22 +637,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DICOM image serving route
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
     try {
+      console.log(`Looking for DICOM image with SOP Instance UID: ${req.params.sopInstanceUID}`);
+      
       const image = await storage.getImageBySopInstanceUID(req.params.sopInstanceUID);
+      console.log(`Database lookup result:`, image ? `Found: ${image.fileName}` : 'Not found');
+      
       if (!image) {
-        return res.status(404).json({ message: "Image not found" });
+        return res.status(404).json({ message: "Image not found in database" });
       }
 
       const fs = await import('fs');
-      const path = await import('path');
-
+      
+      console.log(`Checking file path: ${image.filePath}`);
+      
       // Check if file exists
       if (!fs.existsSync(image.filePath)) {
+        console.log(`File does not exist at path: ${image.filePath}`);
         return res.status(404).json({ message: "DICOM file not found on disk" });
       }
 
+      console.log(`Serving DICOM file: ${image.fileName}`);
+
       // Set proper headers for DICOM
       res.setHeader('Content-Type', 'application/dicom');
-      res.setHeader('Content-Disposition', `attachment; filename="${image.fileName}"`);
+      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
       
       // Stream the DICOM file
       const fileStream = fs.createReadStream(image.filePath);
