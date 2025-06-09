@@ -248,6 +248,66 @@ export default function PatientManager() {
     },
   });
 
+  // THORAX_05 Radiotherapy mutation
+  const populateThoraxMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/populate-thorax', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error('Failed to load THORAX data');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
+      toast({
+        title: "THORAX RT Data Loaded",
+        description: `Successfully loaded ${data.ctImages} CT images, ${data.doseFiles} dose files, ${data.planFiles} plan files, and ${data.structureFiles} structure files`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to load THORAX data",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // LIMBIC_57 Multi-modal mutation
+  const populateLimbicMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('/api/populate-limbic', {
+        method: 'POST'
+      });
+      return response;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
+      toast({
+        title: "LIMBIC Neuro Data Loaded",
+        description: `Successfully loaded ${data.ctImages} CT images, ${data.mriImages} MRI images, ${data.regFiles} registration files, and ${data.structureFiles} structure files across ${data.studies} studies`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to load LIMBIC data",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const populateThorax = () => {
+    populateThoraxMutation.mutate();
+  };
+
+  const populateLimbic = () => {
+    populateLimbicMutation.mutate();
+  };
+
   // Filter patients and studies
   const filteredPatients = patients.filter(patient =>
     patient.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -467,6 +527,29 @@ export default function PatientManager() {
 
           {/* Patients Tab */}
           <TabsContent value="patients" className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Patient Management</h3>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={populateThorax}
+                  disabled={populateThoraxMutation.isPending}
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                  size="sm"
+                >
+                  <Activity className="w-4 h-4 mr-2" />
+                  {populateThoraxMutation.isPending ? "Loading..." : "Load THORAX RT"}
+                </Button>
+                <Button 
+                  onClick={populateLimbic}
+                  disabled={populateLimbicMutation.isPending}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  size="sm"
+                >
+                  <Network className="w-4 h-4 mr-2" />
+                  {populateLimbicMutation.isPending ? "Loading..." : "Load LIMBIC Neuro"}
+                </Button>
+              </div>
+            </div>
             {patientsLoading ? (
               <div className="text-center py-8">Loading patients...</div>
             ) : filteredPatients.length === 0 ? (
