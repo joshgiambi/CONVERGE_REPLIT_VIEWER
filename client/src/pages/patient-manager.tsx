@@ -112,6 +112,7 @@ export default function PatientManager() {
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
+  const [activeTab, setActiveTab] = useState("patients");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -384,10 +385,7 @@ export default function PatientManager() {
           <div className="flex gap-2">
             <Button 
               variant="outline"
-              onClick={() => {
-                const importTab = document.querySelector('[value="import"]') as HTMLElement;
-                importTab?.click();
-              }}
+              onClick={() => setActiveTab("import")}
             >
               <Upload className="h-4 w-4 mr-2" />
               Import DICOM
@@ -414,7 +412,7 @@ export default function PatientManager() {
           </div>
         </div>
 
-        <Tabs defaultValue="patients" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="patients" className="flex items-center gap-2">
               <User className="h-4 w-4" />
