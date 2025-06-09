@@ -51,10 +51,10 @@ export async function uploadLimbicScan(): Promise<void> {
     const allFiles = getAllDicomFiles(limbicPath);
     console.log(`Found ${allFiles.length} DICOM files total`);
 
-    // Parse metadata from all files and group by study/series
-    const studies = new Map<string, any>();
+    // Parse metadata from all files and group by authentic study/series UIDs
     const series = new Map<string, any>();
     let patientInfo: any = null;
+    let studyInfo: any = null;
 
     for (const filePath of allFiles) {
       try {
@@ -70,26 +70,20 @@ export async function uploadLimbicScan(): Promise<void> {
           };
         }
 
-        // Group by study UID
-        const studyUID = metadata.studyInstanceUID || generateUID();
-        if (!studies.has(studyUID)) {
-          studies.set(studyUID, {
-            studyInstanceUID: studyUID,
+        // Extract study info from first valid file
+        if (!studyInfo && metadata.studyInstanceUID) {
+          studyInfo = {
+            studyInstanceUID: metadata.studyInstanceUID,
             studyDate: metadata.studyDate || '20230215',
-            studyDescription: metadata.studyDescription || `${metadata.modality} Study`,
-            accessionNumber: `LIMBIC_${metadata.modality}_001`,
-            modality: metadata.modality || 'UN',
-            files: []
-          });
+            studyDescription: 'LIMBIC Neuroimaging Study - Multi-modal Brain Analysis',
+            accessionNumber: 'LIMBIC_57_001'
+          };
         }
-        studies.get(studyUID)!.files.push({ filePath, metadata });
 
-        // Group by series UID within study
-        const seriesUID = metadata.seriesInstanceUID || generateUID();
-        const seriesKey = `${studyUID}_${seriesUID}`;
-        if (!series.has(seriesKey)) {
-          series.set(seriesKey, {
-            studyUID,
+        // Group by authentic series UID
+        const seriesUID = metadata.seriesInstanceUID;
+        if (seriesUID && !series.has(seriesUID)) {
+          series.set(seriesUID, {
             seriesInstanceUID: seriesUID,
             seriesDescription: metadata.seriesDescription || `${metadata.modality} Series`,
             modality: metadata.modality || 'UN',
@@ -97,7 +91,9 @@ export async function uploadLimbicScan(): Promise<void> {
             files: []
           });
         }
-        series.get(seriesKey)!.files.push({ filePath, metadata });
+        if (seriesUID) {
+          series.get(seriesUID)!.files.push({ filePath, metadata });
+        }
 
       } catch (error) {
         console.log(`Could not parse ${path.basename(filePath)}: ${error}`);
@@ -115,7 +111,6 @@ export async function uploadLimbicScan(): Promise<void> {
     }
 
     console.log(`Patient: ${patientInfo.patientName} (${patientInfo.patientID})`);
-    console.log(`Studies found: ${studies.size}`);
     console.log(`Series found: ${series.size}`);
 
     // Create patient
@@ -126,52 +121,48 @@ export async function uploadLimbicScan(): Promise<void> {
       patientAge: patientInfo.patientAge
     });
 
-    // Create studies
-    for (const studyInfo of Array.from(studies.values())) {
-      const studySeries = Array.from(series.values()).filter(s => s.studyUID === studyInfo.studyInstanceUID);
-      const totalImages = studySeries.reduce((sum, s) => sum + s.files.length, 0);
+    // Create the single study
+    const totalImages = Array.from(series.values()).reduce((sum, s) => sum + s.files.length, 0);
+    const study = await storage.createStudy({
+      patientId: limbicPatient.id,
+      studyInstanceUID: studyInfo?.studyInstanceUID || generateUID(),
+      studyDate: studyInfo?.studyDate || '20230215',
+      studyDescription: studyInfo?.studyDescription || 'LIMBIC Neuroimaging Study',
+      accessionNumber: studyInfo?.accessionNumber || 'LIMBIC_57_001',
+      modality: 'MR', // Primary modality
+      numberOfSeries: series.size,
+      numberOfImages: totalImages,
+      isDemo: true
+    });
 
-      const study = await storage.createStudy({
-        patientId: limbicPatient.id,
-        studyInstanceUID: studyInfo.studyInstanceUID,
-        studyDate: studyInfo.studyDate,
-        studyDescription: studyInfo.studyDescription,
-        accessionNumber: studyInfo.accessionNumber,
-        modality: studyInfo.modality,
-        numberOfSeries: studySeries.length,
-        numberOfImages: totalImages,
-        isDemo: true
+    console.log(`Created study: ${study.studyDescription} - ${series.size} series, ${totalImages} images`);
+
+    // Create all series
+    for (const seriesInfo of Array.from(series.values())) {
+      const seriesData = await storage.createSeries({
+        studyId: study.id,
+        seriesInstanceUID: seriesInfo.seriesInstanceUID,
+        seriesDescription: seriesInfo.seriesDescription,
+        modality: seriesInfo.modality,
+        imageCount: seriesInfo.files.length,
+        seriesNumber: seriesInfo.seriesNumber
       });
 
-      console.log(`Created study: ${study.studyDescription} (${study.modality}) - ${studySeries.length} series, ${totalImages} images`);
+      console.log(`  Series: ${seriesData.seriesDescription} (${seriesData.modality}) - ${seriesInfo.files.length} files`);
 
-      // Create series for this study
-      for (const seriesInfo of studySeries) {
-        const seriesData = await storage.createSeries({
-          studyId: study.id,
-          seriesInstanceUID: seriesInfo.seriesInstanceUID,
-          seriesDescription: seriesInfo.seriesDescription,
-          modality: seriesInfo.modality,
-          imageCount: seriesInfo.files.length,
-          seriesNumber: seriesInfo.seriesNumber
+      // Create images for this series
+      for (let i = 0; i < seriesInfo.files.length; i++) {
+        const { filePath, metadata } = seriesInfo.files[i];
+        const fileName = path.basename(filePath);
+        
+        await storage.createImage({
+          seriesId: seriesData.id,
+          sopInstanceUID: metadata.sopInstanceUID || generateUID() + `.${i + 1}`,
+          filePath,
+          fileName,
+          instanceNumber: metadata.instanceNumber || (i + 1),
+          fileSize: fs.statSync(filePath).size
         });
-
-        console.log(`  Series: ${seriesData.seriesDescription} (${seriesData.modality}) - ${seriesInfo.files.length} images`);
-
-        // Create images for this series
-        for (let i = 0; i < seriesInfo.files.length; i++) {
-          const { filePath, metadata } = seriesInfo.files[i];
-          const fileName = path.basename(filePath);
-          
-          await storage.createImage({
-            seriesId: seriesData.id,
-            sopInstanceUID: metadata.sopInstanceUID || generateUID() + `.${i + 1}`,
-            filePath,
-            fileName,
-            instanceNumber: metadata.instanceNumber || (i + 1),
-            fileSize: fs.statSync(filePath).size
-          });
-        }
       }
     }
 
@@ -184,7 +175,7 @@ export async function uploadLimbicScan(): Promise<void> {
 
     console.log('LIMBIC scan uploaded successfully with authentic DICOM metadata:');
     for (const [modality, count] of Array.from(modalitySummary.entries())) {
-      console.log(`  ${modality}: ${count} images`);
+      console.log(`  ${modality}: ${count} files`);
     }
 
   } catch (error) {

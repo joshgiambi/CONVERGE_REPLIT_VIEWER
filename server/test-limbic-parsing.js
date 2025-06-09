@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const dcmjs = require('dcmjs');
+import fs from 'fs';
+import path from 'path';
+import * as dcmjs from 'dcmjs';
 
 function getAllDicomFiles(dirPath) {
   const files = [];
