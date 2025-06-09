@@ -615,11 +615,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
       
-      // Sort images by anatomical position for proper viewing order
-      const sortedImages = images.sort((a, b) => {
-        // Extract zPosition from metadata for anatomical sorting
-        const aZ = (a.metadata as any)?.zPosition ?? a.instanceNumber ?? 0;
-        const bZ = (b.metadata as any)?.zPosition ?? b.instanceNumber ?? 0;
+      // Sort images by anatomical position using ImagePositionPatient[2] for accuracy
+      const sortedImages = [...images].sort((a, b) => {
+        // Get Z-coordinates from imagePosition
+        const aZ = (a.imagePosition && Array.isArray(a.imagePosition) && a.imagePosition.length >= 3) 
+          ? parseFloat(a.imagePosition[2]) 
+          : a.instanceNumber ?? 0;
+        
+        const bZ = (b.imagePosition && Array.isArray(b.imagePosition) && b.imagePosition.length >= 3) 
+          ? parseFloat(b.imagePosition[2]) 
+          : b.instanceNumber ?? 0;
         
         // For head/neck CT: superior to inferior (higher Z to lower Z)
         return bZ - aZ;
