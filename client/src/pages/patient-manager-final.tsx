@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,9 +28,27 @@ interface Study {
 function PatientManagerFinal() {
   const [, setLocation] = useLocation();
 
-  const { data: patients, isLoading } = useQuery<Patient[]>({
-    queryKey: ['/api/patients'],
-  });
+  // Force cache invalidation
+  useEffect(() => {
+    // Clear all React Query cache
+    const queryClient = (window as any).queryClient;
+    if (queryClient) {
+      queryClient.clear();
+    }
+    // Force page reload if old interface is detected
+    const oldElements = document.querySelectorAll('[data-old-interface]');
+    if (oldElements.length > 0) {
+      window.location.reload();
+    }
+  }, []);
+
+  const { data: patients, isLoading } = useQuery({
+    queryKey: ['/api/patients', Date.now()],
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    gcTime: 0,
+  }) as { data: Patient[] | undefined, isLoading: boolean };
 
   const getModalityColor = (modality: string | null) => {
     switch (modality?.toUpperCase()) {
@@ -68,15 +86,15 @@ function PatientManagerFinal() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm">
+      {/* Header - Force Unique Rendering */}
+      <div className="bg-white border-b border-gray-200 shadow-sm" data-new-interface="true">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
                 CONVERGE
               </h1>
-              <p className="text-gray-600 mt-1">Medical DICOM Imaging Platform</p>
+              <p className="text-gray-600 mt-1">Medical DICOM Imaging Platform - New Interface {Date.now()}</p>
             </div>
             <Button className="bg-blue-600 hover:bg-blue-700">
               <Upload className="mr-2 h-4 w-4" />
@@ -98,7 +116,7 @@ function PatientManagerFinal() {
           <TabsContent value="patients" className="space-y-6">
             {patients && patients.length > 0 ? (
               <div className="space-y-6">
-                {patients.map((patient) => (
+                {patients.map((patient: Patient) => (
                   <Card key={patient.id} className="border-l-4 border-l-blue-500 shadow-lg hover:shadow-xl transition-shadow">
                     <CardHeader className="bg-blue-50 border-b">
                       <CardTitle className="flex items-center text-blue-900">
@@ -117,7 +135,7 @@ function PatientManagerFinal() {
                       <div className="space-y-4">
                         <h4 className="font-semibold text-gray-700 mb-3">Studies ({patient.studies.length})</h4>
                         <div className="grid gap-4">
-                          {patient.studies.map((study) => (
+                          {patient.studies.map((study: Study) => (
                             <Card key={study.id} className="border-l-4 border-l-green-500 bg-green-50">
                               <CardContent className="p-4">
                                 <div className="flex items-center justify-between">
