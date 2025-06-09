@@ -41,31 +41,46 @@ export default function DICOMViewer() {
   const [currentPatient, setCurrentPatient] = useState<any>(null);
   const [location, navigate] = useLocation();
 
-  // Extract studyId from URL parameters - use proper URL parsing
-  const urlParams = new URLSearchParams(location.split('?')[1] || '');
+  // Extract studyId from URL parameters - fix wouter URL parsing
+  const [, params] = location.split('?');
+  const urlParams = new URLSearchParams(params || '');
   const studyId = urlParams.get('studyId');
 
   console.log('DICOM Viewer location:', location);
+  console.log('URL parameters:', params);
   console.log('Study ID from URL:', studyId);
+  console.log('StudyId enabled for query:', !!studyId);
 
   // Fetch study data if studyId is provided
-  const { data: study, isLoading: studyLoading } = useQuery<Study>({
+  const { data: study, isLoading: studyLoading, error: studyError } = useQuery<Study>({
     queryKey: [`/api/studies/${studyId}`],
     queryFn: async () => {
+      console.log(`Fetching study data from: /api/studies/${studyId}`);
       const response = await fetch(`/api/studies/${studyId}`);
-      if (!response.ok) throw new Error('Failed to fetch study');
-      return response.json();
+      if (!response.ok) {
+        console.error('Failed to fetch study:', response.status, response.statusText);
+        throw new Error('Failed to fetch study');
+      }
+      const data = await response.json();
+      console.log('Study data received:', data);
+      return data;
     },
     enabled: !!studyId,
   });
 
   // Fetch series data for the study
-  const { data: seriesData, isLoading: seriesLoading } = useQuery<SeriesData[]>({
+  const { data: seriesData, isLoading: seriesLoading, error: seriesError } = useQuery<SeriesData[]>({
     queryKey: [`/api/studies/${studyId}/series`],
     queryFn: async () => {
+      console.log(`Fetching series data from: /api/studies/${studyId}/series`);
       const response = await fetch(`/api/studies/${studyId}/series`);
-      if (!response.ok) throw new Error('Failed to fetch series');
-      return response.json();
+      if (!response.ok) {
+        console.error('Failed to fetch series:', response.status, response.statusText);
+        throw new Error('Failed to fetch series');
+      }
+      const data = await response.json();
+      console.log('Series data received:', data);
+      return data;
     },
     enabled: !!studyId,
   });
@@ -225,6 +240,20 @@ export default function DICOMViewer() {
             <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-dicom-yellow mx-auto mb-4"></div>
             <h2 className="text-2xl font-bold text-white mb-2">Loading Study</h2>
             <p className="text-gray-400">Please wait while we load the DICOM data...</p>
+          </div>
+        ) : studyError || seriesError ? (
+          /* Error State */
+          <div className="max-w-4xl mx-auto py-16 text-center">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-red-500 text-2xl">!</span>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Error Loading Study</h2>
+            <p className="text-gray-400 mb-4">
+              {studyError?.message || seriesError?.message || 'Failed to load study data'}
+            </p>
+            <Button onClick={() => navigate('/')} variant="outline">
+              Return to Patient Manager
+            </Button>
           </div>
         ) : !studyData && !studyId ? (
           /* Upload Section */
