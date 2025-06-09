@@ -132,9 +132,9 @@ export async function uploadLimbicScan(): Promise<void> {
     });
 
     // Create studies and series in database
-    for (const [studyUID, studyInfo] of studies) {
-      const totalImages = Array.from(studyInfo.series.values())
-        .reduce((sum, series) => sum + series.files.length, 0);
+    for (const studyInfo of Array.from(studies.values())) {
+      const seriesArray = Array.from(studyInfo.series.values());
+      const totalImages = seriesArray.reduce((sum, series) => sum + series.files.length, 0);
 
       console.log(`Creating study: ${studyInfo.studyDescription} with ${studyInfo.series.size} series, ${totalImages} images`);
 
@@ -144,14 +144,14 @@ export async function uploadLimbicScan(): Promise<void> {
         studyDate: studyInfo.studyDate,
         studyDescription: studyInfo.studyDescription,
         accessionNumber: `LIMBIC_${studyInfo.studyInstanceUID.split('.').pop()}`,
-        modality: Array.from(studyInfo.series.values())[0]?.modality || 'MR',
+        modality: seriesArray[0]?.modality || 'MR',
         numberOfSeries: studyInfo.series.size,
         numberOfImages: totalImages,
         isDemo: true
       });
 
       // Create series
-      for (const [seriesUID, seriesInfo] of studyInfo.series) {
+      for (const seriesInfo of seriesArray) {
         console.log(`  Creating series: ${seriesInfo.seriesDescription} (${seriesInfo.modality}) - ${seriesInfo.files.length} images`);
 
         const series = await storage.createSeries({
@@ -193,15 +193,15 @@ export async function uploadLimbicScan(): Promise<void> {
 
     // Log final summary with modality breakdown
     const modalitySummary = new Map<string, number>();
-    for (const study of studies.values()) {
-      for (const series of study.series.values()) {
+    for (const study of Array.from(studies.values())) {
+      for (const series of Array.from(study.series.values())) {
         const current = modalitySummary.get(series.modality) || 0;
         modalitySummary.set(series.modality, current + series.files.length);
       }
     }
 
     console.log('LIMBIC scan uploaded successfully with authentic DICOM metadata:');
-    for (const [modality, count] of modalitySummary) {
+    for (const [modality, count] of Array.from(modalitySummary.entries())) {
       console.log(`  ${modality}: ${count} images`);
     }
 
