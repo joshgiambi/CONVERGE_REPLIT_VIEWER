@@ -164,19 +164,24 @@ export async function uploadLimbicScan(): Promise<void> {
 
       console.log(`  Series: ${seriesData.seriesDescription} (${seriesData.modality}) - ${seriesInfo.files.length} files`);
 
-      // Create images for this series
+      // Create images for this series (check for existing first)
       for (let i = 0; i < seriesInfo.files.length; i++) {
         const { filePath, metadata } = seriesInfo.files[i];
         const fileName = path.basename(filePath);
+        const sopUID = metadata.sopInstanceUID || generateUID() + `.${i + 1}`;
         
-        await storage.createImage({
-          seriesId: seriesData.id,
-          sopInstanceUID: metadata.sopInstanceUID || generateUID() + `.${i + 1}`,
-          filePath,
-          fileName,
-          instanceNumber: metadata.instanceNumber || (i + 1),
-          fileSize: fs.statSync(filePath).size
-        });
+        // Check if image already exists
+        const existingImage = await storage.getImageByUID(sopUID);
+        if (!existingImage) {
+          await storage.createImage({
+            seriesId: seriesData.id,
+            sopInstanceUID: sopUID,
+            filePath,
+            fileName,
+            instanceNumber: metadata.instanceNumber || (i + 1),
+            fileSize: fs.statSync(filePath).size
+          });
+        }
       }
     }
 
