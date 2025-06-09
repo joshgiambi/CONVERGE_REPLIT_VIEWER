@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,7 +24,7 @@ interface Study {
   accessionNumber: string | null;
 }
 
-function PatientManagerClean() {
+function MedicalDashboard() {
   const [, setLocation] = useLocation();
 
   const { data: patients, isLoading } = useQuery({
@@ -179,4 +178,4 @@ function PatientManagerClean() {
   );
 }
 
-export default PatientManagerClean;
+export default MedicalDashboard;

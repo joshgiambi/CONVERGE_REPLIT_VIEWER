@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DICOMViewer from "@/pages/dicom-viewer";
-import PatientManager from "@/pages/patient-manager-clean";
+import MedicalDashboard from "@/pages/medical-dashboard";
 import NotFound from "@/pages/not-found";
 
 function RedirectComponent() {
@@ -17,8 +17,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={RedirectComponent} />
-      <Route path="/patients-new" component={PatientManager} />
-      <Route path="/patients" component={PatientManager} />
+      <Route path="/patients-new" component={MedicalDashboard} />
+      <Route path="/patients" component={MedicalDashboard} />
       <Route path="/dicom-viewer" component={DICOMViewer} />
       <Route component={NotFound} />
     </Switch>
