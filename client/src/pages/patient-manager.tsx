@@ -453,19 +453,100 @@ export default function PatientManager() {
               </Card>
             ) : (
               <div className="space-y-4">
-                <div className="bg-blue-50 p-4 rounded-lg border">
-                  <h3 className="font-medium text-blue-900 mb-2">Debug: Component Status</h3>
-                  <p className="text-sm text-blue-700">
-                    Patients: {filteredPatients.length} | Studies: {studies.length}
-                  </p>
-                </div>
-                <PatientHierarchy 
-                  patients={filteredPatients} 
-                  studies={studies} 
-                  onViewSeries={(studyId: number, seriesId: number) => {
-                    window.open(`/dicom-viewer?studyId=${studyId}&seriesId=${seriesId}`, '_blank');
-                  }}
-                />
+                {/* Simple hierarchical view without complex components */}
+                {filteredPatients.map((patient) => {
+                  const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                  
+                  return (
+                    <Card key={patient.id} className="overflow-hidden">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <User className="h-5 w-5 text-blue-600" />
+                            <div>
+                              <CardTitle className="text-lg">
+                                {patient.patientName || "Unknown Patient"}
+                              </CardTitle>
+                              <div className="text-sm text-gray-500">
+                                ID: {patient.patientID}
+                                {patient.patientSex && ` • ${patient.patientSex}`}
+                                {patient.patientAge && ` • Age ${patient.patientAge}`}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">
+                              {patientStudies.length} studies
+                            </Badge>
+                            <Badge variant="outline">
+                              {patientStudies.reduce((sum, study) => sum + study.numberOfImages, 0)} images
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      
+                      <CardContent>
+                        <div className="space-y-3">
+                          {patientStudies.map((study) => (
+                            <Card key={study.id} className="border-l-4 border-l-blue-500">
+                              <CardHeader className="py-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <FileText className="h-4 w-4 text-green-600" />
+                                    <div>
+                                      <div className="font-medium">
+                                        {study.studyDescription || "Unknown Study"}
+                                      </div>
+                                      <div className="text-sm text-gray-500 flex items-center gap-2">
+                                        <Calendar className="h-3 w-3" />
+                                        {formatDate(study.studyDate)}
+                                        {study.accessionNumber && ` • Acc: ${study.accessionNumber}`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge className={`${
+                                      study.modality === 'CT' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                                      study.modality === 'MR' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                      study.modality === 'RTSTRUCT' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
+                                      study.modality === 'RTPLAN' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' :
+                                      study.modality === 'RTDOSE' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
+                                      'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                    }`}>
+                                      {study.modality}
+                                    </Badge>
+                                    <Badge variant="outline">
+                                      {study.numberOfSeries} series
+                                    </Badge>
+                                    <Badge variant="outline">
+                                      {study.numberOfImages} images
+                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        window.open(`/dicom-viewer?studyId=${study.id}`, '_blank');
+                                      }}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      View
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardHeader>
+                            </Card>
+                          ))}
+                          
+                          {patientStudies.length === 0 && (
+                            <div className="text-center py-4 text-gray-500">
+                              No studies found for this patient
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </TabsContent>
