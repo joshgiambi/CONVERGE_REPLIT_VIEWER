@@ -161,6 +161,3 @@ export type PacsConnection = typeof pacsConnections.$inferSelect;
 export type NetworkQuery = typeof networkQueries.$inferSelect;
 export type InsertPacsConnection = z.infer<typeof insertPacsConnectionSchema>;
 export type InsertNetworkQuery = z.infer<typeof insertNetworkQuerySchema>;
-
-// Re-export RT schema types
-export * from './rt-schema';

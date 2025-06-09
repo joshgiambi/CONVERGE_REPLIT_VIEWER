@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,6 @@ import {
   Play,
   Eye
 } from "lucide-react";
-
 
 interface Patient {
   id: number;
@@ -114,7 +113,6 @@ export default function PatientManager() {
   const [isQuerying, setIsQuerying] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [location, navigate] = useLocation();
 
   // Auto-populate demo data on component mount
   useEffect(() => {
@@ -250,66 +248,6 @@ export default function PatientManager() {
     },
   });
 
-  // THORAX_05 Radiotherapy mutation
-  const populateThoraxMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch('/api/populate-thorax', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (!response.ok) throw new Error('Failed to load THORAX data');
-      return response.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
-      toast({
-        title: "THORAX RT Data Loaded",
-        description: `Successfully loaded ${data.ctImages} CT images, ${data.doseFiles} dose files, ${data.planFiles} plan files, and ${data.structureFiles} structure files`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Failed to load THORAX data",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  // LIMBIC_57 Multi-modal mutation
-  const populateLimbicMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest('/api/populate-limbic', {
-        method: 'POST'
-      });
-      return response;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
-      toast({
-        title: "LIMBIC Neuro Data Loaded",
-        description: `Successfully loaded ${data.ctImages} CT images, ${data.mriImages} MRI images, ${data.regFiles} registration files, and ${data.structureFiles} structure files across ${data.studies} studies`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Failed to load LIMBIC data",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const populateThorax = () => {
-    populateThoraxMutation.mutate();
-  };
-
-  const populateLimbic = () => {
-    populateLimbicMutation.mutate();
-  };
-
   // Filter patients and studies
   const filteredPatients = patients.filter(patient =>
     patient.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -321,46 +259,6 @@ export default function PatientManager() {
     study.studyDescription?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     study.modality?.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "N/A";
-    const year = dateString.slice(0, 4);
-    const month = dateString.slice(4, 6);
-    const day = dateString.slice(6, 8);
-    return `${year}-${month}-${day}`;
-  };
-
-  const getModalityColor = (modality: string) => {
-    switch (modality) {
-      case 'CT':
-        return 'bg-blue-500/20 text-blue-400 border-blue-400';
-      case 'MR':
-      case 'MRI':
-        return 'bg-purple-500/20 text-purple-400 border-purple-400';
-      case 'RT':
-      case 'RTPLAN':
-        return 'bg-green-500/20 text-green-400 border-green-400';
-      case 'RTDOSE':
-        return 'bg-orange-500/20 text-orange-400 border-orange-400';
-      case 'RTSTRUCT':
-        return 'bg-pink-500/20 text-pink-400 border-pink-400';
-      case 'REG':
-        return 'bg-cyan-500/20 text-cyan-400 border-cyan-400';
-      case 'US':
-        return 'bg-teal-500/20 text-teal-400 border-teal-400';
-      case 'XA':
-      case 'DX':
-        return 'bg-yellow-500/20 text-yellow-400 border-yellow-400';
-      case 'NM':
-        return 'bg-red-500/20 text-red-400 border-red-400';
-      case 'PT':
-        return 'bg-indigo-500/20 text-indigo-400 border-indigo-400';
-      default:
-        return 'bg-gray-500/20 text-gray-400 border-gray-400';
-    }
-  };
 
   const handleCreatePacs = (data: z.infer<typeof pacsConnectionSchema>) => {
     createPacsMutation.mutate(data);
@@ -425,52 +323,59 @@ export default function PatientManager() {
     }
   };
 
-
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "Unknown";
+    try {
+      return new Date(dateString).toLocaleDateString();
+    } catch {
+      return dateString;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-black to-gray-700">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900">
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-5xl font-black tracking-wide mb-2" style={{ letterSpacing: '0.2em' }}>
+            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #22c55e',
+                WebkitTextStroke: '1px #22c55e',
                 fontWeight: '900'
               }}>C</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #10b981',
+                WebkitTextStroke: '1px #10b981',
                 fontWeight: '900'
               }}>O</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #3b82f6',
+                WebkitTextStroke: '1px #3b82f6',
                 fontWeight: '900'
               }}>N</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #2563eb',
+                WebkitTextStroke: '1px #2563eb',
                 fontWeight: '900'
               }}>V</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #6366f1',
+                WebkitTextStroke: '1px #6366f1',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #8b5cf6',
+                WebkitTextStroke: '1px #8b5cf6',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #a855f7',
+                WebkitTextStroke: '1px #a855f7',
                 fontWeight: '900'
               }}>G</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '3px #22c55e',
+                WebkitTextStroke: '1px #22c55e',
                 fontWeight: '900'
               }}>E</span>
             </h1>
@@ -518,7 +423,12 @@ export default function PatientManager() {
                 </div>
               </DialogContent>
             </Dialog>
-
+            <Link href="/dicom-viewer">
+              <Button>
+                <Eye className="h-4 w-4 mr-2" />
+                DICOM Viewer
+              </Button>
+            </Link>
           </div>
         </div>
 
@@ -557,9 +467,6 @@ export default function PatientManager() {
 
           {/* Patients Tab */}
           <TabsContent value="patients" className="space-y-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Patient Management</h3>
-            </div>
             {patientsLoading ? (
               <div className="text-center py-8">Loading patients...</div>
             ) : filteredPatients.length === 0 ? (
@@ -602,20 +509,12 @@ export default function PatientManager() {
                         size="sm"
                         className="w-full mt-4"
                         onClick={() => {
-                          console.log('Patient clicked:', patient);
-                          console.log('All studies:', studies);
-                          
                           // Filter studies for this patient and show them
-                          const patientStudies = studies.filter(study => study.patientId === patient.id);
-                          console.log('Patient studies found:', patientStudies);
-                          
+                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
                           if (patientStudies.length > 0) {
-                            const studyId = patientStudies[0].id;
-                            console.log('Navigating to studyId:', studyId);
-                            // Navigate to DICOM viewer with first study
-                            navigate(`/dicom-viewer?studyId=${studyId}`);
+                            // Navigate to DICOM viewer with the first study
+                            window.location.href = `/dicom-viewer?studyId=${patientStudies[0].id}`;
                           } else {
-                            console.log('No studies found for patient:', patient.id);
                             toast({
                               title: "No studies found",
                               description: `No studies found for patient ${patient.patientName}`,
@@ -645,79 +544,57 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-6">
-                {patients.map((patient) => {
-                  const patientStudies = filteredStudies.filter(study => study.patientId === patient.id);
-                  if (patientStudies.length === 0) return null;
-
-                  return (
-                    <div key={patient.id} className="border border-gray-700 rounded-lg p-4">
-                      <div className="mb-4">
-                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                          <User className="h-5 w-5" />
-                          {patient.patientName}
-                        </h3>
-                        <p className="text-gray-400 text-sm">ID: {patient.patientID} | {patient.patientSex} | Age: {patient.patientAge}</p>
+              <div className="grid gap-4">
+                {filteredStudies.map((study) => (
+                  <Card key={study.id} className="hover:shadow-lg transition-shadow">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-5 w-5" />
+                          {study.studyDescription || "Unnamed Study"}
+                        </div>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary">{study.modality}</Badge>
+                          {study.isDemo && <Badge variant="outline">Demo</Badge>}
+                        </div>
+                      </CardTitle>
+                      <CardDescription>
+                        Patient: {study.patientName} | ID: {study.patientID}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <div className="font-medium">Study Date</div>
+                          <div className="text-gray-500">{formatDate(study.studyDate)}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Series</div>
+                          <div className="text-gray-500">{study.numberOfSeries}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Images</div>
+                          <div className="text-gray-500">{study.numberOfImages}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Accession</div>
+                          <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
+                        </div>
                       </div>
-                      
-                      <div className="grid gap-4">
-                        {patientStudies.map((study) => (
-                          <Card key={study.id} className="hover:shadow-lg transition-shadow bg-gray-800/50">
-                            <CardHeader>
-                              <CardTitle className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="h-5 w-5" />
-                                  {study.studyDescription || "Unnamed Study"}
-                                </div>
-                                <div className="flex gap-2">
-                                  <Badge 
-                                    variant="secondary" 
-                                    className={getModalityColor(study.modality)}
-                                  >
-                                    {study.modality}
-                                  </Badge>
-                                  {study.isDemo && <Badge variant="outline">Demo</Badge>}
-                                </div>
-                              </CardTitle>
-                              <CardDescription>
-                                {formatDate(study.studyDate)}
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                                <div>
-                                  <div className="font-medium">Series</div>
-                                  <div className="text-gray-500">{study.numberOfSeries}</div>
-                                </div>
-                                <div>
-                                  <div className="font-medium">Images</div>
-                                  <div className="text-gray-500">{study.numberOfImages}</div>
-                                </div>
-                                <div>
-                                  <div className="font-medium">Accession</div>
-                                  <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
-                                </div>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
-                                onClick={() => {
-                                  console.log('View Study clicked for:', study);
-                                  console.log('Navigating to URL:', `/dicom-viewer?studyId=${study.id}`);
-                                  navigate(`/dicom-viewer?studyId=${study.id}`);
-                                }}
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Study
-                              </Button>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-4"
+                        onClick={() => {
+                          window.location.href = `/dicom-viewer?studyId=${study.id}`;
+                        }}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        View Study
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
           </TabsContent>
@@ -1034,8 +911,6 @@ export default function PatientManager() {
             </div>
           </TabsContent>
         </Tabs>
-
-
       </div>
     </div>
   );

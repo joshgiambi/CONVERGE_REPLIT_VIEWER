@@ -11,8 +11,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={PatientManager} />
-      <Route path="/patient-manager" component={PatientManager} />
       <Route path="/dicom-viewer" component={DICOMViewer} />
+      <Route path="/patients/:id/studies" component={PatientManager} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -22,10 +22,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
-          <Toaster />
-          <Router />
-        </div>
+        <Toaster />
+        <Router />
       </TooltipProvider>
     </QueryClientProvider>
   );

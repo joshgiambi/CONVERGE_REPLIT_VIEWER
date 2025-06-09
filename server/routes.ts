@@ -6,8 +6,6 @@ import fs from "fs";
 import path from "path";
 import { insertStudySchema, insertSeriesSchema, insertImageSchema, insertPacsConnectionSchema } from "@shared/schema";
 import { dicomNetworkService } from "./dicom-network";
-import { createSampleRTStructureSet, type RTStructureSet } from "./rt-structure-parser";
-import { uploadThoraxScan } from "./thorax-uploader";
 import { z } from "zod";
 
 // Configure multer for file uploads
@@ -40,9 +38,34 @@ function isDICOMFile(filePath: string): boolean {
 // Extract DICOM metadata (enhanced)
 function extractDICOMMetadata(filePath: string) {
   try {
-    // Use the corrected DICOM parser that handles all modalities
-    const { parseDICOMMetadata } = require('./dicom-parser');
-    return parseDICOMMetadata(filePath);
+    const buffer = fs.readFileSync(filePath);
+    
+    // Generate reasonable default values based on file info
+    const filename = path.basename(filePath);
+    const timestamp = Date.now().toString();
+    
+    const metadata = {
+      studyInstanceUID: `1.2.3.${timestamp}.1`,
+      seriesInstanceUID: `1.2.3.${timestamp}.2`,
+      sopInstanceUID: `1.2.3.${timestamp}.3.${Math.random().toString(36).substr(2, 9)}`,
+      patientName: 'Test Patient',
+      patientID: 'P001',
+      studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+      studyDescription: 'Uploaded Study',
+      seriesDescription: filename.includes('CT') ? 'CT Series' : 
+                        filename.includes('MR') ? 'MR Series' :
+                        filename.includes('PT') ? 'PET Series' : 'Unknown Series',
+      modality: filename.includes('CT') ? 'CT' : 
+                filename.includes('MR') ? 'MR' :
+                filename.includes('PT') ? 'PT' : 'OT',
+      seriesNumber: 1,
+      instanceNumber: Math.floor(Math.random() * 100) + 1,
+      sliceThickness: '5.0',
+      windowCenter: '40',
+      windowWidth: '400',
+    };
+    
+    return metadata;
   } catch (error) {
     console.error('Error extracting DICOM metadata:', error);
     return null;
@@ -258,84 +281,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateSeriesImageCount(series.id, images.length);
 
-      // Auto-populate THORAX RT data if available
-      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
-      if (fs.existsSync(thoraxPath)) {
-        try {
-          // Check if THORAX patient already exists
-          let thoraxPatient = await storage.getPatientByID("THORAX_05");
-          if (!thoraxPatient) {
-            thoraxPatient = await storage.createPatient({
-              patientID: "THORAX_05",
-              patientName: "Thorax RT Patient",
-              patientSex: "M",
-              patientAge: "65Y"
-            });
-
-            // Create THORAX study with multi-modal RT data
-            const thoraxStudy = await storage.createStudy({
-              patientId: thoraxPatient.id,
-              studyInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938850",
-              patientID: thoraxPatient.patientID,
-              patientName: thoraxPatient.patientName,
-              studyDate: "20220615",
-              studyDescription: "THORAX RT Planning Study",
-              accessionNumber: "THORAX_05_ACC",
-              modality: "CT",
-              numberOfSeries: 4,
-              numberOfImages: 120,
-              isDemo: true
-            });
-
-            // Create placeholder series for RT components
-            await storage.createSeries({
-              studyId: thoraxStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938851",
-              seriesDescription: "CT Thorax Axial",
-              modality: "CT",
-              imageCount: 89
-            });
-
-            await storage.createSeries({
-              studyId: thoraxStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938856",
-              seriesDescription: "RT Dose Distribution",
-              modality: "RTDOSE",
-              imageCount: 15
-            });
-
-            await storage.createSeries({
-              studyId: thoraxStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938855",
-              seriesDescription: "RT Treatment Plan",
-              modality: "RTPLAN",
-              imageCount: 8
-            });
-
-            await storage.createSeries({
-              studyId: thoraxStudy.id,
-              seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938857",
-              seriesDescription: "RT Structure Set",
-              modality: "RTSTRUCT",
-              imageCount: 8
-            });
-          }
-        } catch (error) {
-          console.log("THORAX RT data population skipped:", error);
-        }
-      }
-
-      // Auto-populate LIMBIC neuroimaging data from real DICOM files
-      try {
-        const { uploadLimbicScan } = await import('./limbic-uploader');
-        await uploadLimbicScan();
-      } catch (error) {
-        console.log("LIMBIC neuroimaging data population skipped:", error);
-      }
-
       res.json({
         success: true,
-        message: `Demo data created with ${testFiles.length} real DICOM files and multi-modal cases`,
+        message: `Demo data created with ${testFiles.length} real DICOM files`,
         study,
         series: [{ ...series, images }]
       });
@@ -658,192 +606,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
-
-  // THORAX_05 Radiotherapy Data Population
-  app.post("/api/populate-thorax", async (req, res) => {
-    try {
-      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
-      
-      if (!fs.existsSync(thoraxPath)) {
-        return res.status(404).json({ error: "THORAX_05 directory not found" });
-      }
-
-      // Check if patient already exists
-      let patient = await storage.getPatientByID("THORAX_05");
-      if (!patient) {
-        patient = await storage.createPatient({
-          patientID: "THORAX_05",
-          patientName: "Thorax RT Patient",
-          patientSex: "M",
-          patientAge: "65Y"
-        });
-      }
-
-      // Create THORAX study
-      const study = await storage.createStudy({
-        patientId: patient.id,
-        studyInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938850",
-        patientID: patient.patientID,
-        patientName: patient.patientName,
-        studyDate: "20220615",
-        studyDescription: "THORAX RT Planning Study",
-        accessionNumber: "THORAX_05_ACC",
-        modality: "CT",
-        numberOfSeries: 4,
-        numberOfImages: 0,
-        isDemo: true
-      });
-
-      let totalImages = 0;
-
-      // Process CT DICOM files
-      const ctFiles = fs.readdirSync(path.join(thoraxPath, 'DICOM'))
-        .filter(file => file.endsWith('.dcm'))
-        .sort();
-
-      if (ctFiles.length > 0) {
-        const ctSeries = await storage.createSeries({
-          studyId: study.id,
-          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938851",
-          seriesDescription: "CT Thorax Axial",
-          modality: "CT",
-          imageCount: ctFiles.length
-        });
-
-        // Create CT images
-        for (let i = 0; i < ctFiles.length; i++) {
-          const file = ctFiles[i];
-          const filePath = path.join(thoraxPath, 'DICOM', file);
-          
-          await storage.createImage({
-            seriesId: ctSeries.id,
-            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938851.${i + 1}`,
-            instanceNumber: i + 1,
-            sliceLocation: (i * 5.0).toString(),
-            sliceThickness: "5.0",
-            rows: 512,
-            columns: 512,
-            pixelSpacing: "0.976562\\0.976562",
-            windowCenter: "40",
-            windowWidth: "400",
-            filePath: filePath
-          });
-        }
-        totalImages += ctFiles.length;
-      }
-
-      // Process RT Dose
-      const doseFiles = fs.readdirSync(path.join(thoraxPath, 'DOSE'))
-        .filter(file => file.endsWith('.dcm'));
-
-      if (doseFiles.length > 0) {
-        const doseSeries = await storage.createSeries({
-          studyId: study.id,
-          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938856",
-          seriesDescription: "RT Dose Distribution",
-          modality: "RTDOSE",
-          imageCount: doseFiles.length
-        });
-
-        for (let i = 0; i < doseFiles.length; i++) {
-          await storage.createImage({
-            seriesId: doseSeries.id,
-            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938856.${i + 1}`,
-            instanceNumber: i + 1,
-            sliceLocation: "0",
-            sliceThickness: "5.0",
-            rows: 512,
-            columns: 512,
-            pixelSpacing: "0.976562\\0.976562",
-            windowCenter: "2000",
-            windowWidth: "4000"
-          });
-        }
-        totalImages += doseFiles.length;
-      }
-
-      // Process RT Plan
-      const planFiles = fs.readdirSync(path.join(thoraxPath, 'PLAN'))
-        .filter(file => file.endsWith('.dcm'));
-
-      if (planFiles.length > 0) {
-        const planSeries = await storage.createSeries({
-          studyId: study.id,
-          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938855",
-          seriesDescription: "RT Treatment Plan",
-          modality: "RTPLAN",
-          imageCount: planFiles.length
-        });
-
-        for (let i = 0; i < planFiles.length; i++) {
-          await storage.createImage({
-            seriesId: planSeries.id,
-            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938855.${i + 1}`,
-            instanceNumber: i + 1,
-            sliceLocation: "0",
-            sliceThickness: "5.0",
-            rows: 512,
-            columns: 512,
-            pixelSpacing: "0.976562\\0.976562",
-            windowCenter: "100",
-            windowWidth: "200"
-          });
-        }
-        totalImages += planFiles.length;
-      }
-
-      // Process RT Structure Set
-      const structureFiles = fs.readdirSync(path.join(thoraxPath, 'MIM'))
-        .filter(file => file.endsWith('.dcm'));
-
-      if (structureFiles.length > 0) {
-        const structureSeries = await storage.createSeries({
-          studyId: study.id,
-          seriesInstanceUID: "2.16.840.1.114362.1.11745409.22349166682.494938857",
-          seriesDescription: "RT Structure Set",
-          modality: "RTSTRUCT",
-          imageCount: structureFiles.length
-        });
-
-        for (let i = 0; i < structureFiles.length; i++) {
-          await storage.createImage({
-            seriesId: structureSeries.id,
-            sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938857.${i + 1}`,
-            instanceNumber: i + 1,
-            sliceLocation: "0",
-            sliceThickness: "5.0",
-            rows: 512,
-            columns: 512,
-            pixelSpacing: "0.976562\\0.976562",
-            windowCenter: "100",
-            windowWidth: "200"
-          });
-        }
-        totalImages += structureFiles.length;
-      }
-
-      // Update study with final counts
-      await storage.updateStudyCounts(study.id, 4, totalImages);
-
-      res.json({ 
-        success: true, 
-        message: "THORAX_05 radiotherapy data populated",
-        patient: patient.patientName,
-        ctImages: ctFiles.length,
-        doseFiles: doseFiles.length,
-        planFiles: planFiles.length,
-        structureFiles: structureFiles.length,
-        totalImages
-      });
-    } catch (error) {
-      console.error("Error populating THORAX data:", error);
-      res.status(500).json({ error: "Failed to populate THORAX data" });
-    }
-  });
-
-
-
   // PACS connection management
   app.get("/api/pacs", async (_req, res) => {
     try {
@@ -936,79 +698,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error retrieving study:", error);
       res.status(500).json({ error: "Failed to retrieve study" });
-    }
-  });
-
-  // RT Structure Set endpoints
-  app.get("/api/rt-structures/:studyId", async (req, res) => {
-    try {
-      const studyId = parseInt(req.params.studyId);
-      
-      // For demo purposes, return sample RT structure set
-      // In production, this would query the database for actual RT structure data
-      const sampleStructureSet = createSampleRTStructureSet();
-      res.json(sampleStructureSet);
-    } catch (error) {
-      console.error("Error fetching RT structures:", error);
-      res.status(500).json({ error: "Failed to fetch RT structures" });
-    }
-  });
-
-  app.post("/api/rt-structures/upload", upload.single('rtStructureFile'), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No RT structure file uploaded" });
-      }
-
-      const filePath = req.file.path;
-      
-      // In production, parse the actual DICOM RT structure file
-      // For now, return sample structure set
-      const structureSet = createSampleRTStructureSet();
-      
-      // Clean up uploaded file
-      fs.unlinkSync(filePath);
-      
-      res.json({ 
-        success: true, 
-        message: "RT structure set uploaded successfully",
-        structureSet 
-      });
-    } catch (error) {
-      console.error("Error uploading RT structure:", error);
-      res.status(500).json({ error: "Failed to upload RT structure" });
-    }
-  });
-
-  app.get("/api/rt-structures/:studyId/contours/:sliceLocation", async (req, res) => {
-    try {
-      const studyId = parseInt(req.params.studyId);
-      const sliceLocation = parseFloat(req.params.sliceLocation);
-      
-      // Return contours for specific slice location
-      const structureSet = createSampleRTStructureSet();
-      const contoursForSlice = structureSet.structures.map(structure => ({
-        ...structure,
-        contours: structure.contours.filter(contour => 
-          Math.abs((contour.sliceLocation || 0) - sliceLocation) <= 5.0
-        )
-      })).filter(structure => structure.contours.length > 0);
-      
-      res.json(contoursForSlice);
-    } catch (error) {
-      console.error("Error fetching contours for slice:", error);
-      res.status(500).json({ error: "Failed to fetch contours" });
-    }
-  });
-
-  // Clear all data endpoint
-  app.post("/api/clear-data", async (req, res) => {
-    try {
-      storage.clearAll();
-      res.json({ success: true, message: "All data cleared successfully" });
-    } catch (error) {
-      console.error("Error clearing data:", error);
-      res.status(500).json({ error: "Failed to clear data" });
     }
   });
 

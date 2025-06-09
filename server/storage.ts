@@ -328,9 +328,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   clearAll(): void {
-    // For development purposes - clear all demo data
-    // In production, use proper migration tools
-    console.log('Clearing all data (development mode)');
+    // This would be implemented as database truncation
+    throw new Error('Database clearAll not implemented - use proper migration tools');
   }
 }
 

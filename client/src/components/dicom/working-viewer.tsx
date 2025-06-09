@@ -3,10 +3,6 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { MeasurementOverlay } from './measurement-overlay';
-import { PixelProbe } from './pixel-probe';
-import { CineControls } from './cine-controls';
-import { ImageHistogram } from './image-histogram';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -15,20 +11,9 @@ interface WorkingViewerProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onResetZoom?: () => void;
-  showPixelProbe?: boolean;
-  showCineControls?: boolean;
 }
 
-export function WorkingViewer({ 
-  seriesId, 
-  windowLevel: externalWindowLevel, 
-  onWindowLevelChange, 
-  onZoomIn, 
-  onZoomOut, 
-  onResetZoom,
-  showPixelProbe = false,
-  showCineControls = true 
-}: WorkingViewerProps) {
+export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -56,8 +41,6 @@ export function WorkingViewer({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
-  const [showHistogram, setShowHistogram] = useState(false);
-  const [currentImageData, setCurrentImageData] = useState<{ data: Float32Array; width: number; height: number } | undefined>();
 
 
   useEffect(() => {
@@ -217,9 +200,6 @@ export function WorkingViewer({
       canvas.width = 1024;
       canvas.height = 1024;
       
-      // Store current image data for other components
-      setCurrentImageData(imageData);
-      
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
@@ -280,9 +260,9 @@ export function WorkingViewer({
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
     
-    // Calculate fit-to-window scaling (don't exceed canvas bounds)
-    const fitScale = Math.min(canvasWidth / width, canvasHeight / height);
-    const totalScale = fitScale * zoom;
+    // Calculate base scaling to fill the entire canvas
+    const baseScale = Math.max(canvasWidth / width, canvasHeight / height);
+    const totalScale = baseScale * zoom;
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
     
@@ -290,9 +270,7 @@ export function WorkingViewer({
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
-    // Use high-quality image scaling for better appearance
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingEnabled = false; // Keep crisp pixels for medical imaging
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
@@ -413,12 +391,14 @@ export function WorkingViewer({
 
   // Expose zoom functions to parent component via imperative handle
   useEffect(() => {
-    // Store functions globally for toolbar access
-    (window as any).currentViewerZoom = {
-      zoomIn: handleZoomIn,
-      zoomOut: handleZoomOut,
-      resetZoom: handleResetZoom
-    };
+    if (onZoomIn || onZoomOut || onResetZoom) {
+      // Store functions globally for toolbar access
+      (window as any).currentViewerZoom = {
+        zoomIn: handleZoomIn,
+        zoomOut: handleZoomOut,
+        resetZoom: handleResetZoom
+      };
+    }
     
     return () => {
       delete (window as any).currentViewerZoom;
@@ -538,34 +518,11 @@ export function WorkingViewer({
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
           </div>
 
-          {/* Professional imaging overlays */}
-          <PixelProbe
-            canvasRef={canvasRef}
-            imageData={currentImageData}
-            isActive={showPixelProbe}
-            windowLevel={{ window: currentWindowLevel.width, level: currentWindowLevel.center }}
-          />
 
-          {/* Image Histogram */}
-          <ImageHistogram
-            imageData={currentImageData}
-            windowLevel={{ window: currentWindowLevel.width, level: currentWindowLevel.center }}
-            isVisible={showHistogram}
-            onClose={() => setShowHistogram(false)}
-          />
+
 
         </div>
       </div>
-
-      {/* Cine Controls for multi-image series */}
-      {showCineControls && images.length > 1 && (
-        <CineControls
-          totalImages={images.length}
-          currentIndex={currentIndex}
-          onImageChange={setCurrentIndex}
-          isVisible={true}
-        />
-      )}
 
     </Card>
   );

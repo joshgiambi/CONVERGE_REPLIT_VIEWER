@@ -4,9 +4,6 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
-import { WindowLevelPresets } from './window-level-presets';
-import { RTStructureManager, type RTStructureSet } from './rt-structure-manager';
-import { RTStructureOverlay } from './rt-structure-overlay';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { Button } from '@/components/ui/button';
@@ -21,11 +18,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
-  const [showWindowLevelPresets, setShowWindowLevelPresets] = useState(false);
-  const [activeToolState, setActiveToolState] = useState<string>('');
-  const [measurementMode, setMeasurementMode] = useState<'distance' | 'angle' | 'area'>('distance');
-  const [selectedRTStructureSet, setSelectedRTStructureSet] = useState<RTStructureSet | undefined>();
-  const [showRTStructures, setShowRTStructures] = useState(false);
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -116,7 +108,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-  const setCornerstoneTool = (toolName: string) => {
+  const setActiveTool = (toolName: string) => {
     try {
       const cornerstoneTools = cornerstoneConfig.getCornerstoneTools();
       const elements = document.querySelectorAll('.cornerstone-viewport');
@@ -131,43 +123,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-  const handlePanTool = () => {
-    setCornerstoneTool('Pan');
-    setActiveToolState('pan');
-  };
-  
-  const handleMeasureTool = () => {
-    setCornerstoneTool('Length');
-    setActiveToolState('measure');
-  };
-  
-  const handleAnnotateTool = () => {
-    setCornerstoneTool('ArrowAnnotate');
-    setActiveToolState('annotate');
-  };
-
-  const handleWindowLevelPresetOpen = () => {
-    setShowWindowLevelPresets(true);
-  };
-
-  const handleRTStructureSetSelect = (structureSet: RTStructureSet) => {
-    setSelectedRTStructureSet(structureSet);
-    setShowRTStructures(true);
-  };
-
-  const handleRTStructureVisibilityChange = (roiNumber: number, visible: boolean) => {
-    if (selectedRTStructureSet) {
-      const updatedStructures = selectedRTStructureSet.structures.map(structure => 
-        structure.roiNumber === roiNumber 
-          ? { ...structure, isVisible: visible }
-          : structure
-      );
-      setSelectedRTStructureSet({
-        ...selectedRTStructureSet,
-        structures: updatedStructures
-      });
-    }
-  };
+  const handlePanTool = () => setActiveTool('Pan');
+  const handleMeasureTool = () => setActiveTool('Length');
+  const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
 
   const handleRotate = () => {
     try {
@@ -220,7 +178,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
 
   return (
     <div className="animate-in fade-in-50 duration-500">
-      <div className="grid grid-cols-1 lg:grid-cols-6 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
         <div className="lg:col-span-1">
@@ -233,37 +191,14 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           />
         </div>
 
-        {/* RT Structure Manager */}
-        <div className="lg:col-span-1">
-          <RTStructureManager
-            studyId={studyData.studies[0]?.id}
-            onStructureSetSelect={handleRTStructureSetSelect}
-            selectedStructureSet={selectedRTStructureSet}
-          />
-        </div>
-
         {/* DICOM Viewer */}
-        <div className="lg:col-span-4 relative">
+        <div className="lg:col-span-3">
           {selectedSeries ? (
-            <div className="relative h-full">
-              <WorkingViewer 
-                seriesId={selectedSeries.id} 
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-              />
-              
-              {/* RT Structure Overlay */}
-              {selectedRTStructureSet && showRTStructures && (
-                <RTStructureOverlay
-                  canvasRef={null} // Will be connected to the working viewer canvas
-                  structures={selectedRTStructureSet.structures}
-                  currentSliceLocation={0} // Will be updated with actual slice location
-                  isVisible={showRTStructures}
-                  onStructureVisibilityChange={handleRTStructureVisibilityChange}
-                  onClose={() => setShowRTStructures(false)}
-                />
-              )}
-            </div>
+            <WorkingViewer 
+              seriesId={selectedSeries.id} 
+              windowLevel={windowLevel}
+              onWindowLevelChange={setWindowLevel}
+            />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>
@@ -288,14 +223,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           windowLevel={windowLevel}
         />
       )}
-
-      {/* Window/Level Presets Modal */}
-      <WindowLevelPresets
-        currentWindowLevel={windowLevel}
-        onWindowLevelChange={setWindowLevel}
-        isVisible={showWindowLevelPresets}
-        onClose={() => setShowWindowLevelPresets(false)}
-      />
 
       {/* Error Modal */}
       <ErrorModal
