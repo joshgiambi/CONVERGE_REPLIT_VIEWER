@@ -11,8 +11,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={PatientManager} />
-      <Route path="/dicom-viewer" component={DICOMViewer} />
-      <Route path="/patients/:id/studies" component={PatientManager} />
+      <Route path="/patient-manager" component={PatientManager} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -109,6 +109,7 @@ const querySchema = z.object({
 export default function PatientManager() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
+  const [selectedStudy, setSelectedStudy] = useState<Study | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const { toast } = useToast();
@@ -529,26 +530,6 @@ export default function PatientManager() {
           <TabsContent value="patients" className="space-y-4">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Patient Management</h3>
-              <div className="flex gap-2">
-                <Button 
-                  onClick={populateThorax}
-                  disabled={populateThoraxMutation.isPending}
-                  className="bg-purple-600 hover:bg-purple-700 text-white"
-                  size="sm"
-                >
-                  <Activity className="w-4 h-4 mr-2" />
-                  {populateThoraxMutation.isPending ? "Loading..." : "Load THORAX RT"}
-                </Button>
-                <Button 
-                  onClick={populateLimbic}
-                  disabled={populateLimbicMutation.isPending}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                  size="sm"
-                >
-                  <Network className="w-4 h-4 mr-2" />
-                  {populateLimbicMutation.isPending ? "Loading..." : "Load LIMBIC Neuro"}
-                </Button>
-              </div>
             </div>
             {patientsLoading ? (
               <div className="text-center py-8">Loading patients...</div>
@@ -669,7 +650,8 @@ export default function PatientManager() {
                         size="sm"
                         className="w-full mt-4"
                         onClick={() => {
-                          window.location.href = `/dicom-viewer?studyId=${study.id}`;
+                          // Navigate to integrated DICOM viewer within patient manager
+                          setSelectedStudy(study);
                         }}
                       >
                         <Eye className="h-4 w-4 mr-2" />
