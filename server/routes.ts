@@ -533,15 +533,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/patients", async (req, res) => {
     try {
       const patients = await storage.getAllPatients();
-      const studies = await storage.getAllStudies();
-      
-      // Build hierarchical structure: patients with nested studies
-      const patientsWithStudies = patients.map(patient => ({
-        ...patient,
-        studies: studies.filter(study => study.patientId === patient.id)
-      }));
-      
-      res.json(patientsWithStudies);
+      res.json(patients);
     } catch (error) {
       console.error('Error fetching patients:', error);
       res.status(500).json({ message: "Failed to fetch patients" });
@@ -605,17 +597,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all series
-  app.get("/api/series", async (req, res) => {
-    try {
-      const series = await storage.getAllSeries();
-      res.json(series);
-    } catch (error) {
-      console.error('Error fetching all series:', error);
-      res.status(500).json({ message: "Failed to fetch series" });
-    }
-  });
-
   // Series routes
   app.get("/api/series/:id", async (req, res) => {
     try {
@@ -633,51 +614,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/series/:id/images", async (req, res) => {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
-      
-      console.log(`Returning ${images.length} images for series ${req.params.id}, database-sorted`);
-      
       res.json(images);
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });
-    }
-  });
-
-  // DICOM image serving route
-  app.get("/api/images/:sopInstanceUID", async (req, res) => {
-    try {
-      console.log(`Looking for DICOM image with SOP Instance UID: ${req.params.sopInstanceUID}`);
-      
-      const image = await storage.getImageBySopInstanceUID(req.params.sopInstanceUID);
-      console.log(`Database lookup result:`, image ? `Found: ${image.fileName}` : 'Not found');
-      
-      if (!image) {
-        return res.status(404).json({ message: "Image not found in database" });
-      }
-
-      const fs = await import('fs');
-      
-      console.log(`Checking file path: ${image.filePath}`);
-      
-      // Check if file exists
-      if (!fs.existsSync(image.filePath)) {
-        console.log(`File does not exist at path: ${image.filePath}`);
-        return res.status(404).json({ message: "DICOM file not found on disk" });
-      }
-
-      console.log(`Serving DICOM file: ${image.fileName}`);
-
-      // Set proper headers for DICOM
-      res.setHeader('Content-Type', 'application/dicom');
-      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
-      
-      // Stream the DICOM file
-      const fileStream = fs.createReadStream(image.filePath);
-      fileStream.pipe(res);
-
-    } catch (error) {
-      console.error('Error serving DICOM image:', error);
-      res.status(500).json({ message: "Failed to serve DICOM image" });
     }
   });
 

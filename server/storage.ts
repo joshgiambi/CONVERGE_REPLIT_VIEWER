@@ -1,6 +1,6 @@
 import { studies, series, images, patients, pacsConnections, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
   // Patient operations
@@ -20,14 +20,12 @@ export interface IStorage {
   createSeries(series: InsertSeries): Promise<Series>;
   getSeries(id: number): Promise<Series | undefined>;
   getSeriesByUID(seriesInstanceUID: string): Promise<Series | undefined>;
-  getAllSeries(): Promise<Series[]>;
   getSeriesByStudyId(studyId: number): Promise<Series[]>;
 
   // Image operations
   createImage(image: InsertImage): Promise<DicomImage>;
   getImage(id: number): Promise<DicomImage | undefined>;
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
-  getImageBySopInstanceUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
   
   // PACS operations
@@ -253,10 +251,6 @@ export class DatabaseStorage implements IStorage {
     return seriesData || undefined;
   }
 
-  async getAllSeries(): Promise<Series[]> {
-    return await db.select().from(series);
-  }
-
   async getSeriesByStudyId(studyId: number): Promise<Series[]> {
     return await db.select().from(series).where(eq(series.studyId, studyId));
   }
@@ -280,20 +274,8 @@ export class DatabaseStorage implements IStorage {
     return image || undefined;
   }
 
-  async getImageBySopInstanceUID(sopInstanceUID: string): Promise<DicomImage | undefined> {
-    const [image] = await db.select().from(images).where(eq(images.sopInstanceUID, sopInstanceUID));
-    return image || undefined;
-  }
-
   async getImagesBySeriesId(seriesId: number): Promise<DicomImage[]> {
-    // Get images ordered by instance number - client will handle anatomical sorting
-    const result = await db
-      .select()
-      .from(images)
-      .where(eq(images.seriesId, seriesId))
-      .orderBy(images.instanceNumber);
-    
-    return result;
+    return await db.select().from(images).where(eq(images.seriesId, seriesId));
   }
 
   // PACS operations

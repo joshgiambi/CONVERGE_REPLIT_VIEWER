@@ -3,16 +3,15 @@ import { storage } from "./storage";
 import * as fs from "fs";
 import * as path from "path";
 import multer from "multer";
-import { setupVite } from "./vite";
-import { createServer } from "http";
 
 const app = express();
-const server = createServer(app);
-
 app.use(express.json());
 
 // Setup multer for file uploads
 const upload = multer({ dest: 'uploads/' });
+
+// Serve static files from client/dist
+app.use(express.static(path.join(process.cwd(), 'client/dist')));
 
 function isDICOMFile(filePath: string): boolean {
   try {
@@ -146,15 +145,7 @@ app.post("/api/upload", upload.array('dicomFiles'), async (req, res) => {
 app.get("/api/patients", async (req, res) => {
   try {
     const patients = await storage.getAllPatients();
-    const studies = await storage.getAllStudies();
-    
-    // Build hierarchical structure: patients with nested studies
-    const patientsWithStudies = patients.map(patient => ({
-      ...patient,
-      studies: studies.filter(study => study.patientId === patient.id)
-    }));
-    
-    res.json(patientsWithStudies);
+    res.json(patients);
   } catch (error) {
     console.error('Error fetching patients:', error);
     res.status(500).json({ message: "Failed to fetch patients" });
@@ -208,42 +199,6 @@ app.get("/api/studies/:id/series", async (req, res) => {
   }
 });
 
-// Get all series
-app.get("/api/series", async (req, res) => {
-  try {
-    const series = await storage.getAllSeries();
-    res.json(series);
-  } catch (error) {
-    console.error('Error fetching all series:', error);
-    res.status(500).json({ message: "Failed to fetch series" });
-  }
-});
-
-// Series routes
-app.get("/api/series/:id", async (req, res) => {
-  try {
-    const series = await storage.getSeries(parseInt(req.params.id));
-    if (!series) {
-      return res.status(404).json({ message: "Series not found" });
-    }
-    res.json(series);
-  } catch (error) {
-    console.error('Error fetching series:', error);
-    res.status(500).json({ message: "Failed to fetch series" });
-  }
-});
-
-app.get("/api/series/:id/images", async (req, res) => {
-  try {
-    const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
-    console.log(`Returning ${images.length} images for series ${req.params.id}, database-sorted`);
-    res.json(images);
-  } catch (error) {
-    console.error('Error fetching images:', error);
-    res.status(500).json({ message: "Failed to fetch images" });
-  }
-});
-
 // Series routes
 app.get("/api/series/:id", async (req, res) => {
   try {
@@ -287,13 +242,13 @@ app.get("/api/pacs", async (req, res) => {
   }
 });
 
-// Setup Vite for development
-if (process.env.NODE_ENV === "development") {
-  setupVite(app, server);
-}
+// Serve React app for all other routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'client/dist/index.html'));
+});
 
 const PORT = Number(process.env.PORT) || 5000;
-server.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 HN-ATLAS dataset loaded with 153 CT slices`);
   console.log(`📤 DICOM upload functionality enabled`);
