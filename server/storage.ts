@@ -20,6 +20,7 @@ export interface IStorage {
   createSeries(series: InsertSeries): Promise<Series>;
   getSeries(id: number): Promise<Series | undefined>;
   getSeriesByUID(seriesInstanceUID: string): Promise<Series | undefined>;
+  getAllSeries(): Promise<Series[]>;
   getSeriesByStudyId(studyId: number): Promise<Series[]>;
 
   // Image operations
@@ -250,6 +251,10 @@ export class DatabaseStorage implements IStorage {
   async getSeriesByUID(seriesInstanceUID: string): Promise<Series | undefined> {
     const [seriesData] = await db.select().from(series).where(eq(series.seriesInstanceUID, seriesInstanceUID));
     return seriesData || undefined;
+  }
+
+  async getAllSeries(): Promise<Series[]> {
+    return await db.select().from(series);
   }
 
   async getSeriesByStudyId(studyId: number): Promise<Series[]> {
