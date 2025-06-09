@@ -373,8 +373,20 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
 
   const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+    e.stopPropagation();
+    
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+scroll for zoom
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+    } else {
+      // Regular scroll for slice navigation
+      if (e.deltaY > 0) {
+        goToNext();
+      } else {
+        goToPrevious();
+      }
+    }
   };
 
   const handleZoomIn = () => {
@@ -393,14 +405,14 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
 
   // Expose zoom functions to parent component via imperative handle
   useEffect(() => {
-    if (onZoomIn || onZoomOut || onResetZoom) {
-      // Store functions globally for toolbar access
-      (window as any).currentViewerZoom = {
-        zoomIn: handleZoomIn,
-        zoomOut: handleZoomOut,
-        resetZoom: handleResetZoom
-      };
-    }
+    // Always expose zoom functions for toolbar access
+    (window as any).currentViewerZoom = {
+      zoomIn: handleZoomIn,
+      zoomOut: handleZoomOut,
+      resetZoom: handleResetZoom
+    };
+    
+    console.log('Zoom functions exposed:', (window as any).currentViewerZoom);
     
     return () => {
       delete (window as any).currentViewerZoom;
@@ -413,24 +425,10 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goToNext();
     };
 
-    const handleWheel = (e: WheelEvent) => {
-      // Only handle wheel events if mouse is over the canvas
-      if (canvasRef.current && canvasRef.current.contains(e.target as Node)) {
-        e.preventDefault();
-        if (e.deltaY > 0) {
-          goToNext();
-        } else {
-          goToPrevious();
-        }
-      }
-    };
-
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('wheel', handleWheel, { passive: false });
     
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('wheel', handleWheel);
     };
   }, [currentIndex, images]);
 
