@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Upload, User, Calendar, FileText, Eye, Activity } from "lucide-react";
+import { User, FileText, Upload, Eye, Calendar } from "lucide-react";
 import { useLocation } from "wouter";
 
 interface Patient {
@@ -25,29 +25,11 @@ interface Study {
   accessionNumber: string | null;
 }
 
-function PatientManagerFinal() {
+function PatientManagerClean() {
   const [, setLocation] = useLocation();
 
-  // Force cache invalidation
-  useEffect(() => {
-    // Clear all React Query cache
-    const queryClient = (window as any).queryClient;
-    if (queryClient) {
-      queryClient.clear();
-    }
-    // Force page reload if old interface is detected
-    const oldElements = document.querySelectorAll('[data-old-interface]');
-    if (oldElements.length > 0) {
-      window.location.reload();
-    }
-  }, []);
-
   const { data: patients, isLoading } = useQuery({
-    queryKey: ['/api/patients', Date.now()],
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
-    gcTime: 0,
+    queryKey: ['/api/patients'],
   }) as { data: Patient[] | undefined, isLoading: boolean };
 
   const getModalityColor = (modality: string | null) => {
@@ -55,16 +37,10 @@ function PatientManagerFinal() {
       case 'CT': return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'MR': return 'bg-green-100 text-green-800 border-green-200';
       case 'RTSTRUCT': return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'RTDOSE': return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'RTPLAN': return 'bg-red-100 text-red-800 border-red-200';
+      case 'RTPLAN': return 'bg-orange-100 text-orange-800 border-orange-200';
+      case 'RTDOSE': return 'bg-red-100 text-red-800 border-red-200';
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'Unknown';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString();
   };
 
   const handleViewStudy = (studyId: number) => {
@@ -73,28 +49,23 @@ function PatientManagerFinal() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center py-12">
-            <Activity className="mx-auto h-8 w-8 animate-spin text-blue-600 mb-4" />
-            <p className="text-gray-600">Loading patient data...</p>
-          </div>
-        </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header - Force Unique Rendering */}
-      <div className="bg-white border-b border-gray-200 shadow-sm" data-new-interface="true">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
                 CONVERGE
               </h1>
-              <p className="text-gray-600 mt-1">Medical DICOM Imaging Platform - New Interface {Date.now()}</p>
+              <p className="text-gray-600 mt-1">Medical DICOM Imaging Platform</p>
             </div>
             <Button className="bg-blue-600 hover:bg-blue-700">
               <Upload className="mr-2 h-4 w-4" />
@@ -149,19 +120,21 @@ function PatientManagerFinal() {
                                         {study.modality || 'Unknown'}
                                       </Badge>
                                     </div>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                                      <div className="flex items-center">
-                                        <Calendar className="mr-1 h-3 w-3" />
-                                        {formatDate(study.studyDate)}
+                                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="h-3 w-3" />
+                                        {study.studyDate ? new Date(study.studyDate).toLocaleDateString() : 'Unknown Date'}
                                       </div>
-                                      <div>Series: {study.numberOfSeries || 0}</div>
-                                      <div>Images: {study.numberOfImages || 0}</div>
-                                      <div>Acc#: {study.accessionNumber || 'N/A'}</div>
+                                      <div>{study.numberOfSeries || 0} series</div>
+                                      <div>{study.numberOfImages || 0} images</div>
+                                      {study.accessionNumber && (
+                                        <div>Acc: {study.accessionNumber}</div>
+                                      )}
                                     </div>
                                   </div>
-                                  <Button 
+                                  <Button
                                     onClick={() => handleViewStudy(study.id)}
-                                    className="ml-4 bg-green-600 hover:bg-green-700"
+                                    className="bg-green-600 hover:bg-green-700 text-white"
                                   >
                                     <Eye className="mr-2 h-4 w-4" />
                                     View Study
@@ -177,34 +150,28 @@ function PatientManagerFinal() {
                 ))}
               </div>
             ) : (
-              <Card className="text-center py-12">
-                <CardContent>
-                  <User className="mx-auto h-16 w-16 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-700 mb-2">No Patients Found</h3>
-                  <p className="text-gray-500 mb-4">Upload DICOM files to begin managing patients and studies.</p>
-                  <Button className="bg-blue-600 hover:bg-blue-700">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload DICOM Files
-                  </Button>
-                </CardContent>
-              </Card>
+              <div className="text-center py-12">
+                <User className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No patients found</h3>
+                <p className="text-gray-600">Upload DICOM files to get started</p>
+              </div>
             )}
           </TabsContent>
 
-          <TabsContent value="studies">
-            <Card>
-              <CardContent className="p-6">
-                <p className="text-gray-600">Studies view coming soon...</p>
-              </CardContent>
-            </Card>
+          <TabsContent value="studies" className="space-y-6">
+            <div className="text-center py-12">
+              <FileText className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Studies View</h3>
+              <p className="text-gray-600">View all studies across patients</p>
+            </div>
           </TabsContent>
 
-          <TabsContent value="upload">
-            <Card>
-              <CardContent className="p-6">
-                <p className="text-gray-600">Upload functionality coming soon...</p>
-              </CardContent>
-            </Card>
+          <TabsContent value="upload" className="space-y-6">
+            <div className="text-center py-12">
+              <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Upload DICOM Files</h3>
+              <p className="text-gray-600">Drag and drop DICOM files here</p>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
@@ -212,4 +179,4 @@ function PatientManagerFinal() {
   );
 }
 
-export default PatientManagerFinal;
+export default PatientManagerClean;
