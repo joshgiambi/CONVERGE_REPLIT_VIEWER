@@ -452,99 +452,89 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-4">
-                {/* Simple hierarchical view without complex components */}
+              <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-1">
                 {filteredPatients.map((patient) => {
                   const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                  console.log('Patient:', patient.patientID, 'Studies found:', patientStudies.length, 'All studies:', studies.length);
                   
                   return (
-                    <Card key={patient.id} className="overflow-hidden">
-                      <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <User className="h-5 w-5 text-blue-600" />
-                            <div>
-                              <CardTitle className="text-lg">
-                                {patient.patientName || "Unknown Patient"}
-                              </CardTitle>
-                              <div className="text-sm text-gray-500">
-                                ID: {patient.patientID}
-                                {patient.patientSex && ` • ${patient.patientSex}`}
-                                {patient.patientAge && ` • Age ${patient.patientAge}`}
-                              </div>
-                            </div>
+                    <Card key={patient.id} className="p-6">
+                      <div className="flex items-center gap-4 mb-4">
+                        <User className="h-6 w-6 text-blue-600" />
+                        <div className="flex-1">
+                          <h3 className="text-xl font-semibold">{patient.patientName || "Unknown Patient"}</h3>
+                          <div className="text-gray-600 text-sm mt-1">
+                            ID: {patient.patientID}
+                            {patient.patientSex && ` • Sex: ${patient.patientSex}`}
+                            {patient.patientAge && ` • Age: ${patient.patientAge}`}
+                            {patient.dateOfBirth && patient.dateOfBirth !== "Invalid Date" && ` • DOB: ${formatDate(patient.dateOfBirth)}`}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">
-                              {patientStudies.length} studies
-                            </Badge>
-                            <Badge variant="outline">
-                              {patientStudies.reduce((sum, study) => sum + study.numberOfImages, 0)} images
-                            </Badge>
+                          <div className="text-gray-500 text-xs mt-1">
+                            Created: {formatDate(patient.createdAt)}
                           </div>
                         </div>
-                      </CardHeader>
-                      
-                      <CardContent>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary">{patientStudies.length} studies</Badge>
+                          <Badge variant="outline">{patientStudies.reduce((sum, study) => sum + study.numberOfImages, 0)} images</Badge>
+                        </div>
+                      </div>
+
+                      {patientStudies.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+                          No studies available for this patient
+                        </div>
+                      ) : (
                         <div className="space-y-3">
+                          <h4 className="font-medium text-gray-900 mb-3">Studies ({patientStudies.length})</h4>
                           {patientStudies.map((study) => (
-                            <Card key={study.id} className="border-l-4 border-l-blue-500">
-                              <CardHeader className="py-3">
+                            <Card key={study.id} className="border-l-4 border-l-blue-500 bg-blue-50/30">
+                              <div className="p-4">
                                 <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <FileText className="h-4 w-4 text-green-600" />
-                                    <div>
-                                      <div className="font-medium">
+                                  <div className="flex items-start gap-3 flex-1">
+                                    <FileText className="h-5 w-5 text-green-600 mt-0.5" />
+                                    <div className="flex-1">
+                                      <div className="font-medium text-gray-900">
                                         {study.studyDescription || "Unknown Study"}
                                       </div>
-                                      <div className="text-sm text-gray-500 flex items-center gap-2">
-                                        <Calendar className="h-3 w-3" />
-                                        {formatDate(study.studyDate)}
-                                        {study.accessionNumber && ` • Acc: ${study.accessionNumber}`}
+                                      <div className="text-sm text-gray-600 mt-1 flex items-center gap-3">
+                                        <span className="flex items-center gap-1">
+                                          <Calendar className="h-3 w-3" />
+                                          {formatDate(study.studyDate)}
+                                        </span>
+                                        {study.accessionNumber && (
+                                          <span>Acc: {study.accessionNumber}</span>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-3">
                                     <Badge className={`${
-                                      study.modality === 'CT' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
-                                      study.modality === 'MR' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                                      study.modality === 'RTSTRUCT' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
-                                      study.modality === 'RTPLAN' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' :
-                                      study.modality === 'RTDOSE' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
-                                      'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                      study.modality === 'CT' ? 'bg-blue-100 text-blue-800' :
+                                      study.modality === 'MR' ? 'bg-green-100 text-green-800' :
+                                      study.modality === 'RTSTRUCT' ? 'bg-purple-100 text-purple-800' :
+                                      study.modality === 'RTPLAN' ? 'bg-orange-100 text-orange-800' :
+                                      study.modality === 'RTDOSE' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
                                     }`}>
                                       {study.modality}
                                     </Badge>
-                                    <Badge variant="outline">
-                                      {study.numberOfSeries} series
-                                    </Badge>
-                                    <Badge variant="outline">
-                                      {study.numberOfImages} images
-                                    </Badge>
+                                    <Badge variant="outline">{study.numberOfSeries} series</Badge>
+                                    <Badge variant="outline">{study.numberOfImages} images</Badge>
                                     <Button
                                       size="sm"
-                                      variant="outline"
                                       onClick={() => {
                                         window.open(`/dicom-viewer?studyId=${study.id}`, '_blank');
                                       }}
                                     >
-                                      <Eye className="h-3 w-3 mr-1" />
-                                      View
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      View Study
                                     </Button>
                                   </div>
                                 </div>
-                              </CardHeader>
+                              </div>
                             </Card>
                           ))}
-                          
-                          {patientStudies.length === 0 && (
-                            <div className="text-center py-4 text-gray-500">
-                              No studies found for this patient
-                            </div>
-                          )}
                         </div>
-                      </CardContent>
+                      )}
                     </Card>
                   );
                 })}

@@ -66,6 +66,11 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       
       const imagesData = await response.json();
       
+      // Ensure images data is valid and properly formatted
+      if (!Array.isArray(imagesData)) {
+        throw new Error('Invalid images data format');
+      }
+      
       // Images are already sorted by the API (superior to inferior)
       setImages(imagesData);
       setCurrentIndex(0);

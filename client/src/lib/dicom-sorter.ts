@@ -24,7 +24,7 @@ export interface SortedDICOMSeries {
  * Priority: ImagePositionPatient[2] > SliceLocation > InstanceNumber
  */
 export function sortDICOMSlices(slices: DICOMSliceData[]): SortedDICOMSeries {
-  if (!slices || slices.length === 0) {
+  if (!slices || !Array.isArray(slices) || slices.length === 0) {
     return { slices: [], sortMethod: 'instanceNumber', isReversed: false };
   }
 
