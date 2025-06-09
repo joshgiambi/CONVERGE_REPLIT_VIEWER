@@ -614,7 +614,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/series/:id/images", async (req, res) => {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
-      res.json(images);
+      
+      // Sort images by anatomical position for proper viewing order
+      const sortedImages = images.sort((a, b) => {
+        // Extract zPosition from metadata for anatomical sorting
+        const aZ = a.metadata?.zPosition ?? a.instanceNumber ?? 0;
+        const bZ = b.metadata?.zPosition ?? b.instanceNumber ?? 0;
+        
+        // For head/neck CT: superior to inferior (higher Z to lower Z)
+        return bZ - aZ;
+      });
+      
+      res.json(sortedImages);
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });

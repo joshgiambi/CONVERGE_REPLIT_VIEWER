@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { UploadZone } from '@/components/dicom/upload-zone';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
+import { sortDICOMSlices, type DICOMSliceData } from '@/lib/dicom-sorter';
 import { Download, User, Calendar, Home, ArrowLeft } from 'lucide-react';
 
 interface Study {
