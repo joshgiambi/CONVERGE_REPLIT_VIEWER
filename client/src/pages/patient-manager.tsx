@@ -452,13 +452,21 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <PatientHierarchy 
-                patients={filteredPatients} 
-                studies={studies} 
-                onViewSeries={(studyId: number, seriesId: number) => {
-                  window.open(`/dicom-viewer?studyId=${studyId}&seriesId=${seriesId}`, '_blank');
-                }}
-              />
+              <div className="space-y-4">
+                <div className="bg-blue-50 p-4 rounded-lg border">
+                  <h3 className="font-medium text-blue-900 mb-2">Debug: Component Status</h3>
+                  <p className="text-sm text-blue-700">
+                    Patients: {filteredPatients.length} | Studies: {studies.length}
+                  </p>
+                </div>
+                <PatientHierarchy 
+                  patients={filteredPatients} 
+                  studies={studies} 
+                  onViewSeries={(studyId: number, seriesId: number) => {
+                    window.open(`/dicom-viewer?studyId=${studyId}&seriesId=${seriesId}`, '_blank');
+                  }}
+                />
+              </div>
             )}
           </TabsContent>
 
