@@ -533,7 +533,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/patients", async (req, res) => {
     try {
       const patients = await storage.getAllPatients();
-      res.json(patients);
+      const studies = await storage.getAllStudies();
+      
+      // Build hierarchical structure: patients with nested studies
+      const patientsWithStudies = patients.map(patient => ({
+        ...patient,
+        studies: studies.filter(study => study.patientId === patient.id)
+      }));
+      
+      res.json(patientsWithStudies);
     } catch (error) {
       console.error('Error fetching patients:', error);
       res.status(500).json({ message: "Failed to fetch patients" });
