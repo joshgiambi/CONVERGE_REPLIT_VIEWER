@@ -375,7 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Processing ${files.length} uploaded files`);
 
       // Group files by patient, study, and series
-      const patientMap = new Map();
+      const patientMap = new Map<string, Map<string, Map<string, Array<{file: Express.Multer.File, metadata: any}>>>>>();
       
       for (const file of files) {
         if (!isDICOMFile(file.path)) {
