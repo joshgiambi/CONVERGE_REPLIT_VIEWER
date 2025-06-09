@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { insertStudySchema, insertSeriesSchema, insertImageSchema, insertPacsConnectionSchema } from "@shared/schema";
 import { dicomNetworkService } from "./dicom-network";
+import { DICOMParser } from "./dicom-parser";
 import { z } from "zod";
 
 // Configure multer for file uploads
@@ -698,6 +699,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error retrieving study:", error);
       res.status(500).json({ error: "Failed to retrieve study" });
+    }
+  });
+
+  // DICOM file parsing endpoint
+  app.post("/api/parse-dicom", upload.array('files'), async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      // Create temporary directory for uploaded files
+      const tempDir = path.join('uploads', 'temp_' + Date.now());
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      try {
+        // Copy uploaded files to temp directory with .dcm extension
+        for (const file of files) {
+          const tempFilePath = path.join(tempDir, file.originalname);
+          fs.copyFileSync(file.path, tempFilePath);
+          fs.unlinkSync(file.path); // Clean up original upload
+        }
+
+        // Parse DICOM files using our parser
+        const { data, rtstructDetails } = DICOMParser.parseDICOMFromFolder(tempDir);
+
+        // Clean up temp directory
+        fs.rmSync(tempDir, { recursive: true, force: true });
+
+        res.json({
+          success: true,
+          data: data,
+          rtstructDetails: rtstructDetails,
+          totalFiles: data.length,
+          message: `Parsed ${data.length} DICOM files`
+        });
+
+      } catch (parseError) {
+        // Clean up temp directory on error
+        if (fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+        throw parseError;
+      }
+
+    } catch (error) {
+      console.error("Error parsing DICOM files:", error);
+      res.status(500).json({ 
+        error: "Failed to parse DICOM files",
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Import DICOM metadata into database
+  app.post("/api/import-dicom-metadata", async (req, res) => {
+    try {
+      const { data, rtstructDetails } = req.body;
+      
+      if (!data || !Array.isArray(data)) {
+        return res.status(400).json({ error: "Invalid DICOM data" });
+      }
+
+      const importResults = {
+        patients: 0,
+        studies: 0,
+        series: 0,
+        images: 0,
+        errors: [] as string[]
+      };
+
+      // Group by patient and study
+      const patientGroups = new Map();
+      
+      for (const dicomData of data) {
+        try {
+          if (dicomData.error) {
+            importResults.errors.push(`${dicomData.filename}: ${dicomData.error}`);
+            continue;
+          }
+
+          const patientKey = dicomData.patientID || 'UNKNOWN';
+          if (!patientGroups.has(patientKey)) {
+            patientGroups.set(patientKey, {
+              patientData: dicomData,
+              studies: new Map()
+            });
+          }
+
+          const studyKey = dicomData.studyInstanceUID || 'UNKNOWN_STUDY';
+          const patientGroup = patientGroups.get(patientKey);
+          
+          if (!patientGroup.studies.has(studyKey)) {
+            patientGroup.studies.set(studyKey, {
+              studyData: dicomData,
+              series: new Map()
+            });
+          }
+
+          const seriesKey = dicomData.seriesInstanceUID || 'UNKNOWN_SERIES';
+          const studyGroup = patientGroup.studies.get(studyKey);
+          
+          if (!studyGroup.series.has(seriesKey)) {
+            studyGroup.series.set(seriesKey, {
+              seriesData: dicomData,
+              images: []
+            });
+          }
+
+          studyGroup.series.get(seriesKey).images.push(dicomData);
+          
+        } catch (error) {
+          importResults.errors.push(`${dicomData.filename}: ${error instanceof Error ? error.message : 'Import error'}`);
+        }
+      }
+
+      // Import into database
+      for (const [patientKey, patientGroup] of patientGroups) {
+        try {
+          // Create or get patient
+          let patient = await storage.getPatientByID(patientKey);
+          if (!patient) {
+            patient = await storage.createPatient({
+              patientID: patientKey,
+              patientName: patientGroup.patientData.patientName || 'Unknown Patient',
+              patientSex: patientGroup.patientData.patientSex,
+              patientAge: patientGroup.patientData.patientAge
+            });
+            importResults.patients++;
+          }
+
+          // Create studies
+          for (const [studyKey, studyGroup] of patientGroup.studies) {
+            let study = await storage.getStudyByUID(studyKey);
+            if (!study) {
+              study = await storage.createStudy({
+                patientId: patient.id,
+                studyInstanceUID: studyKey,
+                studyDate: studyGroup.studyData.studyDate,
+                studyTime: studyGroup.studyData.studyTime,
+                studyDescription: studyGroup.studyData.studyDescription || studyGroup.studyData.seriesDescription,
+                accessionNumber: studyGroup.studyData.accessionNumber
+              });
+              importResults.studies++;
+            }
+
+            // Create series
+            for (const [seriesKey, seriesGroup] of studyGroup.series) {
+              let series = await storage.getSeriesByUID(seriesKey);
+              if (!series) {
+                series = await storage.createSeries({
+                  studyId: study.id,
+                  seriesInstanceUID: seriesKey,
+                  seriesDescription: seriesGroup.seriesData.seriesDescription || 'Unknown Series',
+                  modality: seriesGroup.seriesData.modality || 'OT',
+                  seriesNumber: seriesGroup.seriesData.seriesNumber,
+                  imageCount: seriesGroup.images.length
+                });
+                importResults.series++;
+              }
+
+              // Create images
+              for (const imageData of seriesGroup.images) {
+                const existingImage = await storage.getImageByUID(imageData.sopInstanceUID || '');
+                if (!existingImage && imageData.sopInstanceUID) {
+                  await storage.createImage({
+                    seriesId: series.id,
+                    sopInstanceUID: imageData.sopInstanceUID,
+                    instanceNumber: imageData.instanceNumber || 1,
+                    filePath: imageData.filename
+                  });
+                  importResults.images++;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          importResults.errors.push(`Patient ${patientKey}: ${error instanceof Error ? error.message : 'Database error'}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        imported: importResults,
+        message: `Imported ${importResults.patients} patients, ${importResults.studies} studies, ${importResults.series} series, ${importResults.images} images`
+      });
+
+    } catch (error) {
+      console.error("Error importing DICOM metadata:", error);
+      res.status(500).json({ 
+        error: "Failed to import DICOM metadata",
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 

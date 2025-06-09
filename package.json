@@ -50,6 +50,7 @@
     "date-fns": "^3.6.0",
     "dcmjs": "^0.41.0",
     "dicom-dimse": "^0.0.7",
+    "dicom-parser": "^1.8.21",
     "drizzle-orm": "^0.39.1",
     "drizzle-zod": "^0.7.0",
     "embla-carousel-react": "^8.6.0",
