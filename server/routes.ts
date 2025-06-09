@@ -1219,6 +1219,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Clear all data endpoint
+  app.post("/api/clear-data", async (req, res) => {
+    try {
+      storage.clearAll();
+      res.json({ success: true, message: "All data cleared successfully" });
+    } catch (error) {
+      console.error("Error clearing data:", error);
+      res.status(500).json({ error: "Failed to clear data" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
