@@ -331,11 +331,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Parse the DICOM_CONTRAST folder for CT images
+      // Parse the DICOM_CONTRAST folder for CT images - use all available slices
       const contrastFiles = fs.readdirSync(contrastPath)
         .filter(f => f.endsWith('.dcm'))
-        .sort()
-        .slice(0, 20); // Use first 20 slices for demo
+        .sort(); // Use all 154 slices
 
       if (contrastFiles.length === 0) {
         console.log('No DICOM files found in HN-ATLAS contrast folder');
