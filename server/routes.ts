@@ -625,6 +625,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return bZ - aZ;
       });
       
+      console.log(`Returning ${sortedImages.length} images for series ${req.params.id}, sorted by Z-position`);
+      
       res.json(sortedImages);
     } catch (error) {
       console.error('Error fetching images:', error);
