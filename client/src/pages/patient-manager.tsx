@@ -484,12 +484,7 @@ export default function PatientManager() {
                 </div>
               </DialogContent>
             </Dialog>
-            <Link href="/dicom-viewer">
-              <Button>
-                <Eye className="h-4 w-4 mr-2" />
-                DICOM Viewer
-              </Button>
-            </Link>
+
           </div>
         </div>
 
@@ -574,10 +569,10 @@ export default function PatientManager() {
                         className="w-full mt-4"
                         onClick={() => {
                           // Filter studies for this patient and show them
-                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                          const patientStudies = studies.filter(study => study.patientId === patient.id);
                           if (patientStudies.length > 0) {
-                            // Navigate to DICOM viewer with the first study
-                            window.location.href = `/dicom-viewer?studyId=${patientStudies[0].id}`;
+                            // Set selected study to show integrated viewer
+                            setSelectedStudy(patientStudies[0]);
                           } else {
                             toast({
                               title: "No studies found",
@@ -648,7 +643,7 @@ export default function PatientManager() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="w-full mt-4"
+                        className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
                         onClick={() => {
                           // Navigate to integrated DICOM viewer within patient manager
                           setSelectedStudy(study);
@@ -976,6 +971,33 @@ export default function PatientManager() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Study Viewer Modal */}
+        {selectedStudy && (
+          <Dialog open={!!selectedStudy} onOpenChange={() => setSelectedStudy(null)}>
+            <DialogContent className="max-w-4xl h-[80vh]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  {selectedStudy.studyDescription || "Unnamed Study"}
+                </DialogTitle>
+                <DialogDescription>
+                  Patient: {selectedStudy.patientName} | ID: {selectedStudy.patientID} | Date: {formatDate(selectedStudy.studyDate)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 bg-black rounded-lg flex items-center justify-center text-white">
+                <div className="text-center">
+                  <FileText className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">DICOM Study Viewer</h3>
+                  <p className="text-gray-400 mb-4">Study: {selectedStudy.studyDescription}</p>
+                  <p className="text-gray-400 mb-4">Modality: {selectedStudy.modality}</p>
+                  <p className="text-gray-400 mb-4">Series: {selectedStudy.numberOfSeries} | Images: {selectedStudy.numberOfImages}</p>
+                  <p className="text-sm text-gray-500">Multi-planar DICOM viewer functionality will be integrated here</p>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
     </div>
   );
