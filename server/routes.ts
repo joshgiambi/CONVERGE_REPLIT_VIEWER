@@ -618,8 +618,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Sort images by anatomical position for proper viewing order
       const sortedImages = images.sort((a, b) => {
         // Extract zPosition from metadata for anatomical sorting
-        const aZ = a.metadata?.zPosition ?? a.instanceNumber ?? 0;
-        const bZ = b.metadata?.zPosition ?? b.instanceNumber ?? 0;
+        const aZ = (a.metadata as any)?.zPosition ?? a.instanceNumber ?? 0;
+        const bZ = (b.metadata as any)?.zPosition ?? b.instanceNumber ?? 0;
         
         // For head/neck CT: superior to inferior (higher Z to lower Z)
         return bZ - aZ;
@@ -629,6 +629,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });
+    }
+  });
+
+  // DICOM image serving route
+  app.get("/api/images/:sopInstanceUID", async (req, res) => {
+    try {
+      const image = await storage.getImageBySopInstanceUID(req.params.sopInstanceUID);
+      if (!image) {
+        return res.status(404).json({ message: "Image not found" });
+      }
+
+      const fs = await import('fs');
+      const path = await import('path');
+
+      // Check if file exists
+      if (!fs.existsSync(image.filePath)) {
+        return res.status(404).json({ message: "DICOM file not found on disk" });
+      }
+
+      // Set proper headers for DICOM
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Content-Disposition', `attachment; filename="${image.fileName}"`);
+      
+      // Stream the DICOM file
+      const fileStream = fs.createReadStream(image.filePath);
+      fileStream.pipe(res);
+
+    } catch (error) {
+      console.error('Error serving DICOM image:', error);
+      res.status(500).json({ message: "Failed to serve DICOM image" });
     }
   });
 

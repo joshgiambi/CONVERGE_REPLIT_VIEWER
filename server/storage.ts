@@ -26,6 +26,7 @@ export interface IStorage {
   createImage(image: InsertImage): Promise<DicomImage>;
   getImage(id: number): Promise<DicomImage | undefined>;
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
+  getImageBySopInstanceUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
   
   // PACS operations
@@ -270,6 +271,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined> {
+    const [image] = await db.select().from(images).where(eq(images.sopInstanceUID, sopInstanceUID));
+    return image || undefined;
+  }
+
+  async getImageBySopInstanceUID(sopInstanceUID: string): Promise<DicomImage | undefined> {
     const [image] = await db.select().from(images).where(eq(images.sopInstanceUID, sopInstanceUID));
     return image || undefined;
   }
