@@ -41,8 +41,7 @@ export async function uploadLimbicScan(): Promise<void> {
     // Check if LIMBIC patient already exists
     let limbicPatient = await storage.getPatientByID("LIMBIC_57");
     if (limbicPatient) {
-      console.log('LIMBIC patient already exists');
-      return;
+      console.log('LIMBIC patient already exists - continuing with series upload');
     }
 
     console.log('Scanning all DICOM files and parsing authentic metadata...');
@@ -143,7 +142,13 @@ export async function uploadLimbicScan(): Promise<void> {
       await storage.updateStudyCounts(study.id, series.size, totalImages);
     }
 
-    console.log(`Created study: ${study.studyDescription} - ${series.size} series, ${totalImages} images`);
+    console.log(`Study found/created: ${study.studyDescription} - ${series.size} series, ${totalImages} images`);
+
+    // Log all series being processed
+    console.log(`Processing ${series.size} series:`);
+    Array.from(series.values()).forEach((s, i) => {
+      console.log(`  ${i+1}. ${s.modality}: ${s.seriesDescription} (${s.files.length} files)`);
+    });
 
     // Create all series (check for existing first)
     for (const seriesInfo of Array.from(series.values())) {
