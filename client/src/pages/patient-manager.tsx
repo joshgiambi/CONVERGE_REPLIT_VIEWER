@@ -30,6 +30,7 @@ import {
   Play,
   Eye
 } from "lucide-react";
+import { ViewerInterface } from "@/components/dicom/viewer-interface";
 
 interface Patient {
   id: number;
@@ -693,7 +694,10 @@ export default function PatientManager() {
                                 variant="outline"
                                 size="sm"
                                 className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
-                                onClick={() => setSelectedStudy(study)}
+                                onClick={() => {
+                                  console.log('View Study clicked for:', study);
+                                  setSelectedStudy(study);
+                                }}
                               >
                                 <Eye className="h-4 w-4 mr-2" />
                                 View Study
@@ -1023,31 +1027,34 @@ export default function PatientManager() {
         </Tabs>
 
         {/* Study Viewer Modal */}
-        {selectedStudy && (
-          <Dialog open={!!selectedStudy} onOpenChange={() => setSelectedStudy(null)}>
-            <DialogContent className="max-w-4xl h-[80vh]">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  {selectedStudy.studyDescription || "Unnamed Study"}
-                </DialogTitle>
-                <DialogDescription>
-                  Patient: {selectedStudy.patientName} | ID: {selectedStudy.patientID} | Date: {formatDate(selectedStudy.studyDate)}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 bg-black rounded-lg flex items-center justify-center text-white">
-                <div className="text-center">
-                  <FileText className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                  <h3 className="text-lg font-semibold mb-2">DICOM Study Viewer</h3>
-                  <p className="text-gray-400 mb-4">Study: {selectedStudy.studyDescription}</p>
-                  <p className="text-gray-400 mb-4">Modality: {selectedStudy.modality}</p>
-                  <p className="text-gray-400 mb-4">Series: {selectedStudy.numberOfSeries} | Images: {selectedStudy.numberOfImages}</p>
-                  <p className="text-sm text-gray-500">Multi-planar DICOM viewer functionality will be integrated here</p>
+        <Dialog open={!!selectedStudy} onOpenChange={() => setSelectedStudy(null)}>
+          <DialogContent className="max-w-[95vw] h-[90vh] p-0">
+            {selectedStudy && (
+              <div className="h-full flex flex-col">
+                <DialogHeader className="px-6 py-4 border-b border-gray-700">
+                  <DialogTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    {selectedStudy.studyDescription || "Unnamed Study"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Patient: {selectedStudy.patientName} | ID: {selectedStudy.patientID} | Date: {formatDate(selectedStudy.studyDate)}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex-1 overflow-hidden">
+                  <ViewerInterface 
+                    studyData={{
+                      studies: [selectedStudy],
+                      patient: {
+                        patientName: selectedStudy.patientName,
+                        patientID: selectedStudy.patientID
+                      }
+                    }}
+                  />
                 </div>
               </div>
-            </DialogContent>
-          </Dialog>
-        )}
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
