@@ -615,16 +615,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
       
-      // Sort images by anatomical position using ImagePositionPatient[2] for accuracy
+      // Sort images by anatomical position using proper Z-coordinate extraction
       const sortedImages = [...images].sort((a, b) => {
-        // Get Z-coordinates from imagePosition
-        const aZ = (a.imagePosition && Array.isArray(a.imagePosition) && a.imagePosition.length >= 3) 
-          ? parseFloat(a.imagePosition[2]) 
-          : a.instanceNumber ?? 0;
+        // Extract Z-coordinate from imagePosition JSON
+        const getZPosition = (img: any): number => {
+          if (!img.imagePosition) return img.instanceNumber ?? 0;
+          
+          try {
+            let position;
+            if (typeof img.imagePosition === 'string') {
+              position = JSON.parse(img.imagePosition);
+            } else {
+              position = img.imagePosition;
+            }
+            
+            if (Array.isArray(position) && position.length >= 3) {
+              return parseFloat(position[2]);
+            }
+          } catch (e) {
+            // Continue to fallback
+          }
+          
+          return img.instanceNumber ?? 0;
+        };
         
-        const bZ = (b.imagePosition && Array.isArray(b.imagePosition) && b.imagePosition.length >= 3) 
-          ? parseFloat(b.imagePosition[2]) 
-          : b.instanceNumber ?? 0;
+        const aZ = getZPosition(a);
+        const bZ = getZPosition(b);
         
         // For head/neck CT: superior to inferior (higher Z to lower Z)
         return bZ - aZ;
