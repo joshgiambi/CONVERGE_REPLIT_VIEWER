@@ -44,7 +44,6 @@ function Dashboard() {
   }) as { data: Patient[] | undefined, isLoading: boolean };
 
   const handleViewStudy = (studyId: number) => {
-    // Navigate to DICOM viewer with study ID
     window.location.href = `/dicom-viewer?studyId=${studyId}`;
   };
 
