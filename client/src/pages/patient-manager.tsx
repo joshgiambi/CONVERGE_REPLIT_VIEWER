@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ import {
   Play,
   Eye
 } from "lucide-react";
-import { ViewerInterface } from "@/components/dicom/viewer-interface";
+
 
 interface Patient {
   id: number;
@@ -110,11 +110,11 @@ const querySchema = z.object({
 export default function PatientManager() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
-  const [selectedStudy, setSelectedStudy] = useState<Study | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [location, navigate] = useLocation();
 
   // Auto-populate demo data on component mount
   useEffect(() => {
@@ -605,8 +605,8 @@ export default function PatientManager() {
                           // Filter studies for this patient and show them
                           const patientStudies = studies.filter(study => study.patientId === patient.id);
                           if (patientStudies.length > 0) {
-                            // Set selected study to show integrated viewer
-                            setSelectedStudy(patientStudies[0]);
+                            // Navigate to DICOM viewer with first study
+                            navigate(`/dicom-viewer?studyId=${patientStudies[0].id}`);
                           } else {
                             toast({
                               title: "No studies found",
@@ -696,7 +696,7 @@ export default function PatientManager() {
                                 className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
                                 onClick={() => {
                                   console.log('View Study clicked for:', study);
-                                  setSelectedStudy(study);
+                                  navigate(`/dicom-viewer?studyId=${study.id}`);
                                 }}
                               >
                                 <Eye className="h-4 w-4 mr-2" />
@@ -1026,35 +1026,7 @@ export default function PatientManager() {
           </TabsContent>
         </Tabs>
 
-        {/* Study Viewer Modal */}
-        <Dialog open={!!selectedStudy} onOpenChange={() => setSelectedStudy(null)}>
-          <DialogContent className="max-w-[95vw] h-[90vh] p-0">
-            {selectedStudy && (
-              <div className="h-full flex flex-col">
-                <DialogHeader className="px-6 py-4 border-b border-gray-700">
-                  <DialogTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5" />
-                    {selectedStudy.studyDescription || "Unnamed Study"}
-                  </DialogTitle>
-                  <DialogDescription>
-                    Patient: {selectedStudy.patientName} | ID: {selectedStudy.patientID} | Date: {formatDate(selectedStudy.studyDate)}
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="flex-1 overflow-hidden">
-                  <ViewerInterface 
-                    studyData={{
-                      studies: [selectedStudy],
-                      patient: {
-                        patientName: selectedStudy.patientName,
-                        patientID: selectedStudy.patientID
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+
       </div>
     </div>
   );
