@@ -602,12 +602,20 @@ export default function PatientManager() {
                         size="sm"
                         className="w-full mt-4"
                         onClick={() => {
+                          console.log('Patient clicked:', patient);
+                          console.log('All studies:', studies);
+                          
                           // Filter studies for this patient and show them
                           const patientStudies = studies.filter(study => study.patientId === patient.id);
+                          console.log('Patient studies found:', patientStudies);
+                          
                           if (patientStudies.length > 0) {
+                            const studyId = patientStudies[0].id;
+                            console.log('Navigating to studyId:', studyId);
                             // Navigate to DICOM viewer with first study
-                            navigate(`/dicom-viewer?studyId=${patientStudies[0].id}`);
+                            navigate(`/dicom-viewer?studyId=${studyId}`);
                           } else {
+                            console.log('No studies found for patient:', patient.id);
                             toast({
                               title: "No studies found",
                               description: `No studies found for patient ${patient.patientName}`,
@@ -696,6 +704,7 @@ export default function PatientManager() {
                                 className="w-full mt-4 bg-[#04ff00e6] hover:bg-[#04ff00cc] border-[#04ff00e6] hover:border-[#04ff00cc] text-black font-semibold"
                                 onClick={() => {
                                   console.log('View Study clicked for:', study);
+                                  console.log('Navigating to URL:', `/dicom-viewer?studyId=${study.id}`);
                                   navigate(`/dicom-viewer?studyId=${study.id}`);
                                 }}
                               >
