@@ -321,6 +321,46 @@ export default function PatientManager() {
     study.modality?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "N/A";
+    const year = dateString.slice(0, 4);
+    const month = dateString.slice(4, 6);
+    const day = dateString.slice(6, 8);
+    return `${year}-${month}-${day}`;
+  };
+
+  const getModalityColor = (modality: string) => {
+    switch (modality) {
+      case 'CT':
+        return 'bg-blue-500/20 text-blue-400 border-blue-400';
+      case 'MR':
+      case 'MRI':
+        return 'bg-purple-500/20 text-purple-400 border-purple-400';
+      case 'RT':
+      case 'RTPLAN':
+        return 'bg-green-500/20 text-green-400 border-green-400';
+      case 'RTDOSE':
+        return 'bg-orange-500/20 text-orange-400 border-orange-400';
+      case 'RTSTRUCT':
+        return 'bg-pink-500/20 text-pink-400 border-pink-400';
+      case 'REG':
+        return 'bg-cyan-500/20 text-cyan-400 border-cyan-400';
+      case 'US':
+        return 'bg-teal-500/20 text-teal-400 border-teal-400';
+      case 'XA':
+      case 'DX':
+        return 'bg-yellow-500/20 text-yellow-400 border-yellow-400';
+      case 'NM':
+        return 'bg-red-500/20 text-red-400 border-red-400';
+      case 'PT':
+        return 'bg-indigo-500/20 text-indigo-400 border-indigo-400';
+      default:
+        return 'bg-gray-500/20 text-gray-400 border-gray-400';
+    }
+  };
+
   const handleCreatePacs = (data: z.infer<typeof pacsConnectionSchema>) => {
     createPacsMutation.mutate(data);
   };
@@ -384,17 +424,10 @@ export default function PatientManager() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "Unknown";
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
-  };
+
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-purple-900">
+    <div className="min-h-screen bg-gradient-to-b from-black to-gray-700">
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
