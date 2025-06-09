@@ -456,6 +456,7 @@ export default function PatientManager() {
                 {/* Simple hierarchical view without complex components */}
                 {filteredPatients.map((patient) => {
                   const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                  console.log('Patient:', patient.patientID, 'Studies found:', patientStudies.length, 'All studies:', studies.length);
                   
                   return (
                     <Card key={patient.id} className="overflow-hidden">
