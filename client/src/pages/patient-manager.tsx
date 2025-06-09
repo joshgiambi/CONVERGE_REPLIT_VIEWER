@@ -14,6 +14,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { DICOMUploader } from "@/components/dicom/dicom-uploader";
 import { 
   User, 
   Calendar, 
@@ -381,48 +382,16 @@ export default function PatientManager() {
             </h1>
           </div>
           <div className="flex gap-2">
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload DICOM
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[500px]">
-                <DialogHeader>
-                  <DialogTitle>Upload DICOM Files</DialogTitle>
-                  <DialogDescription>
-                    Upload DICOM files to create new studies in the patient database.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500 mb-2">Drag and drop DICOM files here</p>
-                    <p className="text-sm text-gray-400">or click to browse</p>
-                    <input
-                      type="file"
-                      multiple
-                      accept=".dcm,.dicom"
-                      className="hidden"
-                      id="dicom-upload"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          handleFileUpload(Array.from(e.target.files));
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="outline"
-                      className="mt-4"
-                      onClick={() => document.getElementById('dicom-upload')?.click()}
-                    >
-                      Select Files
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button 
+              variant="outline"
+              onClick={() => {
+                const importTab = document.querySelector('[value="import"]') as HTMLElement;
+                importTab?.click();
+              }}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Import DICOM
+            </Button>
             <Link href="/dicom-viewer">
               <Button>
                 <Eye className="h-4 w-4 mr-2" />
@@ -446,7 +415,7 @@ export default function PatientManager() {
         </div>
 
         <Tabs defaultValue="patients" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="patients" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Patients
@@ -454,6 +423,10 @@ export default function PatientManager() {
             <TabsTrigger value="studies" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               Studies
+            </TabsTrigger>
+            <TabsTrigger value="import" className="flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Import DICOM
             </TabsTrigger>
             <TabsTrigger value="pacs" className="flex items-center gap-2">
               <Network className="h-4 w-4" />
@@ -597,6 +570,25 @@ export default function PatientManager() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* Import DICOM Tab */}
+          <TabsContent value="import" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  Import DICOM Files
+                </CardTitle>
+                <CardDescription>
+                  Upload DICOM files to parse metadata and import into the database. 
+                  Supports CT, MRI, PET/CT, RT Structure Sets, Dose, and Plan files.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DICOMUploader />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* PACS Tab */}
