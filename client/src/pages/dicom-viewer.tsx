@@ -41,9 +41,12 @@ export default function DICOMViewer() {
   const [currentPatient, setCurrentPatient] = useState<any>(null);
   const [location, navigate] = useLocation();
 
-  // Extract studyId from URL parameters
-  const urlParams = new URLSearchParams(window.location.search);
+  // Extract studyId from URL parameters - use proper URL parsing
+  const urlParams = new URLSearchParams(location.split('?')[1] || '');
   const studyId = urlParams.get('studyId');
+
+  console.log('DICOM Viewer location:', location);
+  console.log('Study ID from URL:', studyId);
 
   // Fetch study data if studyId is provided
   const { data: study, isLoading: studyLoading } = useQuery<Study>({
@@ -69,6 +72,9 @@ export default function DICOMViewer() {
 
   useEffect(() => {
     if (study && seriesData) {
+      console.log('Study data loaded:', study);
+      console.log('Series data loaded:', seriesData);
+      
       // Transform API data to match expected format
       const transformedData = {
         studies: [study],
@@ -213,7 +219,14 @@ export default function DICOMViewer() {
 
       {/* Main Content */}
       <main className="pt-24 px-6">
-        {!studyData ? (
+        {studyLoading || seriesLoading ? (
+          /* Loading State */
+          <div className="max-w-4xl mx-auto py-16 text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-dicom-yellow mx-auto mb-4"></div>
+            <h2 className="text-2xl font-bold text-white mb-2">Loading Study</h2>
+            <p className="text-gray-400">Please wait while we load the DICOM data...</p>
+          </div>
+        ) : !studyData && !studyId ? (
           /* Upload Section */
           <div className="max-w-4xl mx-auto py-16">
             <div className="text-center mb-8">
