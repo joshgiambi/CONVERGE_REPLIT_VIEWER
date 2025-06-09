@@ -7,16 +7,10 @@ import DICOMViewer from "@/pages/dicom-viewer";
 import MedicalDashboard from "@/pages/medical-dashboard";
 import NotFound from "@/pages/not-found";
 
-function RedirectComponent() {
-  const [, setLocation] = useLocation();
-  setLocation('/patients-new');
-  return null;
-}
-
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={RedirectComponent} />
+      <Route path="/" component={MedicalDashboard} />
       <Route path="/patients-new" component={MedicalDashboard} />
       <Route path="/patients" component={MedicalDashboard} />
       <Route path="/dicom-viewer" component={DICOMViewer} />
