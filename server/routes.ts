@@ -283,9 +283,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateSeriesImageCount(series.id, images.length);
 
+      // Add THORAX_05 radiotherapy data
+      await populateThoraxData();
+      
+      // Add LIMBIC_57 neuroimaging data  
+      await populateLimbicData();
+
       res.json({
         success: true,
-        message: `Demo data created with ${testFiles.length} real DICOM files`,
+        message: `Demo data created with ${testFiles.length} real DICOM files plus multi-modal cases`,
         study,
         series: [{ ...series, images }]
       });
@@ -608,22 +614,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // THORAX_05 Radiotherapy Scan Integration
-  app.post("/api/populate-thorax", async (req, res) => {
-    try {
-      const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
-      
-      if (!fs.existsSync(thoraxPath)) {
-        return res.status(404).json({ error: "THORAX_05 directory not found" });
-      }
+  // Helper function for THORAX data population
+  async function populateThoraxData() {
+    const thoraxPath = path.join(process.cwd(), 'uploads', 'THORAX_05');
+    
+    if (!fs.existsSync(thoraxPath)) {
+      console.log("THORAX_05 directory not found, skipping");
+      return;
+    }
 
-      // Create THORAX patient
-      const patient = await storage.createPatient({
+    // Check if patient already exists
+    let patient = await storage.getPatientByID("THORAX_05");
+    if (!patient) {
+      patient = await storage.createPatient({
         patientID: "THORAX_05",
         patientName: "Thorax RT Patient",
         patientSex: "M",
         patientAge: "65Y"
       });
+    }
 
       // Create THORAX study
       const study = await storage.createStudy({
@@ -650,6 +659,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Create CT images
         for (let i = 0; i < ctFiles.length; i++) {
+          const file = ctFiles[i];
+          const filePath = path.join(thoraxPath, 'DICOM', file);
+          
           await storage.createImage({
             seriesId: ctSeries.id,
             sopInstanceUID: `2.16.840.1.114362.1.11745409.22349166682.494938851.${i + 1}`,
@@ -660,7 +672,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             columns: "512",
             pixelSpacing: "0.976562\\0.976562",
             windowCenter: "40",
-            windowWidth: "400"
+            windowWidth: "400",
+            filePath: filePath
           });
         }
       }

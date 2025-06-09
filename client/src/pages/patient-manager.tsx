@@ -393,49 +393,49 @@ export default function PatientManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-purple-900">
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
+            <h1 className="text-5xl font-black tracking-wide mb-2" style={{ letterSpacing: '0.2em' }}>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #22c55e',
+                WebkitTextStroke: '3px #22c55e',
                 fontWeight: '900'
               }}>C</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #10b981',
+                WebkitTextStroke: '3px #10b981',
                 fontWeight: '900'
               }}>O</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #3b82f6',
+                WebkitTextStroke: '3px #3b82f6',
                 fontWeight: '900'
               }}>N</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #2563eb',
+                WebkitTextStroke: '3px #2563eb',
                 fontWeight: '900'
               }}>V</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #6366f1',
+                WebkitTextStroke: '3px #6366f1',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #8b5cf6',
+                WebkitTextStroke: '3px #8b5cf6',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #a855f7',
+                WebkitTextStroke: '3px #a855f7',
                 fontWeight: '900'
               }}>G</span>
               <span style={{
                 color: 'black',
-                WebkitTextStroke: '1px #22c55e',
+                WebkitTextStroke: '3px #22c55e',
                 fontWeight: '900'
               }}>E</span>
             </h1>
