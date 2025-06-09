@@ -15,6 +15,7 @@ import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DICOMUploader } from "@/components/dicom/dicom-uploader";
+import { PatientHierarchy } from "@/components/dicom/patient-hierarchy";
 import { 
   User, 
   Calendar, 
@@ -441,8 +442,8 @@ export default function PatientManager() {
 
           {/* Patients Tab */}
           <TabsContent value="patients" className="space-y-4">
-            {patientsLoading ? (
-              <div className="text-center py-8">Loading patients...</div>
+            {patientsLoading || studiesLoading ? (
+              <div className="text-center py-8">Loading patient data...</div>
             ) : filteredPatients.length === 0 ? (
               <Card>
                 <CardContent className="text-center py-8">
@@ -451,60 +452,13 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredPatients.map((patient) => (
-                  <Card key={patient.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <User className="h-5 w-5" />
-                        {patient.patientName || "Unknown Patient"}
-                      </CardTitle>
-                      <CardDescription>
-                        ID: {patient.patientID}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm">
-                        {patient.patientSex && (
-                          <div>Sex: {patient.patientSex}</div>
-                        )}
-                        {patient.patientAge && (
-                          <div>Age: {patient.patientAge}</div>
-                        )}
-                        {patient.dateOfBirth && (
-                          <div>DOB: {formatDate(patient.dateOfBirth)}</div>
-                        )}
-                        <div className="text-gray-500">
-                          Created: {formatDate(patient.createdAt)}
-                        </div>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full mt-4"
-                        onClick={() => {
-                          // Filter studies for this patient and prioritize CT studies
-                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                          if (patientStudies.length > 0) {
-                            // Prioritize CT studies over RT structure sets
-                            const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                            const targetStudy = ctStudy || patientStudies[0];
-                            window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
-                          } else {
-                            toast({
-                              title: "No studies found",
-                              description: `No studies found for patient ${patient.patientName}`,
-                              variant: "destructive",
-                            });
-                          }
-                        }}
-                      >
-                        View Studies
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              <PatientHierarchy 
+                patients={filteredPatients} 
+                studies={studies} 
+                onViewSeries={(studyId: number, seriesId: number) => {
+                  window.open(`/dicom-viewer?studyId=${studyId}&seriesId=${seriesId}`, '_blank');
+                }}
+              />
             )}
           </TabsContent>
 

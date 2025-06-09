@@ -597,6 +597,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all series
+  app.get("/api/series", async (req, res) => {
+    try {
+      const series = await storage.getAllSeries();
+      res.json(series);
+    } catch (error) {
+      console.error('Error fetching all series:', error);
+      res.status(500).json({ message: "Failed to fetch series" });
+    }
+  });
+
   // Series routes
   app.get("/api/series/:id", async (req, res) => {
     try {
