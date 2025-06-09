@@ -589,7 +589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/studies/:id/series", async (req, res) => {
     try {
-      const series = await storage.getSeriesByStudy(parseInt(req.params.id));
+      const series = await storage.getSeriesByStudyId(parseInt(req.params.id));
       res.json(series);
     } catch (error) {
       console.error('Error fetching series:', error);
@@ -613,7 +613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/series/:id/images", async (req, res) => {
     try {
-      const images = await storage.getImagesBySeries(parseInt(req.params.id));
+      const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
       res.json(images);
     } catch (error) {
       console.error('Error fetching images:', error);
