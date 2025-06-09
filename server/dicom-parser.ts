@@ -1,4 +1,5 @@
 import fs from 'fs';
+import * as dcmjs from 'dcmjs';
 
 interface DICOMMetadata {
   // Patient Level
@@ -75,172 +76,82 @@ interface DICOMMetadata {
 export function parseDICOMMetadata(filePath: string): DICOMMetadata {
   try {
     const buffer = fs.readFileSync(filePath);
+    
+    // Use dcmjs to parse the DICOM file
+    const dataset = dcmjs.data.DicomMessage.readFile(buffer.buffer);
+    const dict = dataset.dict;
+    
     const metadata: DICOMMetadata = {};
-
-    if (buffer.length < 132) {
-      throw new Error('File too small to be DICOM');
-    }
-
-    // Check for DICM header at offset 128
-    const dicmHeader = buffer.subarray(128, 132).toString('ascii');
-    let offset = 132;
-
-    if (dicmHeader !== 'DICM') {
-      offset = 0; // Start from beginning if no preamble
-    }
-
-    // Skip meta information (group 0x0002) and go to dataset
-    while (offset < buffer.length - 8) {
-      const group = buffer.readUInt16LE(offset);
-      if (group !== 0x0002) break;
-      
-      const element = buffer.readUInt16LE(offset + 2);
-      const vr = buffer.subarray(offset + 4, offset + 6).toString('ascii');
-      
-      let length: number;
-      let valueOffset: number;
-      
-      if (['OB', 'OW', 'SQ', 'UN', 'OF', 'OD'].includes(vr)) {
-        length = buffer.readUInt32LE(offset + 8);
-        valueOffset = offset + 12;
-      } else {
-        length = buffer.readUInt16LE(offset + 6);
-        valueOffset = offset + 8;
+    
+    // Patient Level - Group 0010
+    if (dict['00100010']) metadata.patientName = dict['00100010'].Value?.[0];
+    if (dict['00100020']) metadata.patientID = dict['00100020'].Value?.[0];
+    if (dict['00100040']) metadata.patientSex = dict['00100040'].Value?.[0];
+    if (dict['00101010']) metadata.patientAge = dict['00101010'].Value?.[0];
+    if (dict['00100030']) metadata.patientBirthDate = dict['00100030'].Value?.[0];
+    
+    // Study Level - Group 0008/0020
+    if (dict['0020000D']) metadata.studyInstanceUID = dict['0020000D'].Value?.[0];
+    if (dict['00080020']) metadata.studyDate = dict['00080020'].Value?.[0];
+    if (dict['00080030']) metadata.studyTime = dict['00080030'].Value?.[0];
+    if (dict['00081030']) metadata.studyDescription = dict['00081030'].Value?.[0];
+    if (dict['00080050']) metadata.accessionNumber = dict['00080050'].Value?.[0];
+    
+    // Series Level - Group 0008/0020
+    if (dict['0020000E']) metadata.seriesInstanceUID = dict['0020000E'].Value?.[0];
+    if (dict['0008103E']) metadata.seriesDescription = dict['0008103E'].Value?.[0];
+    if (dict['00200011']) metadata.seriesNumber = dict['00200011'].Value?.[0];
+    if (dict['00080060']) metadata.modality = dict['00080060'].Value?.[0];
+    if (dict['00180015']) metadata.bodyPartExamined = dict['00180015'].Value?.[0];
+    if (dict['00181030']) metadata.protocolName = dict['00181030'].Value?.[0];
+    
+    // Instance Level - Group 0008/0020
+    if (dict['00080018']) metadata.sopInstanceUID = dict['00080018'].Value?.[0];
+    if (dict['00080016']) metadata.sopClassUID = dict['00080016'].Value?.[0];
+    if (dict['00200013']) metadata.instanceNumber = dict['00200013'].Value?.[0];
+    if (dict['00201041']) metadata.sliceLocation = dict['00201041'].Value?.[0];
+    
+    // Image Position/Orientation
+    if (dict['00200032']) {
+      const pos = dict['00200032'].Value;
+      if (pos && pos.length >= 3) {
+        metadata.imagePosition = [parseFloat(pos[0]), parseFloat(pos[1]), parseFloat(pos[2])];
       }
-      
-      offset = valueOffset + length;
-      if (offset % 2 !== 0) offset++;
     }
-
-    // Parse main dataset with implicit VR Little Endian
-    while (offset < buffer.length - 8) {
-      const group = buffer.readUInt16LE(offset);
-      const element = buffer.readUInt16LE(offset + 2);
-      const tag = `${group.toString(16).padStart(4, '0')}${element.toString(16).padStart(4, '0')}`;
-      
-      // For implicit VR, length is 4 bytes at offset+4
-      const length = buffer.readUInt32LE(offset + 4);
-      const valueOffset = offset + 8;
-      
-      if (length > 0 && length < 10000 && valueOffset + length <= buffer.length) {
-        const vr = getImplicitVR(tag);
-        const value = extractValue(buffer, valueOffset, length, vr);
-        
-        // Map important tags
-        switch (tag) {
-          case '00100010': metadata.patientName = value; break;
-          case '00100020': metadata.patientID = value; break;
-          case '00100040': metadata.patientSex = value; break;
-          case '00101010': metadata.patientAge = value; break;
-          case '00100030': metadata.patientBirthDate = value; break;
-          
-          case '0020000d': metadata.studyInstanceUID = value; break;
-          case '00080020': metadata.studyDate = value; break;
-          case '00080030': metadata.studyTime = value; break;
-          case '00081030': metadata.studyDescription = value; break;
-          case '00080050': metadata.accessionNumber = value; break;
-          
-          case '0020000e': metadata.seriesInstanceUID = value; break;
-          case '0008103e': metadata.seriesDescription = value; break;
-          case '00200011': metadata.seriesNumber = parseInt(value) || undefined; break;
-          case '00080060': metadata.modality = value; break;
-          case '00180015': metadata.bodyPartExamined = value; break;
-          case '00181030': metadata.protocolName = value; break;
-          
-          case '00080018': metadata.sopInstanceUID = value; break;
-          case '00080016': metadata.sopClassUID = value; break;
-          case '00200013': metadata.instanceNumber = parseInt(value) || undefined; break;
-          case '00201041': metadata.sliceLocation = parseFloat(value) || undefined; break;
-          
-          case '00180050': metadata.sliceThickness = parseFloat(value) || undefined; break;
-          case '00280010': metadata.rows = parseInt(value) || undefined; break;
-          case '00280011': metadata.columns = parseInt(value) || undefined; break;
-          case '00280100': metadata.bitsAllocated = parseInt(value) || undefined; break;
-          case '00280101': metadata.bitsStored = parseInt(value) || undefined; break;
-          case '00280102': metadata.highBit = parseInt(value) || undefined; break;
-          case '00280103': metadata.pixelRepresentation = parseInt(value) || undefined; break;
-          
-          case '00180060': metadata.kvp = parseFloat(value) || undefined; break;
-          case '00181152': metadata.exposureTime = parseFloat(value) || undefined; break;
-          case '00181210': metadata.reconstructionKernel = value; break;
-          case '00281050': metadata.windowCenter = parseFloat(value) || undefined; break;
-          case '00281051': metadata.windowWidth = parseFloat(value) || undefined; break;
-        }
+    if (dict['00200037']) {
+      const orient = dict['00200037'].Value;
+      if (orient && orient.length >= 6) {
+        metadata.imageOrientation = orient.map((v: string) => parseFloat(v)) as [number, number, number, number, number, number];
       }
-      
-      offset = valueOffset + length;
-      if (offset % 2 !== 0) offset++;
-      
-      // Prevent infinite loops
-      if (offset >= buffer.length - 8) break;
     }
-
+    
+    // Image Properties - Group 0028
+    if (dict['00180050']) metadata.sliceThickness = parseFloat(dict['00180050'].Value?.[0]);
+    if (dict['00280030']) {
+      const spacing = dict['00280030'].Value;
+      if (spacing && spacing.length >= 2) {
+        metadata.pixelSpacing = [parseFloat(spacing[0]), parseFloat(spacing[1])];
+      }
+    }
+    if (dict['00280010']) metadata.rows = dict['00280010'].Value?.[0];
+    if (dict['00280011']) metadata.columns = dict['00280011'].Value?.[0];
+    if (dict['00280100']) metadata.bitsAllocated = dict['00280100'].Value?.[0];
+    if (dict['00280101']) metadata.bitsStored = dict['00280101'].Value?.[0];
+    if (dict['00280102']) metadata.highBit = dict['00280102'].Value?.[0];
+    if (dict['00280103']) metadata.pixelRepresentation = dict['00280103'].Value?.[0];
+    
+    // Acquisition Parameters - Group 0018
+    if (dict['00180060']) metadata.kvp = parseFloat(dict['00180060'].Value?.[0]);
+    if (dict['00181152']) metadata.exposureTime = parseFloat(dict['00181152'].Value?.[0]);
+    if (dict['00181210']) metadata.reconstructionKernel = dict['00181210'].Value?.[0];
+    
+    // Window Settings - Group 0028
+    if (dict['00281050']) metadata.windowCenter = parseFloat(dict['00281050'].Value?.[0]);
+    if (dict['00281051']) metadata.windowWidth = parseFloat(dict['00281051'].Value?.[0]);
+    
     return metadata;
   } catch (error) {
     console.error(`Error parsing DICOM file ${filePath}:`, error);
     return {};
-  }
-}
-
-function getImplicitVR(tag: string): string {
-  const vrMap: { [key: string]: string } = {
-    '00100010': 'PN', // Patient Name
-    '00100020': 'LO', // Patient ID
-    '00100040': 'CS', // Patient Sex
-    '00101010': 'AS', // Patient Age
-    '00100030': 'DA', // Patient Birth Date
-    
-    '0020000d': 'UI', // Study Instance UID
-    '00080020': 'DA', // Study Date
-    '00080030': 'TM', // Study Time
-    '00081030': 'LO', // Study Description
-    '00080050': 'SH', // Accession Number
-    
-    '0020000e': 'UI', // Series Instance UID
-    '0008103e': 'LO', // Series Description
-    '00200011': 'IS', // Series Number
-    '00080060': 'CS', // Modality
-    '00180015': 'CS', // Body Part Examined
-    '00181030': 'LO', // Protocol Name
-    
-    '00080018': 'UI', // SOP Instance UID
-    '00080016': 'UI', // SOP Class UID
-    '00200013': 'IS', // Instance Number
-    '00201041': 'DS', // Slice Location
-    
-    '00180050': 'DS', // Slice Thickness
-    '00280010': 'US', // Rows
-    '00280011': 'US', // Columns
-    '00280100': 'US', // Bits Allocated
-    '00280101': 'US', // Bits Stored
-    '00280102': 'US', // High Bit
-    '00280103': 'US', // Pixel Representation
-    
-    '00180060': 'DS', // KVP
-    '00181152': 'IS', // Exposure Time
-    '00181210': 'SH', // Reconstruction Kernel
-    '00281050': 'DS', // Window Center
-    '00281051': 'DS', // Window Width
-  };
-  
-  return vrMap[tag] || 'LO';
-}
-
-function extractValue(buffer: Buffer, offset: number, length: number, vr: string): string {
-  if (offset + length > buffer.length) {
-    return '';
-  }
-  
-  try {
-    let value = buffer.subarray(offset, offset + length);
-    
-    // Remove padding and null terminators
-    while (value.length > 0 && (value[value.length - 1] === 0 || value[value.length - 1] === 32)) {
-      value = value.subarray(0, value.length - 1);
-    }
-    
-    return value.toString('ascii').trim();
-  } catch (error) {
-    return '';
   }
 }
