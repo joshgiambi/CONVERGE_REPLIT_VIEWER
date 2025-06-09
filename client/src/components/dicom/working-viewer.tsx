@@ -58,34 +58,20 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch(`/api/series/${seriesId}`);
+      // Fetch images for this series using the correct endpoint
+      const response = await fetch(`/api/series/${seriesId}/images`);
       if (!response.ok) {
-        throw new Error(`Failed to load series: ${response.statusText}`);
+        throw new Error(`Failed to load images: ${response.statusText}`);
       }
       
-      const seriesData = await response.json();
+      const imagesData = await response.json();
       
-      // Sort by slice location first, then by instance number
-      const sortedImages = seriesData.images.sort((a: any, b: any) => {
-        // Try slice location first (more reliable for CT ordering)
-        if (a.sliceLocation !== undefined && b.sliceLocation !== undefined) {
-          return parseFloat(a.sliceLocation) - parseFloat(b.sliceLocation);
-        }
-        
-        // Fall back to instance number
-        if (a.instanceNumber !== undefined && b.instanceNumber !== undefined) {
-          return parseInt(a.instanceNumber) - parseInt(b.instanceNumber);
-        }
-        
-        // Fall back to filename comparison
-        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
-      });
-      
-      setImages(sortedImages);
+      // Images are already sorted by the API (superior to inferior)
+      setImages(imagesData);
       setCurrentIndex(0);
       
       // Preload all images immediately
-      preloadAllImages(sortedImages);
+      preloadAllImages(imagesData);
       
     } catch (error: any) {
       setError(error.message);
