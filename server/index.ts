@@ -3,15 +3,16 @@ import { storage } from "./storage";
 import * as fs from "fs";
 import * as path from "path";
 import multer from "multer";
+import { setupVite } from "./vite";
+import { createServer } from "http";
 
 const app = express();
+const server = createServer(app);
+
 app.use(express.json());
 
 // Setup multer for file uploads
 const upload = multer({ dest: 'uploads/' });
-
-// Serve static files from client/dist
-app.use(express.static(path.join(process.cwd(), 'client/dist')));
 
 function isDICOMFile(filePath: string): boolean {
   try {
@@ -286,13 +287,13 @@ app.get("/api/pacs", async (req, res) => {
   }
 });
 
-// Serve React app for all other routes
-app.get('*', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'client/dist/index.html'));
-});
+// Setup Vite for development
+if (process.env.NODE_ENV === "development") {
+  setupVite(app, server);
+}
 
 const PORT = Number(process.env.PORT) || 5000;
-app.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 HN-ATLAS dataset loaded with 153 CT slices`);
   console.log(`📤 DICOM upload functionality enabled`);
