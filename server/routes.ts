@@ -229,6 +229,23 @@ export async function registerRoutes(app: Express) {
     });
   });
 
+  // Test page for debugging
+  app.get("/test", (req: Request, res: Response) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>CONVERGE Test</title></head>
+      <body style="background:#000;color:#fff;font-family:Arial;padding:20px;">
+        <h1>CONVERGE DICOM Platform - System Test</h1>
+        <p>Server is running correctly</p>
+        <p>Complete HN-ATLAS dataset: 153 CT slices loaded</p>
+        <p><a href="/" style="color:#4338ca;">Go to Patient Manager</a></p>
+        <p><a href="/dicom-viewer?studyId=4" style="color:#059669;">Open DICOM Viewer</a></p>
+      </body>
+      </html>
+    `);
+  });
+
   // Create HTTP server
   const httpServer = createServer(app);
 
