@@ -16,9 +16,15 @@ app.use(express.static("dist"));
     serveStatic(app);
   }
 
-  const PORT = 5000;
+  const PORT = Number(process.env.PORT) || 5000;
+  
+  // Always bind to 0.0.0.0 for Replit compatibility
   server.listen(PORT, "0.0.0.0", () => {
-    log(`Server running on port ${PORT}`);
+    log(`Server running on 0.0.0.0:${PORT}`);
     log(`DICOM upload functionality enabled`);
+    log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (process.env.REPLIT_DOMAINS) {
+      log(`Available at: ${process.env.REPLIT_DOMAINS}`);
+    }
   });
 })();
