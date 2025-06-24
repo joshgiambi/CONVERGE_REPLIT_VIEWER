@@ -26,5 +26,13 @@ app.use(express.static("dist"));
     if (process.env.REPLIT_DOMAINS) {
       log(`Available at: ${process.env.REPLIT_DOMAINS}`);
     }
+    log(`Direct preview: ${process.env.REPLIT_DOMAINS}/working`);
+  });
+
+  // Also listen on port 80 for direct access
+  const server80 = app.listen(80, "0.0.0.0", () => {
+    log(`Backup server running on 0.0.0.0:80`);
+  }).on('error', (err) => {
+    log(`Port 80 unavailable: ${err.message}`);
   });
 })();
