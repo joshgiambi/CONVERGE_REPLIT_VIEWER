@@ -19,37 +19,10 @@ export async function createDemoData() {
     const atlasPath = path.join(process.cwd(), 'attached_assets/HN-ATLAS-84/DICOM_CONTRAST');
     
     if (fs.existsSync(atlasPath)) {
-      // Add first 30 DICOM images to demonstrate the viewer functionality
-      const files = fs.readdirSync(atlasPath)
-        .filter(f => f.endsWith('.dcm'))
-        .slice(0, 30)
-        .sort();
-      
-      for (let i = 0; i < files.length; i++) {
-        const filePath = path.join(atlasPath, files[i]);
-        const stats = fs.statSync(filePath);
-        
-        // Create image entry with proper metadata
-        await storage.createImage({
-          seriesId: 1,
-          sopInstanceUID: `2.16.840.1.114362.1.11932039.ct.${(i + 1).toString().padStart(3, '0')}`,
-          instanceNumber: i + 1,
-          filePath: filePath,
-          fileName: files[i],
-          fileSize: stats.size,
-          sliceLocation: ((i + 1) * 3).toString(), // 3mm slice thickness
-          metadata: {
-            source: 'HN-ATLAS-84',
-            anatomy: 'Head & Neck',
-            contrast: true,
-            sliceIndex: i + 1,
-            totalSlices: files.length
-          }
-        });
-      }
-      
-      console.log(`Demo data loaded: ${files.length} CT slices`);
-      return { processed: files.length, errors: [] };
+      console.log('Processing complete HN-ATLAS dataset with DICOM metadata...');
+      const results = await DICOMProcessor.processDICOMDirectory(atlasPath);
+      console.log(`Demo data loaded: ${results.processed} CT slices with proper spatial ordering`);
+      return results;
     }
     
     console.log('HN-ATLAS files not found, demo data structure created');

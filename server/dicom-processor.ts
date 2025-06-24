@@ -1,4 +1,4 @@
-import dicomParser from 'dicom-parser';
+import * as dicomParser from 'dicom-parser';
 import { db } from './db';
 import { patients, studies, series, images } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -64,7 +64,7 @@ export class DICOMProcessor {
       throw new Error('Invalid DICOM file format');
     }
 
-    const dataSet = dicomParser.parseDicom(byteArray);
+    const dataSet = dicomParser.parseDicom ? dicomParser.parseDicom(byteArray) : (dicomParser as any).default.parseDicom(byteArray);
 
     return {
       patientData: {
