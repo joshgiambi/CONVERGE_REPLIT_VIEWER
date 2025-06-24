@@ -484,12 +484,12 @@ export default function PatientManager() {
                         className="w-full mt-4"
                         onClick={() => {
                           // Filter studies for this patient and prioritize CT studies
-                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                          const patientStudies = studies.filter(study => study.patientID === patient.patientID || study.patientName === patient.patientName);
                           if (patientStudies.length > 0) {
                             // Prioritize CT studies over RT structure sets
                             const ctStudy = patientStudies.find(study => study.modality === 'CT');
                             const targetStudy = ctStudy || patientStudies[0];
-                            // Use proper React routing instead of window.location
+                            // Use proper React routing to open viewer with correct study
                             window.open(`/dicom-viewer?studyId=${targetStudy.id}`, '_blank');
                           } else {
                             toast({
