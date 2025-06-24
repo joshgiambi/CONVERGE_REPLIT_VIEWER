@@ -1,0 +1,57 @@
+import pydicom
+import os
+import json
+from collections import defaultdict
+
+# Change to your unzipped DICOM folder
+dicom_dir = "./your_unzipped_folder"
+
+def find_dicom_files(folder):
+    dicom_files = []
+    for root, dirs, files in os.walk(folder):
+        for file in files:
+            if file.lower().endswith('.dcm'):
+                dicom_files.append(os.path.join(root, file))
+    return dicom_files
+
+# We want a nested dict that can easily be serialized to JSON
+def nested_dict():
+    return defaultdict(nested_dict)
+
+hierarchy = nested_dict()
+
+for file_path in find_dicom_files(dicom_dir):
+    try:
+        ds = pydicom.dcmread(file_path, stop_before_pixels=True)
+        patient_id = getattr(ds, "PatientID", "Unknown")
+        patient_name = str(getattr(ds, "PatientName", "Unknown"))
+        study_uid = getattr(ds, "StudyInstanceUID", "Unknown")
+        series_uid = getattr(ds, "SeriesInstanceUID", "Unknown")
+        series_desc = getattr(ds, "SeriesDescription", "")
+        modality = getattr(ds, "Modality", "")
+        # Build the nested hierarchy
+        pat_key = f"{patient_name} (ID:{patient_id})"
+        study_key = f"{study_uid}"
+        series_key = f"{series_uid}"
+        if "files" not in hierarchy[pat_key][study_key][series_key]:
+            hierarchy[pat_key][study_key][series_key]["files"] = []
+        hierarchy[pat_key][study_key][series_key]["series_description"] = series_desc
+        hierarchy[pat_key][study_key][series_key]["modality"] = modality
+        hierarchy[pat_key][study_key][series_key]["files"].append(file_path)
+    except Exception as e:
+        print(f"Could not read {file_path}: {e}")
+
+# Convert defaultdict to regular dict for JSON serialization
+def convert(d):
+    if isinstance(d, defaultdict):
+        d = {k: convert(v) for k, v in d.items()}
+    return d
+
+hierarchy_json = convert(hierarchy)
+
+# Save to JSON file
+with open("dicom_hierarchy.json", "w") as f:
+    json.dump(hierarchy_json, f, indent=2)
+
+# Also print a snippet to verify
+print(json.dumps(hierarchy_json, indent=2)[:1500])  # Print the first part for inspection

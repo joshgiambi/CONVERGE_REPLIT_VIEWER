@@ -79,14 +79,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   };
 
   const handleZoomIn = () => {
-    console.log('Zoom In button clicked');
-    console.log('Available zoom functions:', (window as any).currentViewerZoom);
     try {
       if ((window as any).currentViewerZoom?.zoomIn) {
-        console.log('Calling zoom in function');
         (window as any).currentViewerZoom.zoomIn();
-      } else {
-        console.warn('Zoom in function not available');
       }
     } catch (error) {
       console.warn('Error zooming in:', error);
