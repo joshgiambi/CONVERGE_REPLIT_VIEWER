@@ -1,4 +1,4 @@
-import * as dicomParser from 'dicom-parser';
+const dicomParser = require('dicom-parser');
 import { db } from './db';
 import { patients, studies, series, images } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -265,21 +265,35 @@ export class DICOMProcessor {
   private static getAllDICOMFiles(dirPath: string): string[] {
     const files: string[] = [];
     
-    function walkDir(currentPath: string) {
-      const items = fs.readdirSync(currentPath);
-      
-      for (const item of items) {
-        const fullPath = path.join(currentPath, item);
-        const stat = fs.statSync(fullPath);
+    const walkDir = (currentPath: string) => {
+      try {
+        const items = fs.readdirSync(currentPath);
         
-        if (stat.isDirectory()) {
-          walkDir(fullPath);
-        } else if (item.toLowerCase().endsWith('.dcm') || 
-                   this.isDICOMFile(fs.readFileSync(fullPath))) {
-          files.push(fullPath);
+        for (const item of items) {
+          if (item.startsWith('.') || item.startsWith('__MACOSX')) continue;
+          
+          const fullPath = path.join(currentPath, item);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isDirectory()) {
+            walkDir(fullPath);
+          } else if (item.toLowerCase().endsWith('.dcm') || 
+                     item.toLowerCase().includes('dicom')) {
+            // Quick check for DICOM files
+            try {
+              const buffer = fs.readFileSync(fullPath, { start: 0, end: 200 });
+              if (this.isDICOMFile(buffer)) {
+                files.push(fullPath);
+              }
+            } catch (e) {
+              // Skip files that can't be read
+            }
+          }
         }
+      } catch (e) {
+        console.warn(`Cannot read directory: ${currentPath}`);
       }
-    }
+    };
     
     walkDir(dirPath);
     return files;
