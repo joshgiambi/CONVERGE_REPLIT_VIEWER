@@ -219,31 +219,15 @@ export async function registerRoutes(app: Express) {
 
   // Create HTTP server
   const httpServer = createServer(app);
-  
-  // WebSocket for real-time updates (future use)
-  const wss = new WebSocketServer({ server: httpServer });
-  
-  wss.on('connection', (ws) => {
-    console.log('WebSocket client connected');
-    
-    ws.on('message', (message) => {
-      console.log('Received:', message.toString());
-    });
-    
-    ws.on('close', () => {
-      console.log('WebSocket client disconnected');
-    });
-  });
 
   // Load demo data on startup
   setTimeout(async () => {
     try {
-      console.log('Loading demo data...');
       await createDemoData();
     } catch (error) {
-      console.log('Demo data already loaded or failed to load');
+      console.log('Demo data loading skipped');
     }
-  }, 2000);
+  }, 1000);
 
   return httpServer;
 }
