@@ -99,6 +99,18 @@ export async function registerRoutes(app: Express) {
     }
   });
 
+  // Get series by study ID
+  app.get("/api/studies/:id/series", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const studyId = parseInt(req.params.id);
+      const series = await storage.getSeriesByStudy(studyId);
+      
+      res.json(series);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Series Management
   app.get("/api/series/:id", async (req: Request, res: Response, next: NextFunction) => {
     try {

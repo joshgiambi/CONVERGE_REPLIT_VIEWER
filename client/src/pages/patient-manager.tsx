@@ -489,7 +489,8 @@ export default function PatientManager() {
                             // Prioritize CT studies over RT structure sets
                             const ctStudy = patientStudies.find(study => study.modality === 'CT');
                             const targetStudy = ctStudy || patientStudies[0];
-                            window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
+                            // Use proper React routing instead of window.location
+                            window.open(`/dicom-viewer?studyId=${targetStudy.id}`, '_blank');
                           } else {
                             toast({
                               title: "No studies found",
