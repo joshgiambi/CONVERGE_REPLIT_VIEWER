@@ -1,4 +1,4 @@
-const dicomParser = require('dicom-parser');
+import * as dicomParser from 'dicom-parser';
 import { db } from './db';
 import { patients, studies, series, images } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -52,9 +52,6 @@ export interface ProcessedDICOM {
 
 export class DICOMProcessor {
   
-  /**
-   * Process a single DICOM file and extract all metadata
-   */
   static processDICOMFile(filePath: string): ProcessedDICOM {
     if (!fs.existsSync(filePath)) {
       throw new Error(`DICOM file not found: ${filePath}`);
@@ -63,7 +60,6 @@ export class DICOMProcessor {
     const buffer = fs.readFileSync(filePath);
     const byteArray = new Uint8Array(buffer);
     
-    // Validate DICOM header
     if (!this.isDICOMFile(buffer)) {
       throw new Error('Invalid DICOM file format');
     }
@@ -116,9 +112,6 @@ export class DICOMProcessor {
     };
   }
 
-  /**
-   * Store processed DICOM data in database with proper hierarchy
-   */
   static async storeDICOMInDatabase(
     processedData: ProcessedDICOM, 
     filePath: string, 
@@ -126,7 +119,7 @@ export class DICOMProcessor {
     fileSize: number
   ): Promise<number> {
     
-    // 1. Find or create patient
+    // Find or create patient
     let patient = await db.query.patients.findFirst({
       where: eq(patients.patientID, processedData.patientData.patientID)
     });
@@ -143,7 +136,7 @@ export class DICOMProcessor {
         .returning();
     }
 
-    // 2. Find or create study
+    // Find or create study
     let study = await db.query.studies.findFirst({
       where: eq(studies.studyInstanceUID, processedData.studyData.studyInstanceUID)
     });
@@ -165,7 +158,7 @@ export class DICOMProcessor {
         .returning();
     }
 
-    // 3. Find or create series
+    // Find or create series
     let seriesRecord = await db.query.series.findFirst({
       where: eq(series.seriesInstanceUID, processedData.seriesData.seriesInstanceUID)
     });
@@ -190,7 +183,7 @@ export class DICOMProcessor {
         .returning();
     }
 
-    // 4. Insert image
+    // Insert image
     const [image] = await db.insert(images)
       .values({
         seriesId: seriesRecord.id,
@@ -222,15 +215,12 @@ export class DICOMProcessor {
       })
       .returning();
 
-    // 5. Update counts
+    // Update counts
     await this.updateCounts(study.id, seriesRecord.id);
 
     return image.id;
   }
 
-  /**
-   * Process multiple DICOM files from a directory
-   */
   static async processDICOMDirectory(directoryPath: string): Promise<{
     processed: number;
     errors: string[];
@@ -256,7 +246,6 @@ export class DICOMProcessor {
     return results;
   }
 
-  // Helper methods
   private static isDICOMFile(buffer: Buffer): boolean {
     if (buffer.length < 132) return false;
     return buffer.toString('ascii', 128, 132) === 'DICM';
@@ -279,7 +268,6 @@ export class DICOMProcessor {
             walkDir(fullPath);
           } else if (item.toLowerCase().endsWith('.dcm') || 
                      item.toLowerCase().includes('dicom')) {
-            // Quick check for DICOM files
             try {
               const buffer = fs.readFileSync(fullPath, { start: 0, end: 200 });
               if (this.isDICOMFile(buffer)) {

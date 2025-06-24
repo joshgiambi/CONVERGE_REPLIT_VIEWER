@@ -3,23 +3,16 @@ import { patients, studies, series, images } from '@shared/schema';
 import { eq, desc } from 'drizzle-orm';
 
 export interface DICOMStorageService {
-  // Patient operations
   getPatients(): Promise<any[]>;
   getPatientById(id: number): Promise<any>;
   createPatient(data: any): Promise<any>;
-  
-  // Study operations
   getStudies(): Promise<any[]>;
   getStudyById(id: number): Promise<any>;
   getStudiesByPatient(patientId: number): Promise<any[]>;
   createStudy(data: any): Promise<any>;
-  
-  // Series operations
   getSeriesById(id: number): Promise<any>;
   getSeriesByStudy(studyId: number): Promise<any[]>;
   createSeries(data: any): Promise<any>;
-  
-  // Image operations
   getImageById(sopInstanceUID: string): Promise<any>;
   getImagesBySeriesId(seriesId: number): Promise<any[]>;
   createImage(data: any): Promise<any>;
