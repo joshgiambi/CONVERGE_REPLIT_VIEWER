@@ -196,26 +196,16 @@ export function ViewerToolbar({
             <div className="space-y-3">
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Navigation</h4>
-                <div className="space-y-1 text-gray-300">
+                <div className="grid grid-cols-2 gap-2 text-gray-300">
                   <div>• Mouse Wheel: Navigate slices</div>
                   <div>• Arrow Keys: Previous/Next slice</div>
-                  <div>• Left Click + Drag: Pan image</div>
-                </div>
-              </div>
-              
-              <div>
-                <h4 className="font-medium text-yellow-300 mb-1">Zoom Controls</h4>
-                <div className="space-y-1 text-gray-300">
-                  <div>• Ctrl + Mouse Wheel: Zoom in/out</div>
-                  <div>• Toolbar +/- buttons: Zoom in/out</div>
-                  <div>• Fit to Window button: Reset zoom</div>
                 </div>
               </div>
               
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Window/Level</h4>
-                <div className="space-y-1 text-gray-300">
-                  <div>• Right Click + Drag: Adjust contrast</div>
+                <div className="text-gray-300">
+                  <div>• Drag on image: Adjust contrast</div>
                   <div>• Horizontal: Window width</div>
                   <div>• Vertical: Window level</div>
                 </div>
