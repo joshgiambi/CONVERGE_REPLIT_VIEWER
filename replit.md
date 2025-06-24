@@ -4,11 +4,12 @@
 A specialized DICOM medical imaging viewer featuring multi-planar reconstruction (axial, sagittal, coronal views), real DICOM file parsing and upload, comprehensive patient management interface, and PACS networking capabilities for hospital integration.
 
 ## Recent Changes
-- **2025-01-14**: Cleaned up project structure, removed temporary files and messy workarounds
-- **2025-01-14**: Implemented robust DICOM processing system with proper database schema
-- **2025-01-14**: Created scalable storage layer with proper DICOM metadata extraction
-- **2025-01-14**: Fixed logo styling to white/black as requested
-- **2025-01-14**: Added Z slice readout display with proper DICOM spatial ordering
+- **2025-06-24**: Processed complete HN-ATLAS dataset with all 153 CT slices using proper DICOM metadata
+- **2025-06-24**: Implemented correct Z slice spatial ordering based on slice location and image position
+- **2025-06-24**: Fixed "View Studies" navigation to properly open DICOM viewer with study parameters
+- **2025-06-24**: Cleaned up project structure, removed temporary files and messy workarounds  
+- **2025-06-24**: Built robust DICOM processing system with proper database schema
+- **2025-06-24**: Fixed logo styling to white/black as requested
 
 ## Project Architecture
 
