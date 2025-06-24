@@ -65,66 +65,19 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       
       const seriesData = await response.json();
       
-      // First parse DICOM metadata for proper spatial ordering
-      const imagesWithMetadata = await Promise.all(seriesData.images.map(async (img: any) => {
-        try {
-          const response = await fetch(`/api/images/${img.sopInstanceUID}`);
-          const arrayBuffer = await response.arrayBuffer();
-          
-          if (!window.dicomParser) {
-            await loadDicomParser();
-          }
-          
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataSet = window.dicomParser.parseDicom(byteArray);
-          
-          // Extract spatial metadata
-          const sliceLocation = dataSet.floatString('x00201041');
-          const imagePosition = dataSet.string('x00200032');
-          const instanceNumber = dataSet.intString('x00200013');
-          
-          // Parse image position (z-coordinate is third value)
-          let zPosition = null;
-          if (imagePosition) {
-            const positions = imagePosition.split('\\').map(p => parseFloat(p));
-            zPosition = positions[2];
-          }
-          
-          return {
-            ...img,
-            parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-            parsedZPosition: zPosition,
-            parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : img.instanceNumber
-          };
-        } catch (error) {
-          console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
-          return {
-            ...img,
-            parsedSliceLocation: null,
-            parsedZPosition: null,
-            parsedInstanceNumber: img.instanceNumber
-          };
-        }
-      }));
-      
-      // Sort by spatial position - prefer slice location, then z-position, then instance number
-      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
-        // Primary: slice location
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
+      // Sort by slice location first, then by instance number
+      const sortedImages = seriesData.images.sort((a: any, b: any) => {
+        // Try slice location first (more reliable for CT ordering)
+        if (a.sliceLocation !== undefined && b.sliceLocation !== undefined) {
+          return parseFloat(a.sliceLocation) - parseFloat(b.sliceLocation);
         }
         
-        // Secondary: z-position from image position
-        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
+        // Fall back to instance number
+        if (a.instanceNumber !== undefined && b.instanceNumber !== undefined) {
+          return parseInt(a.instanceNumber) - parseInt(b.instanceNumber);
         }
         
-        // Tertiary: instance number
-        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        
-        // Final fallback: filename
+        // Fall back to filename comparison
         return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
       });
       
@@ -560,16 +513,9 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
               userSelect: 'none'
             }}
           />
-          {/* Current Window/Level and Z position display */}
+          {/* Current Window/Level display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
-            {images.length > 0 && images[currentIndex] && (
-              <div className="mt-1">
-                Z: {images[currentIndex].parsedSliceLocation?.toFixed(1) || 
-                     images[currentIndex].parsedZPosition?.toFixed(1) || 
-                     (currentIndex + 1)}
-              </div>
-            )}
           </div>
 
 

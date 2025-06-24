@@ -14,7 +14,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { DICOMUploader } from "@/components/dicom/dicom-uploader";
 import { 
   User, 
   Calendar, 
@@ -112,7 +111,6 @@ export default function PatientManager() {
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
-  const [activeTab, setActiveTab] = useState("patients");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -341,68 +339,96 @@ export default function PatientManager() {
           <div>
             <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #22c55e',
                 fontWeight: '900'
               }}>C</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #10b981',
                 fontWeight: '900'
               }}>O</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #3b82f6',
                 fontWeight: '900'
               }}>N</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #2563eb',
                 fontWeight: '900'
               }}>V</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #6366f1',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #8b5cf6',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #a855f7',
                 fontWeight: '900'
               }}>G</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
+                WebkitTextStroke: '1px #22c55e',
                 fontWeight: '900'
               }}>E</span>
             </h1>
           </div>
           <div className="flex gap-2">
-            <Button 
-              variant="outline"
-              onClick={() => setActiveTab("import")}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Import DICOM
-            </Button>
-            <Button 
-              onClick={() => {
-                // Open the first available study in the viewer
-                if (studies.length > 0) {
-                  window.open(`/dicom-viewer?studyId=${studies[0].id}`, '_blank');
-                } else {
-                  window.open('/dicom-viewer', '_blank');
-                }
-              }}
-            >
-              <Eye className="h-4 w-4 mr-2" />
-              Open Viewer
-            </Button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload DICOM
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Upload DICOM Files</DialogTitle>
+                  <DialogDescription>
+                    Upload DICOM files to create new studies in the patient database.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 mb-2">Drag and drop DICOM files here</p>
+                    <p className="text-sm text-gray-400">or click to browse</p>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".dcm,.dicom"
+                      className="hidden"
+                      id="dicom-upload"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleFileUpload(Array.from(e.target.files));
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={() => document.getElementById('dicom-upload')?.click()}
+                    >
+                      Select Files
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Link href="/dicom-viewer">
+              <Button>
+                <Eye className="h-4 w-4 mr-2" />
+                DICOM Viewer
+              </Button>
+            </Link>
           </div>
         </div>
 
@@ -419,15 +445,15 @@ export default function PatientManager() {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Tabs defaultValue="patients" className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="patients" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              Import DICOM
+            <TabsTrigger value="studies" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Studies
             </TabsTrigger>
             <TabsTrigger value="pacs" className="flex items-center gap-2">
               <Network className="h-4 w-4" />
@@ -483,14 +509,11 @@ export default function PatientManager() {
                         size="sm"
                         className="w-full mt-4"
                         onClick={() => {
-                          // Filter studies for this patient and prioritize CT studies
-                          const patientStudies = studies.filter(study => study.patientID === patient.patientID || study.patientName === patient.patientName);
+                          // Filter studies for this patient and show them
+                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
                           if (patientStudies.length > 0) {
-                            // Prioritize CT studies over RT structure sets
-                            const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                            const targetStudy = ctStudy || patientStudies[0];
-                            // Use proper React routing to open viewer with correct study
-                            window.open(`/dicom-viewer?studyId=${targetStudy.id}`, '_blank');
+                            // Navigate to DICOM viewer with the first study
+                            window.location.href = `/dicom-viewer?studyId=${patientStudies[0].id}`;
                           } else {
                             toast({
                               title: "No studies found",
@@ -509,25 +532,71 @@ export default function PatientManager() {
             )}
           </TabsContent>
 
-
-
-          {/* Import DICOM Tab */}
-          <TabsContent value="import" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Upload className="h-5 w-5" />
-                  Import DICOM Files
-                </CardTitle>
-                <CardDescription>
-                  Upload DICOM files to parse metadata and import into the database. 
-                  Supports CT, MRI, PET/CT, RT Structure Sets, Dose, and Plan files.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <DICOMUploader />
-              </CardContent>
-            </Card>
+          {/* Studies Tab */}
+          <TabsContent value="studies" className="space-y-4">
+            {studiesLoading ? (
+              <div className="text-center py-8">Loading studies...</div>
+            ) : filteredStudies.length === 0 ? (
+              <Card>
+                <CardContent className="text-center py-8">
+                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No studies found</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4">
+                {filteredStudies.map((study) => (
+                  <Card key={study.id} className="hover:shadow-lg transition-shadow">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-5 w-5" />
+                          {study.studyDescription || "Unnamed Study"}
+                        </div>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary">{study.modality}</Badge>
+                          {study.isDemo && <Badge variant="outline">Demo</Badge>}
+                        </div>
+                      </CardTitle>
+                      <CardDescription>
+                        Patient: {study.patientName} | ID: {study.patientID}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <div className="font-medium">Study Date</div>
+                          <div className="text-gray-500">{formatDate(study.studyDate)}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Series</div>
+                          <div className="text-gray-500">{study.numberOfSeries}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Images</div>
+                          <div className="text-gray-500">{study.numberOfImages}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Accession</div>
+                          <div className="text-gray-500">{study.accessionNumber || "N/A"}</div>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-4"
+                        onClick={() => {
+                          window.location.href = `/dicom-viewer?studyId=${study.id}`;
+                        }}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        View Study
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           {/* PACS Tab */}
