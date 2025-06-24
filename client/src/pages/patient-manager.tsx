@@ -341,43 +341,43 @@ export default function PatientManager() {
           <div>
             <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #22c55e',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>C</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #10b981',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>O</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #3b82f6',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>N</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #2563eb',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>V</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #6366f1',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #8b5cf6',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #a855f7',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>G</span>
               <span style={{
-                color: 'black',
-                WebkitTextStroke: '1px #22c55e',
+                color: 'white',
+                WebkitTextStroke: '2px black',
                 fontWeight: '900'
               }}>E</span>
             </h1>
