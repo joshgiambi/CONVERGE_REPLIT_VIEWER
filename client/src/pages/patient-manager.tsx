@@ -391,6 +391,7 @@ export default function PatientManager() {
               Import DICOM
             </Button>
             <Button 
+              variant="outline"
               onClick={() => {
                 // Open the first available study in the viewer
                 if (studies.length > 0) {
@@ -402,6 +403,19 @@ export default function PatientManager() {
             >
               <Eye className="h-4 w-4 mr-2" />
               Open Viewer
+            </Button>
+            <Button 
+              onClick={() => {
+                // Open the first available study in the enhanced viewer with RT structures
+                if (studies.length > 0) {
+                  window.open(`/enhanced-viewer?studyId=${studies[0].id}`, '_blank');
+                } else {
+                  window.open('/enhanced-viewer', '_blank');
+                }
+              }}
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Enhanced Viewer
             </Button>
           </div>
         </div>
@@ -478,29 +492,56 @@ export default function PatientManager() {
                           Created: {formatDate(patient.createdAt)}
                         </div>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full mt-4"
-                        onClick={() => {
-                          // Filter studies for this patient and prioritize CT studies
-                          const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                          if (patientStudies.length > 0) {
-                            // Prioritize CT studies over RT structure sets
-                            const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                            const targetStudy = ctStudy || patientStudies[0];
-                            window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
-                          } else {
-                            toast({
-                              title: "No studies found",
-                              description: `No studies found for patient ${patient.patientName}`,
-                              variant: "destructive",
-                            });
-                          }
-                        }}
-                      >
-                        View Studies
-                      </Button>
+                      <div className="flex gap-2 mt-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            // Filter studies for this patient and prioritize CT studies
+                            const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                            if (patientStudies.length > 0) {
+                              // Prioritize CT studies over RT structure sets
+                              const ctStudy = patientStudies.find(study => study.modality === 'CT');
+                              const targetStudy = ctStudy || patientStudies[0];
+                              window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
+                            } else {
+                              toast({
+                                title: "No studies found",
+                                description: `No studies found for patient ${patient.patientName}`,
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Viewer
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="flex-1 bg-green-600 hover:bg-green-700"
+                          onClick={() => {
+                            // Filter studies for this patient and prioritize CT studies
+                            const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                            if (patientStudies.length > 0) {
+                              // Prioritize CT studies over RT structure sets
+                              const ctStudy = patientStudies.find(study => study.modality === 'CT');
+                              const targetStudy = ctStudy || patientStudies[0];
+                              window.location.href = `/enhanced-viewer?studyId=${targetStudy.id}`;
+                            } else {
+                              toast({
+                                title: "No studies found",
+                                description: `No studies found for patient ${patient.patientName}`,
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          <Activity className="h-4 w-4 mr-1" />
+                          Enhanced
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
