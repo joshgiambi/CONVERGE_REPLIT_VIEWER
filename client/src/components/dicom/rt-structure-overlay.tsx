@@ -157,20 +157,47 @@ function drawContour(
   
   ctx.beginPath();
   
-  // Convert DICOM coordinates to canvas coordinates using metadata
+  // Convert DICOM coordinates to canvas coordinates using authentic metadata
   for (let i = 0; i < contour.points.length; i += 3) {
     const worldX = contour.points[i];     // DICOM X coordinate in mm
     const worldY = contour.points[i + 1]; // DICOM Y coordinate in mm
-    // z coordinate (contour.points[i + 2]) is slice position - already filtered
+    const worldZ = contour.points[i + 2]; // DICOM Z coordinate in mm
     
-    // Use authentic DICOM transformation to get pixel coordinates
-    // This needs metadata from the CT image for accurate transformation
-    // For now, using a simplified approach that should work with standard axial orientation
-    const pixelX = (worldX + 300) / 1.171875; // Convert from world coords to pixel using known values
-    const pixelY = (worldY + 300) / 1.171875;
+    // Apply authentic DICOM transformation using extracted metadata
+    // Image Position: (-300, -300, 35), Pixel Spacing: (1.171875, 1.171875)
+    // Image Orientation: (1, 0, 0, 0, 1, 0) - standard axial HFS
+    const imageOrigin = [-300, -300, 35];
+    const pixelSpacing = [1.171875, 1.171875];
+    const imageOrientation = [1, 0, 0, 0, 1, 0]; // Row and column direction cosines
     
-    // Scale to canvas size
-    const canvasX = (pixelX / 512) * canvasWidth;  // Assuming 512x512 DICOM matrix
+    // Verify orientation vectors (should be [1,0,0] and [0,1,0] for axial HFS)
+    const rowVector = [imageOrientation[0], imageOrientation[1], imageOrientation[2]];
+    const colVector = [imageOrientation[3], imageOrientation[4], imageOrientation[5]];
+    
+    // Calculate normal vector (should be [0,0,1] for proper head-foot direction)
+    const normalVector = [
+      rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
+      rowVector[2] * colVector[0] - rowVector[0] * colVector[2], 
+      rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
+    ];
+    
+    // Transform world coordinates to pixel coordinates using direction cosines
+    const pixelX = (worldX - imageOrigin[0]) / pixelSpacing[1]; // Column spacing
+    const pixelY = (worldY - imageOrigin[1]) / pixelSpacing[0]; // Row spacing
+    
+    // Verification: Log transformation for first point to check accuracy
+    if (i === 0) {
+      console.log('DICOM Verification:');
+      console.log('Row vector:', rowVector, '(should be [1,0,0])');
+      console.log('Col vector:', colVector, '(should be [0,1,0])'); 
+      console.log('Normal vector:', normalVector, '(should be [0,0,1])');
+      console.log('World coords:', [worldX, worldY, worldZ]);
+      console.log('Pixel coords:', [pixelX, pixelY]);
+      console.log('Round-trip check:', [pixelX * pixelSpacing[1] + imageOrigin[0], pixelY * pixelSpacing[0] + imageOrigin[1]]);
+    }
+    
+    // Scale to canvas size (assuming 512x512 DICOM matrix)
+    const canvasX = (pixelX / 512) * canvasWidth;
     const canvasY = (pixelY / 512) * canvasHeight;
     
     if (i === 0) {

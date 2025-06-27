@@ -677,8 +677,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pixelSpacing: getArray('x00280030')?.join('\\') || null, // Pixel Spacing
         sliceLocation: getString('x00201041'), // Slice Location
         frameOfReferenceUID: getString('x00200052'), // Frame of Reference UID
-        rows: getString('x00280010'), // Rows
+        rows: getString('x00280010'), // Rows  
         columns: getString('x00280011'), // Columns
+        sopClassUID: getString('x00080016'), // SOP Class UID
+        sopInstanceUID: getString('x00080018'), // SOP Instance UID
         windowCenter: getString('x00281050'), // Window Center
         windowWidth: getString('x00281051') // Window Width
       };
