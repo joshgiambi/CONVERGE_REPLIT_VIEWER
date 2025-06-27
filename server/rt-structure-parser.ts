@@ -18,6 +18,7 @@ export interface RTStructureSet {
   studyInstanceUID: string;
   seriesInstanceUID: string;
   sopInstanceUID: string;
+  frameOfReferenceUID?: string;
   structureSetLabel?: string;
   structureSetDate?: string;
   structures: RTStructureContour[];
@@ -37,6 +38,7 @@ export class RTStructureParser {
         studyInstanceUID: this.getString(dataSet, 'x0020000d') || '',
         seriesInstanceUID: this.getString(dataSet, 'x0020000e') || '',
         sopInstanceUID: this.getString(dataSet, 'x00080018') || '',
+        frameOfReferenceUID: this.getString(dataSet, 'x00200052'),
         structureSetLabel: this.getString(dataSet, 'x30060002'),
         structureSetDate: this.getString(dataSet, 'x30060008'),
         structures: []

@@ -616,6 +616,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageOrientation: extractTag(buffer, '00200037'), // Image Orientation Patient  
         pixelSpacing: extractTag(buffer, '00280030'), // Pixel Spacing
         sliceLocation: extractTag(buffer, '00201041'), // Slice Location
+        frameOfReferenceUID: extractTag(buffer, '00200052'), // Frame of Reference UID
         rows: extractTag(buffer, '00280010'), // Rows
         columns: extractTag(buffer, '00280011'), // Columns
         windowCenter: extractTag(buffer, '00281050'), // Window Center

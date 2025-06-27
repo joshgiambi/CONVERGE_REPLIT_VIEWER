@@ -434,17 +434,23 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Use the coordinate system that worked correctly with zoom
-      // Convert DICOM coordinates (typically -250 to +250) to image coordinates
-      const scale = 0.9; // Scale factor for proper anatomical size
-      
-      // Convert DICOM coordinates to normalized coordinates (0-1)
-      const normalizedX = (dicomX + 250) / 500;
-      const normalizedY = (dicomY + 250) / 500;
-      
-      // Map to image pixel coordinates
-      const pixelX = normalizedX * imageWidth * scale + (imageWidth * (1 - scale) / 2);
-      const pixelY = normalizedY * imageHeight * scale + (imageHeight * (1 - scale) / 2);
+      // Use proper DICOM coordinate transformation
+      if (!imageMetadata) {
+        // Fallback simple transformation
+        const pixelX = (dicomX + 250) * (imageWidth / 500);
+        const pixelY = (dicomY + 250) * (imageHeight / 500);
+      } else {
+        // Parse DICOM spatial metadata for proper transformation
+        const imagePosition = imageMetadata.imagePosition ? 
+          imageMetadata.imagePosition.split('\\').map(Number) : [0, 0, 0];
+        const pixelSpacing = imageMetadata.pixelSpacing ? 
+          imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
+        
+        // Convert from DICOM world coordinates to pixel coordinates
+        // DICOM X,Y are in mm in patient coordinate system
+        const pixelX = (dicomX - imagePosition[0]) / pixelSpacing[0];
+        const pixelY = (dicomY - imagePosition[1]) / pixelSpacing[1];
+      }
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
