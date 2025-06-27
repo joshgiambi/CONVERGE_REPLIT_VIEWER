@@ -210,9 +210,13 @@ function drawContour(
 
     if (i === 0) {
       ctx.moveTo(canvasX, canvasY);
-      // Debug first point transformation
+      // Debug transformation to verify it's actually running
+      console.log('RT STRUCTURE DEBUG:');
       console.log('World coords:', [worldX, worldY]);
+      console.log('Pixel coords (j,i):', [j, i]);
+      console.log('Rotated coords:', [rotatedJ, rotatedI]);
       console.log('Canvas coords:', [canvasX, canvasY]);
+      console.log('Canvas dimensions:', [canvasWidth, canvasHeight]);
     } else {
       ctx.lineTo(canvasX, canvasY);
     }

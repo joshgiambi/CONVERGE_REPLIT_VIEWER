@@ -407,9 +407,11 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.globalAlpha = 0.8;
     
     rtStructures.structures.forEach((structure: any) => {
-      // Check if this structure is visible
-      const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
+      // Force all structures to be visible for debugging
+      const isVisible = true; // structureVisibility.get(structure.roiNumber) ?? true;
       if (!isVisible) return;
+      
+      console.log(`Rendering structure: ${structure.structureName} (ROI ${structure.roiNumber})`);
       
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
@@ -420,6 +422,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       structure.contours.forEach((contour: any) => {
         // Check if this contour is on the current slice
         if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+          console.log(`Drawing contour on slice ${currentSlicePosition}, contour at ${contour.slicePosition}`);
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
         }
       });
@@ -481,16 +484,21 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
         const deltaY = dicomY - imagePosition[1];
         
         // Project onto row and column directions, then divide by spacing
-        pixelX = (deltaX * colCosX + deltaY * colCosY) / pixelSpacing[1]; // column index
-        pixelY = (deltaX * rowCosX + deltaY * rowCosY) / pixelSpacing[0]; // row index
+        const origPixelX = (deltaX * colCosX + deltaY * colCosY) / pixelSpacing[1]; // column index
+        const origPixelY = (deltaX * rowCosX + deltaY * rowCosY) / pixelSpacing[0]; // row index
+        
+        // Apply 90-degree counter-rotation to fix sideways orientation
+        pixelX = imageHeight - origPixelY; // Rotate coordinates
+        pixelY = origPixelX;
         
         // Debug coordinate transformation for first point of first contour
-        if (i === 0 && currentIndex === 0) {
+        if (i === 0) {
+          console.log('RT STRUCTURE TRANSFORMATION:');
           console.log('DICOM patient coordinates (mm):', dicomX, dicomY);
           console.log('Image Position Patient:', imagePosition);
           console.log('Pixel Spacing [row, col]:', pixelSpacing);
-          console.log('Image Orientation Patient:', imageOrientation);
-          console.log('Calculated voxel indices:', pixelX, pixelY);
+          console.log('Original pixel indices:', origPixelX, origPixelY);
+          console.log('Rotated pixel indices:', pixelX, pixelY);
           console.log('Image dimensions:', imageWidth, imageHeight);
         }
       } else {
