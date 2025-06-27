@@ -40,7 +40,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
-  const [isPreloading, setIsPreloading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -203,36 +203,36 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
 
-  const preloadAllImages = async (imageList: any[]) => {
-    console.log('Starting to preload all images...');
-    setIsPreloading(true);
-    const newCache = new Map();
+  const preloadNearbyImages = async (currentIndex: number, imageList: any[], radius = 5) => {
+    const newCache = new Map(imageCache);
     
-    // Load all images in parallel
-    const loadPromises = imageList.map(async (image, index) => {
-      try {
-        const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${index + 1}`);
-        }
-        
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        const imageData = await parseDicomImage(arrayBuffer);
-        
-        if (imageData) {
-          newCache.set(image.sopInstanceUID, imageData);
-          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
-        }
-      } catch (error) {
-        console.warn(`Failed to preload image ${index + 1}:`, error);
+    // Calculate range of images to preload around current index
+    const start = Math.max(0, currentIndex - radius);
+    const end = Math.min(imageList.length - 1, currentIndex + radius);
+    
+    const loadPromises = [];
+    
+    for (let i = start; i <= end; i++) {
+      const image = imageList[i];
+      if (!newCache.has(image.sopInstanceUID)) {
+        loadPromises.push(
+          fetch(`/api/images/${image.sopInstanceUID}`)
+            .then(response => response.arrayBuffer())
+            .then(buffer => parseDicomImage(buffer))
+            .then(imageData => {
+              if (imageData) {
+                newCache.set(image.sopInstanceUID, imageData);
+              }
+            })
+            .catch(error => console.warn(`Failed to preload image ${i + 1}:`, error))
+        );
       }
-    });
+    }
     
-    // Wait for all images to load
-    await Promise.allSettled(loadPromises);
-    setImageCache(newCache);
-    setIsPreloading(false);
-    console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
+    if (loadPromises.length > 0) {
+      await Promise.allSettled(loadPromises);
+      setImageCache(newCache);
+    }
   };
 
   const loadImageMetadata = async (imageId: number) => {
@@ -277,6 +277,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
+    setIsLoading(true);
     try {
       const currentImage = images[currentIndex];
       const cacheKey = currentImage.sopInstanceUID;
@@ -288,9 +289,24 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       let imageData = imageCache.get(cacheKey);
       
       if (!imageData) {
-        // Image should be preloaded, but fallback just in case
-        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
-        throw new Error('Image not available in cache');
+        // Load image on demand if not in cache
+        console.log(`Loading image on demand: ${currentIndex + 1}`);
+        const imageResponse = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to load image ${currentIndex + 1}`);
+        }
+        
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        imageData = await parseDicomImage(arrayBuffer);
+        
+        if (!imageData) {
+          throw new Error('Failed to parse DICOM image');
+        }
+        
+        // Cache the loaded image
+        const newCache = new Map(imageCache);
+        newCache.set(cacheKey, imageData);
+        setImageCache(newCache);
       }
       
       // Keep fixed canvas size for consistent display
