@@ -18,6 +18,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  const [rtStructures, setRTStructures] = useState<any>(null);
+  const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -165,6 +167,31 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
+  const handleRTStructureLoad = (rtStructData: any) => {
+    setRTStructures(rtStructData);
+    // Initialize visibility for all structures
+    const visibilityMap = new Map();
+    rtStructData.structures.forEach((structure: any) => {
+      visibilityMap.set(structure.roiNumber, true);
+    });
+    setStructureVisibility(visibilityMap);
+  };
+
+  const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
+    setStructureVisibility(prev => new Map(prev.set(structureId, visible)));
+  };
+
+  const handleStructureColorChange = (structureId: number, color: [number, number, number]) => {
+    if (rtStructures) {
+      const updatedStructures = { ...rtStructures };
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+      if (structure) {
+        structure.color = color;
+        setRTStructures(updatedStructures);
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -188,6 +215,11 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onSeriesSelect={handleSeriesSelect}
             windowLevel={windowLevel}
             onWindowLevelChange={setWindowLevel}
+            studyId={studyData.studies[0]?.id}
+            rtStructures={rtStructures}
+            onRTStructureLoad={handleRTStructureLoad}
+            onStructureVisibilityChange={handleStructureVisibilityChange}
+            onStructureColorChange={handleStructureColorChange}
           />
         </div>
 
@@ -199,6 +231,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
               studyId={studyData.studies[0]?.id}
               windowLevel={windowLevel}
               onWindowLevelChange={setWindowLevel}
+              rtStructures={rtStructures}
+              structureVisibility={structureVisibility}
             />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">

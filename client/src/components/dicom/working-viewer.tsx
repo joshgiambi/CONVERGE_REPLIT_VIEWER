@@ -12,54 +12,22 @@ interface WorkingViewerProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onResetZoom?: () => void;
+  rtStructures?: any;
+  structureVisibility?: Map<number, boolean>;
 }
 
-export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
+export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom, rtStructures: externalRTStructures, structureVisibility: externalStructureVisibility }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rtStructures, setRtStructures] = useState<any>(null);
+  // Use external RT structures if provided, otherwise load our own
+  const rtStructures = externalRTStructures;
+  const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
 
-  // Load RT structures for the study
-  useEffect(() => {
-    const loadRTStructures = async () => {
-      if (!studyId) return;
-      
-      try {
-        // Get RT structure series for this study
-        const response = await fetch(`/api/studies/${studyId}/rt-structures`);
-        if (!response.ok) {
-          console.log('No RT structures found for this study');
-          return;
-        }
-        
-        const rtSeries = await response.json();
-        if (!rtSeries || rtSeries.length === 0) {
-          console.log('No RT structure series found');
-          return;
-        }
-
-        // Parse the RT structure contours
-        const contourResponse = await fetch(`/api/rt-structures/${rtSeries[0].id}/contours`);
-        if (!contourResponse.ok) {
-          console.log('Failed to load RT structure contours');
-          return;
-        }
-
-        const rtStructData = await contourResponse.json();
-        setRtStructures(rtStructData);
-        console.log(`Loaded RT structures with ${rtStructData.structures.length} ROIs`);
-        
-      } catch (error) {
-        console.error('Error loading RT structures:', error);
-      }
-    };
-
-    loadRTStructures();
-  }, [studyId]);
+  // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
   const currentWindowLevel = externalWindowLevel 
     ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
@@ -399,6 +367,10 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.globalAlpha = 0.8;
     
     rtStructures.structures.forEach((structure: any) => {
+      // Check if this structure is visible
+      const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
+      if (!isVisible) return;
+      
       // Set color for this structure
       const [r, g, b] = structure.color;
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
@@ -631,7 +603,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
               size="sm"
               variant={showStructures ? "default" : "outline"}
               onClick={() => setShowStructures(!showStructures)}
-              className="text-xs"
+              className="text-xs bg-green-600 hover:bg-green-700"
             >
               RT ({rtStructures.structures.length})
             </Button>
