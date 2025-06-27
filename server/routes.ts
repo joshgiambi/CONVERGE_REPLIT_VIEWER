@@ -42,13 +42,58 @@ function extractDICOMMetadata(filePath: string) {
 
 function extractTag(buffer: Buffer, tag: string): string | null {
   try {
-    const dataSet = dicomParser.parseDicom(buffer);
+    const byteArray = new Uint8Array(buffer);
+    
+    // Try parsing with explicit transfer syntax first
+    let dataSet;
+    try {
+      dataSet = (dicomParser as any).parseDicom(byteArray, {
+        untilTag: undefined,
+        inflateFlags: undefined
+      });
+    } catch (parseError) {
+      // Try parsing without Part 10 header for implicit VR files
+      try {
+        dataSet = (dicomParser as any).parseDicom(byteArray, {
+          untilTag: undefined,
+          vrCallback: function(tag: string) {
+            // Provide VR for common tags when implicit
+            const vrMap: any = {
+              'x00200032': 'DS', // Image Position Patient
+              'x00200037': 'DS', // Image Orientation Patient
+              'x00280030': 'DS', // Pixel Spacing
+              'x00201041': 'DS', // Slice Location
+              'x00200052': 'UI', // Frame of Reference UID
+              'x00280010': 'US', // Rows
+              'x00280011': 'US', // Columns
+              'x00281050': 'DS', // Window Center
+              'x00281051': 'DS'  // Window Width
+            };
+            return vrMap[tag];
+          }
+        });
+      } catch (fallbackError) {
+        console.warn(`Failed to parse DICOM for tag ${tag}:`, fallbackError.message);
+        return null;
+      }
+    }
+    
     const element = dataSet.elements[tag];
     if (element) {
-      return dataSet.string(tag)?.trim() || null;
+      // Try different value extraction methods
+      try {
+        return dataSet.string(tag)?.trim() || 
+               dataSet.floatString(tag)?.trim() ||
+               dataSet.intString(tag)?.trim() || 
+               null;
+      } catch (valueError) {
+        console.warn(`Failed to extract value for tag ${tag}:`, valueError.message);
+        return null;
+      }
     }
     return null;
-  } catch {
+  } catch (error: any) {
+    console.warn(`Error extracting DICOM tag ${tag}:`, error.message);
     return null;
   }
 }
@@ -611,6 +656,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse DICOM file to extract spatial metadata  
       const buffer = fs.readFileSync(image.filePath);
 
+      // Debug: Log which file we're parsing
+      console.log(`Attempting to parse metadata from: ${image.filePath}`);
+
       const metadata = {
         imagePosition: extractTag(buffer, '00200032'), // Image Position Patient
         imageOrientation: extractTag(buffer, '00200037'), // Image Orientation Patient  
@@ -622,6 +670,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         windowCenter: extractTag(buffer, '00281050'), // Window Center
         windowWidth: extractTag(buffer, '00281051') // Window Width
       };
+
+      // Debug: Log extracted metadata
+      console.log('Extracted metadata:', metadata);
 
       res.json(metadata);
     } catch (error) {

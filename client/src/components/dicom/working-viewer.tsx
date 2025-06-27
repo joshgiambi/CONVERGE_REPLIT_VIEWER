@@ -479,8 +479,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
           console.log('Image dimensions:', imageWidth, imageHeight);
         }
       } else {
-        // Fallback transformation if metadata unavailable
-        const scale = 1.2;
+        // Fallback transformation with proper scaling for anatomy
+        // Since structures are too large, reduce the scale factor significantly
+        const scale = 0.4; // Further reduced to make structures properly sized
         const centerX = imageWidth / 2;
         const centerY = imageHeight / 2;
         pixelX = centerX + (dicomX * scale);
@@ -490,6 +491,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
           console.log('Using fallback transformation - metadata unavailable');
           console.log('DICOM coordinates:', dicomX, dicomY);
           console.log('Pixel coordinates:', pixelX, pixelY);
+          console.log('Applied scale factor:', scale);
         }
       }
       
