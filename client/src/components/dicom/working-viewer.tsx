@@ -481,7 +481,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       } else {
         // Fallback transformation with proper scaling for anatomy
         // Since structures are too large, reduce the scale factor significantly
-        const scale = 0.4; // Further reduced to make structures properly sized
+        const scale = 0.25; // Significantly reduced for proper anatomical sizing
         const centerX = imageWidth / 2;
         const centerY = imageHeight / 2;
         pixelX = centerX + (dicomX * scale);
