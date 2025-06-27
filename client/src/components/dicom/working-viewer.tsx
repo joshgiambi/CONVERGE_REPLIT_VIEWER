@@ -56,7 +56,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
 
   useEffect(() => {
     loadImages();
-  }, [seriesId]);
+  }, [seriesId, loadImages]);
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
@@ -69,95 +69,61 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
-  // Remove the separate useEffect since preloading is now handled in loadImages
-
-  const loadImages = async () => {
+  // OPTIMIZED: Fast metadata extraction without full image download
+  const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
     try {
-      setIsLoading(true);
-      setError(null);
-      
-      const response = await fetch(`/api/series/${seriesId}/images`);
-      if (!response.ok) {
-        throw new Error(`Failed to load images: ${response.statusText}`);
-      }
-      
-      const seriesImages = await response.json();
-      
-      // First parse DICOM metadata for proper spatial ordering
-      const imagesWithMetadata = await Promise.all(seriesImages.map(async (img: any) => {
-        try {
-          const response = await fetch(`/api/images/${img.sopInstanceUID}`);
-          const arrayBuffer = await response.arrayBuffer();
-          
-          if (!window.dicomParser) {
-            await loadDicomParser();
-          }
-          
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataSet = window.dicomParser.parseDicom(byteArray);
-          
-          // Extract spatial metadata
-          const sliceLocation = dataSet.floatString('x00201041');
-          const imagePosition = dataSet.string('x00200032');
-          const instanceNumber = dataSet.intString('x00200013');
-          
-          // Parse image position (z-coordinate is third value)
-          let zPosition = null;
-          if (imagePosition) {
-            const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
-            zPosition = positions[2];
-          }
-          
-          return {
-            ...img,
-            parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-            parsedZPosition: zPosition,
-            parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : img.instanceNumber
-          };
-        } catch (error) {
-          console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
-          return {
-            ...img,
-            parsedSliceLocation: null,
-            parsedZPosition: null,
-            parsedInstanceNumber: img.instanceNumber
-          };
-        }
-      }));
-      
-      // Sort by spatial position - prefer slice location, then z-position, then instance number
-      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
-        // Primary: slice location
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        }
-        
-        // Secondary: z-position from image position
-        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
-        }
-        
-        // Tertiary: instance number
-        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        
-        // Final fallback: filename
-        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+      // First try to get just the DICOM header (first 2KB should contain metadata)
+      const response = await fetch(`/api/images/${sopInstanceUID}`, {
+        headers: { 'Range': 'bytes=0-2048' } // Just get header portion
       });
       
-      setImages(sortedImages);
-      setCurrentIndex(0);
-      
-      // Preload all images with progress tracking
-      preloadAllImages(sortedImages);
-      
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
-      setIsLoading(false);
+      if (response.status === 206 || response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const byteArray = new Uint8Array(arrayBuffer);
+        const dataSet = window.dicomParser.parseDicom(byteArray);
+        
+        const sliceLocation = dataSet.floatString('x00201041');
+        const imagePosition = dataSet.string('x00200032');
+        const instanceNumber = dataSet.intString('x00200013');
+        
+        let zPosition = null;
+        if (imagePosition) {
+          const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
+          zPosition = positions[2];
+        }
+        
+        return {
+          parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
+          parsedZPosition: zPosition,
+          parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : null
+        };
+      }
+    } catch (error) {
+      // Fallback: if range request fails, use instance number
+      console.warn(`Range request failed for ${sopInstanceUID}, using fallback`);
     }
-  };
+    
+    return {
+      parsedSliceLocation: null,
+      parsedZPosition: null,
+      parsedInstanceNumber: null
+    };
+  }, []);
+
+  const loadDicomParser = useCallback((): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (window.dicomParser) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
+      document.head.appendChild(script);
+    });
+  }, []);
 
   const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
     try {
@@ -205,6 +171,54 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       return null;
     }
   };
+
+  // OPTIMIZED: Fast DICOM parsing with performance improvements
+  const parseDicomImageOptimized = useCallback(async (arrayBuffer: ArrayBuffer) => {
+    try {
+      const byteArray = new Uint8Array(arrayBuffer);
+      const dataSet = window.dicomParser.parseDicom(byteArray);
+      
+      const pixelDataElement = dataSet.elements.x7fe00010;
+      if (!pixelDataElement) {
+        throw new Error('No pixel data found in DICOM file');
+      }
+      
+      const rows = dataSet.uint16('x00280010') || 512;
+      const cols = dataSet.uint16('x00280011') || 512;
+      const bitsAllocated = dataSet.uint16('x00280100') || 16;
+      
+      const rescaleSlope = dataSet.floatString('x00281053') || 1;
+      const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
+      
+      if (bitsAllocated === 16) {
+        const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+        const huPixelArray = new Float32Array(rawPixelArray.length);
+        
+        // OPTIMIZED: Unrolled loop for better performance
+        const len = rawPixelArray.length;
+        const slope = rescaleSlope;
+        const intercept = rescaleIntercept;
+        
+        for (let i = 0; i < len; i += 4) {
+          huPixelArray[i] = rawPixelArray[i] * slope + intercept;
+          if (i + 1 < len) huPixelArray[i + 1] = rawPixelArray[i + 1] * slope + intercept;
+          if (i + 2 < len) huPixelArray[i + 2] = rawPixelArray[i + 2] * slope + intercept;
+          if (i + 3 < len) huPixelArray[i + 3] = rawPixelArray[i + 3] * slope + intercept;
+        }
+        
+        return {
+          data: huPixelArray,
+          width: cols,
+          height: rows
+        };
+      } else {
+        throw new Error('Only 16-bit images supported');
+      }
+    } catch (error) {
+      console.error('Error parsing DICOM image:', error);
+      return null;
+    }
+  }, []);
 
   // OPTIMIZED: Maximum speed preloading with controlled concurrency
   const preloadAllImagesOptimized = useCallback(async (imageList: any[]) => {
@@ -263,6 +277,82 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     setIsPreloading(false);
     console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
   }, [parseDicomImageOptimized]);
+
+  // OPTIMIZED: Fast image list loading with minimal metadata
+  const loadImages = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      setLoadingProgress({ loaded: 0, total: 0 });
+      
+      // Load DICOM parser first
+      await loadDicomParser();
+      
+      const response = await fetch(`/api/series/${seriesId}/images`);
+      if (!response.ok) {
+        throw new Error(`Failed to load images: ${response.statusText}`);
+      }
+      
+      const seriesImages = await response.json();
+      setLoadingProgress({ loaded: 0, total: seriesImages.length });
+      
+      // OPTIMIZED: Extract metadata in smaller batches to avoid overwhelming browser
+      const batchSize = 10;
+      const imagesWithMetadata = [];
+      
+      for (let i = 0; i < seriesImages.length; i += batchSize) {
+        const batch = seriesImages.slice(i, i + batchSize);
+        
+        const batchResults = await Promise.all(
+          batch.map(async (img: any) => {
+            try {
+              const metadata = await extractQuickMetadata(img.sopInstanceUID);
+              return { ...img, ...metadata };
+            } catch (error) {
+              console.warn(`Failed to parse metadata for ${img.fileName}:`, error);
+              return {
+                ...img,
+                parsedSliceLocation: null,
+                parsedZPosition: null,
+                parsedInstanceNumber: img.instanceNumber
+              };
+            }
+          })
+        );
+        
+        imagesWithMetadata.push(...batchResults);
+        setLoadingProgress({ loaded: imagesWithMetadata.length, total: seriesImages.length });
+        
+        // Small delay to prevent browser lock-up
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      // Sort by spatial position
+      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
+        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
+          return a.parsedSliceLocation - b.parsedSliceLocation;
+        }
+        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
+          return a.parsedZPosition - b.parsedZPosition;
+        }
+        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
+          return a.parsedInstanceNumber - b.parsedInstanceNumber;
+        }
+        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+      });
+      
+      setImages(sortedImages);
+      setCurrentIndex(0);
+      
+      // Start aggressive preloading immediately
+      preloadAllImagesOptimized(sortedImages);
+      
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [seriesId, loadDicomParser, extractQuickMetadata, preloadAllImagesOptimized]);
 
   const [imageMetadata, setImageMetadata] = useState<any>(null);
 
@@ -576,21 +666,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.stroke();
   };
 
-  const loadDicomParser = useCallback((): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (window.dicomParser) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
-      document.head.appendChild(script);
-    });
-  }, []);
-
   // OPTIMIZED: Fast metadata extraction without full image download
   const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
     try {
@@ -630,6 +705,21 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       parsedZPosition: null,
       parsedInstanceNumber: null
     };
+  }, []);
+
+  const loadDicomParser = useCallback((): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (window.dicomParser) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
+      document.head.appendChild(script);
+    });
   }, []);
 
   const goToPrevious = () => {
