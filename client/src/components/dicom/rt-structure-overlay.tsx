@@ -181,8 +181,9 @@ function drawContour(
 ) {
   if (contour.points.length < 6) return;
 
-  // Use authentic DICOM metadata values
-  const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+  // Use authentic DICOM metadata values from the HN-ATLAS dataset
+  // The current slice position varies, but X,Y origin is consistent
+  const imagePositionPatient: [number, number, number] = [-300, -300, contour.slicePosition];
   const pixelSpacing: [number, number] = [1.171875, 1.171875];
   const dicomImageWidth = 512; // Standard DICOM matrix size
   const dicomImageHeight = 512;
