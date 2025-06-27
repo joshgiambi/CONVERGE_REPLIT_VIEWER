@@ -380,7 +380,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       structure.contours.forEach((contour: any) => {
         // Check if this contour is on the current slice
         if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
-          drawContour(ctx, contour, canvas.width, canvas.height);
+          drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
         }
       });
     });
@@ -389,19 +389,37 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.restore();
   };
 
-  const drawContour = (ctx: CanvasRenderingContext2D, contour: any, canvasWidth: number, canvasHeight: number) => {
+  const drawContour = (ctx: CanvasRenderingContext2D, contour: any, canvasWidth: number, canvasHeight: number, currentImage: any) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
     
     ctx.beginPath();
     
-    // Convert DICOM coordinates to canvas coordinates
+    // Get image dimensions for proper scaling
+    const imageWidth = currentImage?.width || 512;
+    const imageHeight = currentImage?.height || 512;
+    
+    // Calculate base scaling to fill the entire canvas (same as image rendering)
+    const baseScale = Math.max(canvasWidth / imageWidth, canvasHeight / imageHeight);
+    const totalScale = baseScale * zoom;
+    const scaledWidth = imageWidth * totalScale;
+    const scaledHeight = imageHeight * totalScale;
+    
+    // Apply pan offset to centering (same as image rendering)
+    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
+    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+    
+    // Convert DICOM coordinates to canvas coordinates with proper scaling
     for (let i = 0; i < contour.points.length; i += 3) {
-      const x = contour.points[i];     // DICOM X coordinate
-      const y = contour.points[i + 1]; // DICOM Y coordinate
+      const dicomX = contour.points[i];     // DICOM X coordinate
+      const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Fixed coordinate conversion - remove Y flip to correct upside-down orientation
-      const canvasX = (x + 250) * (canvasWidth / 500); // Rough approximation
-      const canvasY = (y + 250) * (canvasHeight / 500); // Remove Y flip - structures should match image orientation
+      // Convert DICOM coordinates to normalized image coordinates (0-1)
+      const normalizedX = (dicomX + 250) / 500; // Normalize to 0-1 range
+      const normalizedY = (dicomY + 250) / 500; // Normalize to 0-1 range
+      
+      // Apply same transformation as the image
+      const canvasX = imageX + (normalizedX * scaledWidth);
+      const canvasY = imageY + (normalizedY * scaledHeight);
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
