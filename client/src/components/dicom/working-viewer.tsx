@@ -22,7 +22,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [imageMetadata, setImageMetadata] = useState<any>(null);
   
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures;
@@ -49,7 +48,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [panY, setPanY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
@@ -104,7 +102,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
           // Parse image position (z-coordinate is third value)
           let zPosition = null;
           if (imagePosition) {
-            const positions = imagePosition.split('\\').map(p => parseFloat(p));
+            const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
             zPosition = positions[2];
           }
           
@@ -236,6 +234,8 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       setImageCache(newCache);
     }
   };
+
+  const [imageMetadata, setImageMetadata] = useState<any>(null);
 
   const loadImageMetadata = async (imageId: number) => {
     try {
