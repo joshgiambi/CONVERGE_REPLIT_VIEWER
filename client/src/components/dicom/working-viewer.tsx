@@ -434,15 +434,18 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Scale down the DICOM coordinates to match the CT image size
-      // Use a smaller scale factor to make structures proportional to the anatomy
-      const scale = 0.8; // Reduce structure size to match CT anatomy better
+      // Fine-tune structure positioning and scale for better anatomical alignment
+      const scale = 1.0; // Increase scale slightly for better size match
       const centerX = imageWidth / 2;
       const centerY = imageHeight / 2;
       
-      // Convert to pixel coordinates relative to image center
-      const pixelX = centerX + (dicomX * scale);
-      const pixelY = centerY + (dicomY * scale);
+      // Add slight offset to improve positioning
+      const offsetX = 10; // Move structures slightly forward
+      const offsetY = -5; // Move structures slightly up
+      
+      // Convert to pixel coordinates with adjusted positioning
+      const pixelX = centerX + (dicomX * scale) + offsetX;
+      const pixelY = centerY + (dicomY * scale) + offsetY;
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
