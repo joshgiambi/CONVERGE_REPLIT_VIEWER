@@ -654,8 +654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const byteArray = new Uint8Array(buffer);
       const dataSet = dicomParser.parseDicom(byteArray, {
-        untilTag: 'x7fe00010',
-        stopAtPixelData: true
+        untilTag: 'x7fe00010'
       });
 
       const getString = (tag: string) => {
@@ -724,8 +723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const buffer = fs.readFileSync(sampleImage.filePath);
           const byteArray = new Uint8Array(buffer);
           const dataSet = dicomParser.parseDicom(byteArray, {
-            untilTag: 'x7fe00010',
-            stopAtPixelData: true
+            untilTag: 'x7fe00010'
           });
           const frameOfReferenceUID = dataSet.string('x00200052')?.trim() || null;
           
