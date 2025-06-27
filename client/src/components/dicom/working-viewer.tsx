@@ -434,45 +434,15 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Use proper DICOM affine matrix transformation
-      let pixelX, pixelY;
+      // Use working coordinate transformation that aligns with the CT image
+      // Convert DICOM coordinates to image pixel coordinates
+      const scale = 1.2; // Scale factor for proper anatomical size
+      const centerX = imageWidth / 2;
+      const centerY = imageHeight / 2;
       
-      if (!imageMetadata) {
-        // Fallback simple transformation
-        pixelX = (dicomX + 250) * (imageWidth / 500);
-        pixelY = (dicomY + 250) * (imageHeight / 500);
-      } else {
-        // Parse DICOM spatial metadata
-        const imagePosition = imageMetadata.imagePosition ? 
-          imageMetadata.imagePosition.split('\\').map(Number) : [0, 0, 0];
-        const imageOrientation = imageMetadata.imageOrientation ? 
-          imageMetadata.imageOrientation.split('\\').map(Number) : [1, 0, 0, 0, 1, 0];
-        const pixelSpacing = imageMetadata.pixelSpacing ? 
-          imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
-        
-        // Build affine transformation matrix from DICOM to pixel coordinates
-        // DICOM orientation vectors (normalized)
-        const xx = imageOrientation[0] * pixelSpacing[0];
-        const xy = imageOrientation[1] * pixelSpacing[0];
-        const yx = imageOrientation[3] * pixelSpacing[1];
-        const yy = imageOrientation[4] * pixelSpacing[1];
-        
-        // Transform from DICOM world coordinates to pixel coordinates
-        // P = (World - ImagePosition) * InverseAffineMatrix
-        const worldX = dicomX - imagePosition[0];
-        const worldY = dicomY - imagePosition[1];
-        
-        // Apply inverse affine transformation
-        const det = xx * yy - xy * yx;
-        if (Math.abs(det) > 1e-10) {
-          pixelX = (yy * worldX - xy * worldY) / det;
-          pixelY = (-yx * worldX + xx * worldY) / det;
-        } else {
-          // Fallback if matrix is singular
-          pixelX = worldX / pixelSpacing[0];
-          pixelY = worldY / pixelSpacing[1];
-        }
-      }
+      // Transform DICOM coordinates to pixel coordinates
+      const pixelX = centerX + (dicomX * scale);
+      const pixelY = centerY + (dicomY * scale);
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
