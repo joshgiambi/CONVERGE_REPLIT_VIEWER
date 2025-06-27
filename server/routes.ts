@@ -21,18 +21,22 @@ function isDICOMFile(filePath: string): boolean {
 function extractDICOMMetadata(filePath: string) {
   try {
     const buffer = fs.readFileSync(filePath);
-    const dataSet = dicomParser.parseDicom(buffer);
-    
+    const byteArray = new Uint8Array(buffer);
+    const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+
     return {
-      patientName: extractTag(buffer, 'x00100010'),
-      patientID: extractTag(buffer, 'x00100020'),
-      studyInstanceUID: extractTag(buffer, 'x0020000d'),
-      seriesInstanceUID: extractTag(buffer, 'x0020000e'),
-      sopInstanceUID: extractTag(buffer, 'x00080018'),
-      modality: extractTag(buffer, 'x00080060'),
-      studyDate: extractTag(buffer, 'x00080020'),
-      seriesDescription: extractTag(buffer, 'x0008103e'),
-      instanceNumber: extractTag(buffer, 'x00200013')
+      patientName: getTagString(dataSet, 'x00100010'),
+      patientID: getTagString(dataSet, 'x00100020'),
+      studyInstanceUID: getTagString(dataSet, 'x0020000d'),
+      seriesInstanceUID: getTagString(dataSet, 'x0020000e'),
+      sopInstanceUID: getTagString(dataSet, 'x00080018'),
+      modality: getTagString(dataSet, 'x00080060'),
+      studyDate: getTagString(dataSet, 'x00080020'),
+      seriesDescription: getTagString(dataSet, 'x0008103e'),
+      instanceNumber: getTagString(dataSet, 'x00200013'),
+      pixelSpacing: getTagArray(dataSet, 'x00280030'),
+      imagePositionPatient: getTagArray(dataSet, 'x00200032'),
+      imageOrientationPatient: getTagArray(dataSet, 'x00200037')
     };
   } catch (error) {
     console.error('Error extracting DICOM metadata:', error);
