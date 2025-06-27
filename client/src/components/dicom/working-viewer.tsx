@@ -413,14 +413,21 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Scale up the structures to match the image size better
-      // Convert DICOM coordinates with proper scaling
-      const scale = 2.0; // Increase size to match anatomy better
+      // Apply the same transformation as the image (zoom + pan)
+      const scale = 2.0; // Base scale to match anatomy size
+      
+      // Calculate coordinates in image space first
+      const imageX = (canvasWidth / 2) + (dicomX * scale);
+      const imageY = (canvasHeight / 2) + (dicomY * scale);
+      
+      // Apply zoom transformation around canvas center
       const centerX = canvasWidth / 2;
       const centerY = canvasHeight / 2;
+      const zoomedX = centerX + (imageX - centerX) * zoom + panX;
+      const zoomedY = centerY + (imageY - centerY) * zoom + panY;
       
-      const canvasX = centerX + (dicomX * scale);
-      const canvasY = centerY + (dicomY * scale);
+      const canvasX = zoomedX;
+      const canvasY = zoomedY;
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
