@@ -430,33 +430,19 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Use DICOM metadata for proper coordinate transformation
-      if (!imageMetadata) {
-        // Fallback to simple transformation
-        const canvasX = (dicomX + 250) * (canvasWidth / 500);
-        const canvasY = (dicomY + 250) * (canvasHeight / 500);
-        
-        if (i === 0) {
-          ctx.moveTo(canvasX, canvasY);
-        } else {
-          ctx.lineTo(canvasX, canvasY);
-        }
-        continue;
-      }
-
-      // Parse DICOM spatial metadata
-      const pixelSpacing = imageMetadata.pixelSpacing ? 
-        imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
-      const imagePosition = imageMetadata.imagePosition ? 
-        imageMetadata.imagePosition.split('\\').map(Number) : [0, 0, 0];
-      
-      // Convert from DICOM world coordinates to pixel coordinates
-      const pixelX = (dicomX - imagePosition[0]) / pixelSpacing[0];
-      const pixelY = (dicomY - imagePosition[1]) / pixelSpacing[1];
-      
-      // Apply image transformation (zoom and pan)
+      // Simple coordinate transformation that responds to zoom and pan
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
+      
+      // Convert DICOM coordinates to normalized image coordinates
+      const normalizedX = (dicomX + 250) / 500; // Normalize to 0-1
+      const normalizedY = (dicomY + 250) / 500; // Normalize to 0-1
+      
+      // Convert to pixel coordinates
+      const pixelX = normalizedX * imageWidth;
+      const pixelY = normalizedY * imageHeight;
+      
+      // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
       const scaledHeight = imageHeight * zoom;
       const imageX = (canvasWidth - scaledWidth) / 2 + panX;

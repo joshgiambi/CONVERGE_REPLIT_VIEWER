@@ -608,10 +608,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Image not found' });
       }
 
-      // Parse DICOM file to extract spatial metadata
+      // Parse DICOM file to extract spatial metadata  
       const buffer = fs.readFileSync(image.filePath);
-      const byteArray = new Uint8Array(buffer);
-      const dataSet = (dicomParser as any).parseDicom(byteArray, {});
 
       const metadata = {
         imagePosition: extractTag(buffer, '00200032'), // Image Position Patient
