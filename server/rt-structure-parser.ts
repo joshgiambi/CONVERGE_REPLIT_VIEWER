@@ -62,7 +62,7 @@ export class RTStructureParser {
       // Extract ROI information
       const roiData = this.parseROISequence(dataSet, roiSequence);
       const contourData = this.parseContourSequence(dataSet, contourSequence);
-      const observationsData = observationsSequence ? this.parseObservationsSequence(dataSet, observationsSequence) : {};
+      const observationsData = observationsSequence ? this.parseObservationsSequence(dataSet, observationsSequence) : new Map();
 
       // Combine the data
       rtStructureSet.structures = this.combineROIData(roiData, contourData, observationsData);
@@ -70,9 +70,9 @@ export class RTStructureParser {
       console.log(`Parsed RT Structure Set with ${rtStructureSet.structures.length} structures`);
       return rtStructureSet;
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error parsing RT Structure Set:', error);
-      throw new Error(`Failed to parse RT Structure Set: ${error.message}`);
+      throw new Error(`Failed to parse RT Structure Set: ${error?.message || 'Unknown error'}`);
     }
   }
 

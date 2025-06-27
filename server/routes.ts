@@ -5,6 +5,7 @@ import * as path from "path";
 import { storage } from "./storage";
 import { Server } from "http";
 import * as dicomParser from 'dicom-parser';
+import { RTStructureParser } from './rt-structure-parser';
 
 const upload = multer({ dest: 'uploads/' });
 
