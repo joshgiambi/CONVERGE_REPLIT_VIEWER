@@ -164,9 +164,13 @@ function worldToCanvas(
   const j = (worldX - originX) / pixelSpacing[0]; // column index - worldX maps to col
   const i = (worldY - originY) / pixelSpacing[1]; // row index - worldY maps to row
 
-  // Step 2: Convert pixel indices to canvas coordinates
-  const canvasX = (j / imageWidth) * canvasWidth;
-  const canvasY = (i / imageHeight) * canvasHeight;
+  // Step 2: Apply 90-degree rotation to fix sideways orientation
+  const rotatedJ = i; // Swap coordinates
+  const rotatedI = imageHeight - j; // Flip and rotate
+
+  // Step 3: Convert rotated pixel indices to canvas coordinates
+  const canvasX = (rotatedJ / imageWidth) * canvasWidth;
+  const canvasY = (rotatedI / imageHeight) * canvasHeight;
 
   return [canvasX, canvasY];
 }
