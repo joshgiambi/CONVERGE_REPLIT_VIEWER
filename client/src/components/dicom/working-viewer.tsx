@@ -60,6 +60,11 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
       displayCurrentImage();
+      // Load metadata for current image
+      const currentImage = images[currentIndex];
+      if (currentImage?.id) {
+        loadImageMetadata(currentImage.id);
+      }
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
@@ -228,6 +233,18 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     setImageCache(newCache);
     setIsPreloading(false);
     console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
+  };
+
+  const loadImageMetadata = async (imageId: number) => {
+    try {
+      const response = await fetch(`/api/images/${imageId}/metadata`);
+      if (response.ok) {
+        const metadata = await response.json();
+        setImageMetadata(metadata);
+      }
+    } catch (error) {
+      console.error('Failed to load image metadata:', error);
+    }
   };
 
   const displayCurrentImage = async () => {
