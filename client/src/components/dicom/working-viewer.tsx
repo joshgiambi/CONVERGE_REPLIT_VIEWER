@@ -371,8 +371,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
       if (!isVisible) return;
       
-      // Set color for this structure
-      const [r, g, b] = structure.color;
+      // Use the structure's actual color, not hardcoded yellow
+      const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
+      const [r, g, b] = color;
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.2)`;
       
@@ -398,9 +399,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const x = contour.points[i];     // DICOM X coordinate
       const y = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Simple coordinate conversion (this would need proper DICOM-to-pixel transformation in production)
+      // Fixed coordinate conversion - remove Y flip to correct upside-down orientation
       const canvasX = (x + 250) * (canvasWidth / 500); // Rough approximation
-      const canvasY = (250 - y) * (canvasHeight / 500); // Flip Y and approximate
+      const canvasY = (y + 250) * (canvasHeight / 500); // Remove Y flip - structures should match image orientation
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);

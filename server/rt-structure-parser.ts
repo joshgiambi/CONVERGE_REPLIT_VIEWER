@@ -124,9 +124,35 @@ export class RTStructureParser {
             });
           }
           
+          // Generate distinct colors for each structure if not found in DICOM
+          const defaultColors = [
+            [255, 0, 0],    // Red
+            [0, 255, 0],    // Green  
+            [0, 0, 255],    // Blue
+            [255, 255, 0],  // Yellow
+            [255, 0, 255],  // Magenta
+            [0, 255, 255],  // Cyan
+            [255, 128, 0],  // Orange
+            [128, 255, 0],  // Lime
+            [255, 0, 128],  // Pink
+            [128, 0, 255],  // Purple
+            [0, 128, 255],  // Sky Blue
+            [255, 255, 128], // Light Yellow
+            [128, 255, 255], // Light Cyan
+            [255, 128, 255], // Light Magenta
+            [128, 128, 255], // Light Blue
+            [255, 128, 128], // Light Red
+            [128, 255, 128], // Light Green
+            [192, 192, 192], // Silver
+            [128, 128, 128]  // Gray
+          ];
+          
+          const colorIndex = (referencedROINumber - 1) % defaultColors.length;
+          const structureColor = displayColor || defaultColors[colorIndex];
+          
           contourData.set(referencedROINumber, {
             referencedROINumber,
-            displayColor: displayColor || [255, 255, 0], // Default yellow
+            displayColor: structureColor,
             contours
           });
         }
