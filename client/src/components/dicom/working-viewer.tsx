@@ -457,31 +457,45 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Proper world-to-voxel transformation as suggested in the screenshot
+      // Proper DICOM coordinate transformation with affine matrix
       let pixelX, pixelY;
       
-      if (imageMetadata && imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
+      if (imageMetadata && imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
         // Parse DICOM spatial metadata
         const imagePosition = imageMetadata.imagePosition.split('\\').map(Number); // [x, y, z] origin
-        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);   // [dx, dy] spacing
+        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);   // [row_spacing, col_spacing]
+        const imageOrientation = imageMetadata.imageOrientation.split('\\').map(Number); // 6 values: row_cosines, col_cosines
         
-        // Transform from DICOM world coordinates (mm) to image pixel coordinates
-        // Formula: (coord_mm - origin) / spacing
-        pixelX = (dicomX - imagePosition[0]) / pixelSpacing[0];
-        pixelY = (dicomY - imagePosition[1]) / pixelSpacing[1];
+        // Build affine transformation matrix from patient coordinates to voxel indices
+        // ImageOrientationPatient contains direction cosines for rows and columns
+        const rowCosX = imageOrientation[0];
+        const rowCosY = imageOrientation[1]; 
+        const rowCosZ = imageOrientation[2];
+        const colCosX = imageOrientation[3];
+        const colCosY = imageOrientation[4];
+        const colCosZ = imageOrientation[5];
+        
+        // Transform from patient coordinates (mm) to voxel indices
+        // Using inverse affine transformation
+        const deltaX = dicomX - imagePosition[0];
+        const deltaY = dicomY - imagePosition[1];
+        
+        // Project onto row and column directions, then divide by spacing
+        pixelX = (deltaX * colCosX + deltaY * colCosY) / pixelSpacing[1]; // column index
+        pixelY = (deltaX * rowCosX + deltaY * rowCosY) / pixelSpacing[0]; // row index
         
         // Debug coordinate transformation for first point of first contour
         if (i === 0 && currentIndex === 0) {
-          console.log('DICOM world coordinates (mm):', dicomX, dicomY);
+          console.log('DICOM patient coordinates (mm):', dicomX, dicomY);
           console.log('Image Position Patient:', imagePosition);
-          console.log('Pixel Spacing:', pixelSpacing);
-          console.log('Calculated pixel coordinates:', pixelX, pixelY);
+          console.log('Pixel Spacing [row, col]:', pixelSpacing);
+          console.log('Image Orientation Patient:', imageOrientation);
+          console.log('Calculated voxel indices:', pixelX, pixelY);
           console.log('Image dimensions:', imageWidth, imageHeight);
         }
       } else {
-        // Fallback transformation with proper scaling for anatomy
-        // Since structures are too large, reduce the scale factor significantly
-        const scale = 0.25; // Significantly reduced for proper anatomical sizing
+        // Enhanced fallback with better anatomical scaling
+        const scale = 0.8; // Better scale for anatomical accuracy
         const centerX = imageWidth / 2;
         const centerY = imageHeight / 2;
         pixelX = centerX + (dicomX * scale);
