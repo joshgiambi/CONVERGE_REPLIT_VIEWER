@@ -434,18 +434,17 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Fine-tune structure positioning and scale for better anatomical alignment
-      const scale = 1.0; // Increase scale slightly for better size match
-      const centerX = imageWidth / 2;
-      const centerY = imageHeight / 2;
+      // Use the coordinate system that worked correctly with zoom
+      // Convert DICOM coordinates (typically -250 to +250) to image coordinates
+      const scale = 0.9; // Scale factor for proper anatomical size
       
-      // Add slight offset to improve positioning
-      const offsetX = 10; // Move structures slightly forward
-      const offsetY = -5; // Move structures slightly up
+      // Convert DICOM coordinates to normalized coordinates (0-1)
+      const normalizedX = (dicomX + 250) / 500;
+      const normalizedY = (dicomY + 250) / 500;
       
-      // Convert to pixel coordinates with adjusted positioning
-      const pixelX = centerX + (dicomX * scale) + offsetX;
-      const pixelY = centerY + (dicomY * scale) + offsetY;
+      // Map to image pixel coordinates
+      const pixelX = normalizedX * imageWidth * scale + (imageWidth * (1 - scale) / 2);
+      const pixelY = normalizedY * imageHeight * scale + (imageHeight * (1 - scale) / 2);
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
