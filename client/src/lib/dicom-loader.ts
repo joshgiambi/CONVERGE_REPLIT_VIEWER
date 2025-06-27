@@ -1,6 +1,8 @@
 // Direct DICOM loading without Cornerstone dependencies
 export class DICOMLoader {
   private static instance: DICOMLoader;
+  private imageCache = new Map<string, HTMLCanvasElement>();
+  private loadingPromises = new Map<string, Promise<HTMLCanvasElement>>();
 
   static getInstance(): DICOMLoader {
     if (!DICOMLoader.instance) {
@@ -10,6 +12,32 @@ export class DICOMLoader {
   }
 
   async loadDICOMImage(sopInstanceUID: string): Promise<HTMLCanvasElement> {
+    // Check cache first
+    if (this.imageCache.has(sopInstanceUID)) {
+      return this.imageCache.get(sopInstanceUID)!;
+    }
+
+    // Check if already loading
+    if (this.loadingPromises.has(sopInstanceUID)) {
+      return this.loadingPromises.get(sopInstanceUID)!;
+    }
+
+    // Start loading
+    const loadingPromise = this.loadImageFromServer(sopInstanceUID);
+    this.loadingPromises.set(sopInstanceUID, loadingPromise);
+
+    try {
+      const canvas = await loadingPromise;
+      this.imageCache.set(sopInstanceUID, canvas);
+      this.loadingPromises.delete(sopInstanceUID);
+      return canvas;
+    } catch (error) {
+      this.loadingPromises.delete(sopInstanceUID);
+      throw error;
+    }
+  }
+
+  private async loadImageFromServer(sopInstanceUID: string): Promise<HTMLCanvasElement> {
     try {
       const response = await fetch(`/api/images/${sopInstanceUID}`);
       if (!response.ok) {
@@ -105,19 +133,16 @@ export class DICOMLoader {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
-    // Find min/max for windowing
-    let min = pixelArray[0];
-    let max = pixelArray[0];
-    for (let i = 1; i < pixelArray.length; i++) {
-      if (pixelArray[i] < min) min = pixelArray[i];
-      if (pixelArray[i] > max) max = pixelArray[i];
-    }
-
-    const range = max - min;
+    // Optimize min/max finding with typed array methods
+    let min = Math.min(...pixelArray);
+    let max = Math.max(...pixelArray);
     
+    const range = max - min;
+    const scale = range > 0 ? 255 / range : 0;
+    
+    // Optimize pixel processing with fewer operations
     for (let i = 0; i < pixelArray.length; i++) {
-      const normalizedValue = range > 0 ? ((pixelArray[i] - min) / range) * 255 : 0;
-      const gray = Math.max(0, Math.min(255, normalizedValue));
+      const gray = range > 0 ? Math.round((pixelArray[i] - min) * scale) : 0;
       
       const pixelIndex = i * 4;
       data[pixelIndex] = gray;     // R
@@ -158,6 +183,20 @@ export class DICOMLoader {
       script.onerror = () => reject(new Error('Failed to load dicom-parser'));
       document.head.appendChild(script);
     });
+  }
+
+  // Cache management methods
+  clearCache(): void {
+    this.imageCache.clear();
+    this.loadingPromises.clear();
+  }
+
+  getCacheSize(): number {
+    return this.imageCache.size;
+  }
+
+  removeCachedImage(sopInstanceUID: string): void {
+    this.imageCache.delete(sopInstanceUID);
   }
 }
 
