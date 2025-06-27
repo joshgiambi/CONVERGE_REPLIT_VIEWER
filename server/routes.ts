@@ -22,24 +22,43 @@ function extractDICOMMetadata(filePath: string) {
   try {
     const buffer = fs.readFileSync(filePath);
     const byteArray = new Uint8Array(buffer);
-    const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+    const dataSet = dicomParser.parseDicom(byteArray, {
+      untilTag: 'x7fe00010', // stop before pixel data
+      stopAtPixelData: true
+    });
+
+    const getString = (tag: string) => {
+      try {
+        return dataSet.string(tag)?.trim() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    const getArray = (tag: string) => {
+      try {
+        return getString(tag)?.split('\\').map(Number) || null;
+      } catch {
+        return null;
+      }
+    };
 
     return {
-      patientName: getTagString(dataSet, 'x00100010'),
-      patientID: getTagString(dataSet, 'x00100020'),
-      studyInstanceUID: getTagString(dataSet, 'x0020000d'),
-      seriesInstanceUID: getTagString(dataSet, 'x0020000e'),
-      sopInstanceUID: getTagString(dataSet, 'x00080018'),
-      modality: getTagString(dataSet, 'x00080060'),
-      studyDate: getTagString(dataSet, 'x00080020'),
-      seriesDescription: getTagString(dataSet, 'x0008103e'),
-      instanceNumber: getTagString(dataSet, 'x00200013'),
-      pixelSpacing: getTagArray(dataSet, 'x00280030'),
-      imagePositionPatient: getTagArray(dataSet, 'x00200032'),
-      imageOrientationPatient: getTagArray(dataSet, 'x00200037')
+      patientName: getString('x00100010'),
+      patientID: getString('x00100020'),
+      studyInstanceUID: getString('x0020000d'),
+      seriesInstanceUID: getString('x0020000e'),
+      sopInstanceUID: getString('x00080018'),
+      modality: getString('x00080060'),
+      studyDate: getString('x00080020'),
+      seriesDescription: getString('x0008103e'),
+      instanceNumber: getString('x00200013'),
+      pixelSpacing: getArray('x00280030'),             // [rowSpacing, colSpacing]
+      imagePositionPatient: getArray('x00200032'),     // [x, y, z]
+      imageOrientationPatient: getArray('x00200037')   // [rx, ry, rz, cx, cy, cz]
     };
   } catch (error) {
-    console.error('Error extracting DICOM metadata:', error);
+    console.error('DICOM parse error:', error);
     return null;
   }
 }
@@ -634,18 +653,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Attempting to parse metadata from: ${image.filePath}`);
 
       const byteArray = new Uint8Array(buffer);
-      const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+      const dataSet = dicomParser.parseDicom(byteArray, {
+        untilTag: 'x7fe00010',
+        stopAtPixelData: true
+      });
+
+      const getString = (tag: string) => {
+        try {
+          return dataSet.string(tag)?.trim() || null;
+        } catch {
+          return null;
+        }
+      };
+
+      const getArray = (tag: string) => {
+        try {
+          return getString(tag)?.split('\\').map(Number) || null;
+        } catch {
+          return null;
+        }
+      };
 
       const metadata = {
-        imagePosition: getTagArray(dataSet, 'x00200032')?.join('\\') || null, // Image Position Patient
-        imageOrientation: getTagArray(dataSet, 'x00200037')?.join('\\') || null, // Image Orientation Patient  
-        pixelSpacing: getTagArray(dataSet, 'x00280030')?.join('\\') || null, // Pixel Spacing
-        sliceLocation: getTagString(dataSet, 'x00201041'), // Slice Location
-        frameOfReferenceUID: getTagString(dataSet, 'x00200052'), // Frame of Reference UID
-        rows: getTagString(dataSet, 'x00280010'), // Rows
-        columns: getTagString(dataSet, 'x00280011'), // Columns
-        windowCenter: getTagString(dataSet, 'x00281050'), // Window Center
-        windowWidth: getTagString(dataSet, 'x00281051') // Window Width
+        imagePosition: getArray('x00200032')?.join('\\') || null, // Image Position Patient
+        imageOrientation: getArray('x00200037')?.join('\\') || null, // Image Orientation Patient  
+        pixelSpacing: getArray('x00280030')?.join('\\') || null, // Pixel Spacing
+        sliceLocation: getString('x00201041'), // Slice Location
+        frameOfReferenceUID: getString('x00200052'), // Frame of Reference UID
+        rows: getString('x00280010'), // Rows
+        columns: getString('x00280011'), // Columns
+        windowCenter: getString('x00281050'), // Window Center
+        windowWidth: getString('x00281051') // Window Width
       };
 
       // Debug: Log extracted metadata
@@ -685,8 +723,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const sampleImage = images[0];
           const buffer = fs.readFileSync(sampleImage.filePath);
           const byteArray = new Uint8Array(buffer);
-          const dataSet = (dicomParser as any).parseDicom(byteArray, {});
-          const frameOfReferenceUID = getTagString(dataSet, 'x00200052');
+          const dataSet = dicomParser.parseDicom(byteArray, {
+            untilTag: 'x7fe00010',
+            stopAtPixelData: true
+          });
+          const frameOfReferenceUID = dataSet.string('x00200052')?.trim() || null;
           
           frameReferences[s.modality || 'Unknown'] = {
             seriesId: s.id,
