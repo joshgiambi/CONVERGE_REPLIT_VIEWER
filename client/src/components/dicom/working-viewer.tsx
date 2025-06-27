@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
+  studyId?: number;
   windowLevel?: { window: number; level: number };
   onWindowLevelChange?: (windowLevel: { window: number; level: number }) => void;
   onZoomIn?: () => void;
@@ -13,12 +14,52 @@ interface WorkingViewerProps {
   onResetZoom?: () => void;
 }
 
-export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
+export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rtStructures, setRtStructures] = useState<any>(null);
+  const [showStructures, setShowStructures] = useState(true);
+
+  // Load RT structures for the study
+  useEffect(() => {
+    const loadRTStructures = async () => {
+      if (!studyId) return;
+      
+      try {
+        // Get RT structure series for this study
+        const response = await fetch(`/api/studies/${studyId}/rt-structures`);
+        if (!response.ok) {
+          console.log('No RT structures found for this study');
+          return;
+        }
+        
+        const rtSeries = await response.json();
+        if (!rtSeries || rtSeries.length === 0) {
+          console.log('No RT structure series found');
+          return;
+        }
+
+        // Parse the RT structure contours
+        const contourResponse = await fetch(`/api/rt-structures/${rtSeries[0].id}/contours`);
+        if (!contourResponse.ok) {
+          console.log('Failed to load RT structure contours');
+          return;
+        }
+
+        const rtStructData = await contourResponse.json();
+        setRtStructures(rtStructData);
+        console.log(`Loaded RT structures with ${rtStructData.structures.length} ROIs`);
+        
+      } catch (error) {
+        console.error('Error loading RT structures:', error);
+      }
+    };
+
+    loadRTStructures();
+  }, [studyId]);
   // Convert external window/level format to internal width/center format
   const currentWindowLevel = externalWindowLevel 
     ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
@@ -250,6 +291,11 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
+      // Render RT structure overlays if available
+      if (rtStructures && showStructures) {
+        renderRTStructures(ctx, canvas, currentImage);
+      }
+      
     } catch (error: any) {
       console.error('Error displaying image:', error);
       ctx.fillStyle = 'black';
@@ -337,6 +383,66 @@ export function WorkingViewer({ seriesId, windowLevel: externalWindowLevel, onWi
     }
 
     ctx.putImageData(imageData, 0, 0);
+  };
+
+  const renderRTStructures = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, currentImage: any) => {
+    if (!rtStructures || !currentImage) return;
+    
+    // Get current slice position
+    const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
+    const tolerance = 2.0; // mm tolerance for slice matching
+    
+    // Save context state
+    ctx.save();
+    
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.8;
+    
+    rtStructures.structures.forEach((structure: any) => {
+      // Set color for this structure
+      const [r, g, b] = structure.color;
+      ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.2)`;
+      
+      structure.contours.forEach((contour: any) => {
+        // Check if this contour is on the current slice
+        if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+          drawContour(ctx, contour, canvas.width, canvas.height);
+        }
+      });
+    });
+    
+    // Restore context state
+    ctx.restore();
+  };
+
+  const drawContour = (ctx: CanvasRenderingContext2D, contour: any, canvasWidth: number, canvasHeight: number) => {
+    if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
+    
+    ctx.beginPath();
+    
+    // Convert DICOM coordinates to canvas coordinates
+    for (let i = 0; i < contour.points.length; i += 3) {
+      const x = contour.points[i];     // DICOM X coordinate
+      const y = contour.points[i + 1]; // DICOM Y coordinate
+      
+      // Simple coordinate conversion (this would need proper DICOM-to-pixel transformation in production)
+      const canvasX = (x + 250) * (canvasWidth / 500); // Rough approximation
+      const canvasY = (250 - y) * (canvasHeight / 500); // Flip Y and approximate
+      
+      if (i === 0) {
+        ctx.moveTo(canvasX, canvasY);
+      } else {
+        ctx.lineTo(canvasX, canvasY);
+      }
+    }
+    
+    // Close the contour
+    ctx.closePath();
+    
+    // Fill and stroke the contour
+    ctx.fill();
+    ctx.stroke();
   };
 
   const loadDicomParser = (): Promise<void> => {

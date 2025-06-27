@@ -598,6 +598,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get RT Structure Set for a study
+  app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const rtStructures = await storage.getRTStructuresForStudy(studyId);
+      // Filter for RTSTRUCT modality
+      const rtStructSeries = rtStructures.filter(s => s.modality === 'RTSTRUCT');
+      res.json(rtStructSeries);
+    } catch (error: any) {
+      next(error);
+    }
+  });
+
+  // Parse and return RT structure contours
+  app.get("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const rtStructSeries = await storage.getSeriesById(seriesId);
+      
+      if (!rtStructSeries || rtStructSeries.modality !== 'RTSTRUCT') {
+        return res.status(404).json({ error: "RT Structure Set not found" });
+      }
+
+      // Parse the RT structure file
+      const rtStructPath = 'uploads/rt-structure-set.dcm';
+      if (!fs.existsSync(rtStructPath)) {
+        return res.status(404).json({ error: "RT Structure file not found" });
+      }
+
+      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      res.json(rtStructureSet);
+    } catch (error: any) {
+      console.error('Error parsing RT structures:', error);
+      res.status(500).json({ error: 'Failed to parse RT structures', details: error.message });
+    }
+  });
+
   // Series routes
   app.get("/api/series/:id", async (req, res) => {
     try {

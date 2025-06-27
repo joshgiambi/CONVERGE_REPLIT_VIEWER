@@ -361,8 +361,7 @@ export class DatabaseStorage implements IStorage {
     return await db
       .select()
       .from(series)
-      .where(eq(series.studyId, studyId))
-      .where(eq(series.modality, 'RTSTRUCT'));
+      .where(eq(series.studyId, studyId));
   }
 
   clearAll(): void {
