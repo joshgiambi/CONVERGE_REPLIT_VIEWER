@@ -611,6 +611,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get RT structure series for a study
+  app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const series = await storage.getSeriesByStudyId(studyId);
+      
+      // Filter to only RT structure series
+      const rtSeries = series.filter(s => s.modality === 'RTSTRUCT');
+      res.json(rtSeries);
+    } catch (error: any) {
+      console.error('Error fetching RT structure series:', error);
+      res.status(500).json({ error: 'Failed to fetch RT structure series', details: error.message });
+    }
+  });
+
   // Parse and return RT structure contours
   app.get("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -621,8 +636,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "RT Structure Set not found" });
       }
 
-      // Parse the RT structure file
-      const rtStructPath = 'uploads/rt-structure-set.dcm';
+      // Parse the RT structure file from the HN-ATLAS dataset
+      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
       if (!fs.existsSync(rtStructPath)) {
         return res.status(404).json({ error: "RT Structure file not found" });
       }

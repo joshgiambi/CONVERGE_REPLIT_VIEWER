@@ -162,7 +162,7 @@ export function SeriesSelector({
                     </h4>
                     
                     <p className="text-xs text-gray-400">
-                      #{seriesItem.seriesNumber} • {new Date(seriesItem.createdAt).toLocaleDateString()}
+                      #{seriesItem.seriesNumber}
                     </p>
                   </div>
 
