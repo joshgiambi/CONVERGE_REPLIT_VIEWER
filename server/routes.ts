@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { storage } from "./storage";
 import { Server } from "http";
-import * as dicomParser from 'dicom-parser';
+import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
 
 const upload = multer({ dest: 'uploads/' });
@@ -653,9 +653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Attempting to parse metadata from: ${image.filePath}`);
 
       const byteArray = new Uint8Array(buffer);
-      const dataSet = dicomParser.parseDicom(byteArray, {
-        untilTag: 'x7fe00010'
-      });
+      const dataSet = (dicomParser as any).parseDicom(byteArray, {});
 
       const getString = (tag: string) => {
         try {
@@ -722,9 +720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const sampleImage = images[0];
           const buffer = fs.readFileSync(sampleImage.filePath);
           const byteArray = new Uint8Array(buffer);
-          const dataSet = dicomParser.parseDicom(byteArray, {
-            untilTag: 'x7fe00010'
-          });
+          const dataSet = (dicomParser as any).parseDicom(byteArray, {});
           const frameOfReferenceUID = dataSet.string('x00200052')?.trim() || null;
           
           frameReferences[s.modality || 'Unknown'] = {
