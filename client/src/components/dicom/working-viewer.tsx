@@ -430,17 +430,19 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Simple coordinate transformation that responds to zoom and pan
+      // Coordinate transformation that matches the image scale
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Convert DICOM coordinates to normalized image coordinates
-      const normalizedX = (dicomX + 250) / 500; // Normalize to 0-1
-      const normalizedY = (dicomY + 250) / 500; // Normalize to 0-1
+      // Scale down the DICOM coordinates to match the CT image size
+      // Use a smaller scale factor to make structures proportional to the anatomy
+      const scale = 0.8; // Reduce structure size to match CT anatomy better
+      const centerX = imageWidth / 2;
+      const centerY = imageHeight / 2;
       
-      // Convert to pixel coordinates
-      const pixelX = normalizedX * imageWidth;
-      const pixelY = normalizedY * imageHeight;
+      // Convert to pixel coordinates relative to image center
+      const pixelX = centerX + (dicomX * scale);
+      const pixelY = centerY + (dicomY * scale);
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
