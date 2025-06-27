@@ -598,6 +598,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get DICOM metadata for proper coordinate transformation
+  app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const imageId = parseInt(req.params.imageId);
+      const image = await storage.getImage(imageId);
+      
+      if (!image) {
+        return res.status(404).json({ error: 'Image not found' });
+      }
+
+      // Parse DICOM file to extract spatial metadata
+      const buffer = fs.readFileSync(image.filePath);
+      const byteArray = new Uint8Array(buffer);
+      const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+
+      const metadata = {
+        imagePosition: extractTag(buffer, '00200032'), // Image Position Patient
+        imageOrientation: extractTag(buffer, '00200037'), // Image Orientation Patient  
+        pixelSpacing: extractTag(buffer, '00280030'), // Pixel Spacing
+        sliceLocation: extractTag(buffer, '00201041'), // Slice Location
+        rows: extractTag(buffer, '00280010'), // Rows
+        columns: extractTag(buffer, '00280011'), // Columns
+        windowCenter: extractTag(buffer, '00281050'), // Window Center
+        windowWidth: extractTag(buffer, '00281051') // Window Width
+      };
+
+      res.json(metadata);
+    } catch (error) {
+      console.error('Error getting image metadata:', error);
+      next(error);
+    }
+  });
+
   // Get RT Structure Set for a study
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {

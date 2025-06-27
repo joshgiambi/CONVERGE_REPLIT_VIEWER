@@ -48,6 +48,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [panY, setPanY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
@@ -412,18 +413,33 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Use the same coordinate system as the image (1:1 pixel mapping)
-      const scale = 1.0; // 1:1 scale to match image pixels exactly
+      // Use DICOM metadata for proper coordinate transformation
+      if (!imageMetadata) {
+        // Fallback to simple transformation
+        const canvasX = (dicomX + 250) * (canvasWidth / 500);
+        const canvasY = (dicomY + 250) * (canvasHeight / 500);
+        
+        if (i === 0) {
+          ctx.moveTo(canvasX, canvasY);
+        } else {
+          ctx.lineTo(canvasX, canvasY);
+        }
+        continue;
+      }
+
+      // Parse DICOM spatial metadata
+      const pixelSpacing = imageMetadata.pixelSpacing ? 
+        imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
+      const imagePosition = imageMetadata.imagePosition ? 
+        imageMetadata.imagePosition.split('\\').map(Number) : [0, 0, 0];
       
-      // Get image dimensions
+      // Convert from DICOM world coordinates to pixel coordinates
+      const pixelX = (dicomX - imagePosition[0]) / pixelSpacing[0];
+      const pixelY = (dicomY - imagePosition[1]) / pixelSpacing[1];
+      
+      // Apply image transformation (zoom and pan)
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
-      
-      // Convert DICOM coordinates to image pixel coordinates
-      const pixelX = imageWidth/2 + (dicomX * scale);
-      const pixelY = imageHeight/2 + (dicomY * scale);
-      
-      // Apply same scaling and positioning as image
       const scaledWidth = imageWidth * zoom;
       const scaledHeight = imageHeight * zoom;
       const imageX = (canvasWidth - scaledWidth) / 2 + panX;
