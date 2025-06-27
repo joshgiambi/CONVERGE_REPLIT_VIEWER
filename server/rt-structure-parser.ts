@@ -1,4 +1,4 @@
-import * as dicomParser from 'dicom-parser';
+import dicomParser from 'dicom-parser';
 import * as fs from 'fs';
 
 export interface RTStructureContour {
@@ -31,7 +31,7 @@ export class RTStructureParser {
     try {
       const buffer = fs.readFileSync(filePath);
       const byteArray = new Uint8Array(buffer);
-      const dataSet = dicomParser.parseDicom(byteArray);
+      const dataSet = (dicomParser as any).parseDicom(byteArray, {});
 
       const rtStructureSet: RTStructureSet = {
         studyInstanceUID: this.getString(dataSet, 'x0020000d') || '',

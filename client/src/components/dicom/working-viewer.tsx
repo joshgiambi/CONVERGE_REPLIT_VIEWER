@@ -67,15 +67,15 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch(`/api/series/${seriesId}`);
+      const response = await fetch(`/api/series/${seriesId}/images`);
       if (!response.ok) {
-        throw new Error(`Failed to load series: ${response.statusText}`);
+        throw new Error(`Failed to load images: ${response.statusText}`);
       }
       
-      const seriesData = await response.json();
+      const seriesImages = await response.json();
       
       // First parse DICOM metadata for proper spatial ordering
-      const imagesWithMetadata = await Promise.all(seriesData.images.map(async (img: any) => {
+      const imagesWithMetadata = await Promise.all(seriesImages.map(async (img: any) => {
         try {
           const response = await fetch(`/api/images/${img.sopInstanceUID}`);
           const arrayBuffer = await response.arrayBuffer();
