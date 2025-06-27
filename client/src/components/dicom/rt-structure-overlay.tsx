@@ -160,8 +160,8 @@ function worldToCanvas(
   const [originX, originY] = origin;
 
   // Step 1: Convert world (mm) to DICOM pixel indices (row i, col j)
-  const i = (worldX - originX) / rowSpacing; // row index (vertical)
-  const j = (worldY - originY) / colSpacing; // column index (horizontal)
+  const j = (worldX - originX) / colSpacing; // column index (horizontal) - worldX maps to col
+  const i = (worldY - originY) / rowSpacing; // row index (vertical) - worldY maps to row
 
   // Step 2: Convert pixel indices to canvas coordinates
   const canvasX = (j / imageWidth) * canvasWidth;
