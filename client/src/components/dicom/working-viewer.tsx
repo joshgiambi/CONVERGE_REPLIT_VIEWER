@@ -413,26 +413,14 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // DICOM RT coordinates are in patient coordinate system (mm)
-      // Need to convert from world coordinates to pixel coordinates
-      // Typical head/neck scan covers roughly -250 to +250mm in each direction
+      // Scale up the structures to match the image size better
+      // Convert DICOM coordinates with proper scaling
+      const scale = 2.0; // Increase size to match anatomy better
+      const centerX = canvasWidth / 2;
+      const centerY = canvasHeight / 2;
       
-      // Convert from DICOM world coordinates to normalized image coordinates
-      // Scale down significantly as structures are anatomically much smaller
-      const scale = 0.5; // Scale factor to fit within anatomy
-      const centerX = imageWidth / 2;
-      const centerY = imageHeight / 2;
-      
-      // Convert DICOM mm to pixel coordinates relative to image center
-      const pixelX = centerX + (dicomX * scale);
-      const pixelY = centerY + (dicomY * scale);
-      
-      // Apply image scaling and positioning
-      const scaleFactorX = scaledWidth / imageWidth;
-      const scaleFactorY = scaledHeight / imageHeight;
-      
-      const canvasX = imageX + (pixelX * scaleFactorX);
-      const canvasY = imageY + (pixelY * scaleFactorY);
+      const canvasX = centerX + (dicomX * scale);
+      const canvasY = centerY + (dicomY * scale);
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
