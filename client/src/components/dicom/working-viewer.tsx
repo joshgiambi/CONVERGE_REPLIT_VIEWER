@@ -22,12 +22,13 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [imageMetadata, setImageMetadata] = useState<any>(null);
+  
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
 
-  // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
   const currentWindowLevel = externalWindowLevel 
     ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
@@ -39,8 +40,8 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       onWindowLevelChange({ window: newWindowLevel.width, level: newWindowLevel.center });
     }
   };
+  
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
-  const [isLoading, setIsLoading] = useState(false);
   
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -58,15 +59,17 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   }, [seriesId]);
 
   useEffect(() => {
-    if (images.length > 0 && !isPreloading) {
+    if (images.length > 0) {
       displayCurrentImage();
       // Load metadata for current image
       const currentImage = images[currentIndex];
       if (currentImage?.id) {
         loadImageMetadata(currentImage.id);
       }
+      // Preload nearby images
+      preloadNearbyImages(currentIndex, images, 3);
     }
-  }, [images, currentIndex, currentWindowLevel, isPreloading]);
+  }, [images, currentIndex, currentWindowLevel]);
 
   const loadImages = async () => {
     try {
@@ -146,8 +149,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       setImages(sortedImages);
       setCurrentIndex(0);
       
-      // Preload all images immediately
-      preloadAllImages(sortedImages);
+      // Images will be loaded on demand
       
     } catch (error: any) {
       setError(error.message);
@@ -330,6 +332,8 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       ctx.textAlign = 'center';
       ctx.fillText('Error loading DICOM', canvas.width / 2, canvas.height / 2 - 10);
       ctx.fillText(error.message, canvas.width / 2, canvas.height / 2 + 10);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -786,6 +790,17 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
               userSelect: 'none'
             }}
           />
+          {/* Loading overlay */}
+          {isLoading && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+              <div className="bg-white p-4 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <span>Loading image...</span>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
