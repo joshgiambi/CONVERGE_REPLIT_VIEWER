@@ -407,11 +407,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.globalAlpha = 0.8;
     
     rtStructures.structures.forEach((structure: any) => {
-      // Force all structures to be visible for debugging
-      const isVisible = true; // structureVisibility.get(structure.roiNumber) ?? true;
+      // Check if this structure is visible
+      const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
       if (!isVisible) return;
-      
-      console.log(`Rendering structure: ${structure.structureName} (ROI ${structure.roiNumber})`);
       
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
@@ -422,7 +420,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       structure.contours.forEach((contour: any) => {
         // Check if this contour is on the current slice
         if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
-          console.log(`Drawing contour on slice ${currentSlicePosition}, contour at ${contour.slicePosition}`);
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
         }
       });
@@ -491,15 +488,16 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
         pixelX = imageHeight - origPixelY; // Rotate coordinates
         pixelY = origPixelX;
         
-        // Debug coordinate transformation for first point of first contour
-        if (i === 0) {
-          console.log('RT STRUCTURE TRANSFORMATION:');
-          console.log('DICOM patient coordinates (mm):', dicomX, dicomY);
-          console.log('Image Position Patient:', imagePosition);
-          console.log('Pixel Spacing [row, col]:', pixelSpacing);
-          console.log('Original pixel indices:', origPixelX, origPixelY);
-          console.log('Rotated pixel indices:', pixelX, pixelY);
-          console.log('Image dimensions:', imageWidth, imageHeight);
+        // Apply horizontal flip to correct mirrored appearance
+        pixelX = imageWidth - pixelX;
+        
+        // Debug coordinate transformation for verification (can be removed in production)
+        if (i === 0 && currentIndex === 0) {
+          console.log('RT coordinate transformation verified:', {
+            dicomCoords: [dicomX, dicomY],
+            originalPixel: [origPixelX, origPixelY],
+            finalPixel: [pixelX, pixelY]
+          });
         }
       } else {
         // Enhanced fallback with better anatomical scaling
