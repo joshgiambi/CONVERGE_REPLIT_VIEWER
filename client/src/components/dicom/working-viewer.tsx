@@ -321,13 +321,12 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
     
-    // Calculate base scaling to fill the entire canvas
-    const baseScale = Math.max(canvasWidth / width, canvasHeight / height);
-    const totalScale = baseScale * zoom;
+    // Use 1:1 pixel scaling at default zoom for proper alignment
+    const totalScale = zoom; // No base scaling - use original image size
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
     
-    // Apply pan offset to centering
+    // Center the image on canvas with pan offset
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
@@ -413,21 +412,25 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Apply the same transformation as the image (zoom + pan)
-      const scale = 2.0; // Base scale to match anatomy size
+      // Use the same coordinate system as the image (1:1 pixel mapping)
+      const scale = 1.0; // 1:1 scale to match image pixels exactly
       
-      // Calculate coordinates in image space first
-      const imageX = (canvasWidth / 2) + (dicomX * scale);
-      const imageY = (canvasHeight / 2) + (dicomY * scale);
+      // Get image dimensions
+      const imageWidth = currentImage?.width || 512;
+      const imageHeight = currentImage?.height || 512;
       
-      // Apply zoom transformation around canvas center
-      const centerX = canvasWidth / 2;
-      const centerY = canvasHeight / 2;
-      const zoomedX = centerX + (imageX - centerX) * zoom + panX;
-      const zoomedY = centerY + (imageY - centerY) * zoom + panY;
+      // Convert DICOM coordinates to image pixel coordinates
+      const pixelX = imageWidth/2 + (dicomX * scale);
+      const pixelY = imageHeight/2 + (dicomY * scale);
       
-      const canvasX = zoomedX;
-      const canvasY = zoomedY;
+      // Apply same scaling and positioning as image
+      const scaledWidth = imageWidth * zoom;
+      const scaledHeight = imageHeight * zoom;
+      const imageX = (canvasWidth - scaledWidth) / 2 + panX;
+      const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+      
+      const canvasX = imageX + (pixelX * zoom);
+      const canvasY = imageY + (pixelY * zoom);
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
