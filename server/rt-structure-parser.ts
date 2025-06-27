@@ -62,7 +62,7 @@ export class RTStructureParser {
       // Extract ROI information
       const roiData = this.parseROISequence(dataSet, roiSequence);
       const contourData = this.parseContourSequence(dataSet, contourSequence);
-      const observationsData = observationsSequence ? this.parseObservationsSequence(dataSet, observationsSequence) : new Map();
+      const observationsData = observationsSequence ? this.parseObservationsSequence(dataSet, observationsSequence) : new Map<number, any>();
 
       // Combine the data
       rtStructureSet.structures = this.combineROIData(roiData, contourData, observationsData);

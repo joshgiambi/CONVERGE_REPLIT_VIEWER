@@ -19,8 +19,11 @@ export interface IStorage {
   // Series operations
   createSeries(series: InsertSeries): Promise<Series>;
   getSeries(id: number): Promise<Series | undefined>;
+  getSeriesById(id: number): Promise<Series | undefined>;
   getSeriesByUID(seriesInstanceUID: string): Promise<Series | undefined>;
   getSeriesByStudyId(studyId: number): Promise<Series[]>;
+  getSeriesWithImages(seriesId: number): Promise<any>;
+  getRTStructuresForStudy(studyId: number): Promise<Series[]>;
 
   // Image operations
   createImage(image: InsertImage): Promise<DicomImage>;
@@ -325,6 +328,41 @@ export class DatabaseStorage implements IStorage {
         numberOfImages: imageCount 
       })
       .where(eq(studies.id, studyId));
+  }
+
+  async getSeriesWithImages(seriesId: number): Promise<any> {
+    const [seriesData] = await db
+      .select()
+      .from(series)
+      .where(eq(series.id, seriesId));
+
+    if (!seriesData) return null;
+
+    const seriesImages = await db
+      .select()
+      .from(images)
+      .where(eq(images.seriesId, seriesId));
+
+    return {
+      ...seriesData,
+      images: seriesImages
+    };
+  }
+
+  async getSeriesById(id: number): Promise<Series | undefined> {
+    const [seriesData] = await db
+      .select()
+      .from(series)
+      .where(eq(series.id, id));
+    return seriesData || undefined;
+  }
+
+  async getRTStructuresForStudy(studyId: number): Promise<Series[]> {
+    return await db
+      .select()
+      .from(series)
+      .where(eq(series.studyId, studyId))
+      .where(eq(series.modality, 'RTSTRUCT'));
   }
 
   clearAll(): void {
