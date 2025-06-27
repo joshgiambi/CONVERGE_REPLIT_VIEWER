@@ -89,15 +89,17 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 27, 2025: Enhanced RT Structure Visualization System
-  - Created tabbed sidebar interface with Series and Structures tabs
-  - Implemented nested RT structure display under CT series in left sidebar
-  - Added RT structure API endpoints for loading anatomical structures
-  - Enhanced structure management with individual visibility toggles
-  - Added dual viewer system: standard viewer (/dicom-viewer) and enhanced viewer (/enhanced-viewer)
-  - Created Enhanced Viewer button in top navigation and patient cards
-  - Styled enhanced viewer buttons in green to indicate RT structure capabilities
-  - All 19 anatomical structures from HN-ATLAS-84 now accessible with color coding
+- June 27, 2025: Enhanced RT Structure Visualization System - COMPLETED
+  - ✅ Created tabbed sidebar interface with Series and Structures tabs
+  - ✅ Implemented nested RT structure display under CT series in left sidebar
+  - ✅ Added RT structure API endpoints for loading anatomical structures
+  - ✅ Enhanced structure management with individual visibility toggles
+  - ✅ Added dual viewer system: standard viewer (/dicom-viewer) and enhanced viewer (/enhanced-viewer)
+  - ✅ Created Enhanced Viewer button in top navigation and patient cards
+  - ✅ Styled enhanced viewer buttons in green to indicate RT structure capabilities
+  - ✅ All 19 anatomical structures from HN-ATLAS-84 now accessible with color coding
+  - ✅ Fixed Vite development server configuration for proper React app serving
+  - ✅ User confirmed Enhanced Viewer button is visible and functional
 - December 27, 2024: Implemented RT Structure Set visualization
   - Added RT structure parser for DICOM RTSTRUCT files
   - Integrated RT structure overlay with CT viewer
