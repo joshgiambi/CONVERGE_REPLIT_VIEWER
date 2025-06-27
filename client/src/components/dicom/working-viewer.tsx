@@ -413,13 +413,17 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Convert DICOM coordinates to normalized image coordinates (0-1)
-      const normalizedX = (dicomX + 250) / 500; // Normalize to 0-1 range
-      const normalizedY = (dicomY + 250) / 500; // Normalize to 0-1 range
+      // Convert DICOM coordinates to pixel coordinates in the image space
+      // Using the same coordinate system that was working before zoom fix
+      const pixelX = (dicomX + 250) * (imageWidth / 500);
+      const pixelY = (dicomY + 250) * (imageHeight / 500);
       
-      // Apply same transformation as the image
-      const canvasX = imageX + (normalizedX * scaledWidth);
-      const canvasY = imageY + (normalizedY * scaledHeight);
+      // Now apply the same scaling and positioning as the image
+      const scaleFactorX = scaledWidth / imageWidth;
+      const scaleFactorY = scaledHeight / imageHeight;
+      
+      const canvasX = imageX + (pixelX * scaleFactorX);
+      const canvasY = imageY + (pixelY * scaleFactorY);
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
