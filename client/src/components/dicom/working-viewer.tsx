@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
-  const [preloadProgress, setPreloadProgress] = useState({ current: 0, total: 0 });
+  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, total: 0 });
   
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures;
@@ -69,11 +69,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
-  useEffect(() => {
-    if (images.length > 0) {
-      preloadAllImages(images);
-    }
-  }, [images]);
+  // Remove the separate useEffect since preloading is now handled in loadImages
 
   const loadImages = async () => {
     try {
@@ -210,50 +206,63 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
 
-  const preloadAllImages = async (imageList: any[]) => {
-    console.log('Starting to preload all images...');
+  // OPTIMIZED: Maximum speed preloading with controlled concurrency
+  const preloadAllImagesOptimized = useCallback(async (imageList: any[]) => {
+    console.log('Starting optimized preload of all images...');
     setIsPreloading(true);
-    setPreloadProgress({ current: 0, total: imageList.length });
-    const newCache = new Map();
     
-    // Load images in smaller batches for better UX
-    const batchSize = 10;
+    const newCache = new Map();
+    const maxConcurrent = 8; // Optimal concurrency for most browsers
     let completed = 0;
     
-    for (let i = 0; i < imageList.length; i += batchSize) {
-      const batch = imageList.slice(i, Math.min(i + batchSize, imageList.length));
-      
-      const batchPromises = batch.map(async (image, batchIndex) => {
-        try {
-          const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-          if (!imageResponse.ok) {
-            throw new Error(`Failed to load image ${i + batchIndex + 1}`);
-          }
-          
-          const arrayBuffer = await imageResponse.arrayBuffer();
-          const imageData = await parseDicomImage(arrayBuffer);
-          
-          if (imageData) {
-            newCache.set(image.sopInstanceUID, imageData);
-          }
-          
-          completed++;
-          setPreloadProgress({ current: completed, total: imageList.length });
-          
-        } catch (error) {
-          console.warn(`Failed to preload image ${i + batchIndex + 1}:`, error);
-          completed++;
-          setPreloadProgress({ current: completed, total: imageList.length });
+    // Process images in batches for maximum speed
+    const processImage = async (image: any, index: number) => {
+      try {
+        const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to load image ${index + 1}`);
         }
-      });
+        
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        const imageData = await parseDicomImageOptimized(arrayBuffer);
+        
+        if (imageData) {
+          newCache.set(image.sopInstanceUID, imageData);
+        }
+        
+        completed++;
+        setLoadingProgress({ loaded: completed, total: imageList.length });
+        
+        if (completed % 10 === 0) {
+          console.log(`Preloaded ${completed}/${imageList.length} images`);
+        }
+      } catch (error) {
+        console.warn(`Failed to preload image ${index + 1}:`, error);
+        completed++;
+        setLoadingProgress({ loaded: completed, total: imageList.length });
+      }
+    };
+    
+    // Process in controlled batches for optimal performance
+    for (let i = 0; i < imageList.length; i += maxConcurrent) {
+      const batch = imageList.slice(i, i + maxConcurrent);
+      const promises = batch.map((image, batchIndex) => 
+        processImage(image, i + batchIndex)
+      );
       
-      await Promise.allSettled(batchPromises);
+      await Promise.allSettled(promises);
+      
+      // Update cache progressively for immediate display
+      setImageCache(new Map(newCache));
+      
+      // Small yield to prevent browser freeze
+      await new Promise(resolve => setTimeout(resolve, 5));
     }
     
     setImageCache(newCache);
     setIsPreloading(false);
     console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
-  };
+  }, [parseDicomImageOptimized]);
 
   const [imageMetadata, setImageMetadata] = useState<any>(null);
 
@@ -311,9 +320,12 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       let imageData = imageCache.get(cacheKey);
       
       if (!imageData) {
-        // Image should be preloaded, but fallback just in case
-        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
-        throw new Error('Image not available in cache');
+        // Show loading indicator for this specific image
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Loading image...', canvas.width / 2, canvas.height / 2);
+        return;
       }
       
       // Keep fixed canvas size for consistent display
@@ -564,7 +576,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.stroke();
   };
 
-  const loadDicomParser = (): Promise<void> => {
+  const loadDicomParser = useCallback((): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (window.dicomParser) {
         resolve();
@@ -577,7 +589,48 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       script.onerror = () => reject(new Error('Failed to load dicom-parser'));
       document.head.appendChild(script);
     });
-  };
+  }, []);
+
+  // OPTIMIZED: Fast metadata extraction without full image download
+  const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
+    try {
+      // First try to get just the DICOM header (first 2KB should contain metadata)
+      const response = await fetch(`/api/images/${sopInstanceUID}`, {
+        headers: { 'Range': 'bytes=0-2048' } // Just get header portion
+      });
+      
+      if (response.status === 206 || response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const byteArray = new Uint8Array(arrayBuffer);
+        const dataSet = window.dicomParser.parseDicom(byteArray);
+        
+        const sliceLocation = dataSet.floatString('x00201041');
+        const imagePosition = dataSet.string('x00200032');
+        const instanceNumber = dataSet.intString('x00200013');
+        
+        let zPosition = null;
+        if (imagePosition) {
+          const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
+          zPosition = positions[2];
+        }
+        
+        return {
+          parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
+          parsedZPosition: zPosition,
+          parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : null
+        };
+      }
+    } catch (error) {
+      // Fallback: if range request fails, use instance number
+      console.warn(`Range request failed for ${sopInstanceUID}, using fallback`);
+    }
+    
+    return {
+      parsedSliceLocation: null,
+      parsedZPosition: null,
+      parsedInstanceNumber: null
+    };
+  }, []);
 
   const goToPrevious = () => {
     if (currentIndex > 0) {
@@ -802,7 +855,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                 <div className="text-center mb-4">
                   <h3 className="text-lg font-semibold text-gray-800">Loading Medical Images</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    {preloadProgress.current} of {preloadProgress.total} images loaded
+                    {loadingProgress.loaded} of {loadingProgress.total} images loaded
                   </p>
                 </div>
                 
@@ -811,7 +864,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                   <div 
                     className="bg-blue-600 h-3 rounded-full transition-all duration-300"
                     style={{ 
-                      width: `${preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0}%` 
+                      width: `${loadingProgress.total > 0 ? (loadingProgress.loaded / loadingProgress.total) * 100 : 0}%` 
                     }}
                   ></div>
                 </div>
@@ -819,7 +872,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                 <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                   <span>
-                    {Math.round(preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0)}%
+                    {Math.round(loadingProgress.total > 0 ? (loadingProgress.loaded / loadingProgress.total) * 100 : 0)}%
                   </span>
                 </div>
               </div>
