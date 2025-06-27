@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import { Card } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { List, Settings } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
+import { List, Settings, Monitor, Palette } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -12,6 +14,11 @@ interface SeriesSelectorProps {
   onSeriesSelect: (series: DICOMSeries) => void;
   windowLevel: WindowLevel;
   onWindowLevelChange: (windowLevel: WindowLevel) => void;
+  studyId?: number;
+  rtStructures?: any;
+  onRTStructureLoad?: (rtStructures: any) => void;
+  onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
+  onStructureColorChange?: (structureId: number, color: [number, number, number]) => void;
 }
 
 export function SeriesSelector({
@@ -19,8 +26,71 @@ export function SeriesSelector({
   selectedSeries,
   onSeriesSelect,
   windowLevel,
-  onWindowLevelChange
+  onWindowLevelChange,
+  studyId,
+  rtStructures,
+  onRTStructureLoad,
+  onStructureVisibilityChange,
+  onStructureColorChange
 }: SeriesSelectorProps) {
+  const [rtSeries, setRTSeries] = useState<any[]>([]);
+  const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
+  const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+  // Load RT structure series for the study
+  useEffect(() => {
+    if (!studyId) return;
+    
+    const loadRTSeries = async () => {
+      try {
+        const response = await fetch(`/api/studies/${studyId}/rt-structures`);
+        if (response.ok) {
+          const rtSeriesData = await response.json();
+          setRTSeries(rtSeriesData);
+        }
+      } catch (error) {
+        console.error('Error loading RT series:', error);
+      }
+    };
+    
+    loadRTSeries();
+  }, [studyId]);
+
+  // Initialize structure visibility when RT structures are loaded
+  useEffect(() => {
+    if (rtStructures?.structures) {
+      const visibilityMap = new Map();
+      rtStructures.structures.forEach((structure: any) => {
+        visibilityMap.set(structure.roiNumber, true);
+      });
+      setStructureVisibility(visibilityMap);
+    }
+  }, [rtStructures]);
+
+  const handleRTSeriesSelect = async (rtSeries: any) => {
+    try {
+      setSelectedRTSeries(rtSeries);
+      
+      // Load RT structure contours
+      const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
+      if (response.ok) {
+        const rtStructData = await response.json();
+        if (onRTStructureLoad) {
+          onRTStructureLoad(rtStructData);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading RT structures:', error);
+    }
+  };
+
+  const handleStructureVisibilityToggle = (structureId: number) => {
+    const newVisibility = !structureVisibility.get(structureId);
+    setStructureVisibility(prev => new Map(prev.set(structureId, newVisibility)));
+    if (onStructureVisibilityChange) {
+      onStructureVisibilityChange(structureId, newVisibility);
+    }
+  };
+
   const handleWindowChange = (values: number[]) => {
     onWindowLevelChange({ window: values[0], level: windowLevel.level });
   };
