@@ -105,112 +105,199 @@ export function SeriesSelector({
 
   return (
     <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
-      <div className="p-6 h-full flex flex-col">
-        <h3 className="text-xl font-bold text-dicom-purple mb-6 flex items-center">
-          <List className="w-6 h-6 mr-3 text-dicom-indigo" />
-          Series
-        </h3>
+      <Tabs defaultValue="series" className="h-full flex flex-col">
+        <CardHeader className="pb-3">
+          <TabsList className="grid w-full grid-cols-2 bg-dicom-indigo/20">
+            <TabsTrigger value="series" className="text-xs">Series</TabsTrigger>
+            <TabsTrigger value="structures" className="text-xs">Structures</TabsTrigger>
+          </TabsList>
+        </CardHeader>
         
-        {/* Series List */}
-        <div className="flex-1 space-y-2 mb-6 overflow-y-auto">
-          {series.map((seriesItem) => (
-            <div
-              key={seriesItem.id}
-              className={`
-                p-3 rounded-lg border cursor-pointer transition-all duration-200
-                ${selectedSeries?.id === seriesItem.id
-                  ? 'border-dicom-purple bg-dicom-purple/20 border-l-4'
-                  : 'border-dicom-gray hover:border-dicom-purple/50 hover:bg-dicom-purple/10 hover:translate-x-1'
-                }
-              `}
-              onClick={() => onSeriesSelect(seriesItem)}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-sm text-white">
-                  {seriesItem.seriesDescription || 'Unnamed Series'}
-                </span>
-                <Badge 
-                  variant="secondary" 
-                  className="bg-dicom-purple text-white text-xs"
-                >
-                  {seriesItem.modality}
-                </Badge>
-              </div>
-              <div className="text-xs text-gray-400 space-y-1">
-                <div>{seriesItem.imageCount} images</div>
-                {seriesItem.sliceThickness && (
-                  <div>{seriesItem.sliceThickness}mm slice</div>
-                )}
-              </div>
-            </div>
-          ))}
-          
-          {series.length === 0 && (
-            <div className="text-center text-gray-400 py-8">
-              <p>No series available</p>
-              <p className="text-sm">Upload DICOM files to get started</p>
-            </div>
-          )}
-        </div>
-
-        {/* Window/Level Controls */}
-        {selectedSeries && (
-          <div className="border-t border-dicom-gray pt-4">
-            <h4 className="text-sm font-semibold text-dicom-yellow mb-3 flex items-center">
-              <Settings className="w-4 h-4 mr-2" />
-              Window/Level
-            </h4>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-gray-400 block mb-2">
-                  Window Width: {windowLevel.window}
-                </label>
-                <Slider
-                  value={[windowLevel.window]}
-                  onValueChange={handleWindowChange}
-                  min={1}
-                  max={2000}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs text-gray-400 block mb-2">
-                  Window Level: {windowLevel.level}
-                </label>
-                <Slider
-                  value={[windowLevel.level]}
-                  onValueChange={handleLevelChange}
-                  min={-1000}
-                  max={1000}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
+        <CardContent className="flex-1 overflow-hidden p-6">
+          <TabsContent value="series" className="h-full space-y-4 mt-0">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-dicom-purple flex items-center">
+                <Monitor className="w-6 h-6 mr-3 text-dicom-indigo" />
+                Image Series
+              </h3>
             </div>
             
-            {/* Preset Buttons */}
-            <div className="mt-4">
-              <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
-                  <Button
-                    key={name}
-                    variant="outline"
-                    size="sm"
-                    className="text-xs bg-dicom-darker border-dicom-gray hover:bg-dicom-gray hover:border-dicom-yellow text-white transition-all duration-200 hover:scale-105"
-                    onClick={() => applyPreset(preset)}
+            {/* Image Series List */}
+            <div className="flex-1 space-y-2 mb-6 overflow-y-auto">
+              {series.filter(s => s.modality !== 'RTSTRUCT').map((seriesItem) => (
+                <div key={seriesItem.id}>
+                  <div
+                    className={`
+                      p-3 rounded-lg border cursor-pointer transition-all duration-200
+                      ${selectedSeries?.id === seriesItem.id
+                        ? 'bg-dicom-yellow/20 border-dicom-yellow shadow-lg'
+                        : 'bg-dicom-indigo/10 border-dicom-indigo/30 hover:border-dicom-yellow/50 hover:bg-dicom-yellow/5'
+                      }
+                    `}
+                    onClick={() => onSeriesSelect(seriesItem)}
                   >
-                    {name.charAt(0).toUpperCase() + name.slice(1)}
-                  </Button>
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge 
+                        variant="outline" 
+                        className={`
+                          text-xs font-medium
+                          ${selectedSeries?.id === seriesItem.id
+                            ? 'border-dicom-yellow text-dicom-yellow'
+                            : 'border-dicom-indigo text-dicom-indigo'
+                          }
+                        `}
+                      >
+                        {seriesItem.modality}
+                      </Badge>
+                      <span className="text-xs text-gray-400">
+                        {seriesItem.imageCount} images
+                      </span>
+                    </div>
+                    
+                    <h4 className={`
+                      text-sm font-medium mb-1
+                      ${selectedSeries?.id === seriesItem.id ? 'text-dicom-yellow' : 'text-white'}
+                    `}>
+                      {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                    </h4>
+                    
+                    <p className="text-xs text-gray-400">
+                      #{seriesItem.seriesNumber} • {new Date(seriesItem.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  {/* RT Structure Series nested under CT */}
+                  {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
+                    <div className="ml-4 mt-2 space-y-1">
+                      {rtSeries.map((rtS) => (
+                        <Button
+                          key={rtS.id}
+                          variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
+                          className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                            selectedRTSeries?.id === rtS.id 
+                              ? 'bg-green-600 text-white' 
+                              : 'hover:bg-green-600/20 text-gray-300'
+                          }`}
+                          onClick={() => handleRTSeriesSelect(rtS)}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="outline" className="border-green-500 text-green-400 text-xs">
+                              RTSTRUCT
+                            </Badge>
+                            <span className="truncate">
+                              {rtS.seriesDescription || 'RT Structure Set'}
+                            </span>
+                          </div>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Window/Level Controls */}
+            {selectedSeries && (
+              <div className="border-t border-dicom-gray pt-4">
+                <h4 className="text-sm font-semibold text-dicom-yellow mb-3 flex items-center">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Window/Level
+                </h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2">
+                      Window Width: {windowLevel.window}
+                    </label>
+                    <Slider
+                      value={[windowLevel.window]}
+                      onValueChange={handleWindowChange}
+                      min={1}
+                      max={2000}
+                      step={1}
+                      className="w-full"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2">
+                      Window Level: {windowLevel.level}
+                    </label>
+                    <Slider
+                      value={[windowLevel.level]}
+                      onValueChange={handleLevelChange}
+                      min={-1000}
+                      max={1000}
+                      step={1}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                
+                {/* Preset Buttons */}
+                <div className="mt-4">
+                  <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
+                      <Button
+                        key={name}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs bg-dicom-darker border-dicom-gray hover:bg-dicom-gray hover:border-dicom-yellow text-white transition-all duration-200 hover:scale-105"
+                        onClick={() => applyPreset(preset)}
+                      >
+                        {name.charAt(0).toUpperCase() + name.slice(1)}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="structures" className="h-full space-y-4 mt-0">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-dicom-purple flex items-center">
+                <Palette className="w-6 h-6 mr-3 text-dicom-indigo" />
+                Structure Contours
+              </h3>
+            </div>
+            
+            {rtStructures?.structures ? (
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {rtStructures.structures.map((structure: any) => (
+                  <div 
+                    key={structure.roiNumber}
+                    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
+                  >
+                    <Checkbox
+                      checked={structureVisibility.get(structure.roiNumber) ?? true}
+                      onCheckedChange={() => handleStructureVisibilityToggle(structure.roiNumber)}
+                      className="border-gray-400"
+                    />
+                    <div 
+                      className="w-4 h-4 rounded border border-gray-400"
+                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm text-white font-medium">
+                        {structure.structureName}
+                      </span>
+                      <div className="text-xs text-gray-400">
+                        {structure.contours.length} contours • ROI {structure.roiNumber}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
-      </div>
+            ) : (
+              <div className="text-center text-gray-500 text-sm py-8">
+                {selectedRTSeries ? 'Loading structures...' : 'Load an RT structure set to view contours'}
+              </div>
+            )}
+          </TabsContent>
+        </CardContent>
+      </Tabs>
     </Card>
   );
 }
