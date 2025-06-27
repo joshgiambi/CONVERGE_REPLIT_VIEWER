@@ -649,7 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const studyId = parseInt(req.params.studyId);
       const series = await storage.getSeriesByStudyId(studyId);
       
-      const frameReferences = {};
+      const frameReferences: any = {};
       
       for (const s of series) {
         const images = await storage.getImagesBySeriesId(s.id);

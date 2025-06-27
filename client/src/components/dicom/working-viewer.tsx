@@ -457,22 +457,40 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const imageWidth = currentImage?.width || 512;
       const imageHeight = currentImage?.height || 512;
       
-      // Use working coordinate transformation that aligns with the CT image
-      // Convert DICOM coordinates to image pixel coordinates
-      const scale = 1.2; // Scale factor for proper anatomical size
-      const centerX = imageWidth / 2;
-      const centerY = imageHeight / 2;
+      // Proper world-to-voxel transformation as suggested in the screenshot
+      let pixelX, pixelY;
       
-      // Transform DICOM coordinates to pixel coordinates
-      const pixelX = centerX + (dicomX * scale);
-      const pixelY = centerY + (dicomY * scale);
-      
-      // Debug coordinate transformation for first point of first contour
-      if (i === 0 && currentIndex === 0) {
-        console.log('DICOM coordinates:', dicomX, dicomY);
-        console.log('Pixel coordinates:', pixelX, pixelY);
-        console.log('Image dimensions:', imageWidth, imageHeight);
-        console.log('Scale factor:', scale);
+      if (imageMetadata && imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
+        // Parse DICOM spatial metadata
+        const imagePosition = imageMetadata.imagePosition.split('\\').map(Number); // [x, y, z] origin
+        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);   // [dx, dy] spacing
+        
+        // Transform from DICOM world coordinates (mm) to image pixel coordinates
+        // Formula: (coord_mm - origin) / spacing
+        pixelX = (dicomX - imagePosition[0]) / pixelSpacing[0];
+        pixelY = (dicomY - imagePosition[1]) / pixelSpacing[1];
+        
+        // Debug coordinate transformation for first point of first contour
+        if (i === 0 && currentIndex === 0) {
+          console.log('DICOM world coordinates (mm):', dicomX, dicomY);
+          console.log('Image Position Patient:', imagePosition);
+          console.log('Pixel Spacing:', pixelSpacing);
+          console.log('Calculated pixel coordinates:', pixelX, pixelY);
+          console.log('Image dimensions:', imageWidth, imageHeight);
+        }
+      } else {
+        // Fallback transformation if metadata unavailable
+        const scale = 1.2;
+        const centerX = imageWidth / 2;
+        const centerY = imageHeight / 2;
+        pixelX = centerX + (dicomX * scale);
+        pixelY = centerY + (dicomY * scale);
+        
+        if (i === 0 && currentIndex === 0) {
+          console.log('Using fallback transformation - metadata unavailable');
+          console.log('DICOM coordinates:', dicomX, dicomY);
+          console.log('Pixel coordinates:', pixelX, pixelY);
+        }
       }
       
       // Apply same transformation as image (zoom and pan)
