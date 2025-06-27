@@ -195,7 +195,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
         <div className="lg:col-span-3">
           {selectedSeries ? (
             <WorkingViewer 
-              seriesId={selectedSeries.id} 
+              seriesId={selectedSeries.id}
+              studyId={studyData.studies[0]?.id}
               windowLevel={windowLevel}
               onWindowLevelChange={setWindowLevel}
             />

@@ -89,8 +89,15 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-Changelog:
-- June 24, 2025. Initial setup
+- December 27, 2024: Implemented RT Structure Set visualization
+  - Added RT structure parser for DICOM RTSTRUCT files
+  - Integrated RT structure overlay with CT viewer
+  - Parsed 19 anatomical structures from HN-ATLAS-84 dataset
+  - Added structure visibility toggle in viewer interface
+  - Fixed CONVERGE logo styling to white/black color scheme
+  - Enhanced CT slice ordering with proper DICOM metadata processing
+  - Added Z slice position readout in viewer overlay
+- June 24, 2025: Initial setup
 
 ## User Preferences
 

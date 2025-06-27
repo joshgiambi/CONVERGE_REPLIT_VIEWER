@@ -626,6 +626,16 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
         </div>
         
         <div className="flex items-center space-x-2">
+          {rtStructures && (
+            <Button
+              size="sm"
+              variant={showStructures ? "default" : "outline"}
+              onClick={() => setShowStructures(!showStructures)}
+              className="text-xs"
+            >
+              RT ({rtStructures.structures.length})
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -674,6 +684,11 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                 Z: {images[currentIndex].parsedSliceLocation?.toFixed(1) || 
                      images[currentIndex].parsedZPosition?.toFixed(1) || 
                      (currentIndex + 1)}
+              </div>
+            )}
+            {rtStructures && showStructures && (
+              <div className="mt-1 text-green-400">
+                RT Structures: {rtStructures.structures.length} ROIs
               </div>
             )}
           </div>
