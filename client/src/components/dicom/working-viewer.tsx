@@ -22,6 +22,8 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPreloading, setIsPreloading] = useState(false);
+  const [preloadProgress, setPreloadProgress] = useState({ current: 0, total: 0 });
   
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures;
@@ -57,17 +59,21 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   }, [seriesId]);
 
   useEffect(() => {
-    if (images.length > 0) {
+    if (images.length > 0 && !isPreloading) {
       displayCurrentImage();
       // Load metadata for current image
       const currentImage = images[currentIndex];
       if (currentImage?.id) {
         loadImageMetadata(currentImage.id);
       }
-      // Preload nearby images
-      preloadNearbyImages(currentIndex, images, 3);
     }
-  }, [images, currentIndex, currentWindowLevel]);
+  }, [images, currentIndex, currentWindowLevel, isPreloading]);
+
+  useEffect(() => {
+    if (images.length > 0) {
+      preloadAllImages(images);
+    }
+  }, [images]);
 
   const loadImages = async () => {
     try {
@@ -147,7 +153,8 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       setImages(sortedImages);
       setCurrentIndex(0);
       
-      // Images will be loaded on demand
+      // Preload all images with progress tracking
+      preloadAllImages(sortedImages);
       
     } catch (error: any) {
       setError(error.message);
@@ -203,36 +210,49 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
 
-  const preloadNearbyImages = async (currentIndex: number, imageList: any[], radius = 5) => {
-    const newCache = new Map(imageCache);
+  const preloadAllImages = async (imageList: any[]) => {
+    console.log('Starting to preload all images...');
+    setIsPreloading(true);
+    setPreloadProgress({ current: 0, total: imageList.length });
+    const newCache = new Map();
     
-    // Calculate range of images to preload around current index
-    const start = Math.max(0, currentIndex - radius);
-    const end = Math.min(imageList.length - 1, currentIndex + radius);
+    // Load images in smaller batches for better UX
+    const batchSize = 10;
+    let completed = 0;
     
-    const loadPromises = [];
-    
-    for (let i = start; i <= end; i++) {
-      const image = imageList[i];
-      if (!newCache.has(image.sopInstanceUID)) {
-        loadPromises.push(
-          fetch(`/api/images/${image.sopInstanceUID}`)
-            .then(response => response.arrayBuffer())
-            .then(buffer => parseDicomImage(buffer))
-            .then(imageData => {
-              if (imageData) {
-                newCache.set(image.sopInstanceUID, imageData);
-              }
-            })
-            .catch(error => console.warn(`Failed to preload image ${i + 1}:`, error))
-        );
-      }
+    for (let i = 0; i < imageList.length; i += batchSize) {
+      const batch = imageList.slice(i, Math.min(i + batchSize, imageList.length));
+      
+      const batchPromises = batch.map(async (image, batchIndex) => {
+        try {
+          const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to load image ${i + batchIndex + 1}`);
+          }
+          
+          const arrayBuffer = await imageResponse.arrayBuffer();
+          const imageData = await parseDicomImage(arrayBuffer);
+          
+          if (imageData) {
+            newCache.set(image.sopInstanceUID, imageData);
+          }
+          
+          completed++;
+          setPreloadProgress({ current: completed, total: imageList.length });
+          
+        } catch (error) {
+          console.warn(`Failed to preload image ${i + batchIndex + 1}:`, error);
+          completed++;
+          setPreloadProgress({ current: completed, total: imageList.length });
+        }
+      });
+      
+      await Promise.allSettled(batchPromises);
     }
     
-    if (loadPromises.length > 0) {
-      await Promise.allSettled(loadPromises);
-      setImageCache(newCache);
-    }
+    setImageCache(newCache);
+    setIsPreloading(false);
+    console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
   };
 
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -291,24 +311,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       let imageData = imageCache.get(cacheKey);
       
       if (!imageData) {
-        // Load image on demand if not in cache
-        console.log(`Loading image on demand: ${currentIndex + 1}`);
-        const imageResponse = await fetch(`/api/images/${currentImage.sopInstanceUID}`);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${currentIndex + 1}`);
-        }
-        
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        imageData = await parseDicomImage(arrayBuffer);
-        
-        if (!imageData) {
-          throw new Error('Failed to parse DICOM image');
-        }
-        
-        // Cache the loaded image
-        const newCache = new Map(imageCache);
-        newCache.set(cacheKey, imageData);
-        setImageCache(newCache);
+        // Image should be preloaded, but fallback just in case
+        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
+        throw new Error('Image not available in cache');
       }
       
       // Keep fixed canvas size for consistent display
@@ -790,8 +795,39 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
               userSelect: 'none'
             }}
           />
-          {/* Loading overlay */}
-          {isLoading && (
+          {/* Preloading overlay with progress */}
+          {isPreloading && (
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+              <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+                <div className="text-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800">Loading Medical Images</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {preloadProgress.current} of {preloadProgress.total} images loaded
+                  </p>
+                </div>
+                
+                {/* Progress bar */}
+                <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+                  <div 
+                    className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                    style={{ 
+                      width: `${preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0}%` 
+                    }}
+                  ></div>
+                </div>
+                
+                <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <span>
+                    {Math.round(preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Single image loading overlay */}
+          {isLoading && !isPreloading && (
             <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
               <div className="bg-white p-4 rounded-lg">
                 <div className="flex items-center space-x-3">

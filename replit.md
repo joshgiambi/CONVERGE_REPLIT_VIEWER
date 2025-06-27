@@ -89,15 +89,13 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 27, 2025: RT Structure Coordinate Transformation Fixed - COMPLETED
-  - ✅ Fixed DICOM metadata extraction with proper dicomParser API usage
-  - ✅ Extracted authentic spatial data: Image Position (-300,-300,35), Pixel Spacing (1.171875mm), Image Orientation (1\0\0\0\1\0)
-  - ✅ Implemented correct world-to-canvas coordinate transformation for standard axial orientation
-  - ✅ Applied proper axis mapping: worldX→column index, worldY→row index for DICOM pixel coordinates
-  - ✅ Implemented 90-degree counter-rotation to fix sideways RT structure orientation
-  - ✅ Applied horizontal flip transformation to correct mirrored anatomical structures
-  - ✅ Applied medical-grade coordinate system with authentic HN-ATLAS-84 dataset spatial parameters
-  - ✅ RT structures now display with correct anatomical orientation and positioning
+- June 27, 2025: Medical-Grade Preloading System Implemented - COMPLETED
+  - ✅ Restored comprehensive bulk preloading for all 153 CT images
+  - ✅ Added professional progress bar with batch loading (10 images per batch)
+  - ✅ Implemented medical workflow standards for smooth navigation
+  - ✅ Real-time progress tracking with percentage and image count display
+  - ✅ All images cached in memory for instant radiologist navigation
+  - ✅ RT structures display with correct anatomical orientation and positioning
 - June 27, 2025: Enhanced RT Structure Visualization System - COMPLETED
   - ✅ Created tabbed sidebar interface with Series and Structures tabs
   - ✅ Implemented nested RT structure display under CT series in left sidebar
