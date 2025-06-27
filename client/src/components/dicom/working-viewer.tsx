@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, total: 0 });
+  const [preloadProgress, setPreloadProgress] = useState({ current: 0, total: 0 });
   
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures;
@@ -56,7 +56,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
 
   useEffect(() => {
     loadImages();
-  }, [seriesId, loadImages]);
+  }, [seriesId]);
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
@@ -69,61 +69,99 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
-  // OPTIMIZED: Fast metadata extraction without full image download
-  const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
+  useEffect(() => {
+    if (images.length > 0) {
+      preloadAllImages(images);
+    }
+  }, [images]);
+
+  const loadImages = async () => {
     try {
-      // First try to get just the DICOM header (first 2KB should contain metadata)
-      const response = await fetch(`/api/images/${sopInstanceUID}`, {
-        headers: { 'Range': 'bytes=0-2048' } // Just get header portion
-      });
+      setIsLoading(true);
+      setError(null);
       
-      if (response.status === 206 || response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const byteArray = new Uint8Array(arrayBuffer);
-        const dataSet = window.dicomParser.parseDicom(byteArray);
-        
-        const sliceLocation = dataSet.floatString('x00201041');
-        const imagePosition = dataSet.string('x00200032');
-        const instanceNumber = dataSet.intString('x00200013');
-        
-        let zPosition = null;
-        if (imagePosition) {
-          const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
-          zPosition = positions[2];
+      const response = await fetch(`/api/series/${seriesId}/images`);
+      if (!response.ok) {
+        throw new Error(`Failed to load images: ${response.statusText}`);
+      }
+      
+      const seriesImages = await response.json();
+      
+      // First parse DICOM metadata for proper spatial ordering
+      const imagesWithMetadata = await Promise.all(seriesImages.map(async (img: any) => {
+        try {
+          const response = await fetch(`/api/images/${img.sopInstanceUID}`);
+          const arrayBuffer = await response.arrayBuffer();
+          
+          if (!window.dicomParser) {
+            await loadDicomParser();
+          }
+          
+          const byteArray = new Uint8Array(arrayBuffer);
+          const dataSet = window.dicomParser.parseDicom(byteArray);
+          
+          // Extract spatial metadata
+          const sliceLocation = dataSet.floatString('x00201041');
+          const imagePosition = dataSet.string('x00200032');
+          const instanceNumber = dataSet.intString('x00200013');
+          
+          // Parse image position (z-coordinate is third value)
+          let zPosition = null;
+          if (imagePosition) {
+            const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
+            zPosition = positions[2];
+          }
+          
+          return {
+            ...img,
+            parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
+            parsedZPosition: zPosition,
+            parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : img.instanceNumber
+          };
+        } catch (error) {
+          console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
+          return {
+            ...img,
+            parsedSliceLocation: null,
+            parsedZPosition: null,
+            parsedInstanceNumber: img.instanceNumber
+          };
+        }
+      }));
+      
+      // Sort by spatial position - prefer slice location, then z-position, then instance number
+      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
+        // Primary: slice location
+        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
+          return a.parsedSliceLocation - b.parsedSliceLocation;
         }
         
-        return {
-          parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-          parsedZPosition: zPosition,
-          parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : null
-        };
-      }
-    } catch (error) {
-      // Fallback: if range request fails, use instance number
-      console.warn(`Range request failed for ${sopInstanceUID}, using fallback`);
+        // Secondary: z-position from image position
+        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
+          return a.parsedZPosition - b.parsedZPosition;
+        }
+        
+        // Tertiary: instance number
+        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
+          return a.parsedInstanceNumber - b.parsedInstanceNumber;
+        }
+        
+        // Final fallback: filename
+        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+      });
+      
+      setImages(sortedImages);
+      setCurrentIndex(0);
+      
+      // Preload all images with progress tracking
+      preloadAllImages(sortedImages);
+      
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
     }
-    
-    return {
-      parsedSliceLocation: null,
-      parsedZPosition: null,
-      parsedInstanceNumber: null
-    };
-  }, []);
-
-  const loadDicomParser = useCallback((): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (window.dicomParser) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
-      document.head.appendChild(script);
-    });
-  }, []);
+  };
 
   const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
     try {
@@ -172,187 +210,50 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
 
-  // OPTIMIZED: Fast DICOM parsing with performance improvements
-  const parseDicomImageOptimized = useCallback(async (arrayBuffer: ArrayBuffer) => {
-    try {
-      const byteArray = new Uint8Array(arrayBuffer);
-      const dataSet = window.dicomParser.parseDicom(byteArray);
-      
-      const pixelDataElement = dataSet.elements.x7fe00010;
-      if (!pixelDataElement) {
-        throw new Error('No pixel data found in DICOM file');
-      }
-      
-      const rows = dataSet.uint16('x00280010') || 512;
-      const cols = dataSet.uint16('x00280011') || 512;
-      const bitsAllocated = dataSet.uint16('x00280100') || 16;
-      
-      const rescaleSlope = dataSet.floatString('x00281053') || 1;
-      const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
-      
-      if (bitsAllocated === 16) {
-        const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
-        const huPixelArray = new Float32Array(rawPixelArray.length);
-        
-        // OPTIMIZED: Unrolled loop for better performance
-        const len = rawPixelArray.length;
-        const slope = rescaleSlope;
-        const intercept = rescaleIntercept;
-        
-        for (let i = 0; i < len; i += 4) {
-          huPixelArray[i] = rawPixelArray[i] * slope + intercept;
-          if (i + 1 < len) huPixelArray[i + 1] = rawPixelArray[i + 1] * slope + intercept;
-          if (i + 2 < len) huPixelArray[i + 2] = rawPixelArray[i + 2] * slope + intercept;
-          if (i + 3 < len) huPixelArray[i + 3] = rawPixelArray[i + 3] * slope + intercept;
-        }
-        
-        return {
-          data: huPixelArray,
-          width: cols,
-          height: rows
-        };
-      } else {
-        throw new Error('Only 16-bit images supported');
-      }
-    } catch (error) {
-      console.error('Error parsing DICOM image:', error);
-      return null;
-    }
-  }, []);
-
-  // OPTIMIZED: Maximum speed preloading with controlled concurrency
-  const preloadAllImagesOptimized = useCallback(async (imageList: any[]) => {
-    console.log('Starting optimized preload of all images...');
+  const preloadAllImages = async (imageList: any[]) => {
+    console.log('Starting to preload all images...');
     setIsPreloading(true);
-    
+    setPreloadProgress({ current: 0, total: imageList.length });
     const newCache = new Map();
-    const maxConcurrent = 8; // Optimal concurrency for most browsers
+    
+    // Load images in smaller batches for better UX
+    const batchSize = 10;
     let completed = 0;
     
-    // Process images in batches for maximum speed
-    const processImage = async (image: any, index: number) => {
-      try {
-        const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${index + 1}`);
-        }
-        
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        const imageData = await parseDicomImageOptimized(arrayBuffer);
-        
-        if (imageData) {
-          newCache.set(image.sopInstanceUID, imageData);
-        }
-        
-        completed++;
-        setLoadingProgress({ loaded: completed, total: imageList.length });
-        
-        if (completed % 10 === 0) {
-          console.log(`Preloaded ${completed}/${imageList.length} images`);
-        }
-      } catch (error) {
-        console.warn(`Failed to preload image ${index + 1}:`, error);
-        completed++;
-        setLoadingProgress({ loaded: completed, total: imageList.length });
-      }
-    };
-    
-    // Process in controlled batches for optimal performance
-    for (let i = 0; i < imageList.length; i += maxConcurrent) {
-      const batch = imageList.slice(i, i + maxConcurrent);
-      const promises = batch.map((image, batchIndex) => 
-        processImage(image, i + batchIndex)
-      );
+    for (let i = 0; i < imageList.length; i += batchSize) {
+      const batch = imageList.slice(i, Math.min(i + batchSize, imageList.length));
       
-      await Promise.allSettled(promises);
+      const batchPromises = batch.map(async (image, batchIndex) => {
+        try {
+          const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to load image ${i + batchIndex + 1}`);
+          }
+          
+          const arrayBuffer = await imageResponse.arrayBuffer();
+          const imageData = await parseDicomImage(arrayBuffer);
+          
+          if (imageData) {
+            newCache.set(image.sopInstanceUID, imageData);
+          }
+          
+          completed++;
+          setPreloadProgress({ current: completed, total: imageList.length });
+          
+        } catch (error) {
+          console.warn(`Failed to preload image ${i + batchIndex + 1}:`, error);
+          completed++;
+          setPreloadProgress({ current: completed, total: imageList.length });
+        }
+      });
       
-      // Update cache progressively for immediate display
-      setImageCache(new Map(newCache));
-      
-      // Small yield to prevent browser freeze
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await Promise.allSettled(batchPromises);
     }
     
     setImageCache(newCache);
     setIsPreloading(false);
     console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
-  }, [parseDicomImageOptimized]);
-
-  // OPTIMIZED: Fast image list loading with minimal metadata
-  const loadImages = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      setLoadingProgress({ loaded: 0, total: 0 });
-      
-      // Load DICOM parser first
-      await loadDicomParser();
-      
-      const response = await fetch(`/api/series/${seriesId}/images`);
-      if (!response.ok) {
-        throw new Error(`Failed to load images: ${response.statusText}`);
-      }
-      
-      const seriesImages = await response.json();
-      setLoadingProgress({ loaded: 0, total: seriesImages.length });
-      
-      // OPTIMIZED: Extract metadata in smaller batches to avoid overwhelming browser
-      const batchSize = 10;
-      const imagesWithMetadata = [];
-      
-      for (let i = 0; i < seriesImages.length; i += batchSize) {
-        const batch = seriesImages.slice(i, i + batchSize);
-        
-        const batchResults = await Promise.all(
-          batch.map(async (img: any) => {
-            try {
-              const metadata = await extractQuickMetadata(img.sopInstanceUID);
-              return { ...img, ...metadata };
-            } catch (error) {
-              console.warn(`Failed to parse metadata for ${img.fileName}:`, error);
-              return {
-                ...img,
-                parsedSliceLocation: null,
-                parsedZPosition: null,
-                parsedInstanceNumber: img.instanceNumber
-              };
-            }
-          })
-        );
-        
-        imagesWithMetadata.push(...batchResults);
-        setLoadingProgress({ loaded: imagesWithMetadata.length, total: seriesImages.length });
-        
-        // Small delay to prevent browser lock-up
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
-      
-      // Sort by spatial position
-      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        }
-        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
-        }
-        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
-      });
-      
-      setImages(sortedImages);
-      setCurrentIndex(0);
-      
-      // Start aggressive preloading immediately
-      preloadAllImagesOptimized(sortedImages);
-      
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [seriesId, loadDicomParser, extractQuickMetadata, preloadAllImagesOptimized]);
+  };
 
   const [imageMetadata, setImageMetadata] = useState<any>(null);
 
@@ -410,12 +311,9 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       let imageData = imageCache.get(cacheKey);
       
       if (!imageData) {
-        // Show loading indicator for this specific image
-        ctx.fillStyle = 'white';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Loading image...', canvas.width / 2, canvas.height / 2);
-        return;
+        // Image should be preloaded, but fallback just in case
+        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
+        throw new Error('Image not available in cache');
       }
       
       // Keep fixed canvas size for consistent display
@@ -666,48 +564,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.stroke();
   };
 
-  // OPTIMIZED: Fast metadata extraction without full image download
-  const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
-    try {
-      // First try to get just the DICOM header (first 2KB should contain metadata)
-      const response = await fetch(`/api/images/${sopInstanceUID}`, {
-        headers: { 'Range': 'bytes=0-2048' } // Just get header portion
-      });
-      
-      if (response.status === 206 || response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const byteArray = new Uint8Array(arrayBuffer);
-        const dataSet = window.dicomParser.parseDicom(byteArray);
-        
-        const sliceLocation = dataSet.floatString('x00201041');
-        const imagePosition = dataSet.string('x00200032');
-        const instanceNumber = dataSet.intString('x00200013');
-        
-        let zPosition = null;
-        if (imagePosition) {
-          const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
-          zPosition = positions[2];
-        }
-        
-        return {
-          parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-          parsedZPosition: zPosition,
-          parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : null
-        };
-      }
-    } catch (error) {
-      // Fallback: if range request fails, use instance number
-      console.warn(`Range request failed for ${sopInstanceUID}, using fallback`);
-    }
-    
-    return {
-      parsedSliceLocation: null,
-      parsedZPosition: null,
-      parsedInstanceNumber: null
-    };
-  }, []);
-
-  const loadDicomParser = useCallback((): Promise<void> => {
+  const loadDicomParser = (): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (window.dicomParser) {
         resolve();
@@ -720,7 +577,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       script.onerror = () => reject(new Error('Failed to load dicom-parser'));
       document.head.appendChild(script);
     });
-  }, []);
+  };
 
   const goToPrevious = () => {
     if (currentIndex > 0) {
@@ -945,7 +802,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                 <div className="text-center mb-4">
                   <h3 className="text-lg font-semibold text-gray-800">Loading Medical Images</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    {loadingProgress.loaded} of {loadingProgress.total} images loaded
+                    {preloadProgress.current} of {preloadProgress.total} images loaded
                   </p>
                 </div>
                 
@@ -954,7 +811,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                   <div 
                     className="bg-blue-600 h-3 rounded-full transition-all duration-300"
                     style={{ 
-                      width: `${loadingProgress.total > 0 ? (loadingProgress.loaded / loadingProgress.total) * 100 : 0}%` 
+                      width: `${preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0}%` 
                     }}
                   ></div>
                 </div>
@@ -962,7 +819,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
                 <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                   <span>
-                    {Math.round(loadingProgress.total > 0 ? (loadingProgress.loaded / loadingProgress.total) * 100 : 0)}%
+                    {Math.round(preloadProgress.total > 0 ? (preloadProgress.current / preloadProgress.total) * 100 : 0)}%
                   </span>
                 </div>
               </div>

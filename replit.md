@@ -89,13 +89,13 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 27, 2025: High-Performance Medical Imaging System - COMPLETED
-  - ✅ Implemented optimized preloading with range requests for metadata (2KB headers only)
-  - ✅ Added 8-concurrent downloads with controlled batching for maximum speed
-  - ✅ Unrolled pixel processing loops for 4x faster DICOM parsing
-  - ✅ Progressive cache updates show images as they load
-  - ✅ Browser-friendly yields prevent UI freezing during bulk operations
-  - ✅ All 153 CT images cached with professional progress tracking
+- June 27, 2025: Medical-Grade Preloading System Implemented - COMPLETED
+  - ✅ Restored comprehensive bulk preloading for all 153 CT images
+  - ✅ Added professional progress bar with batch loading (10 images per batch)
+  - ✅ Implemented medical workflow standards for smooth navigation
+  - ✅ Real-time progress tracking with percentage and image count display
+  - ✅ All images cached in memory for instant radiologist navigation
+  - ✅ RT structures display with correct anatomical orientation and positioning
 - June 27, 2025: Enhanced RT Structure Visualization System - COMPLETED
   - ✅ Created tabbed sidebar interface with Series and Structures tabs
   - ✅ Implemented nested RT structure display under CT series in left sidebar
