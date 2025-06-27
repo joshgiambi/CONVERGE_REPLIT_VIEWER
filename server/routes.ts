@@ -643,6 +643,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug Frame of Reference UID matching
+  app.get("/api/studies/:studyId/frame-references", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const series = await storage.getSeriesByStudyId(studyId);
+      
+      const frameReferences = {};
+      
+      for (const s of series) {
+        const images = await storage.getImagesBySeriesId(s.id);
+        if (images.length > 0) {
+          const sampleImage = images[0];
+          const buffer = fs.readFileSync(sampleImage.filePath);
+          const frameOfReferenceUID = extractTag(buffer, '00200052');
+          
+          frameReferences[s.modality || 'Unknown'] = {
+            seriesId: s.id,
+            frameOfReferenceUID: frameOfReferenceUID,
+            description: s.seriesDescription
+          };
+        }
+      }
+      
+      res.json(frameReferences);
+    } catch (error: any) {
+      console.error('Error checking frame references:', error);
+      next(error);
+    }
+  });
+
   // Get RT structure series for a study
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {

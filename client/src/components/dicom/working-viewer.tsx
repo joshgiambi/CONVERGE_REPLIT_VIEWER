@@ -240,7 +240,30 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
+        console.log('Image metadata:', metadata);
         setImageMetadata(metadata);
+        
+        // Debug Frame of Reference UID matching
+        if (studyId) {
+          const frameRefResponse = await fetch(`/api/studies/${studyId}/frame-references`);
+          if (frameRefResponse.ok) {
+            const frameRefs = await frameRefResponse.json();
+            console.log('Frame of Reference UIDs by modality:', frameRefs);
+            
+            // Check if CT and RTSTRUCT have matching Frame of Reference UIDs
+            if (frameRefs.CT && frameRefs.RTSTRUCT) {
+              const ctFrame = frameRefs.CT.frameOfReferenceUID;
+              const rtFrame = frameRefs.RTSTRUCT.frameOfReferenceUID;
+              if (ctFrame !== rtFrame) {
+                console.warn('Frame of Reference UID mismatch!');
+                console.warn('CT Frame UID:', ctFrame);
+                console.warn('RTSTRUCT Frame UID:', rtFrame);
+              } else {
+                console.log('Frame of Reference UIDs match - good alignment expected');
+              }
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load image metadata:', error);
@@ -443,6 +466,14 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       // Transform DICOM coordinates to pixel coordinates
       const pixelX = centerX + (dicomX * scale);
       const pixelY = centerY + (dicomY * scale);
+      
+      // Debug coordinate transformation for first point of first contour
+      if (i === 0 && currentIndex === 0) {
+        console.log('DICOM coordinates:', dicomX, dicomY);
+        console.log('Pixel coordinates:', pixelX, pixelY);
+        console.log('Image dimensions:', imageWidth, imageHeight);
+        console.log('Scale factor:', scale);
+      }
       
       // Apply same transformation as image (zoom and pan)
       const scaledWidth = imageWidth * zoom;
