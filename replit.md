@@ -93,9 +93,9 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
   - ✅ Fixed DICOM metadata extraction with proper dicomParser API usage
   - ✅ Extracted authentic spatial data: Image Position (-300,-300,35), Pixel Spacing (1.171875mm), Image Orientation (1\0\0\0\1\0)
   - ✅ Implemented correct world-to-canvas coordinate transformation for standard axial orientation
-  - ✅ Applied proper axis mapping: worldX→row index, worldY→column index for DICOM pixel coordinates
-  - ✅ Fixed RT structure rotation and alignment issues using medical-grade coordinate system
-  - ✅ Verified transformation accuracy with authentic HN-ATLAS-84 dataset spatial parameters
+  - ✅ Applied proper axis mapping: worldX→column index, worldY→row index for DICOM pixel coordinates
+  - ✅ Implemented 90-degree counter-rotation to fix sideways RT structure orientation
+  - ✅ Applied medical-grade coordinate system with authentic HN-ATLAS-84 dataset spatial parameters
 - June 27, 2025: Enhanced RT Structure Visualization System - COMPLETED
   - ✅ Created tabbed sidebar interface with Series and Structures tabs
   - ✅ Implemented nested RT structure display under CT series in left sidebar
