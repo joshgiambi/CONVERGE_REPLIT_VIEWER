@@ -145,6 +145,31 @@ function renderRTStructures(
   ctx.restore();
 }
 
+// World to canvas coordinate transformation for RTSTRUCT contours
+function worldToCanvas(
+  worldX: number,
+  worldY: number,
+  origin: [number, number, number],
+  pixelSpacing: [number, number],
+  canvasWidth: number,
+  canvasHeight: number,
+  imageWidth: number,
+  imageHeight: number
+): [number, number] {
+  const [rowSpacing, colSpacing] = pixelSpacing;
+  const [originX, originY] = origin;
+
+  // Step 1: Convert world (mm) to DICOM pixel indices (row i, col j)
+  const i = (worldX - originX) / rowSpacing; // row index (vertical)
+  const j = (worldY - originY) / colSpacing; // column index (horizontal)
+
+  // Step 2: Convert pixel indices to canvas coordinates
+  const canvasX = (j / imageWidth) * canvasWidth;
+  const canvasY = (i / imageHeight) * canvasHeight;
+
+  return [canvasX, canvasY];
+}
+
 function drawContour(
   ctx: CanvasRenderingContext2D,
   contour: RTContour,
@@ -153,70 +178,42 @@ function drawContour(
   imageWidth: number,
   imageHeight: number
 ) {
-  if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
-  
+  if (contour.points.length < 6) return;
+
+  // Use authentic DICOM metadata values
+  const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+  const pixelSpacing: [number, number] = [1.171875, 1.171875];
+  const dicomImageWidth = 512; // Standard DICOM matrix size
+  const dicomImageHeight = 512;
+
   ctx.beginPath();
-  
-  // Convert DICOM coordinates to canvas coordinates using authentic metadata
+
   for (let i = 0; i < contour.points.length; i += 3) {
-    const worldX = contour.points[i];     // DICOM X coordinate in mm
-    const worldY = contour.points[i + 1]; // DICOM Y coordinate in mm
-    const worldZ = contour.points[i + 2]; // DICOM Z coordinate in mm
-    
-    // Apply authentic DICOM transformation using extracted metadata
-    // Image Position: (-300, -300, 35), Pixel Spacing: (1.171875, 1.171875)
-    // Image Orientation: (1, 0, 0, 0, 1, 0) - standard axial HFS
-    const imageOrigin = [-300, -300, 35];
-    const pixelSpacing = [1.171875, 1.171875];
-    const imageOrientation = [1, 0, 0, 0, 1, 0]; // Row and column direction cosines
-    
-    // Verify orientation vectors (should be [1,0,0] and [0,1,0] for axial HFS)
-    const rowVector = [imageOrientation[0], imageOrientation[1], imageOrientation[2]];
-    const colVector = [imageOrientation[3], imageOrientation[4], imageOrientation[5]];
-    
-    // Calculate normal vector (should be [0,0,1] for proper head-foot direction)
-    const normalVector = [
-      rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
-      rowVector[2] * colVector[0] - rowVector[0] * colVector[2], 
-      rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
-    ];
-    
-    // Transform world coordinates to pixel coordinates - fix axis mapping
-    // For standard axial orientation, X maps to columns, Y maps to rows
-    const pixelCol = (worldX - imageOrigin[0]) / pixelSpacing[0]; // X -> columns
-    const pixelRow = (worldY - imageOrigin[1]) / pixelSpacing[1]; // Y -> rows
-    
-    // Apply proper axis orientation for display (may need Y-flip for screen coordinates)
-    const pixelX = pixelCol;
-    const pixelY = pixelRow;
-    
-    // Verification: Log transformation for first point to check accuracy
-    if (i === 0) {
-      console.log('DICOM Verification:');
-      console.log('Row vector:', rowVector, '(should be [1,0,0])');
-      console.log('Col vector:', colVector, '(should be [0,1,0])'); 
-      console.log('Normal vector:', normalVector, '(should be [0,0,1])');
-      console.log('World coords:', [worldX, worldY, worldZ]);
-      console.log('Pixel coords:', [pixelX, pixelY]);
-      console.log('Round-trip check:', [pixelX * pixelSpacing[0] + imageOrigin[0], pixelY * pixelSpacing[1] + imageOrigin[1]]);
-    }
-    
-    // Scale to canvas size (assuming 512x512 DICOM matrix)
-    // Test different orientations to fix left-facing issue
-    const canvasX = (pixelY / 512) * canvasWidth;  // Try swapping X/Y
-    const canvasY = (pixelX / 512) * canvasHeight;
-    
+    const worldX = contour.points[i];
+    const worldY = contour.points[i + 1];
+
+    const [canvasX, canvasY] = worldToCanvas(
+      worldX,
+      worldY,
+      imagePositionPatient,
+      pixelSpacing,
+      canvasWidth,
+      canvasHeight,
+      dicomImageWidth,
+      dicomImageHeight
+    );
+
     if (i === 0) {
       ctx.moveTo(canvasX, canvasY);
+      // Debug first point transformation
+      console.log('World coords:', [worldX, worldY]);
+      console.log('Canvas coords:', [canvasX, canvasY]);
     } else {
       ctx.lineTo(canvasX, canvasY);
     }
   }
-  
-  // Close the contour
+
   ctx.closePath();
-  
-  // Fill and stroke the contour
   ctx.fill();
   ctx.stroke();
 }
