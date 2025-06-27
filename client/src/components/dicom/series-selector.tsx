@@ -5,8 +5,7 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { List, Settings, Monitor, Palette, Eye, EyeOff, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { List, Settings, Monitor, Palette } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -37,8 +36,6 @@ export function SeriesSelector({
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  const [activeTab, setActiveTab] = useState('series');
-  const [isWindowLevelOpen, setIsWindowLevelOpen] = useState(false);
   // Load RT structure series for the study
   useEffect(() => {
     if (!studyId) return;
@@ -107,50 +104,22 @@ export function SeriesSelector({
   };
 
   return (
-    <Card className="h-full bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-        {/* Custom sliding tab selector */}
+    <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
+      <Tabs defaultValue="series" className="h-full flex flex-col">
         <CardHeader className="pb-3">
-          <div className="relative bg-white rounded-lg p-1 shadow-sm border">
-            <div 
-              className="absolute top-1 bottom-1 bg-blue-600 rounded-md transition-all duration-200 ease-in-out"
-              style={{
-                left: activeTab === 'series' ? '4px' : '50%',
-                width: 'calc(50% - 4px)'
-              }}
-            />
-            <div className="relative z-10 grid grid-cols-2 gap-1">
-              <button
-                onClick={() => setActiveTab('series')}
-                className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'series' 
-                    ? 'text-white' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Series
-              </button>
-              <button
-                onClick={() => setActiveTab('structures')}
-                className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'structures' 
-                    ? 'text-white' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Structures
-              </button>
-            </div>
-          </div>
+          <TabsList className="grid w-full grid-cols-2 bg-dicom-indigo/20">
+            <TabsTrigger value="series" className="text-xs">Series</TabsTrigger>
+            <TabsTrigger value="structures" className="text-xs">Structures</TabsTrigger>
+          </TabsList>
         </CardHeader>
         
         <CardContent className="flex-1 overflow-hidden p-6">
           <TabsContent value="series" className="h-full space-y-4 mt-0">
             <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <Monitor className="h-5 w-5 text-gray-600" />
-                <h3 className="text-lg font-semibold text-gray-800">Image Series</h3>
-              </div>
+              <h3 className="text-xl font-bold text-dicom-purple flex items-center">
+                <Monitor className="w-6 h-6 mr-3 text-dicom-indigo" />
+                Image Series
+              </h3>
             </div>
             
             {/* Image Series List */}
@@ -329,50 +298,6 @@ export function SeriesSelector({
           </TabsContent>
         </CardContent>
       </Tabs>
-      
-      {/* Collapsible Window/Level Controls at bottom */}
-      <div className="border-t border-gray-200 bg-white">
-        <Collapsible open={isWindowLevelOpen} onOpenChange={setIsWindowLevelOpen}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-4 h-auto">
-              <div className="flex items-center space-x-2">
-                <Settings className="h-5 w-5 text-gray-600" />
-                <span className="text-lg font-semibold text-gray-800">Window/Level</span>
-              </div>
-              {isWindowLevelOpen ? 
-                <ChevronUp className="h-4 w-4" /> : 
-                <ChevronDown className="h-4 w-4" />
-              }
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="px-4 pb-4">
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-gray-600 mb-2 block">Window Width: {windowLevel.window}</label>
-                <Slider
-                  value={[windowLevel.window]}
-                  onValueChange={(value) => onWindowLevelChange({ ...windowLevel, window: value[0] })}
-                  max={2000}
-                  min={1}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-600 mb-2 block">Window Center: {windowLevel.level}</label>
-                <Slider
-                  value={[windowLevel.level]}
-                  onValueChange={(value) => onWindowLevelChange({ ...windowLevel, level: value[0] })}
-                  max={1000}
-                  min={-1000}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
     </Card>
   );
 }

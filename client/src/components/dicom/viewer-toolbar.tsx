@@ -59,7 +59,7 @@ export function ViewerToolbar({
     { id: 'reset-zoom', icon: Maximize2, label: 'Fit to Window', action: onResetZoom },
     { id: 'separator' },
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
-    { id: 'contour', icon: () => <span className="text-base">🖌️</span>, label: 'Contouring', action: () => {}, selectable: true },
+    { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasureTool, selectable: true },
     { id: 'annotate', icon: MessageSquare, label: 'Annotate', action: onAnnotateTool, selectable: true },
     { id: 'separator' },
     { id: 'rotate', icon: RotateCw, label: 'Rotate', action: onRotate },

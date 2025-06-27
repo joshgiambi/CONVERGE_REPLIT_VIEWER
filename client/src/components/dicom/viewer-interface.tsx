@@ -20,10 +20,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  const [activeTab, setActiveTab] = useState('series');
-  const [isWindowLevelOpen, setIsWindowLevelOpen] = useState(false);
-  const [isContouringMode, setIsContouringMode] = useState(false);
-  const [activeContourTool, setActiveContourTool] = useState<'brush' | 'pen' | 'operations' | null>(null);
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
