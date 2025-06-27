@@ -181,9 +181,14 @@ function drawContour(
       rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
     ];
     
-    // Transform world coordinates to pixel coordinates using direction cosines
-    const pixelX = (worldX - imageOrigin[0]) / pixelSpacing[1]; // Column spacing
-    const pixelY = (worldY - imageOrigin[1]) / pixelSpacing[0]; // Row spacing
+    // Transform world coordinates to pixel coordinates - fix axis mapping
+    // For standard axial orientation, X maps to columns, Y maps to rows
+    const pixelCol = (worldX - imageOrigin[0]) / pixelSpacing[0]; // X -> columns
+    const pixelRow = (worldY - imageOrigin[1]) / pixelSpacing[1]; // Y -> rows
+    
+    // Apply proper axis orientation for display (may need Y-flip for screen coordinates)
+    const pixelX = pixelCol;
+    const pixelY = pixelRow;
     
     // Verification: Log transformation for first point to check accuracy
     if (i === 0) {
@@ -193,12 +198,13 @@ function drawContour(
       console.log('Normal vector:', normalVector, '(should be [0,0,1])');
       console.log('World coords:', [worldX, worldY, worldZ]);
       console.log('Pixel coords:', [pixelX, pixelY]);
-      console.log('Round-trip check:', [pixelX * pixelSpacing[1] + imageOrigin[0], pixelY * pixelSpacing[0] + imageOrigin[1]]);
+      console.log('Round-trip check:', [pixelX * pixelSpacing[0] + imageOrigin[0], pixelY * pixelSpacing[1] + imageOrigin[1]]);
     }
     
     // Scale to canvas size (assuming 512x512 DICOM matrix)
-    const canvasX = (pixelX / 512) * canvasWidth;
-    const canvasY = (pixelY / 512) * canvasHeight;
+    // Test different orientations to fix left-facing issue
+    const canvasX = (pixelY / 512) * canvasWidth;  // Try swapping X/Y
+    const canvasY = (pixelX / 512) * canvasHeight;
     
     if (i === 0) {
       ctx.moveTo(canvasX, canvasY);
