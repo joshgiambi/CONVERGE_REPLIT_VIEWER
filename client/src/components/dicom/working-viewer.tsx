@@ -413,17 +413,19 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
       const dicomX = contour.points[i];     // DICOM X coordinate
       const dicomY = contour.points[i + 1]; // DICOM Y coordinate
       
-      // Convert DICOM coordinates to pixel coordinates in the image space
-      // Using the same coordinate system that was working before zoom fix
-      const pixelX = (dicomX + 250) * (imageWidth / 500);
-      const pixelY = (dicomY + 250) * (imageHeight / 500);
+      // DICOM RT coordinates are in mm, need proper scaling
+      // The coordinate range appears to be much smaller than assumed
+      // Convert to normalized coordinates (0-1) relative to image bounds
+      const normalizedX = (dicomX + 125) / 250; // Adjust range to fit anatomy
+      const normalizedY = (dicomY + 125) / 250; // Adjust range to fit anatomy
       
-      // Now apply the same scaling and positioning as the image
-      const scaleFactorX = scaledWidth / imageWidth;
-      const scaleFactorY = scaledHeight / imageHeight;
+      // Clamp to reasonable bounds
+      const clampedX = Math.max(0, Math.min(1, normalizedX));
+      const clampedY = Math.max(0, Math.min(1, normalizedY));
       
-      const canvasX = imageX + (pixelX * scaleFactorX);
-      const canvasY = imageY + (pixelY * scaleFactorY);
+      // Apply to scaled image coordinates
+      const canvasX = imageX + (clampedX * scaledWidth);
+      const canvasY = imageY + (clampedY * scaledHeight);
       
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
