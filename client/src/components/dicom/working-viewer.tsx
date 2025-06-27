@@ -203,17 +203,29 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     }
   };
 
-  const preloadAllImages = async (imageList: any[]) => {
-    console.log('Starting to preload all images...');
-    setIsPreloading(true);
-    const newCache = new Map();
+  const preloadNearbyImages = async (imageList: any[], currentIdx: number) => {
+    // Only preload current image + 2 ahead and 2 behind for faster initial load
+    const preloadRange = 2;
+    const startIdx = Math.max(0, currentIdx - preloadRange);
+    const endIdx = Math.min(imageList.length - 1, currentIdx + preloadRange);
     
-    // Load all images in parallel
-    const loadPromises = imageList.map(async (image, index) => {
+    const imagesToPreload = imageList.slice(startIdx, endIdx + 1);
+    console.log(`Preloading ${imagesToPreload.length} nearby images (${startIdx + 1}-${endIdx + 1})`);
+    
+    const newCache = new Map(imageCache);
+    
+    // Load nearby images in parallel
+    const loadPromises = imagesToPreload.map(async (image, index) => {
+      const globalIndex = startIdx + index;
       try {
+        // Skip if already cached
+        if (newCache.has(image.sopInstanceUID)) {
+          return;
+        }
+        
         const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
         if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${index + 1}`);
+          throw new Error(`Failed to load image ${globalIndex + 1}`);
         }
         
         const arrayBuffer = await imageResponse.arrayBuffer();
@@ -221,18 +233,15 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
         
         if (imageData) {
           newCache.set(image.sopInstanceUID, imageData);
-          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
+          console.log(`Loaded image ${globalIndex + 1}/${imageList.length}`);
         }
       } catch (error) {
-        console.warn(`Failed to preload image ${index + 1}:`, error);
+        console.warn(`Failed to load image ${globalIndex + 1}:`, error);
       }
     });
     
-    // Wait for all images to load
     await Promise.allSettled(loadPromises);
     setImageCache(newCache);
-    setIsPreloading(false);
-    console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
   };
 
   const loadImageMetadata = async (imageId: number) => {

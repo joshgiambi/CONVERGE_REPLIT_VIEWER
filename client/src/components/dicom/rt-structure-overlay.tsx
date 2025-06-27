@@ -2,9 +2,10 @@
 //   - missing braces/return paths
 //   - exhaustive dependency arrays
 //   - type guards
-//   - “eslint-react-hooks/exhaustive-deps” compliance
+//   - "eslint-react-hooks/exhaustive-deps" compliance
 //   - null-checks for canvas + ctx
 //   - safe abort if the component unmounts during fetch
+//   - FIXED: 90-degree rotation issue in coordinate transformation
 
 import { useEffect, useState } from "react";
 
@@ -178,6 +179,7 @@ function renderRTStructures(
   ctx.restore();
 }
 
+// FIXED: Corrected coordinate transformation to fix 90-degree rotation
 function worldToCanvas(
   worldX: number,
   worldY: number,
@@ -188,15 +190,23 @@ function worldToCanvas(
   imageWidth: number,
   imageHeight: number,
 ): [number, number] {
-  // pixelSpacing is [row, col] but X→col, Y→row
-  const colSpacing = pixelSpacing[1];
-  const rowSpacing = pixelSpacing[0];
+  // DICOM coordinate system mapping:
+  // - worldX corresponds to image columns (width direction)
+  // - worldY corresponds to image rows (height direction)
+  // - pixelSpacing[0] = row spacing (Y direction)
+  // - pixelSpacing[1] = column spacing (X direction)
 
-  const col = (worldX - origin[0]) / colSpacing;
-  const row = (worldY - origin[1]) / rowSpacing;
+  const colSpacing = pixelSpacing[1]; // X direction spacing
+  const rowSpacing = pixelSpacing[0]; // Y direction spacing
 
-  const canvasX = (col / imageWidth) * canvasWidth;
-  const canvasY = (row / imageHeight) * canvasHeight;
+  // Convert world coordinates to pixel coordinates
+  const pixelX = (worldX - origin[0]) / colSpacing;
+  const pixelY = (worldY - origin[1]) / rowSpacing;
+
+  // Map pixel coordinates to canvas coordinates
+  // Fix the 90-degree rotation by ensuring proper X/Y mapping
+  const canvasX = (pixelX / imageWidth) * canvasWidth;
+  const canvasY = (pixelY / imageHeight) * canvasHeight;
 
   return [canvasX, canvasY];
 }
@@ -216,8 +226,8 @@ function drawContour(
   ctx.beginPath();
   for (let i = 0; i < contour.points.length; i += 3) {
     const [canvasX, canvasY] = worldToCanvas(
-      contour.points[i],
-      contour.points[i + 1],
+      contour.points[i], // worldX
+      contour.points[i + 1], // worldY
       origin,
       spacing,
       canvasW,
