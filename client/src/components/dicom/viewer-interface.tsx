@@ -4,6 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
+import { ContourEditPanel } from './contour-edit-panel';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
@@ -376,6 +377,35 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           }}
         />
       )}
+
+      {/* Contour Edit Panel */}
+      <ContourEditPanel
+        isVisible={selectedForEdit !== null}
+        selectedStructure={selectedForEdit && rtStructures ? 
+          rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit) : null
+        }
+        onClose={() => setSelectedForEdit(null)}
+        onStructureNameChange={(name) => {
+          if (selectedForEdit && rtStructures) {
+            // Update structure name in the rtStructures
+            const updatedStructures = rtStructures.structures.map((s: any) => 
+              s.roiNumber === selectedForEdit ? { ...s, structureName: name } : s
+            );
+            setRTStructures({ ...rtStructures, structures: updatedStructures });
+          }
+        }}
+        onStructureColorChange={(color) => {
+          if (selectedForEdit && rtStructures) {
+            // Update structure color in the rtStructures
+            const updatedStructures = rtStructures.structures.map((s: any) => 
+              s.roiNumber === selectedForEdit ? { ...s, color } : s
+            );
+            setRTStructures({ ...rtStructures, structures: updatedStructures });
+          }
+        }}
+        contourSettings={contourSettings}
+        onContourSettingsChange={setContourSettings}
+      />
 
       {/* Error Modal */}
       <ErrorModal
