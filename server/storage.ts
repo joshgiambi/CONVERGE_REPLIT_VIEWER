@@ -29,6 +29,7 @@ export interface IStorage {
   createImage(image: InsertImage): Promise<DicomImage>;
   getImage(id: number): Promise<DicomImage | undefined>;
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
+  getImageBySopInstanceUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
   
   // PACS operations

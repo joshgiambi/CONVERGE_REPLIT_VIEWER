@@ -325,7 +325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
     try {
       const sopInstanceUID = req.params.sopInstanceUID;
-      const image = await storage.getImageByUID(sopInstanceUID);
+      const image = await storage.getImageBySopInstanceUID(sopInstanceUID);
       
       if (!image) {
         return res.status(404).json({ message: "Image not found" });
@@ -662,8 +662,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const imageId = parseInt(req.params.imageId);
-      const image = await storage.getImage(imageId);
+      const imageId = req.params.imageId;
+      // Try to get by SOP Instance UID first, then by ID
+      let image;
+      if (imageId.includes('.')) {
+        image = await storage.getImageBySopInstanceUID(imageId);
+      } else {
+        const numericId = parseInt(imageId);
+        if (!isNaN(numericId)) {
+          image = await storage.getImage(numericId);
+        }
+      }
       
       if (!image) {
         return res.status(404).json({ error: 'Image not found' });
