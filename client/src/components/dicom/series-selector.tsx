@@ -177,23 +177,11 @@ export function SeriesSelector({
 
   const { groups, ungrouped } = groupStructures(filteredStructures);
 
-  const toggleGroupExpansion = (groupName: string) => {
-    const newExpanded = new Map(expandedGroups);
-    newExpanded.set(groupName, !newExpanded.get(groupName));
-    setExpandedGroups(newExpanded);
-  };
+  // Add state for grouping toggle
+  const [groupingEnabled, setGroupingEnabled] = useState(true);
 
-  const toggleCollapseAll = () => {
-    const newCollapsed = !allCollapsed;
-    setAllCollapsed(newCollapsed);
-    const newExpanded = new Map();
-    if (!newCollapsed) {
-      // Expand all groups
-      groups.forEach((_, groupName) => {
-        newExpanded.set(groupName, true);
-      });
-    }
-    setExpandedGroups(newExpanded);
+  const toggleGrouping = () => {
+    setGroupingEnabled(!groupingEnabled);
   };
 
   const handleWindowChange = (values: number[]) => {
@@ -323,12 +311,24 @@ export function SeriesSelector({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={toggleCollapseAll}
+                        onClick={toggleGrouping}
                         className="flex-1 justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
                       >
-                        <Minimize2 className="w-4 h-4 mr-2" />
-                        {allCollapsed ? 'Expand All' : 'Collapse All'}
+                        <FolderTree className="w-4 h-4 mr-2" />
+                        {groupingEnabled ? 'Ungroup' : 'Group'}
                       </Button>
+                      
+                      {groupingEnabled && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={toggleAllExpansion}
+                          className="flex-1 justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
+                        >
+                          <Minimize2 className="w-4 h-4 mr-2" />
+                          {allCollapsed ? 'Expand All' : 'Collapse All'}
+                        </Button>
+                      )}
                       
                       {/* Operations Button - show when structures are selected */}
                       {selectedStructures.size > 0 && (
