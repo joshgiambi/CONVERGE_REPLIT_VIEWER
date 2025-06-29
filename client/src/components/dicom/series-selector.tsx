@@ -45,6 +45,7 @@ export function SeriesSelector({
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [groupingEnabled, setGroupingEnabled] = useState(true);
   const [allVisible, setAllVisible] = useState(true);
+  const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
 
   // Load RT structure series for the study
   useEffect(() => {
@@ -499,12 +500,19 @@ export function SeriesSelector({
                                     {groupStructures.map((structure: any) => (
                                       <div 
                                         key={structure.roiNumber}
-                                        className={`flex items-center space-x-3 p-3 ml-6 hover:bg-gray-800/30 transition-all duration-200 ${
+                                        className={`flex items-center space-x-3 p-3 ml-6 hover:bg-gray-800/30 transition-all duration-200 relative ${
                                           selectedStructures.has(structure.roiNumber) 
                                             ? 'bg-yellow-500/10' 
                                             : ''
+                                        } ${
+                                          selectedForEdit === structure.roiNumber
+                                            ? 'bg-blue-500/20 border-l-2 border-blue-400'
+                                            : ''
                                         }`}
                                       >
+                                        {/* Nested line indicator */}
+                                        <div className="absolute left-3 top-0 bottom-0 w-px bg-gray-600"></div>
+                                        <div className="absolute left-3 top-1/2 w-3 h-px bg-gray-600"></div>
                                         <Checkbox
                                           checked={selectedStructures.has(structure.roiNumber)}
                                           onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
