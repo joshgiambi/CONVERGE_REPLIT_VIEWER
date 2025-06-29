@@ -329,7 +329,7 @@ export function WorkingViewer({
     
   }, [images, currentIndex, imageCache, parseDicomImage, currentWindowLevel, zoom, panX, panY, showStructures, rtStructures, structureVisibility]);
 
-  // Draw RT structures overlay with proper coordinate transformation
+  // Draw RT structures overlay - simplified version that was working
   const drawRTStructures = useCallback((
     ctx: CanvasRenderingContext2D,
     canvasWidth: number,
@@ -350,53 +350,58 @@ export function WorkingViewer({
     const structures = rtStructures.structures || [];
     if (!Array.isArray(structures)) return;
     
-    // Get current slice Z position for matching contours
-    const currentSliceZ = currentImage.imagePosition?.[2] || currentImage.sliceLocation || 0;
+    console.log('Drawing RT structures:', structures.length, 'structures for slice', currentIndex);
     
     // Draw structures for current slice
     structures.forEach((structure: any) => {
       if (!structureVisibility.get(structure.roiNumber)) return;
       
+      console.log('Drawing structure:', structure.structureName, 'contours:', structure.contours?.length);
+      
       const contours = structure.contours || [];
       
-      contours.forEach((contour: any) => {
+      contours.forEach((contour: any, contourIndex: number) => {
         if (!contour.points || contour.points.length === 0) return;
         
+        // Draw all contours for testing - remove slice matching for now
         ctx.beginPath();
-        ctx.strokeStyle = `rgb(${structure.color?.join(',') || '255,0,0'})`;
-        ctx.fillStyle = `rgba(${structure.color?.join(',') || '255,0,0'}, 0.2)`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = structure.color ? 
+          `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
+          '#00ff00';
+        ctx.fillStyle = structure.color ? 
+          `rgba(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]}, 0.2)` : 
+          'rgba(0, 255, 0, 0.2)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
-        contour.points.forEach((point: any, i: number) => {
-          let dicomX, dicomY;
-          
-          // Handle different point formats
-          if (Array.isArray(point) && point.length >= 2) {
-            [dicomX, dicomY] = point;
-          } else if (point && typeof point === 'object' && 'x' in point && 'y' in point) {
-            dicomX = point.x;
-            dicomY = point.y;
-          } else {
-            return;
-          }
-          
-          // Simple coordinate transformation that was working before
-          const pixelX = imageWidth - (dicomX * 0.8 + imageWidth / 2);
-          const pixelY = dicomY * 0.8 + imageHeight / 2;
-          
-          const canvasX = imageX + (pixelX * zoom);
-          const canvasY = imageY + (pixelY * zoom);
-          
-          if (i === 0) {
-            ctx.moveTo(canvasX, canvasY);
-          } else {
-            ctx.lineTo(canvasX, canvasY);
-          }
-        });
+        let hasValidPoints = false;
         
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        // Handle DICOM contour format (x,y,z triplets)
+        if (contour.points.length >= 6 && contour.points.length % 3 === 0) {
+          for (let i = 0; i < contour.points.length; i += 3) {
+            const x = contour.points[i];
+            const y = contour.points[i + 1];
+            
+            // Simple coordinate transformation - scale and center
+            const canvasX = imageX + (x / 500) * scaledWidth + scaledWidth / 4;
+            const canvasY = imageY + (y / 500) * scaledHeight + scaledHeight / 4;
+            
+            if (i === 0) {
+              ctx.moveTo(canvasX, canvasY);
+              hasValidPoints = true;
+            } else {
+              ctx.lineTo(canvasX, canvasY);
+            }
+          }
+        }
+        
+        if (hasValidPoints) {
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          console.log('Drew contour', contourIndex, 'for structure', structure.structureName);
+        }
       });
     });
   }, [images, currentIndex, zoom, rtStructures, structureVisibility]);
