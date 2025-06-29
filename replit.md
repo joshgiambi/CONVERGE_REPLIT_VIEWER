@@ -89,17 +89,17 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 29, 2025: Consolidated Structure Management with Auto-Launch - COMPLETED
-  - ✅ Consolidated structure management into left sidebar with search functionality
-  - ✅ Added search bar for filtering structures by name
-  - ✅ Implemented grouping for _L/_R structure pairs with expandable headings
-  - ✅ Reduced structure list item heights for better space utilization
-  - ✅ Integrated visibility controls and color editing into structure list
-  - ✅ Removed redundant structure management from contour editor panel
-  - ✅ Auto-launch contour editing mode when RT structures are loaded
-  - ✅ Auto-select first structure when contour mode activates
-  - ✅ Added pen/polygon tool with medical imaging standard controls
-  - ✅ Enhanced viewer border shows selected structure color and editing label
+- June 29, 2025: Advanced Structure Management with Merge/Delete Controls - COMPLETED
+  - ✅ Enhanced grouped structure display with color indicators and structure summaries
+  - ✅ Added expand all/collapse all toggle button for grouped structures
+  - ✅ Implemented structure selection checkboxes for merge operations
+  - ✅ Added merge functionality with confirmation dialog and custom naming
+  - ✅ Integrated delete buttons with confirmation for individual structures
+  - ✅ Working color picker for real-time structure color changes
+  - ✅ Compact design with reduced heights for nested groups and structures
+  - ✅ Visual feedback for selected structures (blue) and merge candidates (green)
+  - ✅ Professional merge dialog showing selected structures and new name input
+  - ✅ Complete structure management workflow integrated in left sidebar
 - June 29, 2025: Instant CT Scan Loading Optimization - COMPLETED
   - ✅ Implemented database-stored DICOM metadata for instant viewer loading
   - ✅ Added comprehensive range request support for efficient file serving
