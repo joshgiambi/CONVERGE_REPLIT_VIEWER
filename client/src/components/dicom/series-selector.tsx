@@ -107,8 +107,9 @@ export function SeriesSelector({
 
   return (
     <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
-      <CardContent className="p-0 h-full">
-        <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+      <CardContent className="p-0 h-full flex flex-col">
+        <div className="flex-1 overflow-hidden">
+          <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
           
           {/* Series Section */}
           <AccordionItem value="series" className="border-dicom-indigo/30">
@@ -238,68 +239,68 @@ export function SeriesSelector({
             </AccordionContent>
           </AccordionItem>
 
-          {/* Window/Level Section */}
-          {selectedSeries && (
-            <AccordionItem value="window-level" className="border-dicom-indigo/30">
-              <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-dicom-indigo/10">
-                <div className="flex items-center text-dicom-purple font-bold">
-                  <Settings className="w-5 h-5 mr-3 text-dicom-indigo" />
-                  Window/Level
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="px-6 pb-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-2">
-                      Window Width: {windowLevel.window}
-                    </label>
-                    <Slider
-                      value={[windowLevel.window]}
-                      onValueChange={handleWindowChange}
-                      min={1}
-                      max={2000}
-                      step={1}
-                      className="w-full"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-2">
-                      Window Level: {windowLevel.level}
-                    </label>
-                    <Slider
-                      value={[windowLevel.level]}
-                      onValueChange={handleLevelChange}
-                      min={-1000}
-                      max={1000}
-                      step={1}
-                      className="w-full"
-                    />
-                  </div>
+          </Accordion>
+        </div>
+
+        {/* Window/Level Fixed Bottom Pane */}
+        {selectedSeries && (
+          <div className="border-t border-dicom-indigo/30 bg-dicom-darker/80 backdrop-blur-sm">
+            <div className="p-4">
+              <div className="flex items-center text-dicom-purple font-bold mb-3">
+                <Settings className="w-4 h-4 mr-2 text-dicom-indigo" />
+                Window/Level
+              </div>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">
+                    Window Width: {windowLevel.window}
+                  </label>
+                  <Slider
+                    value={[windowLevel.window]}
+                    onValueChange={handleWindowChange}
+                    min={1}
+                    max={2000}
+                    step={1}
+                    className="w-full"
+                  />
                 </div>
                 
-                {/* Preset Buttons */}
-                <div className="mt-4">
-                  <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
-                      <Button
-                        key={name}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs bg-dicom-darker border-dicom-gray hover:bg-dicom-gray hover:border-dicom-yellow text-white transition-all duration-200 hover:scale-105"
-                        onClick={() => applyPreset(preset)}
-                      >
-                        {name.charAt(0).toUpperCase() + name.slice(1)}
-                      </Button>
-                    ))}
-                  </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">
+                    Window Level: {windowLevel.level}
+                  </label>
+                  <Slider
+                    value={[windowLevel.level]}
+                    onValueChange={handleLevelChange}
+                    min={-1000}
+                    max={1000}
+                    step={1}
+                    className="w-full"
+                  />
                 </div>
-              </AccordionContent>
-            </AccordionItem>
-          )}
-
-        </Accordion>
+              </div>
+              
+              {/* Preset Buttons */}
+              <div className="mt-3">
+                <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
+                <div className="grid grid-cols-2 gap-1">
+                  {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
+                    <Button
+                      key={name}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-dicom-darker border-dicom-gray hover:bg-dicom-gray hover:border-dicom-yellow text-white transition-all duration-200 hover:scale-105"
+                      onClick={() => applyPreset(preset)}
+                    >
+                      {name.charAt(0).toUpperCase() + name.slice(1)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
