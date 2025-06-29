@@ -285,16 +285,31 @@ export function SeriesSelector({
                       />
                     </div>
 
-                    {/* Collapse All Button */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={toggleCollapseAll}
-                      className="w-full justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
-                    >
-                      <Minimize2 className="w-4 h-4 mr-2" />
-                      {allCollapsed ? 'Expand All' : 'Collapse All'}
-                    </Button>
+                    {/* Control Buttons Row */}
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={toggleCollapseAll}
+                        className="flex-1 justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
+                      >
+                        <Minimize2 className="w-4 h-4 mr-2" />
+                        {allCollapsed ? 'Expand All' : 'Collapse All'}
+                      </Button>
+                      
+                      {/* Operations Button - only show when structures are selected */}
+                      {Array.from(structureSelection.values()).some(selected => selected) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {/* Handle operations */}}
+                          className="flex-1 justify-center text-xs bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
+                        >
+                          <Settings className="w-4 h-4 mr-2" />
+                          Operations ({Array.from(structureSelection.values()).filter(selected => selected).length})
+                        </Button>
+                      )}
+                    </div>
 
                     {/* Structures List */}
                     <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 600px)' }}>

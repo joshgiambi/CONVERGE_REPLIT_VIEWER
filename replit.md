@@ -89,6 +89,16 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
+- June 29, 2025: Structure Selection and Operations System - COMPLETED
+  - ✅ Enhanced structure sidebar with advanced search functionality and nested _L/_R grouping
+  - ✅ Added parent rows displaying combined structure colors and counts with badges  
+  - ✅ Implemented selection checkboxes for operations (yellow highlight when selected)
+  - ✅ Added visibility toggle buttons (blue eye icons) and delete buttons (red trash icons)
+  - ✅ Created structure selection mechanism with visual feedback in viewer interface
+  - ✅ Positioned Operations button in sidebar next to Collapse All button (matching design spec)
+  - ✅ Operations button shows selection count and appears only when structures are selected
+  - ✅ All 19 anatomical structures now support individual selection and group operations
+  - ✅ Enhanced UI follows medical imaging interface standards with proper color coding
 - June 27, 2025: RT Structure Coordinate Transformation Fixed - COMPLETED
   - ✅ Fixed DICOM metadata extraction with proper dicomParser API usage
   - ✅ Extracted authentic spatial data: Image Position (-300,-300,35), Pixel Spacing (1.171875mm), Image Orientation (1\0\0\0\1\0)

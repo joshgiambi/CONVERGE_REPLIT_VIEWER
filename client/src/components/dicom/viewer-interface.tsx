@@ -6,9 +6,7 @@ import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Settings } from 'lucide-react';
+
 
 interface ViewerInterfaceProps {
   studyData: any;
@@ -250,75 +248,21 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
         </div>
 
         {/* DICOM Viewer */}
-        <div className="lg:col-span-3 relative">
-          {/* Operations Button */}
-          {selectedStructures.length > 0 && (
-            <div className="absolute top-4 left-4 z-10">
-              <Button
-                onClick={() => setShowOperations(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
-                size="sm"
-              >
-                <Settings className="w-4 h-4 mr-2" />
-                Operations
-              </Button>
+        <div className="lg:col-span-3">
+          {selectedSeries ? (
+            <WorkingViewer 
+              seriesId={selectedSeries.id}
+              studyId={studyData.studies[0]?.id}
+              windowLevel={windowLevel}
+              onWindowLevelChange={setWindowLevel}
+              rtStructures={rtStructures}
+              structureVisibility={structureVisibility}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
+              <p className="text-indigo-400">Select a series to view DICOM images</p>
             </div>
           )}
-
-          {/* Selected Structure Indicators */}
-          {selectedStructures.length > 0 && (
-            <div className="absolute top-4 right-4 z-10 space-y-2">
-              {selectedStructures.map((structure) => (
-                <div 
-                  key={structure.roiNumber}
-                  className="bg-black/80 backdrop-blur-sm rounded-lg p-2 border-2 shadow-lg"
-                  style={{ borderColor: `rgb(${structure.color.join(',')})` }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <div 
-                      className="w-3 h-3 rounded-full border border-gray-400"
-                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                    />
-                    <span className="text-white text-sm font-medium">
-                      {structure.structureName}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Viewer with dynamic border based on selected structures */}
-          <div 
-            className={`h-full rounded-lg transition-all duration-300 ${
-              selectedStructures.length > 0 
-                ? 'border-4 shadow-lg' 
-                : 'border border-indigo-800'
-            }`}
-            style={selectedStructures.length > 0 ? {
-              borderColor: selectedStructures.length === 1 
-                ? `rgb(${selectedStructures[0].color.join(',')})` 
-                : '#60a5fa', // Blue for multiple selections
-              boxShadow: selectedStructures.length === 1
-                ? `0 0 20px rgba(${selectedStructures[0].color.join(',')}, 0.3)`
-                : '0 0 20px rgba(96, 165, 250, 0.3)'
-            } : {}}
-          >
-            {selectedSeries ? (
-              <WorkingViewer 
-                seriesId={selectedSeries.id}
-                studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center bg-black rounded-lg">
-                <p className="text-indigo-400">Select a series to view DICOM images</p>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
