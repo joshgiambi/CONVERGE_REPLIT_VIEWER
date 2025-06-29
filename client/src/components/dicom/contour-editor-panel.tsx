@@ -14,15 +14,17 @@ import {
   Save,
   Eye,
   EyeOff,
-  Palette
+  Palette,
+  Edit3,
+  Circle
 } from 'lucide-react';
 
 interface ContourEditorPanelProps {
   seriesId: number;
   studyId: any;
   rtStructures: any;
-  editMode: 'view' | 'brush' | 'eraser';
-  onEditModeChange: (mode: 'view' | 'brush' | 'eraser') => void;
+  editMode: 'view' | 'brush' | 'eraser' | 'polygon';
+  onEditModeChange: (mode: 'view' | 'brush' | 'eraser' | 'polygon') => void;
   selectedStructure: number | null;
   onSelectedStructureChange: (structureId: number | null) => void;
   brushSettings: {
@@ -93,7 +95,7 @@ export function ContourEditorPanel({
           {/* Tool Selection */}
           <div className="space-y-3">
             <h3 className="text-sm font-medium text-white">Editing Mode</h3>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Button
                 variant={editMode === 'view' ? 'default' : 'outline'}
                 size="sm"
@@ -102,6 +104,15 @@ export function ContourEditorPanel({
               >
                 <MousePointer className="h-4 w-4" />
                 <span className="text-xs">View</span>
+              </Button>
+              <Button
+                variant={editMode === 'polygon' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => onEditModeChange('polygon')}
+                className="flex flex-col items-center gap-1 h-auto py-2 bg-purple-600 hover:bg-purple-700"
+              >
+                <Edit3 className="h-4 w-4" />
+                <span className="text-xs">Polygon</span>
               </Button>
               <Button
                 variant={editMode === 'brush' ? 'default' : 'outline'}
@@ -126,35 +137,84 @@ export function ContourEditorPanel({
 
           <Separator />
 
-          {/* Structure Selection */}
+          {/* Structure Management */}
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-white">Target Structure</h3>
-            <Select
-              value={selectedStructure?.toString() || ""}
-              onValueChange={(value) => onSelectedStructureChange(value ? parseInt(value) : null)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select structure to edit" />
-              </SelectTrigger>
-              <SelectContent>
-                {structures.map((structure: any) => (
-                  <SelectItem key={structure.roiNumber} value={structure.roiNumber.toString()}>
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                      />
-                      {structure.structureName}
+            <h3 className="text-sm font-medium text-white">Structure Management</h3>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {structures.map((structure: any) => (
+                <div 
+                  key={structure.roiNumber} 
+                  className={`flex items-center justify-between p-3 rounded border cursor-pointer transition-all ${
+                    selectedStructure === structure.roiNumber 
+                      ? 'border-blue-400 bg-blue-500/20' 
+                      : 'border-gray-700 hover:border-gray-600'
+                  }`}
+                  onClick={() => onSelectedStructureChange(structure.roiNumber)}
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <div 
+                      className="w-4 h-4 rounded-full border-2 border-white/20"
+                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm text-white font-medium truncate">
+                        {structure.structureName}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        ROI #{structure.roiNumber}
+                      </div>
                     </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStructureVisibilityChange(structure.roiNumber, !structureVisibility.get(structure.roiNumber));
+                      }}
+                      className="h-8 w-8 p-0"
+                    >
+                      {structureVisibility.get(structure.roiNumber) ? (
+                        <Eye className="h-4 w-4 text-blue-400" />
+                      ) : (
+                        <EyeOff className="h-4 w-4 text-gray-500" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Color picker functionality can be added here
+                      }}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Palette className="h-4 w-4 text-gray-400" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <Separator />
 
-          {/* Brush Settings */}
+          {/* Tool Settings */}
+          {editMode === 'polygon' && (
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium text-white">Polygon Tool</h3>
+              <div className="bg-blue-900/20 border border-blue-500/30 rounded p-3">
+                <div className="text-xs text-blue-300 space-y-1">
+                  <div>• Click to place polygon vertices</div>
+                  <div>• Double-click or press Enter to close</div>
+                  <div>• Press Escape to cancel current polygon</div>
+                  <div>• Right-click to remove last vertex</div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {(editMode === 'brush' || editMode === 'eraser') && (
             <div className="space-y-4">
               <h3 className="text-sm font-medium text-white">Brush Settings</h3>
@@ -190,37 +250,6 @@ export function ContourEditorPanel({
               </div>
             </div>
           )}
-
-          <Separator />
-
-          {/* Structure Visibility */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-white">Structure Visibility</h3>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {structures.map((structure: any) => (
-                <div key={structure.roiNumber} className="flex items-center justify-between p-2 rounded border border-gray-700">
-                  <div className="flex items-center gap-2">
-                    <div 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                    />
-                    <span className="text-sm text-white truncate">{structure.structureName}</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onStructureVisibilityChange(structure.roiNumber, !structureVisibility.get(structure.roiNumber))}
-                  >
-                    {structureVisibility.get(structure.roiNumber) ? (
-                      <Eye className="h-4 w-4 text-blue-400" />
-                    ) : (
-                      <EyeOff className="h-4 w-4 text-gray-500" />
-                    )}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
 
           <Separator />
 

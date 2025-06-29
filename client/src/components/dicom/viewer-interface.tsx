@@ -24,7 +24,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   
   // Contour editing state
   const [contourMode, setContourMode] = useState<boolean>(false);
-  const [editMode, setEditMode] = useState<'view' | 'brush' | 'eraser'>('view');
+  const [editMode, setEditMode] = useState<'view' | 'brush' | 'eraser' | 'polygon'>('view');
   const [selectedStructure, setSelectedStructure] = useState<number | null>(null);
   const [brushSettings, setBrushSettings] = useState({
     size: 10,
