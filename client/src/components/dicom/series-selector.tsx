@@ -287,41 +287,35 @@ export function SeriesSelector({
                 ))}
               </div>
               
-              {/* RT Series List */}
-              {rtSeries.length > 0 && (
-                <div className="space-y-2 mb-4">
-                  <h4 className="text-lg font-semibold text-dicom-purple">RT Structure Sets</h4>
-                  <div className="space-y-2">
-                    {rtSeries.map((rtSeriesItem) => (
-                      <div
-                        key={rtSeriesItem.id}
-                        className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                          selectedRTSeries?.id === rtSeriesItem.id
-                            ? 'border-green-400 bg-green-400/20'
-                            : 'border-dicom-indigo/30 hover:border-dicom-indigo/50 hover:bg-dicom-indigo/10'
-                        }`}
-                        onClick={() => handleRTSeriesSelect(rtSeriesItem)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-green-400 text-sm">
-                              {rtSeriesItem.seriesDescription || `RT Structure Set ${rtSeriesItem.seriesNumber}`}
-                            </div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              RT-STRUCT • {rtSeriesItem.structureCount || 0} structures
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-gray-400">
-                              #{rtSeriesItem.seriesNumber}
-                            </div>
-                          </div>
+              {/* RT Series nested under CT series */}
+              {rtSeries.map((rtSeriesItem) => (
+                <div key={rtSeriesItem.id} className="ml-4 mt-2">
+                  <div
+                    className={`p-2 rounded-lg border cursor-pointer transition-all ${
+                      selectedRTSeries?.id === rtSeriesItem.id
+                        ? 'border-green-400 bg-green-400/20'
+                        : 'border-gray-600/50 hover:border-green-400/50 hover:bg-green-400/10'
+                    }`}
+                    onClick={() => handleRTSeriesSelect(rtSeriesItem)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-green-400 text-xs">
+                          📊 {rtSeriesItem.seriesDescription || `RT Structure Set ${rtSeriesItem.seriesNumber}`}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {rtSeriesItem.structureCount || 0} anatomical structures
                         </div>
                       </div>
-                    ))}
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500">
+                          #{rtSeriesItem.seriesNumber}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              )}
+              ))}
               
               {/* Window/Level Controls */}
               {selectedSeries && (
