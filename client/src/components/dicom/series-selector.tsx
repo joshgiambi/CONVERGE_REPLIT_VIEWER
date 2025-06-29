@@ -43,6 +43,8 @@ export function SeriesSelector({
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Map<string, boolean>>(new Map());
   const [allCollapsed, setAllCollapsed] = useState(false);
+  const [groupingEnabled, setGroupingEnabled] = useState(true);
+  const [allVisible, setAllVisible] = useState(true);
 
   // Load RT structure series for the study
   useEffect(() => {
@@ -177,11 +179,42 @@ export function SeriesSelector({
 
   const { groups, ungrouped } = groupStructures(filteredStructures);
 
-  // Add state for grouping toggle
-  const [groupingEnabled, setGroupingEnabled] = useState(true);
-
   const toggleGrouping = () => {
     setGroupingEnabled(!groupingEnabled);
+  };
+
+  const toggleAllVisibility = () => {
+    if (!rtStructures?.structures) return;
+    
+    setStructureVisibility(prev => {
+      const newMap = new Map(prev);
+      const shouldShow = !allVisible;
+      
+      rtStructures.structures.forEach((structure: any) => {
+        newMap.set(structure.roiNumber, shouldShow);
+      });
+      
+      return newMap;
+    });
+    
+    setAllVisible(!allVisible);
+  };
+
+  const toggleGroupVisibility = (groupStructures: any[]) => {
+    const allGroupVisible = groupStructures.every(structure => 
+      structureVisibility.get(structure.roiNumber) ?? true
+    );
+    
+    setStructureVisibility(prev => {
+      const newMap = new Map(prev);
+      const shouldShow = !allGroupVisible;
+      
+      groupStructures.forEach(structure => {
+        newMap.set(structure.roiNumber, shouldShow);
+      });
+      
+      return newMap;
+    });
   };
 
   const handleWindowChange = (values: number[]) => {
@@ -307,7 +340,17 @@ export function SeriesSelector({
                     </div>
 
                     {/* Control Buttons Row */}
-                    <div className="flex space-x-2">
+                    <div className="flex space-x-2 mb-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={toggleAllVisibility}
+                        className="flex-1 justify-center text-xs bg-green-600/80 border-green-500 text-white hover:bg-green-700"
+                      >
+                        {allVisible ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+                        {allVisible ? 'Hide All' : 'Show All'}
+                      </Button>
+                      
                       <Button
                         variant="outline"
                         size="sm"
@@ -427,6 +470,23 @@ export function SeriesSelector({
                                     <span className="text-sm text-white font-medium">{groupName}</span>
                                   </div>
                                   <div className="flex items-center space-x-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleGroupVisibility(groupStructures);
+                                      }}
+                                      className="p-1 h-auto hover:bg-gray-700"
+                                    >
+                                      {groupStructures.every(structure => 
+                                        structureVisibility.get(structure.roiNumber) ?? true
+                                      ) ? (
+                                        <Eye className="w-4 h-4 text-blue-400" />
+                                      ) : (
+                                        <EyeOff className="w-4 h-4 text-gray-500" />
+                                      )}
+                                    </Button>
                                     <Badge variant="outline" className="text-xs border-gray-500 text-gray-400">
                                       {groupStructures.length}
                                     </Badge>
