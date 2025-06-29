@@ -177,6 +177,9 @@ export function SeriesSelector({
                                 <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
                                   RT
                                 </Badge>
+                                <span className="truncate text-xs">
+                                  {rtS.seriesDescription || 'Structure Set'}
+                                </span>
                               </div>
                             </Button>
                           ))}
@@ -198,7 +201,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                  <div className="space-y-1 flex-1 overflow-y-auto">
                     {rtStructures.structures.map((structure: any) => (
                       <div 
                         key={structure.roiNumber}
