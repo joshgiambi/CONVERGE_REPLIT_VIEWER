@@ -572,7 +572,7 @@ export function SeriesSelector({
                                     : 'border-gray-700'
                                 } ${
                                   selectedForEdit === structure.roiNumber
-                                    ? 'bg-blue-500/20 border-l-2 border-blue-400'
+                                    ? 'bg-green-500/20 border-l-2 border-green-400'
                                     : ''
                                 }`}
                               >
