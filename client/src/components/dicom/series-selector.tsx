@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Minimize2 } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Minimize2, FolderTree } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -351,6 +351,53 @@ export function SeriesSelector({
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
                         );
                         const { groups, ungrouped } = groupStructures(filteredStructures);
+                        
+                        if (!groupingEnabled) {
+                          // Show all structures as individual rows
+                          return filteredStructures.map((structure: any) => (
+                            <div 
+                              key={structure.roiNumber}
+                              className={`flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-800/50 border transition-all duration-200 ${
+                                selectedStructures.has(structure.roiNumber) 
+                                  ? 'border-yellow-500 bg-yellow-500/10' 
+                                  : 'border-gray-700'
+                              }`}
+                            >
+                              <Checkbox
+                                checked={selectedStructures.has(structure.roiNumber)}
+                                onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
+                                className="border-yellow-500 data-[state=checked]:bg-yellow-500"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
+                                className="p-1 h-auto hover:bg-gray-700"
+                              >
+                                {structureVisibility.get(structure.roiNumber) ?? true ? (
+                                  <Eye className="w-4 h-4 text-blue-400" />
+                                ) : (
+                                  <EyeOff className="w-4 h-4 text-gray-500" />
+                                )}
+                              </Button>
+                              <div 
+                                className="w-4 h-4 rounded border border-gray-400"
+                                style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                              />
+                              <span className="text-sm text-white font-medium flex-1 truncate">
+                                {structure.structureName}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteStructure(structure.roiNumber)}
+                                className="p-1 h-auto hover:bg-red-600/20"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-400" />
+                              </Button>
+                            </div>
+                          ));
+                        }
                         
                         return (
                           <>
