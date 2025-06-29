@@ -27,6 +27,15 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [contourSettings, setContourSettings] = useState({ thickness: 2, opacity: 0.8 });
 
+  // Automatically enter contour edit mode when a structure is selected for editing
+  useEffect(() => {
+    if (selectedForEdit && rtStructures) {
+      setIsContourEditMode(true);
+    } else {
+      setIsContourEditMode(false);
+    }
+  }, [selectedForEdit, rtStructures]);
+
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
     queryKey: ['/api/studies', studyData.studies[0]?.id, 'series'],
@@ -246,6 +255,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onStructureVisibilityChange={handleStructureVisibilityChange}
             onStructureColorChange={handleStructureColorChange}
             onStructureSelection={handleStructureSelection}
+            selectedForEdit={selectedForEdit}
+            onSelectedForEditChange={setSelectedForEdit}
           />
         </div>
 

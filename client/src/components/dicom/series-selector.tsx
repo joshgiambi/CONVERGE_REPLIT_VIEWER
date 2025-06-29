@@ -36,7 +36,9 @@ export function SeriesSelector({
   onRTStructureLoad,
   onStructureVisibilityChange,
   onStructureColorChange,
-  onStructureSelection
+  onStructureSelection,
+  selectedForEdit: externalSelectedForEdit,
+  onSelectedForEditChange
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -47,16 +49,19 @@ export function SeriesSelector({
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [groupingEnabled, setGroupingEnabled] = useState(true);
   const [allVisible, setAllVisible] = useState(true);
-  const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
+  const [localSelectedForEdit, setLocalSelectedForEdit] = useState<number | null>(null);
+  
+  // Use external selectedForEdit if provided, otherwise use local state
+  const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
 
   // Handler for structure editing selection
   const handleStructureEditSelection = (roiNumber: number) => {
     const newSelected = selectedForEdit === roiNumber ? null : roiNumber;
-    setSelectedForEdit(newSelected);
     
-    // Call parent callback if provided
     if (onSelectedForEditChange) {
       onSelectedForEditChange(newSelected);
+    } else {
+      setLocalSelectedForEdit(newSelected);
     }
   };
 
@@ -447,7 +452,7 @@ export function SeriesSelector({
                               />
                               <span 
                                 className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-green-300 transition-colors"
-                                onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                                onClick={() => handleStructureEditSelection(structure.roiNumber)}
                               >
                                 {structure.structureName}
                               </span>
@@ -615,7 +620,7 @@ export function SeriesSelector({
                                 />
                                 <span 
                                   className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-green-300 transition-colors"
-                                  onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                                  onClick={() => handleStructureEditSelection(structure.roiNumber)}
                                 >
                                   {structure.structureName}
                                 </span>
