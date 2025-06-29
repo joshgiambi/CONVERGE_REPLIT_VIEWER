@@ -175,7 +175,7 @@ export function WorkingViewer({
     }
   }, [loadDicomParser]);
 
-  // Load images for the series with optimized loading
+  // Load images for the series - medical grade reliability
   const loadImages = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -191,72 +191,46 @@ export function WorkingViewer({
       // Load DICOM parser first
       await loadDicomParser();
       
-      // OPTIMIZATION: Show first image immediately, then load metadata for others
-      if (imageList.length > 0) {
-        // Quick load first image to show something immediately
-        const firstImage = imageList[0];
-        const firstMetadata = await extractQuickMetadata(firstImage.id);
-        const firstImageWithMetadata = { ...firstImage, ...firstMetadata };
-        
-        setImages([firstImageWithMetadata]);
-        setCurrentIndex(0);
-        setIsLoading(false); // Stop loading indicator early
-        
-        // Background loading for remaining images
-        setIsPreloading(true);
-        setLoadingProgress({ loaded: 1, total: imageList.length });
-        
-        // Process remaining images in smaller batches for better performance
-        const batchSize = 8;
-        const remainingImages = imageList.slice(1);
-        const allImages = [firstImageWithMetadata];
-        
-        for (let i = 0; i < remainingImages.length; i += batchSize) {
-          const batch = remainingImages.slice(i, i + batchSize);
-          
-          const batchWithMetadata = await Promise.all(
-            batch.map(async (image: any) => {
-              const metadata = await extractQuickMetadata(image.id);
-              return { ...image, ...metadata };
-            })
-          );
-          
-          allImages.push(...batchWithMetadata);
-          
-          // Update progress
-          setLoadingProgress({ 
-            loaded: allImages.length, 
-            total: imageList.length 
-          });
-          
-          // Yield to browser for responsive UI
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-        
-        // Sort all images once complete
-        allImages.sort((a, b) => {
-          if (a.parsedSliceLocation && b.parsedSliceLocation) {
-            return a.parsedSliceLocation - b.parsedSliceLocation;
-          } else if (a.parsedZPosition && b.parsedZPosition) {
-            return a.parsedZPosition - b.parsedZPosition;
-          } else if (a.parsedInstanceNumber && b.parsedInstanceNumber) {  
-            return a.parsedInstanceNumber - b.parsedInstanceNumber;
-          }
-          return 0;
-        });
-        
-        setImages(allImages);
-        setIsPreloading(false);
-        
-        // Find the correct index for the first image after sorting
-        const firstImageIndex = allImages.findIndex(img => img.id === firstImage.id);
-        setCurrentIndex(firstImageIndex >= 0 ? firstImageIndex : 0);
+      // For medical applications, we need reliable metadata for proper image ordering
+      // Use efficient concurrent processing with controlled batch size
+      const batchSize = 12; // Optimal balance of speed and browser responsiveness
+      const batches = [];
+      
+      for (let i = 0; i < imageList.length; i += batchSize) {
+        batches.push(imageList.slice(i, i + batchSize));
       }
+      
+      const allImagesWithMetadata = [];
+      
+      for (const batch of batches) {
+        const batchResults = await Promise.all(
+          batch.map(async (image: any) => {
+            const metadata = await extractQuickMetadata(image.id);
+            return { ...image, ...metadata };
+          })
+        );
+        allImagesWithMetadata.push(...batchResults);
+      }
+      
+      // Sort images by medical imaging criteria
+      allImagesWithMetadata.sort((a, b) => {
+        if (a.parsedSliceLocation && b.parsedSliceLocation) {
+          return a.parsedSliceLocation - b.parsedSliceLocation;
+        } else if (a.parsedZPosition && b.parsedZPosition) {
+          return a.parsedZPosition - b.parsedZPosition;
+        } else if (a.parsedInstanceNumber && b.parsedInstanceNumber) {  
+          return a.parsedInstanceNumber - b.parsedInstanceNumber;
+        }
+        return 0;
+      });
+      
+      setImages(allImagesWithMetadata);
+      setCurrentIndex(0);
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load images');
+    } finally {
       setIsLoading(false);
-      setIsPreloading(false);
     }
   }, [seriesId, loadDicomParser, extractQuickMetadata]);
 

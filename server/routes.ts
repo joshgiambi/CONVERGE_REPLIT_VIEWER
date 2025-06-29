@@ -10,6 +10,9 @@ import { generateUID, isDICOMFile, getTagString, getTagArray, extractTag } from 
 
 const upload = multer({ dest: 'uploads/' });
 
+// Cache for DICOM metadata to speed up CT scan loading
+const metadataCache = new Map<string, any>();
+
 function extractDICOMMetadata(filePath: string) {
   try {
     const buffer = fs.readFileSync(filePath);
@@ -208,27 +211,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fs.copyFileSync(sourcePath, demoPath);
         const fileStats = fs.statSync(demoPath);
         
-        // Extract instance number from filename
+        // Extract comprehensive DICOM metadata at import time
+        const dicomMetadata = extractDICOMMetadata(demoPath);
+        
+        // Extract instance number from filename as fallback
         const instanceMatch = fileName.match(/\.(\d+)\.dcm$/);
-        const instanceNumber = instanceMatch ? parseInt(instanceMatch[1]) : i + 1;
+        const instanceNumber = dicomMetadata?.instanceNumber ? parseInt(dicomMetadata.instanceNumber) : (instanceMatch ? parseInt(instanceMatch[1]) : i + 1);
         
         const image = await storage.createImage({
           seriesId: ctSeries.id,
-          sopInstanceUID: generateUID(),
+          sopInstanceUID: dicomMetadata?.sopInstanceUID || generateUID(),
           instanceNumber: instanceNumber,
           filePath: demoPath,
           fileName: fileName,
           fileSize: fileStats.size,
-          imagePosition: null,
-          imageOrientation: null,
-          pixelSpacing: '0.488\\0.488',
-          sliceLocation: `${instanceNumber * 3.0}`,
-          windowCenter: '50',
-          windowWidth: '350',
+          imagePosition: dicomMetadata?.imagePositionPatient ? dicomMetadata.imagePositionPatient.join('\\') : null,
+          imageOrientation: dicomMetadata?.imageOrientationPatient ? dicomMetadata.imageOrientationPatient.join('\\') : null,
+          pixelSpacing: dicomMetadata?.pixelSpacing ? dicomMetadata.pixelSpacing.join('\\') : '1.171875\\1.171875',
+          sliceLocation: dicomMetadata?.imagePositionPatient ? dicomMetadata.imagePositionPatient[2].toString() : `${instanceNumber * 2.5}`,
+          windowCenter: '40',
+          windowWidth: '100',
           metadata: {
             source: 'HN-ATLAS-84',
             anatomy: 'Head & Neck',
-            contrast: true
+            contrast: true,
+            dicomTags: dicomMetadata
           },
         });
         ctImages.push(image);
@@ -314,7 +321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
   
-  // Serve DICOM files
+  // Serve DICOM files with range request support for fast metadata extraction
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
     try {
       const sopInstanceUID = req.params.sopInstanceUID;
@@ -329,13 +336,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Image file not found on disk" });
       }
       
-      // Set appropriate headers for DICOM files
-      res.setHeader('Content-Type', 'application/dicom');
-      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+      const stat = fs.statSync(image.filePath);
+      const fileSize = stat.size;
       
-      // Stream the file
-      const fileStream = fs.createReadStream(image.filePath);
-      fileStream.pipe(res);
+      // Handle range requests for fast metadata extraction
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 2048, fileSize - 1);
+        
+        if (start >= fileSize) {
+          res.status(416).send('Requested Range Not Satisfiable');
+          return;
+        }
+        
+        const chunksize = (end - start) + 1;
+        const file = fs.createReadStream(image.filePath, { start, end });
+        
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', chunksize);
+        res.setHeader('Content-Type', 'application/dicom');
+        
+        file.pipe(res);
+      } else {
+        // Serve full file for actual image display
+        res.setHeader('Content-Type', 'application/dicom');
+        res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+        res.setHeader('Content-Length', fileSize);
+        res.setHeader('Accept-Ranges', 'bytes');
+        
+        const fileStream = fs.createReadStream(image.filePath);
+        fileStream.pipe(res);
+      }
       
     } catch (error) {
       console.error('Error serving DICOM file:', error);
