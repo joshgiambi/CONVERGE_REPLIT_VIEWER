@@ -342,44 +342,39 @@ export function WorkingViewer({
       const contours = structure.contours || [];
       
       contours.forEach((contour: any) => {
-        // Match contour to current slice within 1mm tolerance
-        if (Math.abs(contour.slicePosition - currentSliceZ) > 1.0) return;
-        
-        if (!contour.points || contour.points.length < 6) return; // Need at least 3 points (x,y,z each)
+        if (!contour.points || contour.points.length === 0) return;
         
         ctx.beginPath();
-        ctx.strokeStyle = structure.color ? 
-          `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
-          '#00ff00';
-        ctx.fillStyle = structure.color ? 
-          `rgba(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]}, 0.2)` : 
-          'rgba(0, 255, 0, 0.2)';
+        ctx.strokeStyle = `rgb(${structure.color?.join(',') || '255,0,0'})`;
+        ctx.fillStyle = `rgba(${structure.color?.join(',') || '255,0,0'}, 0.2)`;
         ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
         
-        // Process DICOM contour points (x,y,z format)
-        for (let i = 0; i < contour.points.length; i += 3) {
-          const dicomX = contour.points[i];
-          const dicomY = contour.points[i + 1];
+        contour.points.forEach((point: any, i: number) => {
+          let dicomX, dicomY;
           
-          // Convert DICOM patient coordinates to image pixel coordinates
-          const imageOrigin = currentImage.imagePosition || [0, 0, 0];
-          const pixelSpacing = currentImage.pixelSpacing || [1, 1];
+          // Handle different point formats
+          if (Array.isArray(point) && point.length >= 2) {
+            [dicomX, dicomY] = point;
+          } else if (point && typeof point === 'object' && 'x' in point && 'y' in point) {
+            dicomX = point.x;
+            dicomY = point.y;
+          } else {
+            return;
+          }
           
-          const pixelX = (dicomX - imageOrigin[0]) / pixelSpacing[0];
-          const pixelY = (dicomY - imageOrigin[1]) / pixelSpacing[1];
+          // Simple coordinate transformation that was working before
+          const pixelX = imageWidth - (dicomX * 0.8 + imageWidth / 2);
+          const pixelY = dicomY * 0.8 + imageHeight / 2;
           
-          // Transform to canvas coordinates with zoom and pan
-          const canvasX = imageX + (pixelX / imageWidth) * scaledWidth;
-          const canvasY = imageY + (pixelY / imageHeight) * scaledHeight;
+          const canvasX = imageX + (pixelX * zoom);
+          const canvasY = imageY + (pixelY * zoom);
           
           if (i === 0) {
             ctx.moveTo(canvasX, canvasY);
           } else {
             ctx.lineTo(canvasX, canvasY);
           }
-        }
+        });
         
         ctx.closePath();
         ctx.fill();
