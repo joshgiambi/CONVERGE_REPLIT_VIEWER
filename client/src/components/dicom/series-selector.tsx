@@ -297,8 +297,8 @@ export function SeriesSelector({
                         {allCollapsed ? 'Expand All' : 'Collapse All'}
                       </Button>
                       
-                      {/* Operations Button - only show when structures are selected */}
-                      {Array.from(structureSelection.values()).some(selected => selected) && (
+                      {/* Operations Button - temporarily disabled for performance */}
+                      {false && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -306,7 +306,7 @@ export function SeriesSelector({
                           className="flex-1 justify-center text-xs bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
                         >
                           <Settings className="w-4 h-4 mr-2" />
-                          Operations ({Array.from(structureSelection.values()).filter(selected => selected).length})
+                          Operations
                         </Button>
                       )}
                     </div>
