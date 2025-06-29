@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -335,17 +335,21 @@ export function WorkingViewer({
     const currentImage = images[currentIndex];
     if (!currentImage) return;
     
+    // Get structures array from rtStructures (it's an object with a structures property)
+    const structures = rtStructures.structures || [];
+    if (!Array.isArray(structures)) return;
+    
     // Draw structures for current slice
-    rtStructures.forEach((structure: any, structureId: number) => {
-      if (!structureVisibility.get(structureId)) return;
+    structures.forEach((structure: any) => {
+      if (!structureVisibility.get(structure.roiNumber)) return;
       
       const contours = structure.contours || [];
       contours.forEach((contour: any) => {
         if (!contour.points || contour.points.length === 0) return;
         
         ctx.beginPath();
-        ctx.strokeStyle = structure.color || '#ff0000';
-        ctx.fillStyle = structure.color ? `${structure.color}33` : '#ff000033';
+        ctx.strokeStyle = `rgb(${structure.color?.join(',') || '255,0,0'})`;
+        ctx.fillStyle = `rgba(${structure.color?.join(',') || '255,0,0'}, 0.2)`;
         ctx.lineWidth = 2;
         
         contour.points.forEach((point: number[], i: number) => {
@@ -370,20 +374,28 @@ export function WorkingViewer({
         ctx.stroke();
       });
     });
-  }, [images, currentIndex, zoom]);
+  }, [images, currentIndex, zoom, rtStructures, structureVisibility]);
 
-  // Navigation functions
-  const goToPrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+  // Navigation functions with bounds checking
+  const goToPrevious = useCallback(() => {
+    try {
+      if (images.length > 0 && currentIndex > 0) {
+        setCurrentIndex(prevIndex => Math.max(0, prevIndex - 1));
+      }
+    } catch (error) {
+      console.error('Error navigating to previous image:', error);
     }
-  };
+  }, [currentIndex, images.length]);
 
-  const goToNext = () => {
-    if (currentIndex < images.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+  const goToNext = useCallback(() => {
+    try {
+      if (images.length > 0 && currentIndex < images.length - 1) {
+        setCurrentIndex(prevIndex => Math.min(images.length - 1, prevIndex + 1));
+      }
+    } catch (error) {
+      console.error('Error navigating to next image:', error);
     }
-  };
+  }, [currentIndex, images.length]);
 
   // Mouse event handlers
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -436,23 +448,35 @@ export function WorkingViewer({
     setIsDragging(false);
   };
 
-  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl+scroll for zoom
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
-    } else {
-      // Regular scroll for slice navigation
-      if (e.deltaY > 0) {
-        goToNext();
+  const handleCanvasWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    try {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+scroll for zoom
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        const newZoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
+        setZoom(newZoom);
+        
+        // Call external zoom handlers if provided
+        if (e.deltaY > 0 && onZoomOut) {
+          onZoomOut();
+        } else if (e.deltaY < 0 && onZoomIn) {
+          onZoomIn();
+        }
       } else {
-        goToPrevious();
+        // Regular scroll for slice navigation
+        if (e.deltaY > 0) {
+          goToNext();
+        } else {
+          goToPrevious();
+        }
       }
+    } catch (error) {
+      console.error('Error handling wheel event:', error);
     }
-  };
+  }, [zoom, goToNext, goToPrevious, onZoomIn, onZoomOut]);
 
   // Effects
   useEffect(() => {
@@ -517,6 +541,34 @@ export function WorkingViewer({
           </div>
           
           <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setZoom(prev => Math.max(0.1, prev * 0.8))}
+              title="Zoom Out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setZoom(prev => Math.min(5, prev * 1.25))}
+              title="Zoom In"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setZoom(1);
+                setPanX(0);
+                setPanY(0);
+              }}
+              title="Reset Zoom"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
             <Badge variant="outline">
               W: {Math.round(currentWindowLevel.width)} L: {Math.round(currentWindowLevel.center)}
             </Badge>
@@ -544,10 +596,10 @@ export function WorkingViewer({
             ref={canvasRef}
             width={800}
             height={600}
-            className={`cursor-grab active:cursor-grabbing transition-all duration-200 ${
+            className={`cursor-grab active:cursor-grabbing transition-all duration-200 bg-black ${
               selectedStructureInfo && editMode !== 'view' 
                 ? 'border-4' 
-                : 'border border-gray-300'
+                : 'border border-gray-600'
             }`}
             style={{
               borderColor: selectedStructureInfo && editMode !== 'view' 
