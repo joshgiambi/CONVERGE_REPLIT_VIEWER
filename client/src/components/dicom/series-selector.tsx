@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { List, Settings, Monitor, Palette } from 'lucide-react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Layers3, Palette, Settings } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -36,6 +36,7 @@ export function SeriesSelector({
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+
   // Load RT structure series for the study
   useEffect(() => {
     if (!studyId) return;
@@ -79,13 +80,14 @@ export function SeriesSelector({
         }
       }
     } catch (error) {
-      console.error('Error loading RT structures:', error);
+      console.error('Error loading RT structure contours:', error);
     }
   };
 
   const handleStructureVisibilityToggle = (structureId: number) => {
     const newVisibility = !structureVisibility.get(structureId);
     setStructureVisibility(prev => new Map(prev.set(structureId, newVisibility)));
+    
     if (onStructureVisibilityChange) {
       onStructureVisibilityChange(structureId, newVisibility);
     }
@@ -105,105 +107,147 @@ export function SeriesSelector({
 
   return (
     <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
-      <Tabs defaultValue="series" className="h-full flex flex-col">
-        <CardHeader className="pb-3">
-          <TabsList className="grid w-full grid-cols-2 bg-dicom-indigo/20">
-            <TabsTrigger value="series" className="text-xs">Series</TabsTrigger>
-            <TabsTrigger value="structures" className="text-xs">Structures</TabsTrigger>
-          </TabsList>
-        </CardHeader>
-        
-        <CardContent className="flex-1 overflow-hidden p-6">
-          <TabsContent value="series" className="h-full space-y-4 mt-0">
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold text-dicom-purple flex items-center">
-                <Monitor className="w-6 h-6 mr-3 text-dicom-indigo" />
-                Image Series
-              </h3>
-            </div>
-            
-            {/* Image Series List */}
-            <div className="flex-1 space-y-2 mb-6 overflow-y-auto">
-              {series.filter(s => s.modality !== 'RTSTRUCT').map((seriesItem) => (
-                <div key={seriesItem.id}>
-                  <div
-                    className={`
-                      p-3 rounded-lg border cursor-pointer transition-all duration-200
-                      ${selectedSeries?.id === seriesItem.id
-                        ? 'bg-dicom-yellow/20 border-dicom-yellow shadow-lg'
-                        : 'bg-dicom-indigo/10 border-dicom-indigo/30 hover:border-dicom-yellow/50 hover:bg-dicom-yellow/5'
-                      }
-                    `}
-                    onClick={() => onSeriesSelect(seriesItem)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <Badge 
-                        variant="outline" 
-                        className={`
-                          text-xs font-medium
-                          ${selectedSeries?.id === seriesItem.id
-                            ? 'border-dicom-yellow text-dicom-yellow'
-                            : 'border-dicom-indigo text-dicom-indigo'
-                          }
-                        `}
-                      >
-                        {seriesItem.modality}
-                      </Badge>
-                      <span className="text-xs text-gray-400">
-                        {seriesItem.imageCount} images
-                      </span>
-                    </div>
-                    
-                    <h4 className={`
-                      text-sm font-medium mb-1
-                      ${selectedSeries?.id === seriesItem.id ? 'text-dicom-yellow' : 'text-white'}
-                    `}>
-                      {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
-                    </h4>
-                    
-                    <p className="text-xs text-gray-400">
-                      #{seriesItem.seriesNumber}
-                    </p>
-                  </div>
-
-                  {/* RT Structure Series nested under CT */}
-                  {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
-                    <div className="ml-4 mt-2 space-y-1">
-                      {rtSeries.map((rtS) => (
-                        <Button
-                          key={rtS.id}
-                          variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
-                          className={`w-full p-2 h-auto text-left justify-start text-xs ${
-                            selectedRTSeries?.id === rtS.id 
-                              ? 'bg-green-600 text-white' 
-                              : 'hover:bg-green-600/20 text-gray-300'
-                          }`}
-                          onClick={() => handleRTSeriesSelect(rtS)}
+      <CardContent className="p-0 h-full">
+        <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+          
+          {/* Series Section */}
+          <AccordionItem value="series" className="border-dicom-indigo/30">
+            <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-dicom-indigo/10">
+              <div className="flex items-center text-dicom-purple font-bold">
+                <Layers3 className="w-5 h-5 mr-3 text-dicom-indigo" />
+                Series
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-4">
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {series.filter(s => s.modality !== 'RTSTRUCT').map((seriesItem) => (
+                  <div key={seriesItem.id}>
+                    <div
+                      className={`
+                        p-3 rounded-lg border cursor-pointer transition-all duration-200
+                        ${selectedSeries?.id === seriesItem.id
+                          ? 'bg-dicom-yellow/20 border-dicom-yellow shadow-lg'
+                          : 'bg-dicom-indigo/10 border-dicom-indigo/30 hover:border-dicom-yellow/50 hover:bg-dicom-yellow/5'
+                        }
+                      `}
+                      onClick={() => onSeriesSelect(seriesItem)}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <Badge 
+                          variant="outline" 
+                          className={`
+                            text-xs font-medium
+                            ${selectedSeries?.id === seriesItem.id
+                              ? 'border-dicom-yellow text-dicom-yellow'
+                              : 'border-dicom-indigo text-dicom-indigo'
+                            }
+                          `}
                         >
-                          <div className="flex items-center space-x-2">
-                            <Badge variant="outline" className="border-green-500 text-green-400 text-xs">
-                              RTSTRUCT
-                            </Badge>
-                            <span className="truncate">
-                              {rtS.seriesDescription || 'RT Structure Set'}
-                            </span>
-                          </div>
-                        </Button>
-                      ))}
+                          {seriesItem.modality}
+                        </Badge>
+                        <span className="text-xs text-gray-400">
+                          {seriesItem.imageCount} images
+                        </span>
+                      </div>
+                      
+                      <h4 className={`
+                        text-sm font-medium mb-1
+                        ${selectedSeries?.id === seriesItem.id ? 'text-dicom-yellow' : 'text-white'}
+                      `}>
+                        {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                      </h4>
+                      
+                      <p className="text-xs text-gray-400">
+                        #{seriesItem.seriesNumber}
+                      </p>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
 
-            {/* Window/Level Controls */}
-            {selectedSeries && (
-              <div className="border-t border-dicom-gray pt-4">
-                <h4 className="text-sm font-semibold text-dicom-yellow mb-3 flex items-center">
-                  <Settings className="w-4 h-4 mr-2" />
+                    {/* RT Structure Series nested under CT */}
+                    {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
+                      <div className="ml-4 mt-2 space-y-1">
+                        {rtSeries.map((rtS) => (
+                          <Button
+                            key={rtS.id}
+                            variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
+                            className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                              selectedRTSeries?.id === rtS.id 
+                                ? 'bg-green-600 text-white' 
+                                : 'hover:bg-green-600/20 text-gray-300'
+                            }`}
+                            onClick={() => handleRTSeriesSelect(rtS)}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <Badge variant="outline" className="border-green-500 text-green-400 text-xs">
+                                RTSTRUCT
+                              </Badge>
+                              <span className="truncate">
+                                {rtS.seriesDescription || 'RT Structure Set'}
+                              </span>
+                            </div>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Structures Section */}
+          <AccordionItem value="structures" className="border-dicom-indigo/30">
+            <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-dicom-indigo/10">
+              <div className="flex items-center text-dicom-purple font-bold">
+                <Palette className="w-5 h-5 mr-3 text-dicom-indigo" />
+                Structures
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-4">
+              {rtStructures?.structures ? (
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {rtStructures.structures.map((structure: any) => (
+                    <div 
+                      key={structure.roiNumber}
+                      className="flex items-center space-x-3 p-3 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
+                    >
+                      <Checkbox
+                        checked={structureVisibility.get(structure.roiNumber) ?? true}
+                        onCheckedChange={() => handleStructureVisibilityToggle(structure.roiNumber)}
+                        className="border-gray-400"
+                      />
+                      <div 
+                        className="w-4 h-4 rounded border border-gray-400"
+                        style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm text-white font-medium">
+                          {structure.structureName}
+                        </span>
+                        <div className="text-xs text-gray-400">
+                          {structure.contours.length} contours • ROI {structure.roiNumber}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-gray-500 text-sm py-8">
+                  {selectedRTSeries ? 'Loading structures...' : 'Load an RT structure set to view contours'}
+                </div>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Window/Level Section */}
+          {selectedSeries && (
+            <AccordionItem value="window-level" className="border-dicom-indigo/30">
+              <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-dicom-indigo/10">
+                <div className="flex items-center text-dicom-purple font-bold">
+                  <Settings className="w-5 h-5 mr-3 text-dicom-indigo" />
                   Window/Level
-                </h4>
-                
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-4">
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs text-gray-400 block mb-2">
@@ -251,53 +295,12 @@ export function SeriesSelector({
                     ))}
                   </div>
                 </div>
-              </div>
-            )}
-          </TabsContent>
+              </AccordionContent>
+            </AccordionItem>
+          )}
 
-          <TabsContent value="structures" className="h-full space-y-4 mt-0">
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold text-dicom-purple flex items-center">
-                <Palette className="w-6 h-6 mr-3 text-dicom-indigo" />
-                Structure Contours
-              </h3>
-            </div>
-            
-            {rtStructures?.structures ? (
-              <div className="space-y-1 max-h-96 overflow-y-auto">
-                {rtStructures.structures.map((structure: any) => (
-                  <div 
-                    key={structure.roiNumber}
-                    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
-                  >
-                    <Checkbox
-                      checked={structureVisibility.get(structure.roiNumber) ?? true}
-                      onCheckedChange={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                      className="border-gray-400"
-                    />
-                    <div 
-                      className="w-4 h-4 rounded border border-gray-400"
-                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                    />
-                    <div className="flex-1">
-                      <span className="text-sm text-white font-medium">
-                        {structure.structureName}
-                      </span>
-                      <div className="text-xs text-gray-400">
-                        {structure.contours.length} contours • ROI {structure.roiNumber}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center text-gray-500 text-sm py-8">
-                {selectedRTSeries ? 'Loading structures...' : 'Load an RT structure set to view contours'}
-              </div>
-            )}
-          </TabsContent>
-        </CardContent>
-      </Tabs>
+        </Accordion>
+      </CardContent>
     </Card>
   );
 }
