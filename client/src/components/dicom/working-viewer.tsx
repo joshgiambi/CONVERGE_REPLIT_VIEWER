@@ -110,21 +110,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     };
   }, []);
 
-  const loadDicomParser = useCallback((): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (window.dicomParser) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
-      document.head.appendChild(script);
-    });
-  }, []);
-
   const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
     try {
       // Load dicom-parser if not already loaded
@@ -665,62 +650,6 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     ctx.fill();
     ctx.stroke();
   };
-
-  // OPTIMIZED: Fast metadata extraction without full image download
-  const extractQuickMetadata = useCallback(async (sopInstanceUID: string) => {
-    try {
-      // First try to get just the DICOM header (first 2KB should contain metadata)
-      const response = await fetch(`/api/images/${sopInstanceUID}`, {
-        headers: { 'Range': 'bytes=0-2048' } // Just get header portion
-      });
-      
-      if (response.status === 206 || response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const byteArray = new Uint8Array(arrayBuffer);
-        const dataSet = window.dicomParser.parseDicom(byteArray);
-        
-        const sliceLocation = dataSet.floatString('x00201041');
-        const imagePosition = dataSet.string('x00200032');
-        const instanceNumber = dataSet.intString('x00200013');
-        
-        let zPosition = null;
-        if (imagePosition) {
-          const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
-          zPosition = positions[2];
-        }
-        
-        return {
-          parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-          parsedZPosition: zPosition,
-          parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : null
-        };
-      }
-    } catch (error) {
-      // Fallback: if range request fails, use instance number
-      console.warn(`Range request failed for ${sopInstanceUID}, using fallback`);
-    }
-    
-    return {
-      parsedSliceLocation: null,
-      parsedZPosition: null,
-      parsedInstanceNumber: null
-    };
-  }, []);
-
-  const loadDicomParser = useCallback((): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (window.dicomParser) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
-      document.head.appendChild(script);
-    });
-  }, []);
 
   const goToPrevious = () => {
     if (currentIndex > 0) {
