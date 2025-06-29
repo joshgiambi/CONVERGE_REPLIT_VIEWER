@@ -606,6 +606,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get images for a series with pre-stored metadata for instant loading
+  app.get("/api/series/:seriesId/images", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const images = await storage.getImagesBySeries(seriesId);
+      
+      // Transform to include metadata needed for viewer with instant loading
+      const imagesWithMetadata = images.map(image => ({
+        id: image.sopInstanceUID,
+        sopInstanceUID: image.sopInstanceUID,
+        instanceNumber: image.instanceNumber,
+        fileName: image.fileName,
+        filePath: image.filePath,
+        parsedSliceLocation: image.sliceLocation ? parseFloat(image.sliceLocation) : null,
+        parsedZPosition: image.imagePosition ? parseFloat(image.imagePosition.split('\\')[2]) : null,
+        parsedInstanceNumber: image.instanceNumber,
+        imagePosition: image.imagePosition,
+        imageOrientation: image.imageOrientation,
+        pixelSpacing: image.pixelSpacing,
+        windowCenter: image.windowCenter ? parseFloat(image.windowCenter) : 40,
+        windowWidth: image.windowWidth ? parseFloat(image.windowWidth) : 100,
+        metadata: image.metadata
+      }));
+      
+      // Sort by anatomical position for proper viewing order
+      imagesWithMetadata.sort((a, b) => {
+        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
+          return a.parsedSliceLocation - b.parsedSliceLocation;
+        } else if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
+          return a.parsedZPosition - b.parsedZPosition;
+        } else if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
+          return a.parsedInstanceNumber - b.parsedInstanceNumber;
+        }
+        return 0;
+      });
+      
+      res.json(imagesWithMetadata);
+    } catch (error) {
+      console.error('Error getting series images:', error);
+      res.status(500).json({ message: "Failed to get series images" });
+    }
+  });
+
   app.get("/api/studies/:id/series", async (req, res) => {
     try {
       const series = await storage.getSeriesByStudyId(parseInt(req.params.id));
