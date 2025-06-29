@@ -39,7 +39,7 @@ export function SeriesSelector({
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  const [structureSelection, setStructureSelection] = useState<Map<number, boolean>>(new Map());
+  const [selectedStructures, setSelectedStructures] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Map<string, boolean>>(new Map());
   const [allCollapsed, setAllCollapsed] = useState(false);
@@ -100,14 +100,17 @@ export function SeriesSelector({
     }
   };
 
-  const handleStructureSelectionToggle = (structureId: number) => {
-    const newSelection = new Map(structureSelection);
-    const isSelected = !newSelection.get(structureId);
-    newSelection.set(structureId, isSelected);
-    setStructureSelection(newSelection);
+  const handleStructureSelection = (structureId: number, selected: boolean) => {
+    const newSelection = new Set(selectedStructures);
+    if (selected) {
+      newSelection.add(structureId);
+    } else {
+      newSelection.delete(structureId);
+    }
+    setSelectedStructures(newSelection);
     
     if (onStructureSelection) {
-      onStructureSelection(structureId, isSelected);
+      onStructureSelection(structureId, selected);
     }
   };
 
@@ -297,8 +300,8 @@ export function SeriesSelector({
                         {allCollapsed ? 'Expand All' : 'Collapse All'}
                       </Button>
                       
-                      {/* Operations Button - temporarily disabled for performance */}
-                      {false && (
+                      {/* Operations Button - show when structures are selected */}
+                      {selectedStructures.size > 0 && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -306,97 +309,28 @@ export function SeriesSelector({
                           className="flex-1 justify-center text-xs bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
                         >
                           <Settings className="w-4 h-4 mr-2" />
-                          Operations
+                          Operations ({selectedStructures.size})
                         </Button>
                       )}
                     </div>
 
-                    {/* Structures List */}
+                    {/* Structures List - All structures as separate rows */}
                     <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 600px)' }}>
-                      {/* Grouped Structures */}
-                      {Array.from(groups.entries()).map(([groupName, groupStructures]) => (
-                        <div key={groupName} className="border border-gray-700 rounded-lg">
-                          {/* Group Header */}
-                          <div 
-                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-800/50"
-                            onClick={() => toggleGroupExpansion(groupName)}
-                          >
-                            <div className="flex items-center space-x-2">
-                              {expandedGroups.get(groupName) ? (
-                                <ChevronDown className="w-4 h-4 text-gray-400" />
-                              ) : (
-                                <ChevronRight className="w-4 h-4 text-gray-400" />
-                              )}
-                              <div className="flex items-center space-x-2">
-                                {groupStructures.map((structure, index) => (
-                                  <div 
-                                    key={index}
-                                    className="w-3 h-3 rounded-full border border-gray-400"
-                                    style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-sm text-white font-medium">{groupName}</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Badge variant="outline" className="text-xs border-gray-500 text-gray-400">
-                                {groupStructures.length}
-                              </Badge>
-                            </div>
-                          </div>
-
-                          {/* Group Children */}
-                          {expandedGroups.get(groupName) && (
-                            <div className="border-t border-gray-700">
-                              {groupStructures.map((structure: any) => (
-                                <div 
-                                  key={structure.roiNumber}
-                                  className="flex items-center space-x-3 p-3 ml-6 hover:bg-gray-800/30"
-                                >
-                                  {/* Checkbox temporarily disabled for performance */}
-                                  <div className="w-4 h-4 rounded border border-gray-600 bg-gray-800/50" />
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                    className="p-1 h-auto hover:bg-gray-700"
-                                  >
-                                    {structureVisibility.get(structure.roiNumber) ?? true ? (
-                                      <Eye className="w-4 h-4 text-blue-400" />
-                                    ) : (
-                                      <EyeOff className="w-4 h-4 text-gray-500" />
-                                    )}
-                                  </Button>
-                                  <div 
-                                    className="w-4 h-4 rounded border border-gray-400"
-                                    style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                                  />
-                                  <span className="text-sm text-white font-medium flex-1 truncate">
-                                    {structure.structureName}
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                    className="p-1 h-auto hover:bg-red-600/20"
-                                  >
-                                    <Trash2 className="w-4 h-4 text-red-400" />
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-
-                      {/* Ungrouped Structures */}
-                      {ungrouped.map((structure: any) => (
+                      {/* All Structures as Individual Rows */}
+                      {rtStructures?.structures?.map((structure: any) => (
                         <div 
                           key={structure.roiNumber}
-                          className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-800/50 border border-gray-700"
+                          className={`flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-800/50 border transition-all duration-200 ${
+                            selectedStructures.has(structure.roiNumber) 
+                              ? 'border-yellow-500 bg-yellow-500/10' 
+                              : 'border-gray-700'
+                          }`}
                         >
-                          {/* Checkbox temporarily disabled for performance */}
-                          <div className="w-4 h-4 rounded border border-gray-600 bg-gray-800/50" />
+                          <Checkbox
+                            checked={selectedStructures.has(structure.roiNumber)}
+                            onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
+                            className="border-yellow-500 data-[state=checked]:bg-yellow-500"
+                          />
                           <Button
                             variant="ghost"
                             size="sm"

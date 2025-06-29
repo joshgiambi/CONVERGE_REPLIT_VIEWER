@@ -20,9 +20,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  // Temporarily disabled for performance
-  // const [selectedStructures, setSelectedStructures] = useState<any[]>([]);
-  // const [showOperations, setShowOperations] = useState(false);
+  const [selectedStructures, setSelectedStructures] = useState<Set<number>>(new Set());
+  const [selectedStructureColors, setSelectedStructureColors] = useState<string[]>([]);
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
