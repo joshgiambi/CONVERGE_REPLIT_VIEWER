@@ -231,6 +231,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
             onStructureColorChange={handleStructureColorChange}
+            selectedStructure={selectedStructure}
+            onSelectedStructureChange={setSelectedStructure}
+            editMode={editMode}
           />
         </div>
 

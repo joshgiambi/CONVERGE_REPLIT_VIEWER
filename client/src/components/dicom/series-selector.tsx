@@ -35,11 +35,16 @@ export function SeriesSelector({
   rtStructures,
   onRTStructureLoad,
   onStructureVisibilityChange,
-  onStructureColorChange
+  onStructureColorChange,
+  selectedStructure,
+  onSelectedStructureChange,
+  editMode
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   // Load RT structure series for the study
   useEffect(() => {
     if (!studyId) return;
@@ -93,6 +98,46 @@ export function SeriesSelector({
     if (onStructureVisibilityChange) {
       onStructureVisibilityChange(structureId, newVisibility);
     }
+  };
+
+  // Group structures by base name (for _L, _R grouping)
+  const groupStructures = (structures: any[]) => {
+    const groups: { [key: string]: any[] } = {};
+    const singles: any[] = [];
+
+    structures.forEach(structure => {
+      const name = structure.structureName;
+      const baseName = name.replace(/_[LR]$/, '');
+      
+      if (name.endsWith('_L') || name.endsWith('_R')) {
+        if (!groups[baseName]) {
+          groups[baseName] = [];
+        }
+        groups[baseName].push(structure);
+      } else {
+        singles.push(structure);
+      }
+    });
+
+    return { groups, singles };
+  };
+
+  // Filter structures based on search term
+  const filterStructures = (structures: any[]) => {
+    if (!searchTerm) return structures;
+    return structures.filter(structure => 
+      structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  };
+
+  const toggleGroup = (groupName: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(groupName)) {
+      newExpanded.delete(groupName);
+    } else {
+      newExpanded.add(groupName);
+    }
+    setExpandedGroups(newExpanded);
   };
 
   const handleWindowChange = (values: number[]) => {
@@ -268,31 +313,159 @@ export function SeriesSelector({
             </div>
             
             {rtStructures?.structures ? (
-              <div className="space-y-1 max-h-96 overflow-y-auto">
-                {rtStructures.structures.map((structure: any) => (
-                  <div 
-                    key={structure.roiNumber}
-                    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
-                  >
-                    <Checkbox
-                      checked={structureVisibility.get(structure.roiNumber) ?? true}
-                      onCheckedChange={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                      className="border-gray-400"
-                    />
-                    <div 
-                      className="w-4 h-4 rounded border border-gray-400"
-                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                    />
-                    <div className="flex-1">
-                      <span className="text-sm text-white font-medium">
-                        {structure.structureName}
-                      </span>
-                      <div className="text-xs text-gray-400">
-                        {structure.contours.length} contours • ROI {structure.roiNumber}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="space-y-3">
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    type="text"
+                    placeholder="Search structures..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 bg-black/50 border-gray-600 text-white placeholder-gray-400"
+                  />
+                </div>
+
+                {/* Structure List */}
+                <div className="space-y-1 max-h-80 overflow-y-auto">
+                  {(() => {
+                    const filteredStructures = filterStructures(rtStructures.structures);
+                    const { groups, singles } = groupStructures(filteredStructures);
+
+                    return (
+                      <>
+                        {/* Grouped structures */}
+                        {Object.entries(groups).map(([groupName, groupStructures]) => (
+                          <div key={groupName} className="space-y-1">
+                            <div
+                              className="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
+                              onClick={() => toggleGroup(groupName)}
+                            >
+                              <div className="flex items-center space-x-2">
+                                {expandedGroups.has(groupName) ? (
+                                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                                )}
+                                <span className="text-sm text-white font-medium">{groupName}</span>
+                                <Badge variant="outline" className="text-xs text-gray-400">
+                                  {groupStructures.length}
+                                </Badge>
+                              </div>
+                            </div>
+                            
+                            {expandedGroups.has(groupName) && (
+                              <div className="ml-6 space-y-1">
+                                {groupStructures.map((structure: any) => (
+                                  <div 
+                                    key={structure.roiNumber}
+                                    className={`flex items-center space-x-3 p-2 rounded-lg border cursor-pointer transition-all ${
+                                      selectedStructure === structure.roiNumber 
+                                        ? 'border-blue-400 bg-blue-500/20' 
+                                        : 'border-dicom-indigo/20 hover:bg-dicom-indigo/10'
+                                    }`}
+                                    onClick={() => onSelectedStructureChange?.(structure.roiNumber)}
+                                  >
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleStructureVisibilityToggle(structure.roiNumber);
+                                      }}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      {structureVisibility.get(structure.roiNumber) ? (
+                                        <Eye className="h-3 w-3 text-blue-400" />
+                                      ) : (
+                                        <EyeOff className="h-3 w-3 text-gray-500" />
+                                      )}
+                                    </Button>
+                                    <div 
+                                      className="w-3 h-3 rounded border border-gray-400"
+                                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                                    />
+                                    <div className="flex-1">
+                                      <span className="text-xs text-white font-medium">
+                                        {structure.structureName}
+                                      </span>
+                                      <div className="text-xs text-gray-400">
+                                        ROI {structure.roiNumber}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Color picker functionality
+                                      }}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      <Palette className="h-3 w-3 text-gray-400" />
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Single structures */}
+                        {singles.map((structure: any) => (
+                          <div 
+                            key={structure.roiNumber}
+                            className={`flex items-center space-x-3 p-2 rounded-lg border cursor-pointer transition-all ${
+                              selectedStructure === structure.roiNumber 
+                                ? 'border-blue-400 bg-blue-500/20' 
+                                : 'border-dicom-indigo/20 hover:bg-dicom-indigo/10'
+                            }`}
+                            onClick={() => onSelectedStructureChange?.(structure.roiNumber)}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStructureVisibilityToggle(structure.roiNumber);
+                              }}
+                              className="h-6 w-6 p-0"
+                            >
+                              {structureVisibility.get(structure.roiNumber) ? (
+                                <Eye className="h-3 w-3 text-blue-400" />
+                              ) : (
+                                <EyeOff className="h-3 w-3 text-gray-500" />
+                              )}
+                            </Button>
+                            <div 
+                              className="w-3 h-3 rounded border border-gray-400"
+                              style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                            />
+                            <div className="flex-1">
+                              <span className="text-xs text-white font-medium">
+                                {structure.structureName}
+                              </span>
+                              <div className="text-xs text-gray-400">
+                                ROI {structure.roiNumber}
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Color picker functionality
+                              }}
+                              className="h-6 w-6 p-0"
+                            >
+                              <Palette className="h-3 w-3 text-gray-400" />
+                            </Button>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             ) : (
               <div className="text-center text-gray-500 text-sm py-8">
