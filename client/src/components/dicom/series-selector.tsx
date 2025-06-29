@@ -5,7 +5,8 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { List, Settings, Monitor, Palette } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { List, Settings, Monitor, Palette, Search, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -19,6 +20,9 @@ interface SeriesSelectorProps {
   onRTStructureLoad?: (rtStructures: any) => void;
   onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
   onStructureColorChange?: (structureId: number, color: [number, number, number]) => void;
+  selectedStructure?: number | null;
+  onSelectedStructureChange?: (structureId: number | null) => void;
+  editMode?: 'view' | 'brush' | 'eraser' | 'polygon';
 }
 
 export function SeriesSelector({
