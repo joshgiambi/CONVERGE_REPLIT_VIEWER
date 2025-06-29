@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -14,8 +14,6 @@ interface WorkingViewerProps {
   onResetZoom?: () => void;
   rtStructures?: any;
   structureVisibility?: Map<number, boolean>;
-  selectedStructure?: number | null;
-  editMode?: 'view' | 'brush' | 'eraser' | 'polygon';
 }
 
 export function WorkingViewer({ 
@@ -27,9 +25,7 @@ export function WorkingViewer({
   onZoomOut, 
   onResetZoom, 
   rtStructures: externalRTStructures, 
-  structureVisibility: externalStructureVisibility,
-  selectedStructure,
-  editMode = 'view'
+  structureVisibility: externalStructureVisibility 
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -43,18 +39,6 @@ export function WorkingViewer({
   const rtStructures = externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
-
-  // Get selected structure info for border styling
-  const getSelectedStructureInfo = () => {
-    if (!selectedStructure || !rtStructures?.structures) return null;
-    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    return structure ? {
-      name: structure.structureName,
-      color: `rgb(${structure.color.join(',')})`
-    } : null;
-  };
-
-  const selectedStructureInfo = getSelectedStructureInfo();
 
   // Convert external window/level format to internal width/center format
   const currentWindowLevel = externalWindowLevel 
@@ -78,24 +62,6 @@ export function WorkingViewer({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
-
-  // Expose zoom functions to external components via global object
-  useEffect(() => {
-    (window as any).currentViewerZoom = {
-      zoomIn: () => setZoom(prev => Math.min(5, prev * 1.25)),
-      zoomOut: () => setZoom(prev => Math.max(0.1, prev * 0.8)),
-      resetZoom: () => {
-        setZoom(1);
-        setPanX(0);
-        setPanY(0);
-      },
-      getCurrentZoom: () => zoom
-    };
-    
-    return () => {
-      delete (window as any).currentViewerZoom;
-    };
-  }, [zoom]);
 
   // Load DICOM parser library
   const loadDicomParser = useCallback((): Promise<void> => {
@@ -209,7 +175,7 @@ export function WorkingViewer({
     }
   }, [loadDicomParser]);
 
-  // Load images for the series - instant loading with pre-stored metadata
+  // Load images for the series - medical grade reliability
   const loadImages = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -220,14 +186,45 @@ export function WorkingViewer({
         throw new Error('Failed to load images');
       }
       
-      // Images already contain pre-processed metadata from database
       const imageList = await response.json();
       
-      // Load DICOM parser for image rendering only
+      // Load DICOM parser first
       await loadDicomParser();
       
-      // Images are already sorted by the server with proper medical imaging criteria
-      setImages(imageList);
+      // For medical applications, we need reliable metadata for proper image ordering
+      // Use efficient concurrent processing with controlled batch size
+      const batchSize = 12; // Optimal balance of speed and browser responsiveness
+      const batches = [];
+      
+      for (let i = 0; i < imageList.length; i += batchSize) {
+        batches.push(imageList.slice(i, i + batchSize));
+      }
+      
+      const allImagesWithMetadata = [];
+      
+      for (const batch of batches) {
+        const batchResults = await Promise.all(
+          batch.map(async (image: any) => {
+            const metadata = await extractQuickMetadata(image.id);
+            return { ...image, ...metadata };
+          })
+        );
+        allImagesWithMetadata.push(...batchResults);
+      }
+      
+      // Sort images by medical imaging criteria
+      allImagesWithMetadata.sort((a, b) => {
+        if (a.parsedSliceLocation && b.parsedSliceLocation) {
+          return a.parsedSliceLocation - b.parsedSliceLocation;
+        } else if (a.parsedZPosition && b.parsedZPosition) {
+          return a.parsedZPosition - b.parsedZPosition;
+        } else if (a.parsedInstanceNumber && b.parsedInstanceNumber) {  
+          return a.parsedInstanceNumber - b.parsedInstanceNumber;
+        }
+        return 0;
+      });
+      
+      setImages(allImagesWithMetadata);
       setCurrentIndex(0);
       
     } catch (err) {
@@ -235,12 +232,19 @@ export function WorkingViewer({
     } finally {
       setIsLoading(false);
     }
-  }, [seriesId, loadDicomParser]);
+  }, [seriesId, loadDicomParser, extractQuickMetadata]);
 
-  // Load image metadata - skip this since we have pre-processed metadata
+  // Load image metadata
   const loadImageMetadata = useCallback(async (imageId: string) => {
-    // Skip metadata fetching as images already contain processed metadata
-    return;
+    try {
+      const response = await fetch(`/api/images/${imageId}/metadata`);
+      if (response.ok) {
+        const metadata = await response.json();
+        // Store metadata if needed
+      }
+    } catch (error) {
+      console.warn('Failed to load image metadata:', error);
+    }
   }, []);
 
   // Display current image on canvas
@@ -329,7 +333,7 @@ export function WorkingViewer({
     
   }, [images, currentIndex, imageCache, parseDicomImage, currentWindowLevel, zoom, panX, panY, showStructures, rtStructures, structureVisibility]);
 
-  // Draw RT structures overlay - simplified version that was working
+  // Draw RT structures overlay
   const drawRTStructures = useCallback((
     ctx: CanvasRenderingContext2D,
     canvasWidth: number,
@@ -346,76 +350,55 @@ export function WorkingViewer({
     const currentImage = images[currentIndex];
     if (!currentImage) return;
     
-    // Get structures array from rtStructures
-    const structures = rtStructures.structures || [];
-    if (!Array.isArray(structures)) return;
-    
     // Draw structures for current slice
-    structures.forEach((structure: any) => {
-      if (!structureVisibility.get(structure.roiNumber)) return;
+    rtStructures.forEach((structure: any, structureId: number) => {
+      if (!structureVisibility.get(structureId)) return;
       
       const contours = structure.contours || [];
-      
-      contours.forEach((contour: any, contourIndex: number) => {
-        if (!contour.points || contour.points.length < 6) return;
-        
-        // Match contour to current slice within 1mm tolerance
-        const currentSliceZ = currentImage.imagePosition?.[2] || currentImage.sliceLocation || 0;
-        if (Math.abs(contour.slicePosition - currentSliceZ) > 1.0) return;
+      contours.forEach((contour: any) => {
+        if (!contour.points || contour.points.length === 0) return;
         
         ctx.beginPath();
-        ctx.strokeStyle = structure.color ? 
-          `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
-          '#00ff00';
-        ctx.fillStyle = structure.color ? 
-          `rgba(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]}, 0.2)` : 
-          'rgba(0, 255, 0, 0.2)';
+        ctx.strokeStyle = structure.color || '#ff0000';
+        ctx.fillStyle = structure.color ? `${structure.color}33` : '#ff000033';
         ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
         
-        // Handle DICOM contour format (x,y,z triplets)
-        for (let i = 0; i < contour.points.length; i += 3) {
-          const x = contour.points[i];
-          const y = contour.points[i + 1];
+        contour.points.forEach((point: number[], i: number) => {
+          const [dicomX, dicomY] = point;
           
-          // Convert from DICOM patient coordinates to image pixel coordinates
-          const canvasX = (x - (currentImage.imagePosition?.[0] || 0)) / (currentImage.pixelSpacing?.[0] || 1);
-          const canvasY = (y - (currentImage.imagePosition?.[1] || 0)) / (currentImage.pixelSpacing?.[1] || 1);
+          // Transform DICOM coordinates to pixel coordinates
+          const pixelX = imageWidth - (dicomX * 0.8 + imageWidth / 2);
+          const pixelY = dicomY * 0.8 + imageHeight / 2;
+          
+          const canvasX = imageX + (pixelX * zoom);
+          const canvasY = imageY + (pixelY * zoom);
           
           if (i === 0) {
             ctx.moveTo(canvasX, canvasY);
           } else {
             ctx.lineTo(canvasX, canvasY);
           }
-        }
+        });
         
         ctx.closePath();
+        ctx.fill();
         ctx.stroke();
       });
     });
-  }, [images, currentIndex, zoom, rtStructures, structureVisibility]);
+  }, [images, currentIndex, zoom]);
 
-  // Navigation functions with bounds checking
-  const goToPrevious = useCallback(() => {
-    try {
-      if (images.length > 0 && currentIndex > 0) {
-        setCurrentIndex(prevIndex => Math.max(0, prevIndex - 1));
-      }
-    } catch (error) {
-      console.error('Error navigating to previous image:', error);
+  // Navigation functions
+  const goToPrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
     }
-  }, [currentIndex, images.length]);
+  };
 
-  const goToNext = useCallback(() => {
-    try {
-      if (images.length > 0 && currentIndex < images.length - 1) {
-        setCurrentIndex(prevIndex => Math.min(images.length - 1, prevIndex + 1));
-      }
-    } catch (error) {
-      console.error('Error navigating to next image:', error);
+  const goToNext = () => {
+    if (currentIndex < images.length - 1) {
+      setCurrentIndex(currentIndex + 1);
     }
-  }, [currentIndex, images.length]);
+  };
 
   // Mouse event handlers
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -468,35 +451,23 @@ export function WorkingViewer({
     setIsDragging(false);
   };
 
-  const handleCanvasWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    try {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+scroll for zoom
-        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-        const newZoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
-        setZoom(newZoom);
-        
-        // Call external zoom handlers if provided
-        if (e.deltaY > 0 && onZoomOut) {
-          onZoomOut();
-        } else if (e.deltaY < 0 && onZoomIn) {
-          onZoomIn();
-        }
+  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+scroll for zoom
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+    } else {
+      // Regular scroll for slice navigation
+      if (e.deltaY > 0) {
+        goToNext();
       } else {
-        // Regular scroll for slice navigation
-        if (e.deltaY > 0) {
-          goToNext();
-        } else {
-          goToPrevious();
-        }
+        goToPrevious();
       }
-    } catch (error) {
-      console.error('Error handling wheel event:', error);
     }
-  }, [zoom, goToNext, goToPrevious, onZoomIn, onZoomOut]);
+  };
 
   // Effects
   useEffect(() => {
@@ -561,96 +532,27 @@ export function WorkingViewer({
           </div>
           
           <div className="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const newZoom = Math.max(0.1, zoom * 0.8);
-                setZoom(newZoom);
-                if (onZoomOut) onZoomOut();
-              }}
-              title="Zoom Out"
-            >
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const newZoom = Math.min(5, zoom * 1.25);
-                setZoom(newZoom);
-                if (onZoomIn) onZoomIn();
-              }}
-              title="Zoom In"
-            >
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setZoom(1);
-                setPanX(0);
-                setPanY(0);
-                if (onResetZoom) onResetZoom();
-              }}
-              title="Reset Zoom"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
             <Badge variant="outline">
               W: {Math.round(currentWindowLevel.width)} L: {Math.round(currentWindowLevel.center)}
             </Badge>
             <Badge variant="outline">
               Zoom: {Math.round(zoom * 100)}%
             </Badge>
-            <Button
-              variant={showStructures ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowStructures(!showStructures)}
-              title="Toggle All Structures"
-            >
-              View All
-            </Button>
           </div>
         </div>
         
-        <div className="relative">
-          {/* Structure editing label */}
-          {selectedStructureInfo && editMode !== 'view' && (
-            <div 
-              className="absolute top-2 left-2 z-10 px-3 py-1 rounded-md text-sm font-medium text-white shadow-lg"
-              style={{ 
-                backgroundColor: selectedStructureInfo.color,
-                border: `2px solid ${selectedStructureInfo.color}`
-              }}
-            >
-              Editing: {selectedStructureInfo.name}
-            </div>
-          )}
-          
-          <canvas
-            ref={canvasRef}
-            width={800}
-            height={600}
-            className={`cursor-grab active:cursor-grabbing transition-all duration-200 bg-black ${
-              selectedStructureInfo && editMode !== 'view' 
-                ? 'border-4' 
-                : 'border border-gray-600'
-            }`}
-            style={{
-              borderColor: selectedStructureInfo && editMode !== 'view' 
-                ? selectedStructureInfo.color 
-                : undefined
-            }}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseUp}
-            onWheel={handleCanvasWheel}
-            onContextMenu={(e) => e.preventDefault()}
-          />
-        </div>
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={600}
+          className="border border-gray-300 cursor-grab active:cursor-grabbing"
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
+          onWheel={handleCanvasWheel}
+          onContextMenu={(e) => e.preventDefault()}
+        />
       </Card>
     </div>
   );

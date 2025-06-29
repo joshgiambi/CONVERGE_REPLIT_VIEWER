@@ -539,7 +539,7 @@ export default function PatientManager() {
                           }}
                         >
                           <Activity className="h-4 w-4 mr-1" />
-                          Enhanced Viewer
+                          Enhanced
                         </Button>
                       </div>
                     </CardContent>

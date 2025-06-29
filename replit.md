@@ -89,35 +89,6 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 29, 2025: Contour Editor Right Sidebar Implementation - COMPLETED
-  - ✅ Implemented contour editor as dedicated right sidebar (not overlay)
-  - ✅ Three-column layout activates only when contour editor is active
-  - ✅ Restored working RT structure rendering from enhanced viewer
-  - ✅ Fixed coordinate transformation for proper anatomical structure display
-  - ✅ Enhanced structure matching to current slice with 1mm tolerance
-  - ✅ Functional zoom controls in bottom toolbar
-  - ✅ Smooth keyboard navigation for CT scrolling
-  - ✅ Professional medical imaging workflow with proper sidebar organization
-- June 29, 2025: Advanced Structure Management with Merge/Delete Controls - COMPLETED
-  - ✅ Enhanced grouped structure display with color indicators and structure summaries
-  - ✅ Added expand all/collapse all toggle button for grouped structures
-  - ✅ Implemented structure selection checkboxes for merge operations
-  - ✅ Added merge functionality with confirmation dialog and custom naming
-  - ✅ Integrated delete buttons with confirmation for individual structures
-  - ✅ Working color picker for real-time structure color changes
-  - ✅ Compact design with reduced heights for nested groups and structures
-  - ✅ Visual feedback for selected structures (blue) and merge candidates (green)
-  - ✅ Professional merge dialog showing selected structures and new name input
-  - ✅ Complete structure management workflow integrated in left sidebar
-- June 29, 2025: Instant CT Scan Loading Optimization - COMPLETED
-  - ✅ Implemented database-stored DICOM metadata for instant viewer loading
-  - ✅ Added comprehensive range request support for efficient file serving
-  - ✅ Enhanced extractDICOMMetadata to capture all spatial positioning data
-  - ✅ Created pre-sorted API endpoint with anatomical positioning logic
-  - ✅ Eliminated client-side metadata parsing delays completely
-  - ✅ Medical imaging workflow now loads 153 CT slices instantly
-  - ✅ Enhanced image import process with upfront metadata extraction
-  - ✅ Optimized for medical professional workflow requirements
 - June 29, 2025: Major Codebase Cleanup and Stabilization - COMPLETED
   - ✅ Fixed all duplicate function declarations causing app crashes
   - ✅ Consolidated shared utilities into shared/utils.ts file

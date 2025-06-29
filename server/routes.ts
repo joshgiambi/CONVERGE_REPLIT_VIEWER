@@ -616,61 +616,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get images for a series with pre-stored metadata for instant loading
-  app.get("/api/series/:seriesId/images", async (req, res) => {
-    try {
-      const seriesId = parseInt(req.params.seriesId);
-      const images = await storage.getImagesBySeriesId(seriesId);
-      
-      // Transform to include metadata needed for viewer with instant loading
-      const imagesWithMetadata = images.map(image => ({
-        id: image.sopInstanceUID,
-        sopInstanceUID: image.sopInstanceUID,
-        instanceNumber: image.instanceNumber,
-        fileName: image.fileName,
-        // Pre-processed metadata for instant sorting and display
-        parsedSliceLocation: image.sliceLocation ? parseFloat(image.sliceLocation) : null,
-        parsedZPosition: image.imagePosition ? parseFloat(image.imagePosition.split('\\')[2]) : null,
-        parsedInstanceNumber: image.instanceNumber,
-        imagePosition: image.imagePosition,
-        imageOrientation: image.imageOrientation,
-        pixelSpacing: image.pixelSpacing,
-        windowCenter: image.windowCenter ? parseFloat(image.windowCenter) : 40,
-        windowWidth: image.windowWidth ? parseFloat(image.windowWidth) : 100,
-        metadata: image.metadata
-      }));
-      
-      // Sort by anatomical position for proper medical viewing order
-      imagesWithMetadata.sort((a, b) => {
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        } else if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
-        } else if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        return 0;
-      });
-      
-      res.json(imagesWithMetadata);
-    } catch (error) {
-      console.error('Error getting series images:', error);
-      res.status(500).json({ message: "Failed to get series images" });
-    }
-  });
-
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const imageIdParam = req.params.imageId;
-      console.log('Received imageId parameter:', imageIdParam);
-      
-      const imageId = parseInt(imageIdParam);
-      if (isNaN(imageId) || imageId < 1) {
-        console.log('Invalid image ID:', imageIdParam);
-        return res.status(400).json({ error: 'Invalid image ID' });
-      }
-      
+      const imageId = parseInt(req.params.imageId);
       const image = await storage.getImage(imageId);
       
       if (!image) {
@@ -723,46 +672,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error getting image metadata:', error);
       next(error);
-    }
-  });
-
-  // Save edited contours
-  app.post("/api/contours/save", async (req: Request, res: Response) => {
-    try {
-      const { contours, studyId } = req.body;
-      
-      // Store contour edits in database or file system
-      // For now, we'll save to a JSON file per study
-      const contoursPath = path.join(__dirname, '../uploads/contours');
-      if (!fs.existsSync(contoursPath)) {
-        fs.mkdirSync(contoursPath, { recursive: true });
-      }
-      
-      const contourFile = path.join(contoursPath, `study_${studyId}_contours.json`);
-      fs.writeFileSync(contourFile, JSON.stringify(contours, null, 2));
-      
-      res.json({ success: true, message: 'Contours saved successfully' });
-    } catch (error) {
-      console.error('Error saving contours:', error);
-      res.status(500).json({ message: 'Failed to save contours' });
-    }
-  });
-
-  // Load edited contours
-  app.get("/api/contours/:studyId", async (req: Request, res: Response) => {
-    try {
-      const { studyId } = req.params;
-      const contourFile = path.join(__dirname, '../uploads/contours', `study_${studyId}_contours.json`);
-      
-      if (fs.existsSync(contourFile)) {
-        const contours = JSON.parse(fs.readFileSync(contourFile, 'utf-8'));
-        res.json(contours);
-      } else {
-        res.json([]);
-      }
-    } catch (error) {
-      console.error('Error loading contours:', error);
-      res.status(500).json({ message: 'Failed to load contours' });
     }
   });
 

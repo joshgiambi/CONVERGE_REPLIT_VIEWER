@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
@@ -20,9 +20,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  
-  // Structure selection state
-  const [selectedStructure, setSelectedStructure] = useState<number | null>(null);
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -83,39 +80,35 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-  // Zoom handlers for toolbar
-  const handleZoomIn = useCallback(() => {
+  const handleZoomIn = () => {
     try {
-      // Pass zoom command to working viewer
       if ((window as any).currentViewerZoom?.zoomIn) {
         (window as any).currentViewerZoom.zoomIn();
       }
     } catch (error) {
       console.warn('Error zooming in:', error);
     }
-  }, []);
+  };
 
-  const handleZoomOut = useCallback(() => {
+  const handleZoomOut = () => {
     try {
-      // Pass zoom command to working viewer  
       if ((window as any).currentViewerZoom?.zoomOut) {
         (window as any).currentViewerZoom.zoomOut();
       }
     } catch (error) {
       console.warn('Error zooming out:', error);
     }
-  }, []);
+  };
 
-  const handleResetZoom = useCallback(() => {
+  const handleResetZoom = () => {
     try {
-      // Pass reset zoom command to working viewer
       if ((window as any).currentViewerZoom?.resetZoom) {
         (window as any).currentViewerZoom.resetZoom();
       }
     } catch (error) {
       console.warn('Error resetting zoom:', error);
     }
-  }, []);
+  };
 
   const setActiveTool = (toolName: string) => {
     try {
@@ -174,8 +167,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
-
-
   const handleRTStructureLoad = (rtStructData: any) => {
     setRTStructures(rtStructData);
     // Initialize visibility for all structures
@@ -184,11 +175,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
       visibilityMap.set(structure.roiNumber, true);
     });
     setStructureVisibility(visibilityMap);
-    
-    // Select the first structure by default
-    if (rtStructData.structures.length > 0) {
-      setSelectedStructure(rtStructData.structures[0].roiNumber);
-    }
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
@@ -220,6 +206,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   return (
     <div className="animate-in fade-in-50 duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
+        
         {/* Series Selector */}
         <div className="lg:col-span-1">
           <SeriesSelector
@@ -233,8 +220,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
             onStructureColorChange={handleStructureColorChange}
-            selectedStructure={selectedStructure}
-            onSelectedStructureChange={setSelectedStructure}
           />
         </div>
 
@@ -246,12 +231,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
               studyId={studyData.studies[0]?.id}
               windowLevel={windowLevel}
               onWindowLevelChange={setWindowLevel}
-              onZoomIn={handleZoomIn}
-              onZoomOut={handleZoomOut}
-              onResetZoom={handleResetZoom}
               rtStructures={rtStructures}
               structureVisibility={structureVisibility}
-              selectedStructure={selectedStructure}
             />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
@@ -275,11 +256,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
-          hasRTStructures={!!rtStructures}
         />
       )}
-
-
 
       {/* Error Modal */}
       <ErrorModal

@@ -13,8 +13,7 @@ import {
   Settings,
   Info,
   HelpCircle,
-  Keyboard,
-  Edit
+  Keyboard
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -29,9 +28,6 @@ interface ViewerToolbarProps {
   currentSlice?: number;
   totalSlices?: number;
   windowLevel?: { window: number; level: number };
-  onContourModeToggle?: () => void;
-  contourMode?: boolean;
-  hasRTStructures?: boolean;
 }
 
 export function ViewerToolbar({
@@ -45,10 +41,7 @@ export function ViewerToolbar({
   onFlip,
   currentSlice,
   totalSlices,
-  windowLevel,
-  onContourModeToggle,
-  contourMode = false,
-  hasRTStructures = false
+  windowLevel
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -68,10 +61,6 @@ export function ViewerToolbar({
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
     { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasureTool, selectable: true },
     { id: 'annotate', icon: MessageSquare, label: 'Annotate', action: onAnnotateTool, selectable: true },
-    ...(hasRTStructures ? [
-      { id: 'separator' },
-      { id: 'contour', icon: Edit, label: 'Contour Editor', action: onContourModeToggle, selectable: true, active: contourMode }
-    ] : []),
     { id: 'separator' },
     { id: 'rotate', icon: RotateCw, label: 'Rotate', action: onRotate },
     { id: 'flip', icon: FlipHorizontal, label: 'Flip', action: onFlip },
@@ -92,7 +81,7 @@ export function ViewerToolbar({
             }
 
             const IconComponent = tool.icon!;
-            const isActive = tool.selectable && (activeTool === tool.id || (tool as any).active);
+            const isActive = tool.selectable && activeTool === tool.id;
 
             return (
               <div key={tool.id} className="relative group">
