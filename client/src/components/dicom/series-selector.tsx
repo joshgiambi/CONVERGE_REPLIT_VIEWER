@@ -48,6 +48,7 @@ export function SeriesSelector({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [selectedForMerge, setSelectedForMerge] = useState<Set<number>>(new Set());
   const [showColorPicker, setShowColorPicker] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'series' | 'structures'>('series');
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [mergeStructureName, setMergeStructureName] = useState('');
   // Load RT structure series for the study
@@ -229,16 +230,39 @@ export function SeriesSelector({
 
   return (
     <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
-      <Tabs defaultValue="series" className="h-full flex flex-col">
+      <div className="h-full flex flex-col">
         <CardHeader className="pb-3">
-          <TabsList className="grid w-full grid-cols-2 bg-dicom-indigo/20">
-            <TabsTrigger value="series" className="text-xs">Series</TabsTrigger>
-            <TabsTrigger value="structures" className="text-xs">Structures</TabsTrigger>
-          </TabsList>
+          {/* Pill Switcher */}
+          <div className="flex p-1 bg-gray-800/50 rounded-lg border border-gray-600">
+            <button
+              onClick={() => setActiveTab('series')}
+              className={`flex-1 flex items-center justify-center px-3 py-2 text-sm font-medium rounded-md transition-all ${
+                activeTab === 'series'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              }`}
+            >
+              <List className="w-4 h-4 mr-2" />
+              Series
+            </button>
+            <button
+              onClick={() => setActiveTab('structures')}
+              className={`flex-1 flex items-center justify-center px-3 py-2 text-sm font-medium rounded-md transition-all ${
+                activeTab === 'structures'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              }`}
+            >
+              <Monitor className="w-4 h-4 mr-2" />
+              Structures
+            </button>
+          </div>
         </CardHeader>
         
         <CardContent className="flex-1 overflow-hidden p-6">
-          <TabsContent value="series" className="h-full space-y-4 mt-0">
+          <>
+            {activeTab === 'series' && (
+              <div className="h-full space-y-4 mt-0">
             <div className="space-y-2">
               <h3 className="text-xl font-bold text-dicom-purple flex items-center">
                 <Monitor className="w-6 h-6 mr-3 text-dicom-indigo" />
@@ -377,9 +401,11 @@ export function SeriesSelector({
                 </div>
               </div>
             )}
-          </TabsContent>
+            </div>
+          )}
 
-          <TabsContent value="structures" className="h-full space-y-4 mt-0">
+          {activeTab === 'structures' && (
+            <div className="h-full space-y-4 mt-0">
             <div className="space-y-2">
               <h3 className="text-xl font-bold text-dicom-purple flex items-center">
                 <Palette className="w-6 h-6 mr-3 text-dicom-indigo" />
@@ -641,9 +667,10 @@ export function SeriesSelector({
                 {selectedRTSeries ? 'Loading structures...' : 'Load an RT structure set to view contours'}
               </div>
             )}
-          </TabsContent>
+            </div>
+          )}
         </CardContent>
-      </Tabs>
+      </div>
 
       {/* Merge Structures Dialog */}
       <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
