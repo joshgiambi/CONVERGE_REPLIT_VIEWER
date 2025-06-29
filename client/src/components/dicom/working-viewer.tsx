@@ -175,7 +175,7 @@ export function WorkingViewer({
     }
   }, [loadDicomParser]);
 
-  // Load images for the series - medical grade reliability
+  // Load images for the series with instant metadata from database
   const loadImages = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -186,45 +186,13 @@ export function WorkingViewer({
         throw new Error('Failed to load images');
       }
       
-      const imageList = await response.json();
+      const imagesWithMetadata = await response.json();
       
-      // Load DICOM parser first
+      // Load DICOM parser for image rendering
       await loadDicomParser();
       
-      // For medical applications, we need reliable metadata for proper image ordering
-      // Use efficient concurrent processing with controlled batch size
-      const batchSize = 12; // Optimal balance of speed and browser responsiveness
-      const batches = [];
-      
-      for (let i = 0; i < imageList.length; i += batchSize) {
-        batches.push(imageList.slice(i, i + batchSize));
-      }
-      
-      const allImagesWithMetadata = [];
-      
-      for (const batch of batches) {
-        const batchResults = await Promise.all(
-          batch.map(async (image: any) => {
-            const metadata = await extractQuickMetadata(image.id);
-            return { ...image, ...metadata };
-          })
-        );
-        allImagesWithMetadata.push(...batchResults);
-      }
-      
-      // Sort images by medical imaging criteria
-      allImagesWithMetadata.sort((a, b) => {
-        if (a.parsedSliceLocation && b.parsedSliceLocation) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        } else if (a.parsedZPosition && b.parsedZPosition) {
-          return a.parsedZPosition - b.parsedZPosition;
-        } else if (a.parsedInstanceNumber && b.parsedInstanceNumber) {  
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        return 0;
-      });
-      
-      setImages(allImagesWithMetadata);
+      // Images already have metadata and are pre-sorted by server
+      setImages(imagesWithMetadata);
       setCurrentIndex(0);
       
     } catch (err) {
@@ -232,7 +200,7 @@ export function WorkingViewer({
     } finally {
       setIsLoading(false);
     }
-  }, [seriesId, loadDicomParser, extractQuickMetadata]);
+  }, [seriesId, loadDicomParser]);
 
   // Load image metadata
   const loadImageMetadata = useCallback(async (imageId: string) => {

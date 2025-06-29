@@ -610,17 +610,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/series/:seriesId/images", async (req, res) => {
     try {
       const seriesId = parseInt(req.params.seriesId);
-      const images = await storage.getImagesBySeries(seriesId);
+      const images = await storage.getImagesBySeriesId(seriesId);
       
       // Transform to include metadata needed for viewer with instant loading
-      const imagesWithMetadata = images.map(image => ({
+      const imagesWithMetadata = images.map((image: any) => ({
         id: image.sopInstanceUID,
         sopInstanceUID: image.sopInstanceUID,
         instanceNumber: image.instanceNumber,
         fileName: image.fileName,
         filePath: image.filePath,
         parsedSliceLocation: image.sliceLocation ? parseFloat(image.sliceLocation) : null,
-        parsedZPosition: image.imagePosition ? parseFloat(image.imagePosition.split('\\')[2]) : null,
+        parsedZPosition: image.imagePosition && typeof image.imagePosition === 'string' ? parseFloat(image.imagePosition.split('\\')[2]) : null,
         parsedInstanceNumber: image.instanceNumber,
         imagePosition: image.imagePosition,
         imageOrientation: image.imageOrientation,
