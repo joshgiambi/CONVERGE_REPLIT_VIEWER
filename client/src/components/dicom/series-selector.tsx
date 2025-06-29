@@ -106,10 +106,12 @@ export function SeriesSelector({
   };
 
   return (
-    <Card className="h-full bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
-      <CardContent className="p-0 h-full flex flex-col">
-        <div className="flex-1 overflow-hidden">
-          <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+    <div className="h-full flex flex-col space-y-4">
+      {/* Main Series and Structures Panel */}
+      <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
+        <CardContent className="p-0 h-full flex flex-col">
+          <div className="flex-1 overflow-hidden">
+            <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
             <AccordionItem value="series" className="border-dicom-indigo/30">
@@ -232,67 +234,73 @@ export function SeriesSelector({
 
           </Accordion>
         </div>
+        </CardContent>
+      </Card>
 
-        {/* Window/Level Fixed Bottom Pane */}
-        {selectedSeries && (
-          <div className="border-t border-dicom-indigo/30 bg-dicom-darker/80 backdrop-blur-sm">
-            <div className="p-4">
-              <div className="flex items-center text-orange-400 font-medium mb-3 text-sm">
-                <Settings className="w-4 h-4 mr-2 text-orange-400" />
-                Window/Level
-              </div>
-              
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">
-                    Window Width: {windowLevel.window}
-                  </label>
-                  <Slider
-                    value={[windowLevel.window]}
-                    onValueChange={handleWindowChange}
-                    min={1}
-                    max={2000}
-                    step={1}
-                    className="w-full"
-                  />
+      {/* Window/Level Controls - Separate collapsible panel */}
+      <Card className="bg-dicom-dark/60 backdrop-blur-md border border-orange-500/30 rounded-2xl overflow-hidden">
+        <CardContent className="p-0">
+          <Accordion type="single" collapsible defaultValue="window-level">
+            <AccordionItem value="window-level" className="border-orange-500/30">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10">
+                <div className="flex items-center text-orange-400 font-medium text-sm">
+                  <Settings className="w-4 h-4 mr-2 text-orange-400" />
+                  Window/Level
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4 pb-4">
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">
+                      Window Width: {windowLevel.window}
+                    </label>
+                    <Slider
+                      value={[windowLevel.window]}
+                      onValueChange={handleWindowChange}
+                      min={1}
+                      max={2000}
+                      step={1}
+                      className="w-full"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">
+                      Window Level: {windowLevel.level}
+                    </label>
+                    <Slider
+                      value={[windowLevel.level]}
+                      onValueChange={handleLevelChange}
+                      min={-1000}
+                      max={1000}
+                      step={1}
+                      className="w-full"
+                    />
+                  </div>
                 </div>
                 
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">
-                    Window Level: {windowLevel.level}
-                  </label>
-                  <Slider
-                    value={[windowLevel.level]}
-                    onValueChange={handleLevelChange}
-                    min={-1000}
-                    max={1000}
-                    step={1}
-                    className="w-full"
-                  />
+                {/* Preset Buttons */}
+                <div className="mt-3">
+                  <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
+                  <div className="grid grid-cols-2 gap-1">
+                    {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
+                      <Button
+                        key={name}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs py-1 px-2 h-auto border-orange-500/50 text-orange-300 hover:bg-orange-500/20"
+                        onClick={() => applyPreset(preset as WindowLevel)}
+                      >
+                        {name.charAt(0).toUpperCase() + name.slice(1)}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              
-              {/* Preset Buttons */}
-              <div className="mt-3">
-                <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
-                <div className="grid grid-cols-2 gap-1">
-                  {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
-                    <Button
-                      key={name}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs bg-dicom-darker border-dicom-gray hover:bg-dicom-gray hover:border-dicom-yellow text-white transition-all duration-200 hover:scale-105"
-                      onClick={() => applyPreset(preset)}
-                    >
-                      {name.charAt(0).toUpperCase() + name.slice(1)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
