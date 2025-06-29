@@ -504,18 +504,18 @@ export function SeriesSelector({
                               </div>
                             ))}
 
-                            {/* Individual nested structures */}
+                            {/* Individual nested structures below group headers */}
                             {Object.entries(groups).map(([groupName, groupStructures]: [string, any[]]) => 
                               expandedGroups.get(groupName) ? groupStructures.map((structure: any, index: number) => (
                                 <div 
-                                  key={structure.roiNumber}
-                                  className={`flex items-center space-x-2 px-3 py-2 ml-4 hover:bg-gray-800/30 transition-all duration-200 relative border-l-2 border-transparent ${
+                                  key={`nested-${structure.roiNumber}`}
+                                  className={`flex items-center space-x-2 px-3 py-2 ml-4 hover:bg-gray-800/30 transition-all duration-200 relative ${
                                     selectedStructures.has(structure.roiNumber) 
-                                      ? 'bg-yellow-500/10 border-l-yellow-500' 
+                                      ? 'bg-yellow-500/10' 
                                       : ''
                                   } ${
                                     selectedForEdit === structure.roiNumber
-                                      ? 'bg-green-500/20 border-l-green-400'
+                                      ? 'bg-green-500/20 border-l-2 border-green-400'
                                       : ''
                                   }`}
                                 >

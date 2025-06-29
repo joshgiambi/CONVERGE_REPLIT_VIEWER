@@ -8,8 +8,7 @@ import {
   Hand, 
   Ruler, 
   MessageSquare,
-  RotateCw,
-  FlipHorizontal,
+  Edit3,
   Settings,
   Info,
   HelpCircle,
@@ -23,8 +22,8 @@ interface ViewerToolbarProps {
   onPanTool: () => void;
   onMeasureTool: () => void;
   onAnnotateTool: () => void;
-  onRotate: () => void;
-  onFlip: () => void;
+  onContourEdit: () => void;
+  onContourSettings: () => void;
   currentSlice?: number;
   totalSlices?: number;
   windowLevel?: { window: number; level: number };
