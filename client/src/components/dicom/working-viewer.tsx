@@ -763,7 +763,7 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
             onMouseUp={handleCanvasMouseUp}
             onWheel={handleCanvasWheel}
             onContextMenu={(e) => e.preventDefault()}
-            className="max-w-full max-h-full object-contain border border-indigo-700 rounded cursor-move"
+            className="max-w-full max-h-full object-contain rounded cursor-move"
             style={{ 
               backgroundColor: 'black',
               imageRendering: 'auto',
