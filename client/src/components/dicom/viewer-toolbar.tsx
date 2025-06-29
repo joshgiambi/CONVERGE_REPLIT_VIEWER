@@ -13,7 +13,8 @@ import {
   Settings,
   Info,
   HelpCircle,
-  Keyboard
+  Keyboard,
+  Edit
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -28,6 +29,9 @@ interface ViewerToolbarProps {
   currentSlice?: number;
   totalSlices?: number;
   windowLevel?: { window: number; level: number };
+  onContourModeToggle?: () => void;
+  contourMode?: boolean;
+  hasRTStructures?: boolean;
 }
 
 export function ViewerToolbar({
@@ -41,7 +45,10 @@ export function ViewerToolbar({
   onFlip,
   currentSlice,
   totalSlices,
-  windowLevel
+  windowLevel,
+  onContourModeToggle,
+  contourMode = false,
+  hasRTStructures = false
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);

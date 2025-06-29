@@ -4,6 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
+import { ContourEditor } from './contour-editor';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,16 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+  
+  // Contour editing state
+  const [contourMode, setContourMode] = useState<boolean>(false);
+  const [editMode, setEditMode] = useState<'view' | 'brush' | 'eraser'>('view');
+  const [selectedStructure, setSelectedStructure] = useState<number | null>(null);
+  const [brushSettings, setBrushSettings] = useState({
+    size: 10,
+    opacity: 1.0,
+    mode: 'paint' as 'paint' | 'erase'
+  });
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -256,6 +267,26 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
+          onContourModeToggle={() => setContourMode(!contourMode)}
+          contourMode={contourMode}
+          hasRTStructures={!!rtStructures}
+        />
+      )}
+
+      {/* Contour Editor Panel - Only shows when RT structures are loaded and contour mode is active */}
+      {selectedSeries && rtStructures && contourMode && (
+        <ContourEditor
+          seriesId={selectedSeries.id}
+          studyId={studyData.studies[0]?.id}
+          rtStructures={rtStructures}
+          editMode={editMode}
+          onEditModeChange={setEditMode}
+          selectedStructure={selectedStructure}
+          onSelectedStructureChange={setSelectedStructure}
+          brushSettings={brushSettings}
+          onBrushSettingsChange={setBrushSettings}
+          structureVisibility={structureVisibility}
+          onStructureVisibilityChange={handleStructureVisibilityChange}
         />
       )}
 
