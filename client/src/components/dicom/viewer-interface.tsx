@@ -179,10 +179,24 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     setStructureVisibility(visibilityMap);
   };
 
-  // Temporarily disabled for performance
-  // const handleStructureSelection = (structureId: number, selected: boolean) => {
-  //   // Structure selection functionality temporarily disabled
-  // };
+  const handleStructureSelection = (structureId: number, selected: boolean) => {
+    const newSelection = new Set(selectedStructures);
+    if (selected) {
+      newSelection.add(structureId);
+    } else {
+      newSelection.delete(structureId);
+    }
+    setSelectedStructures(newSelection);
+    
+    // Update selected structure colors for viewer border
+    if (rtStructures?.structures) {
+      const colors = Array.from(newSelection).map(id => {
+        const structure = rtStructures.structures.find((s: any) => s.roiNumber === id);
+        return structure ? `rgb(${structure.color.join(',')})` : '';
+      }).filter(Boolean);
+      setSelectedStructureColors(colors);
+    }
+  };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
     setStructureVisibility(prev => new Map(prev.set(structureId, visible)));
@@ -227,20 +241,65 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
             onStructureColorChange={handleStructureColorChange}
+            onStructureSelection={handleStructureSelection}
           />
         </div>
 
-        {/* DICOM Viewer */}
-        <div className="lg:col-span-3">
+        {/* DICOM Viewer with Dynamic Border */}
+        <div className="lg:col-span-3 relative">
           {selectedSeries ? (
-            <WorkingViewer 
-              seriesId={selectedSeries.id}
-              studyId={studyData.studies[0]?.id}
-              windowLevel={windowLevel}
-              onWindowLevelChange={setWindowLevel}
-              rtStructures={rtStructures}
-              structureVisibility={structureVisibility}
-            />
+            <div className="relative h-full">
+              {/* Dynamic Border Based on Selected Structures */}
+              <div 
+                className="absolute inset-0 rounded-lg pointer-events-none"
+                style={{
+                  border: selectedStructureColors.length > 0 
+                    ? `3px solid ${selectedStructureColors[0]}` 
+                    : '1px solid #374151',
+                  background: selectedStructureColors.length > 1 
+                    ? `linear-gradient(45deg, ${selectedStructureColors.join(', ')})` 
+                    : 'transparent',
+                  backgroundClip: selectedStructureColors.length > 1 ? 'padding-box' : 'initial',
+                  zIndex: 1
+                }}
+              />
+              
+              {/* Main Viewer */}
+              <WorkingViewer 
+                seriesId={selectedSeries.id}
+                studyId={studyData.studies[0]?.id}
+                windowLevel={windowLevel}
+                onWindowLevelChange={setWindowLevel}
+                rtStructures={rtStructures}
+                structureVisibility={structureVisibility}
+              />
+              
+              {/* Structure Tags on Right Side */}
+              {selectedStructures.size > 0 && rtStructures?.structures && (
+                <div className="absolute right-4 top-4 space-y-2 z-10">
+                  {Array.from(selectedStructures).map(structureId => {
+                    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+                    if (!structure) return null;
+                    
+                    return (
+                      <div 
+                        key={structureId}
+                        className="flex items-center space-x-2 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border"
+                        style={{ borderColor: `rgb(${structure.color.join(',')})` }}
+                      >
+                        <div 
+                          className="w-3 h-3 rounded-full border border-gray-400"
+                          style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                        />
+                        <span className="text-sm text-white font-medium">
+                          {structure.structureName}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>
