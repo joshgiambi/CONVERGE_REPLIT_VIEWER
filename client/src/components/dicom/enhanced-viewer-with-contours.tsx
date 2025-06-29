@@ -89,6 +89,52 @@ export function EnhancedViewerWithContours({ seriesId, studyId, rtStructures = [
     setStructureVisibility(visibility);
   }, [rtStructures]);
 
+  // Navigation functions
+  const goToPrevious = useCallback(() => {
+    if (currentIndex > 0) {
+      const newIndex = currentIndex - 1;
+      setCurrentIndex(newIndex);
+      if (images[newIndex]) {
+        loadImageData(images[newIndex]);
+      }
+    }
+  }, [currentIndex, images]);
+
+  const goToNext = useCallback(() => {
+    if (currentIndex < images.length - 1) {
+      const newIndex = currentIndex + 1;
+      setCurrentIndex(newIndex);
+      if (images[newIndex]) {
+        loadImageData(images[newIndex]);
+      }
+    }
+  }, [currentIndex, images]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowUp':
+        case 'ArrowLeft':
+          e.preventDefault();
+          goToPrevious();
+          break;
+        case 'ArrowDown':
+        case 'ArrowRight':
+          e.preventDefault();
+          goToNext();
+          break;
+        case ' ':
+          e.preventDefault();
+          // Space bar could toggle play/pause for cine mode
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [goToPrevious, goToNext]);
+
   // Load images with pre-stored metadata
   useEffect(() => {
     const loadImages = async () => {
@@ -374,14 +420,61 @@ export function EnhancedViewerWithContours({ seriesId, studyId, rtStructures = [
 
   // Redraw all contours
   const redrawContours = useCallback(() => {
-    if (!overlayCanvasRef.current) return;
+    if (!overlayCanvasRef.current || !canvasRef.current) return;
     
     const ctx = overlayCanvasRef.current.getContext('2d');
     if (!ctx) return;
     
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
     
-    // Draw all visible contours for current slice
+    const currentImage = images[currentIndex];
+    if (!currentImage) return;
+    
+    // Draw RT structures from DICOM data
+    rtStructures.forEach(structure => {
+      if (!structureVisibility.get(structure.roiNumber)) return;
+      
+      // Find contours for this slice
+      const contours = structure.contours?.filter((contour: any) => {
+        // Match by slice position (Z coordinate)
+        const sliceZ = currentImage.imagePosition?.[2] || currentImage.sliceLocation || 0;
+        return Math.abs(contour.slicePosition - sliceZ) < 1.0; // Within 1mm tolerance
+      }) || [];
+      
+      contours.forEach((contour: any) => {
+        if (contour.points && contour.points.length >= 6) { // At least 3 points (x,y,z each)
+          ctx.strokeStyle = structure.color ? 
+            `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
+            '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          
+          ctx.beginPath();
+          
+          // Convert DICOM coordinates to canvas coordinates
+          for (let i = 0; i < contour.points.length; i += 3) {
+            const x = contour.points[i];
+            const y = contour.points[i + 1];
+            
+            // Convert from DICOM patient coordinates to image pixel coordinates
+            const canvasX = (x - (currentImage.imagePosition?.[0] || 0)) / (currentImage.pixelSpacing?.[0] || 1);
+            const canvasY = (y - (currentImage.imagePosition?.[1] || 0)) / (currentImage.pixelSpacing?.[1] || 1);
+            
+            if (i === 0) {
+              ctx.moveTo(canvasX, canvasY);
+            } else {
+              ctx.lineTo(canvasX, canvasY);
+            }
+          }
+          
+          ctx.closePath();
+          ctx.stroke();
+        }
+      });
+    });
+    
+    // Draw user-created contour segments
     rtStructures.forEach(structure => {
       if (!structureVisibility.get(structure.roiNumber)) return;
       
@@ -404,24 +497,24 @@ export function EnhancedViewerWithContours({ seriesId, studyId, rtStructures = [
         ctx.stroke();
       });
     });
-  }, [contourSegments, currentIndex, rtStructures, structureVisibility]);
+  }, [contourSegments, currentIndex, rtStructures, structureVisibility, images]);
 
   // Navigation functions
-  const goToPrevious = () => {
+  const goToPrevious = useCallback(() => {
     if (currentIndex > 0) {
       const newIndex = currentIndex - 1;
       setCurrentIndex(newIndex);
       loadImageData(images[newIndex]);
     }
-  };
+  }, [currentIndex, images, loadImageData]);
 
-  const goToNext = () => {
+  const goToNext = useCallback(() => {
     if (currentIndex < images.length - 1) {
       const newIndex = currentIndex + 1;
       setCurrentIndex(newIndex);
       loadImageData(images[newIndex]);
     }
-  };
+  }, [currentIndex, images, loadImageData]);
 
   // Undo/Redo functions
   const handleUndo = () => {
