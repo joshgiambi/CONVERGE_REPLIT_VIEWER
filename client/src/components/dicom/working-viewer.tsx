@@ -79,6 +79,24 @@ export function WorkingViewer({
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
+  // Expose zoom functions to external components via global object
+  useEffect(() => {
+    (window as any).currentViewerZoom = {
+      zoomIn: () => setZoom(prev => Math.min(5, prev * 1.25)),
+      zoomOut: () => setZoom(prev => Math.max(0.1, prev * 0.8)),
+      resetZoom: () => {
+        setZoom(1);
+        setPanX(0);
+        setPanY(0);
+      },
+      getCurrentZoom: () => zoom
+    };
+    
+    return () => {
+      delete (window as any).currentViewerZoom;
+    };
+  }, [zoom]);
+
   // Load DICOM parser library
   const loadDicomParser = useCallback((): Promise<void> => {
     return new Promise((resolve, reject) => {

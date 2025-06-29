@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
-import { EnhancedViewerWithContours } from './enhanced-viewer-with-contours';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
-import { ContourEditorPanel } from './contour-editor-panel';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { Button } from '@/components/ui/button';
@@ -23,15 +21,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
   
-  // Contour editing state
-  const [contourMode, setContourMode] = useState<boolean>(false);
-  const [editMode, setEditMode] = useState<'view' | 'brush' | 'eraser' | 'polygon'>('view');
+  // Structure selection state
   const [selectedStructure, setSelectedStructure] = useState<number | null>(null);
-  const [brushSettings, setBrushSettings] = useState({
-    size: 10,
-    opacity: 1.0,
-    mode: 'paint' as 'paint' | 'erase'
-  });
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -194,8 +185,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     });
     setStructureVisibility(visibilityMap);
     
-    // Auto-launch contour editing when RT structures are loaded
-    setContourMode(true);
     // Select the first structure by default
     if (rtStructData.structures.length > 0) {
       setSelectedStructure(rtStructData.structures[0].roiNumber);
@@ -230,108 +219,47 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
 
   return (
     <div className="animate-in fade-in-50 duration-500">
-      {/* Three-column layout when contour editor is active */}
-      {contourMode && rtStructures ? (
-        <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
-          {/* Series Selector - Left Sidebar */}
-          <div className="w-80 flex-shrink-0">
-            <SeriesSelector
-              series={series}
-              selectedSeries={selectedSeries}
-              onSeriesSelect={handleSeriesSelect}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
+        {/* Series Selector */}
+        <div className="lg:col-span-1">
+          <SeriesSelector
+            series={series}
+            selectedSeries={selectedSeries}
+            onSeriesSelect={handleSeriesSelect}
+            windowLevel={windowLevel}
+            onWindowLevelChange={setWindowLevel}
+            studyId={studyData.studies[0]?.id}
+            rtStructures={rtStructures}
+            onRTStructureLoad={handleRTStructureLoad}
+            onStructureVisibilityChange={handleStructureVisibilityChange}
+            onStructureColorChange={handleStructureColorChange}
+            selectedStructure={selectedStructure}
+            onSelectedStructureChange={setSelectedStructure}
+          />
+        </div>
+
+        {/* DICOM Viewer */}
+        <div className="lg:col-span-3">
+          {selectedSeries ? (
+            <WorkingViewer 
+              seriesId={selectedSeries.id}
+              studyId={studyData.studies[0]?.id}
               windowLevel={windowLevel}
               onWindowLevelChange={setWindowLevel}
-              studyId={studyData.studies[0]?.id}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onResetZoom={handleResetZoom}
               rtStructures={rtStructures}
-              onRTStructureLoad={handleRTStructureLoad}
-              onStructureVisibilityChange={handleStructureVisibilityChange}
-              onStructureColorChange={handleStructureColorChange}
-              selectedStructure={selectedStructure}
-              onSelectedStructureChange={setSelectedStructure}
-              editMode={editMode}
-            />
-          </div>
-
-          {/* DICOM Viewer - Center */}
-          <div className="flex-1">
-            {selectedSeries ? (
-              <WorkingViewer 
-                seriesId={selectedSeries.id}
-                studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-                selectedStructure={selectedStructure}
-                editMode={editMode}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
-                <p className="text-indigo-400">Select a series to view DICOM images</p>
-              </div>
-            )}
-          </div>
-
-          {/* Contour Editor - Right Sidebar */}
-          <div className="w-80 flex-shrink-0">
-            <ContourEditorPanel
-              seriesId={selectedSeries?.id || 0}
-              studyId={studyData.studies[0]?.id}
-              rtStructures={rtStructures}
-              selectedStructure={selectedStructure}
-              onSelectedStructureChange={setSelectedStructure}
-              editMode={editMode}
-              onEditModeChange={setEditMode}
-              brushSettings={brushSettings}
-              onBrushSettingsChange={setBrushSettings}
               structureVisibility={structureVisibility}
-              onStructureVisibilityChange={handleStructureVisibilityChange}
-            />
-          </div>
-        </div>
-      ) : (
-        /* Two-column layout when contour editor is not active */
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
-          {/* Series Selector */}
-          <div className="lg:col-span-1">
-            <SeriesSelector
-              series={series}
-              selectedSeries={selectedSeries}
-              onSeriesSelect={handleSeriesSelect}
-              windowLevel={windowLevel}
-              onWindowLevelChange={setWindowLevel}
-              studyId={studyData.studies[0]?.id}
-              rtStructures={rtStructures}
-              onRTStructureLoad={handleRTStructureLoad}
-              onStructureVisibilityChange={handleStructureVisibilityChange}
-              onStructureColorChange={handleStructureColorChange}
               selectedStructure={selectedStructure}
-              onSelectedStructureChange={setSelectedStructure}
-              editMode={editMode}
             />
-          </div>
-
-          {/* DICOM Viewer */}
-          <div className="lg:col-span-3">
-            {selectedSeries ? (
-              <WorkingViewer 
-                seriesId={selectedSeries.id}
-                studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-                selectedStructure={selectedStructure}
-                editMode={editMode}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
-                <p className="text-indigo-400">Select a series to view DICOM images</p>
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
+              <p className="text-indigo-400">Select a series to view DICOM images</p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Floating Toolbar */}
       {selectedSeries && (
@@ -347,8 +275,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
-          onContourModeToggle={() => setContourMode(!contourMode)}
-          contourMode={contourMode}
           hasRTStructures={!!rtStructures}
         />
       )}
