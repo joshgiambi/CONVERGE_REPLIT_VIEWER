@@ -244,6 +244,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
               onWindowLevelChange={setWindowLevel}
               rtStructures={rtStructures}
               structureVisibility={structureVisibility}
+              selectedStructure={selectedStructure}
+              editMode={editMode}
             />
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">

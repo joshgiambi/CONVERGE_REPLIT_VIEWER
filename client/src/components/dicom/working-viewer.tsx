@@ -14,6 +14,8 @@ interface WorkingViewerProps {
   onResetZoom?: () => void;
   rtStructures?: any;
   structureVisibility?: Map<number, boolean>;
+  selectedStructure?: number | null;
+  editMode?: 'view' | 'brush' | 'eraser' | 'polygon';
 }
 
 export function WorkingViewer({ 
@@ -25,7 +27,9 @@ export function WorkingViewer({
   onZoomOut, 
   onResetZoom, 
   rtStructures: externalRTStructures, 
-  structureVisibility: externalStructureVisibility 
+  structureVisibility: externalStructureVisibility,
+  selectedStructure,
+  editMode = 'view'
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -39,6 +43,18 @@ export function WorkingViewer({
   const rtStructures = externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
+
+  // Get selected structure info for border styling
+  const getSelectedStructureInfo = () => {
+    if (!selectedStructure || !rtStructures?.structures) return null;
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    return structure ? {
+      name: structure.structureName,
+      color: `rgb(${structure.color.join(',')})`
+    } : null;
+  };
+
+  const selectedStructureInfo = getSelectedStructureInfo();
 
   // Convert external window/level format to internal width/center format
   const currentWindowLevel = externalWindowLevel 
@@ -510,18 +526,42 @@ export function WorkingViewer({
           </div>
         </div>
         
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={600}
-          className="border border-gray-300 cursor-grab active:cursor-grabbing"
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseUp}
-          onWheel={handleCanvasWheel}
-          onContextMenu={(e) => e.preventDefault()}
-        />
+        <div className="relative">
+          {/* Structure editing label */}
+          {selectedStructureInfo && editMode !== 'view' && (
+            <div 
+              className="absolute top-2 left-2 z-10 px-3 py-1 rounded-md text-sm font-medium text-white shadow-lg"
+              style={{ 
+                backgroundColor: selectedStructureInfo.color,
+                border: `2px solid ${selectedStructureInfo.color}`
+              }}
+            >
+              Editing: {selectedStructureInfo.name}
+            </div>
+          )}
+          
+          <canvas
+            ref={canvasRef}
+            width={800}
+            height={600}
+            className={`cursor-grab active:cursor-grabbing transition-all duration-200 ${
+              selectedStructureInfo && editMode !== 'view' 
+                ? 'border-4' 
+                : 'border border-gray-300'
+            }`}
+            style={{
+              borderColor: selectedStructureInfo && editMode !== 'view' 
+                ? selectedStructureInfo.color 
+                : undefined
+            }}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseUp}
+            onWheel={handleCanvasWheel}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+        </div>
       </Card>
     </div>
   );
