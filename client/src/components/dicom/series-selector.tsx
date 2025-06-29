@@ -20,6 +20,7 @@ interface SeriesSelectorProps {
   onRTStructureLoad?: (rtStructures: any) => void;
   onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
   onStructureColorChange?: (structureId: number, color: [number, number, number]) => void;
+  onStructureSelection?: (structureId: number, selected: boolean) => void;
 }
 
 export function SeriesSelector({
@@ -32,7 +33,8 @@ export function SeriesSelector({
   rtStructures,
   onRTStructureLoad,
   onStructureVisibilityChange,
-  onStructureColorChange
+  onStructureColorChange,
+  onStructureSelection
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -100,8 +102,13 @@ export function SeriesSelector({
 
   const handleStructureSelectionToggle = (structureId: number) => {
     const newSelection = new Map(structureSelection);
-    newSelection.set(structureId, !newSelection.get(structureId));
+    const isSelected = !newSelection.get(structureId);
+    newSelection.set(structureId, isSelected);
     setStructureSelection(newSelection);
+    
+    if (onStructureSelection) {
+      onStructureSelection(structureId, isSelected);
+    }
   };
 
   const handleDeleteStructure = (structureId: number) => {

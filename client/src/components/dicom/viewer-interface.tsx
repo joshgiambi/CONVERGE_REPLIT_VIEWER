@@ -20,6 +20,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+  const [selectedStructures, setSelectedStructures] = useState<any[]>([]);
+  const [showOperations, setShowOperations] = useState(false);
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
@@ -177,6 +179,27 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     setStructureVisibility(visibilityMap);
   };
 
+  const handleStructureSelection = (structureId: number, selected: boolean) => {
+    if (!rtStructures?.structures) return;
+
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) return;
+
+    if (selected) {
+      // Add structure to selection
+      setSelectedStructures(prev => {
+        const exists = prev.some(s => s.roiNumber === structureId);
+        if (!exists) {
+          return [...prev, structure];
+        }
+        return prev;
+      });
+    } else {
+      // Remove structure from selection
+      setSelectedStructures(prev => prev.filter(s => s.roiNumber !== structureId));
+    }
+  };
+
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
     setStructureVisibility(prev => new Map(prev.set(structureId, visible)));
   };
@@ -220,6 +243,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
             onStructureColorChange={handleStructureColorChange}
+            onStructureSelection={handleStructureSelection}
           />
         </div>
 
