@@ -89,6 +89,16 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
+- June 29, 2025: Professional Contour Editing with Brush Tools - COMPLETED
+  - ✅ Implemented comprehensive contour editing system modeled after MIM Maestro
+  - ✅ Added brush and eraser tools with customizable size and opacity settings
+  - ✅ Created real-time stroke preview with medical-grade precision
+  - ✅ Integrated undo/redo functionality for safe editing workflows
+  - ✅ Added structure visibility controls and color-coded anatomical overlays
+  - ✅ Implemented contour persistence with JSON-based storage system
+  - ✅ Created dedicated contour editor page with professional medical interface
+  - ✅ Added navigation buttons from patient cards to access brush editing tools
+  - ✅ Optimized for radiation therapy planning and diagnostic workflows
 - June 29, 2025: Instant CT Scan Loading Optimization - COMPLETED
   - ✅ Implemented database-stored DICOM metadata for instant viewer loading
   - ✅ Added comprehensive range request support for efficient file serving
