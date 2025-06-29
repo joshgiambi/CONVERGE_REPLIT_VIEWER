@@ -6,17 +6,9 @@ import { storage } from "./storage";
 import { Server } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
+import { generateUID, isDICOMFile, getTagString, getTagArray, extractTag } from '../shared/utils';
 
 const upload = multer({ dest: 'uploads/' });
-
-function isDICOMFile(filePath: string): boolean {
-  try {
-    const buffer = fs.readFileSync(filePath, { start: 128, end: 132 } as any);
-    return buffer.toString() === 'DICM';
-  } catch {
-    return false;
-  }
-}
 
 function extractDICOMMetadata(filePath: string) {
   try {
@@ -26,22 +18,6 @@ function extractDICOMMetadata(filePath: string) {
       untilTag: 'x7fe00010', // stop before pixel data
       stopAtPixelData: true
     });
-
-    const getString = (tag: string) => {
-      try {
-        return dataSet.string(tag)?.trim() || null;
-      } catch {
-        return null;
-      }
-    };
-
-    const getArray = (tag: string) => {
-      try {
-        return getString(tag)?.split('\\').map(Number) || null;
-      } catch {
-        return null;
-      }
-    };
 
     return {
       patientName: getString('x00100010'),
