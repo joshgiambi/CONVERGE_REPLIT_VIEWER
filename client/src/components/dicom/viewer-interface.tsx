@@ -22,6 +22,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
   const [selectedStructures, setSelectedStructures] = useState<Set<number>>(new Set());
   const [selectedStructureColors, setSelectedStructureColors] = useState<string[]>([]);
+  const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
+  const [isContourEditMode, setIsContourEditMode] = useState(false);
+  const [contourSettings, setContourSettings] = useState({ thickness: 2, opacity: 0.8 });
 
   // Fetch series data for the study
   const { data: seriesData, isLoading } = useQuery({
