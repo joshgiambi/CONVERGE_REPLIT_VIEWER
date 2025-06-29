@@ -405,6 +405,10 @@ export function SeriesSelector({
                                 selectedStructures.has(structure.roiNumber) 
                                   ? 'border-yellow-500 bg-yellow-500/10' 
                                   : 'border-gray-700'
+                              } ${
+                                selectedForEdit === structure.roiNumber
+                                  ? 'bg-blue-500/20 border-l-2 border-blue-400'
+                                  : ''
                               }`}
                             >
                               <Checkbox
@@ -428,7 +432,10 @@ export function SeriesSelector({
                                 className="w-4 h-4 rounded border border-gray-400"
                                 style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                               />
-                              <span className="text-sm text-white font-medium flex-1 truncate">
+                              <span 
+                                className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-blue-300 transition-colors"
+                                onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                              >
                                 {structure.structureName}
                               </span>
                               <Button
@@ -534,7 +541,10 @@ export function SeriesSelector({
                                           className="w-4 h-4 rounded border border-gray-400"
                                           style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                         />
-                                        <span className="text-sm text-white font-medium flex-1 truncate">
+                                        <span 
+                                          className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-blue-300 transition-colors"
+                                          onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                                        >
                                           {structure.structureName}
                                         </span>
                                         <Button
@@ -560,6 +570,10 @@ export function SeriesSelector({
                                   selectedStructures.has(structure.roiNumber) 
                                     ? 'border-yellow-500 bg-yellow-500/10' 
                                     : 'border-gray-700'
+                                } ${
+                                  selectedForEdit === structure.roiNumber
+                                    ? 'bg-blue-500/20 border-l-2 border-blue-400'
+                                    : ''
                                 }`}
                               >
                                 <Checkbox
@@ -583,7 +597,10 @@ export function SeriesSelector({
                                   className="w-4 h-4 rounded border border-gray-400"
                                   style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                 />
-                                <span className="text-sm text-white font-medium flex-1 truncate">
+                                <span 
+                                  className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-blue-300 transition-colors"
+                                  onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                                >
                                   {structure.structureName}
                                 </span>
                                 <Button
