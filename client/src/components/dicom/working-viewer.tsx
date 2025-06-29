@@ -311,7 +311,7 @@ export function WorkingViewer({
     
   }, [images, currentIndex, imageCache, parseDicomImage, currentWindowLevel, zoom, panX, panY, showStructures, rtStructures, structureVisibility]);
 
-  // Draw RT structures overlay
+  // Draw RT structures overlay with proper coordinate transformation
   const drawRTStructures = useCallback((
     ctx: CanvasRenderingContext2D,
     canvasWidth: number,
@@ -328,50 +328,58 @@ export function WorkingViewer({
     const currentImage = images[currentIndex];
     if (!currentImage) return;
     
-    // Get structures array from rtStructures (it's an object with a structures property)
+    // Get structures array from rtStructures
     const structures = rtStructures.structures || [];
     if (!Array.isArray(structures)) return;
+    
+    // Get current slice Z position for matching contours
+    const currentSliceZ = currentImage.imagePosition?.[2] || currentImage.sliceLocation || 0;
     
     // Draw structures for current slice
     structures.forEach((structure: any) => {
       if (!structureVisibility.get(structure.roiNumber)) return;
       
       const contours = structure.contours || [];
+      
       contours.forEach((contour: any) => {
-        if (!contour.points || contour.points.length === 0) return;
+        // Match contour to current slice within 1mm tolerance
+        if (Math.abs(contour.slicePosition - currentSliceZ) > 1.0) return;
+        
+        if (!contour.points || contour.points.length < 6) return; // Need at least 3 points (x,y,z each)
         
         ctx.beginPath();
-        ctx.strokeStyle = `rgb(${structure.color?.join(',') || '255,0,0'})`;
-        ctx.fillStyle = `rgba(${structure.color?.join(',') || '255,0,0'}, 0.2)`;
+        ctx.strokeStyle = structure.color ? 
+          `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
+          '#00ff00';
+        ctx.fillStyle = structure.color ? 
+          `rgba(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]}, 0.2)` : 
+          'rgba(0, 255, 0, 0.2)';
         ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
-        contour.points.forEach((point: any, i: number) => {
-          let dicomX, dicomY;
+        // Process DICOM contour points (x,y,z format)
+        for (let i = 0; i < contour.points.length; i += 3) {
+          const dicomX = contour.points[i];
+          const dicomY = contour.points[i + 1];
           
-          // Handle different point formats
-          if (Array.isArray(point) && point.length >= 2) {
-            [dicomX, dicomY] = point;
-          } else if (point && typeof point === 'object' && 'x' in point && 'y' in point) {
-            dicomX = point.x;
-            dicomY = point.y;
-          } else {
-            console.warn('Invalid point format:', point);
-            return;
-          }
+          // Convert DICOM patient coordinates to image pixel coordinates
+          const imageOrigin = currentImage.imagePosition || [0, 0, 0];
+          const pixelSpacing = currentImage.pixelSpacing || [1, 1];
           
-          // Transform DICOM coordinates to pixel coordinates
-          const pixelX = imageWidth - (dicomX * 0.8 + imageWidth / 2);
-          const pixelY = dicomY * 0.8 + imageHeight / 2;
+          const pixelX = (dicomX - imageOrigin[0]) / pixelSpacing[0];
+          const pixelY = (dicomY - imageOrigin[1]) / pixelSpacing[1];
           
-          const canvasX = imageX + (pixelX * zoom);
-          const canvasY = imageY + (pixelY * zoom);
+          // Transform to canvas coordinates with zoom and pan
+          const canvasX = imageX + (pixelX / imageWidth) * scaledWidth;
+          const canvasY = imageY + (pixelY / imageHeight) * scaledHeight;
           
           if (i === 0) {
             ctx.moveTo(canvasX, canvasY);
           } else {
             ctx.lineTo(canvasX, canvasY);
           }
-        });
+        }
         
         ctx.closePath();
         ctx.fill();
