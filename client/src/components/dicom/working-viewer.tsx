@@ -350,20 +350,19 @@ export function WorkingViewer({
     const structures = rtStructures.structures || [];
     if (!Array.isArray(structures)) return;
     
-    console.log('Drawing RT structures:', structures.length, 'structures for slice', currentIndex);
-    
     // Draw structures for current slice
     structures.forEach((structure: any) => {
       if (!structureVisibility.get(structure.roiNumber)) return;
       
-      console.log('Drawing structure:', structure.structureName, 'contours:', structure.contours?.length);
-      
       const contours = structure.contours || [];
       
       contours.forEach((contour: any, contourIndex: number) => {
-        if (!contour.points || contour.points.length === 0) return;
+        if (!contour.points || contour.points.length < 6) return;
         
-        // Draw all contours for testing - remove slice matching for now
+        // Match contour to current slice within 1mm tolerance
+        const currentSliceZ = currentImage.imagePosition?.[2] || currentImage.sliceLocation || 0;
+        if (Math.abs(contour.slicePosition - currentSliceZ) > 1.0) return;
+        
         ctx.beginPath();
         ctx.strokeStyle = structure.color ? 
           `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})` : 
@@ -371,37 +370,28 @@ export function WorkingViewer({
         ctx.fillStyle = structure.color ? 
           `rgba(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]}, 0.2)` : 
           'rgba(0, 255, 0, 0.2)';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         
-        let hasValidPoints = false;
-        
         // Handle DICOM contour format (x,y,z triplets)
-        if (contour.points.length >= 6 && contour.points.length % 3 === 0) {
-          for (let i = 0; i < contour.points.length; i += 3) {
-            const x = contour.points[i];
-            const y = contour.points[i + 1];
-            
-            // Simple coordinate transformation - scale and center
-            const canvasX = imageX + (x / 500) * scaledWidth + scaledWidth / 4;
-            const canvasY = imageY + (y / 500) * scaledHeight + scaledHeight / 4;
-            
-            if (i === 0) {
-              ctx.moveTo(canvasX, canvasY);
-              hasValidPoints = true;
-            } else {
-              ctx.lineTo(canvasX, canvasY);
-            }
+        for (let i = 0; i < contour.points.length; i += 3) {
+          const x = contour.points[i];
+          const y = contour.points[i + 1];
+          
+          // Convert from DICOM patient coordinates to image pixel coordinates
+          const canvasX = (x - (currentImage.imagePosition?.[0] || 0)) / (currentImage.pixelSpacing?.[0] || 1);
+          const canvasY = (y - (currentImage.imagePosition?.[1] || 0)) / (currentImage.pixelSpacing?.[1] || 1);
+          
+          if (i === 0) {
+            ctx.moveTo(canvasX, canvasY);
+          } else {
+            ctx.lineTo(canvasX, canvasY);
           }
         }
         
-        if (hasValidPoints) {
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          console.log('Drew contour', contourIndex, 'for structure', structure.structureName);
-        }
+        ctx.closePath();
+        ctx.stroke();
       });
     });
   }, [images, currentIndex, zoom, rtStructures, structureVisibility]);
