@@ -718,6 +718,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save edited contours
+  app.post("/api/contours/save", async (req: Request, res: Response) => {
+    try {
+      const { contours, studyId } = req.body;
+      
+      // Store contour edits in database or file system
+      // For now, we'll save to a JSON file per study
+      const contoursPath = path.join(__dirname, '../uploads/contours');
+      if (!fs.existsSync(contoursPath)) {
+        fs.mkdirSync(contoursPath, { recursive: true });
+      }
+      
+      const contourFile = path.join(contoursPath, `study_${studyId}_contours.json`);
+      fs.writeFileSync(contourFile, JSON.stringify(contours, null, 2));
+      
+      res.json({ success: true, message: 'Contours saved successfully' });
+    } catch (error) {
+      console.error('Error saving contours:', error);
+      res.status(500).json({ message: 'Failed to save contours' });
+    }
+  });
+
+  // Load edited contours
+  app.get("/api/contours/:studyId", async (req: Request, res: Response) => {
+    try {
+      const { studyId } = req.params;
+      const contourFile = path.join(__dirname, '../uploads/contours', `study_${studyId}_contours.json`);
+      
+      if (fs.existsSync(contourFile)) {
+        const contours = JSON.parse(fs.readFileSync(contourFile, 'utf-8'));
+        res.json(contours);
+      } else {
+        res.json([]);
+      }
+    } catch (error) {
+      console.error('Error loading contours:', error);
+      res.status(500).json({ message: 'Failed to load contours' });
+    }
+  });
+
   // Get RT Structure Set for a study
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {
