@@ -6,34 +6,56 @@ import { storage } from "./storage";
 import { Server } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
-import { generateUID, isDICOMFile, getTagString, getTagArray, extractTag } from '../shared/utils';
 
 const upload = multer({ dest: 'uploads/' });
 
-// Cache for DICOM metadata to speed up CT scan loading
-const metadataCache = new Map<string, any>();
+function isDICOMFile(filePath: string): boolean {
+  try {
+    const buffer = fs.readFileSync(filePath, { start: 128, end: 132 } as any);
+    return buffer.toString() === 'DICM';
+  } catch {
+    return false;
+  }
+}
 
 function extractDICOMMetadata(filePath: string) {
   try {
     const buffer = fs.readFileSync(filePath);
     const byteArray = new Uint8Array(buffer);
     const dataSet = dicomParser.parseDicom(byteArray, {
-      untilTag: 'x7fe00010' // stop before pixel data
+      untilTag: 'x7fe00010', // stop before pixel data
+      stopAtPixelData: true
     });
 
+    const getString = (tag: string) => {
+      try {
+        return dataSet.string(tag)?.trim() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    const getArray = (tag: string) => {
+      try {
+        return getString(tag)?.split('\\').map(Number) || null;
+      } catch {
+        return null;
+      }
+    };
+
     return {
-      patientName: getTagString(dataSet, 'x00100010'),
-      patientID: getTagString(dataSet, 'x00100020'),
-      studyInstanceUID: getTagString(dataSet, 'x0020000d'),
-      seriesInstanceUID: getTagString(dataSet, 'x0020000e'),
-      sopInstanceUID: getTagString(dataSet, 'x00080018'),
-      modality: getTagString(dataSet, 'x00080060'),
-      studyDate: getTagString(dataSet, 'x00080020'),
-      seriesDescription: getTagString(dataSet, 'x0008103e'),
-      instanceNumber: getTagString(dataSet, 'x00200013'),
-      pixelSpacing: getTagArray(dataSet, 'x00280030'),             // [rowSpacing, colSpacing]
-      imagePositionPatient: getTagArray(dataSet, 'x00200032'),     // [x, y, z]
-      imageOrientationPatient: getTagArray(dataSet, 'x00200037')   // [rx, ry, rz, cx, cy, cz]
+      patientName: getString('x00100010'),
+      patientID: getString('x00100020'),
+      studyInstanceUID: getString('x0020000d'),
+      seriesInstanceUID: getString('x0020000e'),
+      sopInstanceUID: getString('x00080018'),
+      modality: getString('x00080060'),
+      studyDate: getString('x00080020'),
+      seriesDescription: getString('x0008103e'),
+      instanceNumber: getString('x00200013'),
+      pixelSpacing: getArray('x00280030'),             // [rowSpacing, colSpacing]
+      imagePositionPatient: getArray('x00200032'),     // [x, y, z]
+      imageOrientationPatient: getArray('x00200037')   // [rx, ry, rz, cx, cy, cz]
     };
   } catch (error) {
     console.error('DICOM parse error:', error);
@@ -41,7 +63,37 @@ function extractDICOMMetadata(filePath: string) {
   }
 }
 
+function getTagString(dataSet: any, tag: string): string | null {
+  try {
+    return dataSet.string(tag)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
+function getTagArray(dataSet: any, tag: string): number[] | null {
+  try {
+    const value = dataSet.string(tag);
+    return value ? value.split('\\').map(Number) : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractTag(buffer: Buffer, tag: string): string | null {
+  try {
+    const byteArray = new Uint8Array(buffer);
+    const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+    return getTagString(dataSet, tag);
+  } catch (error: any) {
+    console.warn(`Failed to extract DICOM tag ${tag}:`, error.message);
+    return null;
+  }
+}
+
+function generateUID(): string {
+  return `2.16.840.1.114362.1.11932039.${Date.now()}.${Math.floor(Math.random() * 10000)}`;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -211,31 +263,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fs.copyFileSync(sourcePath, demoPath);
         const fileStats = fs.statSync(demoPath);
         
-        // Extract comprehensive DICOM metadata at import time
-        const dicomMetadata = extractDICOMMetadata(demoPath);
-        
-        // Extract instance number from filename as fallback
+        // Extract instance number from filename
         const instanceMatch = fileName.match(/\.(\d+)\.dcm$/);
-        const instanceNumber = dicomMetadata?.instanceNumber ? parseInt(dicomMetadata.instanceNumber) : (instanceMatch ? parseInt(instanceMatch[1]) : i + 1);
+        const instanceNumber = instanceMatch ? parseInt(instanceMatch[1]) : i + 1;
         
         const image = await storage.createImage({
           seriesId: ctSeries.id,
-          sopInstanceUID: dicomMetadata?.sopInstanceUID || generateUID(),
+          sopInstanceUID: generateUID(),
           instanceNumber: instanceNumber,
           filePath: demoPath,
           fileName: fileName,
           fileSize: fileStats.size,
-          imagePosition: dicomMetadata?.imagePositionPatient ? dicomMetadata.imagePositionPatient.join('\\') : null,
-          imageOrientation: dicomMetadata?.imageOrientationPatient ? dicomMetadata.imageOrientationPatient.join('\\') : null,
-          pixelSpacing: dicomMetadata?.pixelSpacing ? dicomMetadata.pixelSpacing.join('\\') : '1.171875\\1.171875',
-          sliceLocation: dicomMetadata?.imagePositionPatient ? dicomMetadata.imagePositionPatient[2].toString() : `${instanceNumber * 2.5}`,
-          windowCenter: '40',
-          windowWidth: '100',
+          imagePosition: null,
+          imageOrientation: null,
+          pixelSpacing: '0.488\\0.488',
+          sliceLocation: `${instanceNumber * 3.0}`,
+          windowCenter: '50',
+          windowWidth: '350',
           metadata: {
             source: 'HN-ATLAS-84',
             anatomy: 'Head & Neck',
-            contrast: true,
-            dicomTags: dicomMetadata
+            contrast: true
           },
         });
         ctImages.push(image);
@@ -321,11 +369,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
   
-  // Serve DICOM files with range request support for fast metadata extraction
+  // Serve DICOM files
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
     try {
       const sopInstanceUID = req.params.sopInstanceUID;
-      const image = await storage.getImageBySopInstanceUID(sopInstanceUID);
+      const image = await storage.getImageByUID(sopInstanceUID);
       
       if (!image) {
         return res.status(404).json({ message: "Image not found" });
@@ -336,41 +384,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Image file not found on disk" });
       }
       
-      const stat = fs.statSync(image.filePath);
-      const fileSize = stat.size;
+      // Set appropriate headers for DICOM files
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
       
-      // Handle range requests for fast metadata extraction
-      const range = req.headers.range;
-      if (range) {
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 2048, fileSize - 1);
-        
-        if (start >= fileSize) {
-          res.status(416).send('Requested Range Not Satisfiable');
-          return;
-        }
-        
-        const chunksize = (end - start) + 1;
-        const file = fs.createReadStream(image.filePath, { start, end });
-        
-        res.status(206);
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Length', chunksize);
-        res.setHeader('Content-Type', 'application/dicom');
-        
-        file.pipe(res);
-      } else {
-        // Serve full file for actual image display
-        res.setHeader('Content-Type', 'application/dicom');
-        res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
-        res.setHeader('Content-Length', fileSize);
-        res.setHeader('Accept-Ranges', 'bytes');
-        
-        const fileStream = fs.createReadStream(image.filePath);
-        fileStream.pipe(res);
-      }
+      // Stream the file
+      const fileStream = fs.createReadStream(image.filePath);
+      fileStream.pipe(res);
       
     } catch (error) {
       console.error('Error serving DICOM file:', error);
@@ -606,49 +626,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get images for a series with pre-stored metadata for instant loading
-  app.get("/api/series/:seriesId/images", async (req, res) => {
-    try {
-      const seriesId = parseInt(req.params.seriesId);
-      const images = await storage.getImagesBySeriesId(seriesId);
-      
-      // Transform to include metadata needed for viewer with instant loading
-      const imagesWithMetadata = images.map((image: any) => ({
-        id: image.sopInstanceUID,
-        sopInstanceUID: image.sopInstanceUID,
-        instanceNumber: image.instanceNumber,
-        fileName: image.fileName,
-        filePath: image.filePath,
-        parsedSliceLocation: image.sliceLocation ? parseFloat(image.sliceLocation) : null,
-        parsedZPosition: image.imagePosition && typeof image.imagePosition === 'string' ? parseFloat(image.imagePosition.split('\\')[2]) : null,
-        parsedInstanceNumber: image.instanceNumber,
-        imagePosition: image.imagePosition,
-        imageOrientation: image.imageOrientation,
-        pixelSpacing: image.pixelSpacing,
-        windowCenter: image.windowCenter ? parseFloat(image.windowCenter) : 40,
-        windowWidth: image.windowWidth ? parseFloat(image.windowWidth) : 100,
-        metadata: image.metadata
-      }));
-      
-      // Sort by anatomical position for proper viewing order
-      imagesWithMetadata.sort((a, b) => {
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        } else if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
-        } else if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-        return 0;
-      });
-      
-      res.json(imagesWithMetadata);
-    } catch (error) {
-      console.error('Error getting series images:', error);
-      res.status(500).json({ message: "Failed to get series images" });
-    }
-  });
-
   app.get("/api/studies/:id/series", async (req, res) => {
     try {
       const series = await storage.getSeriesByStudyId(parseInt(req.params.id));
@@ -662,17 +639,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const imageId = req.params.imageId;
-      // Try to get by SOP Instance UID first, then by ID
-      let image;
-      if (imageId.includes('.')) {
-        image = await storage.getImageBySopInstanceUID(imageId);
-      } else {
-        const numericId = parseInt(imageId);
-        if (!isNaN(numericId)) {
-          image = await storage.getImage(numericId);
-        }
-      }
+      const imageId = parseInt(req.params.imageId);
+      const image = await storage.getImage(imageId);
       
       if (!image) {
         return res.status(404).json({ error: 'Image not found' });

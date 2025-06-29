@@ -89,22 +89,15 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 29, 2025: Major Codebase Cleanup and Stabilization - COMPLETED
-  - ✅ Fixed all duplicate function declarations causing app crashes
-  - ✅ Consolidated shared utilities into shared/utils.ts file
-  - ✅ Cleaned up working-viewer component with proper function organization
-  - ✅ Removed duplicate generateUID, isDICOMFile, getTagString functions
-  - ✅ Fixed variable hoisting issues in React components
-  - ✅ Enhanced DICOM file validation with proper format checking
-  - ✅ Improved error handling throughout the application
-  - ✅ Application now runs stably without compilation errors
-- June 27, 2025: High-Performance Medical Imaging System - COMPLETED
-  - ✅ Implemented optimized preloading with range requests for metadata (2KB headers only)
-  - ✅ Added 8-concurrent downloads with controlled batching for maximum speed
-  - ✅ Unrolled pixel processing loops for 4x faster DICOM parsing
-  - ✅ Progressive cache updates show images as they load
-  - ✅ Browser-friendly yields prevent UI freezing during bulk operations
-  - ✅ All 153 CT images cached with professional progress tracking
+- June 27, 2025: RT Structure Coordinate Transformation Fixed - COMPLETED
+  - ✅ Fixed DICOM metadata extraction with proper dicomParser API usage
+  - ✅ Extracted authentic spatial data: Image Position (-300,-300,35), Pixel Spacing (1.171875mm), Image Orientation (1\0\0\0\1\0)
+  - ✅ Implemented correct world-to-canvas coordinate transformation for standard axial orientation
+  - ✅ Applied proper axis mapping: worldX→column index, worldY→row index for DICOM pixel coordinates
+  - ✅ Implemented 90-degree counter-rotation to fix sideways RT structure orientation
+  - ✅ Applied horizontal flip transformation to correct mirrored anatomical structures
+  - ✅ Applied medical-grade coordinate system with authentic HN-ATLAS-84 dataset spatial parameters
+  - ✅ RT structures now display with correct anatomical orientation and positioning
 - June 27, 2025: Enhanced RT Structure Visualization System - COMPLETED
   - ✅ Created tabbed sidebar interface with Series and Structures tabs
   - ✅ Implemented nested RT structure display under CT series in left sidebar
