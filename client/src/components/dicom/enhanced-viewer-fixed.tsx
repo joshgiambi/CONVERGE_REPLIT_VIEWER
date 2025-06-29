@@ -32,12 +32,12 @@ interface BrushSettings {
 }
 
 interface EnhancedViewerProps {
-  seriesId: number;
-  studyId?: number;
-  rtStructures?: any[];
+  seriesId: string;
+  studyId: string;
+  rtStructures: RTStructureContour[];
 }
 
-export function EnhancedViewerWithContours({ seriesId, studyId, rtStructures = [] }: EnhancedViewerProps) {
+export function EnhancedViewerFixed({ seriesId, studyId, rtStructures }: EnhancedViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   
