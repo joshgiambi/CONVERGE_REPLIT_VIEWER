@@ -219,17 +219,10 @@ export function WorkingViewer({
     }
   }, [seriesId, loadDicomParser]);
 
-  // Load image metadata
+  // Load image metadata - skip this since we have pre-processed metadata
   const loadImageMetadata = useCallback(async (imageId: string) => {
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`);
-      if (response.ok) {
-        const metadata = await response.json();
-        // Store metadata if needed
-      }
-    } catch (error) {
-      console.warn('Failed to load image metadata:', error);
-    }
+    // Skip metadata fetching as images already contain processed metadata
+    return;
   }, []);
 
   // Display current image on canvas

@@ -255,7 +255,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSeriesByStudyId(studyId: number): Promise<Series[]> {
-    return await db.select().from(series).where(eq(series.studyId, studyId));
+    const seriesList = await db.select().from(series).where(eq(series.studyId, studyId));
+    
+    // Add structure count for RT series
+    const seriesWithCounts = await Promise.all(
+      seriesList.map(async (s) => {
+        if (s.modality === 'RTSTRUCT') {
+          // Count structures in this RT series
+          const structures = await db.select().from(rtStructures).where(eq(rtStructures.seriesId, s.id));
+          return { ...s, structureCount: structures.length };
+        }
+        return s;
+      })
+    );
+    
+    return seriesWithCounts;
   }
 
   // Image operations
