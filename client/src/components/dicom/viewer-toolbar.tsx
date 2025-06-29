@@ -68,6 +68,10 @@ export function ViewerToolbar({
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
     { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasureTool, selectable: true },
     { id: 'annotate', icon: MessageSquare, label: 'Annotate', action: onAnnotateTool, selectable: true },
+    ...(hasRTStructures ? [
+      { id: 'separator' },
+      { id: 'contour', icon: Edit, label: 'Contour Editor', action: onContourModeToggle, selectable: true, active: contourMode }
+    ] : []),
     { id: 'separator' },
     { id: 'rotate', icon: RotateCw, label: 'Rotate', action: onRotate },
     { id: 'flip', icon: FlipHorizontal, label: 'Flip', action: onFlip },
@@ -88,7 +92,7 @@ export function ViewerToolbar({
             }
 
             const IconComponent = tool.icon!;
-            const isActive = tool.selectable && activeTool === tool.id;
+            const isActive = tool.selectable && (activeTool === tool.id || (tool as any).active);
 
             return (
               <div key={tool.id} className="relative group">

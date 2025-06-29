@@ -4,7 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ErrorModal } from './error-modal';
-import { ContourEditor } from './contour-editor';
+import { ContourEditorPanel } from './contour-editor-panel';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { Button } from '@/components/ui/button';
@@ -275,7 +275,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
 
       {/* Contour Editor Panel - Only shows when RT structures are loaded and contour mode is active */}
       {selectedSeries && rtStructures && contourMode && (
-        <ContourEditor
+        <ContourEditorPanel
           seriesId={selectedSeries.id}
           studyId={studyData.studies[0]?.id}
           rtStructures={rtStructures}

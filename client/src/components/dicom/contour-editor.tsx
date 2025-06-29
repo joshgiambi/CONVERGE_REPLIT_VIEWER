@@ -40,23 +40,35 @@ interface BrushSettings {
 }
 
 interface ContourEditorProps {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
-  currentImage: any;
-  currentSliceIndex: number;
-  rtStructures: any[];
+  seriesId: number;
+  studyId: any;
+  rtStructures: any;
+  editMode: 'view' | 'brush' | 'eraser';
+  onEditModeChange: (mode: 'view' | 'brush' | 'eraser') => void;
+  selectedStructure: number | null;
+  onSelectedStructureChange: (structureId: number | null) => void;
+  brushSettings: {
+    size: number;
+    opacity: number;
+    mode: 'paint' | 'erase';
+  };
+  onBrushSettingsChange: (settings: any) => void;
   structureVisibility: Map<number, boolean>;
-  onStructureUpdate: (structureId: number, contours: ContourSegment[]) => void;
-  onVisibilityToggle: (structureId: number) => void;
+  onStructureVisibilityChange: (structureId: number, visible: boolean) => void;
 }
 
 export function ContourEditor({
-  canvasRef,
-  currentImage,
-  currentSliceIndex,
+  seriesId,
+  studyId,
   rtStructures,
+  editMode,
+  onEditModeChange,
+  selectedStructure,
+  onSelectedStructureChange,
+  brushSettings,
+  onBrushSettingsChange,
   structureVisibility,
-  onStructureUpdate,
-  onVisibilityToggle
+  onStructureVisibilityChange
 }: ContourEditorProps) {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [editMode, setEditMode] = useState<'view' | 'brush' | 'eraser' | 'polygon' | 'circle'>('view');
