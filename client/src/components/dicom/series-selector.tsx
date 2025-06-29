@@ -353,11 +353,8 @@ export function SeriesSelector({
                                   key={structure.roiNumber}
                                   className="flex items-center space-x-3 p-3 ml-6 hover:bg-gray-800/30"
                                 >
-                                  <Checkbox
-                                    checked={structureSelection.get(structure.roiNumber) ?? false}
-                                    onCheckedChange={() => handleStructureSelectionToggle(structure.roiNumber)}
-                                    className="border-yellow-500 data-[state=checked]:bg-yellow-500"
-                                  />
+                                  {/* Checkbox temporarily disabled for performance */}
+                                  <div className="w-4 h-4 rounded border border-gray-600 bg-gray-800/50" />
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -398,11 +395,8 @@ export function SeriesSelector({
                           key={structure.roiNumber}
                           className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-800/50 border border-gray-700"
                         >
-                          <Checkbox
-                            checked={structureSelection.get(structure.roiNumber) ?? false}
-                            onCheckedChange={() => handleStructureSelectionToggle(structure.roiNumber)}
-                            className="border-yellow-500 data-[state=checked]:bg-yellow-500"
-                          />
+                          {/* Checkbox temporarily disabled for performance */}
+                          <div className="w-4 h-4 rounded border border-gray-600 bg-gray-800/50" />
                           <Button
                             variant="ghost"
                             size="sm"
