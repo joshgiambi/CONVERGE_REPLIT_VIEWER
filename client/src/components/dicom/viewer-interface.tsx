@@ -41,12 +41,12 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
       
-      // Auto-select first series
+      // Auto-select first series only once when data loads
       if (seriesData.length > 0 && !selectedSeries) {
         handleSeriesSelect(seriesData[0]);
       }
     }
-  }, [seriesData, selectedSeries]);
+  }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
