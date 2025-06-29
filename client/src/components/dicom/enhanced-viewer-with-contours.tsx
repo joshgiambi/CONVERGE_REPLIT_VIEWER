@@ -528,15 +528,37 @@ export function EnhancedViewerWithContours({ seriesId, studyId, rtStructures = [
           </div>
           
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setZoom(prev => Math.min(5, prev * 1.25))}
+              title="Zoom In"
+            >
               <ZoomIn className="w-4 h-4" />
             </Button>
-            <Button variant="outline" size="sm">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setZoom(prev => Math.max(0.1, prev * 0.8))}
+              title="Zoom Out"
+            >
               <ZoomOut className="w-4 h-4" />
             </Button>
-            <Button variant="outline" size="sm">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setZoom(1);
+                setPanX(0);
+                setPanY(0);
+              }}
+              title="Reset Zoom"
+            >
               <RotateCcw className="w-4 h-4" />
             </Button>
+            <Badge variant="outline" className="ml-2">
+              {Math.round(zoom * 100)}%
+            </Badge>
           </div>
         </div>
 
