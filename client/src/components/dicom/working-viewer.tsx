@@ -537,7 +537,11 @@ export function WorkingViewer({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setZoom(prev => Math.max(0.1, prev * 0.8))}
+              onClick={() => {
+                const newZoom = Math.max(0.1, zoom * 0.8);
+                setZoom(newZoom);
+                if (onZoomOut) onZoomOut();
+              }}
               title="Zoom Out"
             >
               <ZoomOut className="h-4 w-4" />
@@ -545,7 +549,11 @@ export function WorkingViewer({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setZoom(prev => Math.min(5, prev * 1.25))}
+              onClick={() => {
+                const newZoom = Math.min(5, zoom * 1.25);
+                setZoom(newZoom);
+                if (onZoomIn) onZoomIn();
+              }}
               title="Zoom In"
             >
               <ZoomIn className="h-4 w-4" />
@@ -557,6 +565,7 @@ export function WorkingViewer({
                 setZoom(1);
                 setPanX(0);
                 setPanY(0);
+                if (onResetZoom) onResetZoom();
               }}
               title="Reset Zoom"
             >
