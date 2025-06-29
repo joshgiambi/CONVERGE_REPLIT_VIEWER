@@ -256,13 +256,26 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                   border: selectedStructureColors.length > 0 
                     ? `3px solid ${selectedStructureColors[0]}` 
                     : '1px solid #374151',
-                  background: selectedStructureColors.length > 1 
-                    ? `linear-gradient(45deg, ${selectedStructureColors.join(', ')})` 
-                    : 'transparent',
-                  backgroundClip: selectedStructureColors.length > 1 ? 'padding-box' : 'initial',
                   zIndex: 1
                 }}
               />
+              
+              {/* Multi-color border effect for multiple selections */}
+              {selectedStructureColors.length > 1 && (
+                <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ zIndex: 1 }}>
+                  {selectedStructureColors.map((color, index) => (
+                    <div
+                      key={index}
+                      className="absolute inset-0 rounded-lg"
+                      style={{
+                        border: `3px solid ${color}`,
+                        transform: `scale(${1 - (index * 0.02)})`,
+                        opacity: 0.8 - (index * 0.2)
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
               
               {/* Main Viewer */}
               <WorkingViewer 
