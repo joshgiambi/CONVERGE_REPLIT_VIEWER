@@ -120,12 +120,12 @@ export function SeriesSelector({
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-4">
-                <div className="space-y-2 max-h-64 overflow-y-auto">
+                <div className="space-y-2 max-h-48 overflow-y-auto">
                   {series.filter(s => s.modality !== 'RTSTRUCT').map((seriesItem) => (
                     <div key={seriesItem.id}>
                       <div
                         className={`
-                          p-3 rounded-lg border cursor-pointer transition-all duration-200
+                          p-2 rounded-lg border cursor-pointer transition-all duration-200
                           ${selectedSeries?.id === seriesItem.id
                             ? 'bg-blue-500/20 border-blue-500 shadow-lg'
                             : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
@@ -133,7 +133,7 @@ export function SeriesSelector({
                         `}
                         onClick={() => onSeriesSelect(seriesItem)}
                       >
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between mb-1">
                           <Badge 
                             variant="outline" 
                             className={`
@@ -152,38 +152,31 @@ export function SeriesSelector({
                         </div>
                         
                         <h4 className={`
-                          text-sm font-medium mb-1
+                          text-sm font-medium truncate
                           ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
                         `}>
                           {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
                         </h4>
-                        
-                        <p className="text-xs text-gray-400">
-                          #{seriesItem.seriesNumber}
-                        </p>
                       </div>
 
                       {/* RT Structure Series nested under CT */}
                       {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
-                        <div className="ml-2 mt-2 space-y-1 border-l-2 border-green-500/30 pl-3">
+                        <div className="ml-2 mt-1 space-y-1 border-l-2 border-green-500/30 pl-2">
                           {rtSeries.map((rtS) => (
                             <Button
                               key={rtS.id}
                               variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
-                              className={`w-full p-3 h-auto text-left justify-start text-sm ${
+                              className={`w-full p-2 h-auto text-left justify-start text-xs ${
                                 selectedRTSeries?.id === rtS.id 
                                   ? 'bg-green-600 text-white border-green-500' 
                                   : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
                               } border rounded-lg`}
                               onClick={() => handleRTSeriesSelect(rtS)}
                             >
-                              <div className="flex items-center space-x-3">
+                              <div className="flex items-center space-x-2">
                                 <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
                                   RT
                                 </Badge>
-                                <span className="truncate font-medium">
-                                  {rtS.seriesDescription || 'Structure Set'}
-                                </span>
                               </div>
                             </Button>
                           ))}
