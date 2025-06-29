@@ -262,7 +262,7 @@ export function SeriesSelector({
               
               {/* Image Series List */}
               <div className="flex-1 space-y-2 mb-6 overflow-y-auto">
-                {series.map((seriesItem) => (
+                {series.filter(seriesItem => seriesItem.modality !== 'RTSTRUCT').map((seriesItem) => (
                   <div
                     key={seriesItem.id}
                     className={`p-3 rounded-lg border cursor-pointer transition-all ${
