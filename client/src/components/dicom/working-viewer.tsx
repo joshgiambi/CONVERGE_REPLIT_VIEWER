@@ -575,6 +575,14 @@ export function WorkingViewer({
             <Badge variant="outline">
               Zoom: {Math.round(zoom * 100)}%
             </Badge>
+            <Button
+              variant={showStructures ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowStructures(!showStructures)}
+              title="Toggle All Structures"
+            >
+              View All
+            </Button>
           </div>
         </div>
         

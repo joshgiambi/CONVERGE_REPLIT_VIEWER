@@ -662,7 +662,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const imageId = parseInt(req.params.imageId);
+      const imageIdParam = req.params.imageId;
+      console.log('Received imageId parameter:', imageIdParam);
+      
+      const imageId = parseInt(imageIdParam);
+      if (isNaN(imageId) || imageId < 1) {
+        console.log('Invalid image ID:', imageIdParam);
+        return res.status(400).json({ error: 'Invalid image ID' });
+      }
+      
       const image = await storage.getImage(imageId);
       
       if (!image) {
