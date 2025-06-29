@@ -492,91 +492,19 @@ export default function PatientManager() {
                           Created: {formatDate(patient.createdAt)}
                         </div>
                       </div>
-                      <div className="flex flex-col gap-2 mt-4">
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => {
-                              // Filter studies for this patient and prioritize CT studies
-                              const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                              if (patientStudies.length > 0) {
-                                // Prioritize CT studies over RT structure sets
-                                const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                                const targetStudy = ctStudy || patientStudies[0];
-                                window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
-                              } else {
-                                toast({
-                                  title: "No studies found",
-                                  description: `No studies found for patient ${patient.patientName}`,
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            Viewer
-                          </Button>
-                          <Button
-                            variant="default"
-                            size="sm"
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                            onClick={() => {
-                              // Filter studies for this patient and prioritize CT studies
-                              const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                              if (patientStudies.length > 0) {
-                                // Prioritize CT studies over RT structure sets
-                                const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                                const targetStudy = ctStudy || patientStudies[0];
-                                window.location.href = `/enhanced-viewer?studyId=${targetStudy.id}`;
-                              } else {
-                                toast({
-                                  title: "No studies found",
-                                  description: `No studies found for patient ${patient.patientName}`,
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                          >
-                            <Activity className="h-4 w-4 mr-1" />
-                            Enhanced
-                          </Button>
-                        </div>
+                      <div className="flex gap-2 mt-4">
                         <Button
-                          variant="default"
+                          variant="outline"
                           size="sm"
-                          className="w-full bg-blue-600 hover:bg-blue-700"
+                          className="flex-1"
                           onClick={() => {
-                            // Filter studies for this patient and get series data
+                            // Filter studies for this patient and prioritize CT studies
                             const patientStudies = studies.filter(study => study.patientID === patient.patientID);
                             if (patientStudies.length > 0) {
-                              // Prioritize CT studies for contour editing
+                              // Prioritize CT studies over RT structure sets
                               const ctStudy = patientStudies.find(study => study.modality === 'CT');
                               const targetStudy = ctStudy || patientStudies[0];
-                              
-                              // Find the first CT series for this study
-                              fetch(`/api/studies/${targetStudy.id}/series`)
-                                .then(res => res.json())
-                                .then(seriesData => {
-                                  if (seriesData.length > 0) {
-                                    const ctSeries = seriesData.find((s: any) => s.modality === 'CT') || seriesData[0];
-                                    window.location.href = `/contour-editor?studyId=${targetStudy.id}&seriesId=${ctSeries.id}`;
-                                  } else {
-                                    toast({
-                                      title: "No series found",
-                                      description: "No CT series available for contour editing",
-                                      variant: "destructive",
-                                    });
-                                  }
-                                })
-                                .catch(() => {
-                                  toast({
-                                    title: "Error",
-                                    description: "Failed to load series data",
-                                    variant: "destructive",
-                                  });
-                                });
+                              window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
                             } else {
                               toast({
                                 title: "No studies found",
@@ -586,10 +514,32 @@ export default function PatientManager() {
                             }
                           }}
                         >
-                          <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                          Contour Editor
+                          <Eye className="h-4 w-4 mr-1" />
+                          Viewer
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="flex-1 bg-green-600 hover:bg-green-700"
+                          onClick={() => {
+                            // Filter studies for this patient and prioritize CT studies
+                            const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                            if (patientStudies.length > 0) {
+                              // Prioritize CT studies over RT structure sets
+                              const ctStudy = patientStudies.find(study => study.modality === 'CT');
+                              const targetStudy = ctStudy || patientStudies[0];
+                              window.location.href = `/enhanced-viewer?studyId=${targetStudy.id}`;
+                            } else {
+                              toast({
+                                title: "No studies found",
+                                description: `No studies found for patient ${patient.patientName}`,
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          <Activity className="h-4 w-4 mr-1" />
+                          Enhanced Viewer
                         </Button>
                       </div>
                     </CardContent>
