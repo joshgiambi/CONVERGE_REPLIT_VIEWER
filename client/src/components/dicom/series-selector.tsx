@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { List, Monitor, Palette, Search, Eye, EyeOff, ChevronDown, ChevronRight, Expand, Trash2, Merge } from 'lucide-react';
+import { List, Monitor, Palette, Search, Eye, EyeOff, ChevronDown, ChevronRight, Expand, Trash2, Merge, Layers } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -60,7 +60,11 @@ export function SeriesSelector({
         const response = await fetch(`/api/studies/${studyId}/rt-structures`);
         if (response.ok) {
           const rtSeriesData = await response.json();
-          setRTSeries(rtSeriesData);
+          // Filter to only include RT structure sets (not other series types)
+          const filteredRTSeries = rtSeriesData.filter((series: any) => 
+            series.modality === 'RTSTRUCT' || series.seriesDescription?.toLowerCase().includes('structure')
+          );
+          setRTSeries(filteredRTSeries);
         }
       } catch (error) {
         console.error('Error loading RT series:', error);
@@ -300,8 +304,9 @@ export function SeriesSelector({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <div className="font-medium text-green-400 text-xs">
-                          📊 {rtSeriesItem.seriesDescription || `RT Structure Set ${rtSeriesItem.seriesNumber}`}
+                        <div className="font-medium text-green-400 text-xs flex items-center">
+                          <Layers className="h-3 w-3 mr-1" />
+                          {rtSeriesItem.seriesDescription || `RT Structure Set ${rtSeriesItem.seriesNumber}`}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
                           {rtSeriesItem.structureCount || 0} anatomical structures
