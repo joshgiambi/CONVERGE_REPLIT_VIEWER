@@ -89,6 +89,15 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
+- June 29, 2025: Contour Editor Right Sidebar Implementation - COMPLETED
+  - ✅ Implemented contour editor as dedicated right sidebar (not overlay)
+  - ✅ Three-column layout activates only when contour editor is active
+  - ✅ Restored working RT structure rendering from enhanced viewer
+  - ✅ Fixed coordinate transformation for proper anatomical structure display
+  - ✅ Enhanced structure matching to current slice with 1mm tolerance
+  - ✅ Functional zoom controls in bottom toolbar
+  - ✅ Smooth keyboard navigation for CT scrolling
+  - ✅ Professional medical imaging workflow with proper sidebar organization
 - June 29, 2025: Advanced Structure Management with Merge/Delete Controls - COMPLETED
   - ✅ Enhanced grouped structure display with color indicators and structure summaries
   - ✅ Added expand all/collapse all toggle button for grouped structures

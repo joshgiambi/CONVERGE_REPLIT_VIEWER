@@ -255,15 +255,10 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           {/* DICOM Viewer - Center */}
           <div className="flex-1">
             {selectedSeries ? (
-              <WorkingViewer 
+              <EnhancedViewerWithContours 
                 seriesId={selectedSeries.id}
                 studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-                selectedStructure={selectedStructure}
-                editMode={editMode}
+                rtStructures={rtStructures?.structures || []}
               />
             ) : (
               <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
@@ -314,15 +309,10 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           {/* DICOM Viewer */}
           <div className="lg:col-span-3">
             {selectedSeries ? (
-              <WorkingViewer 
+              <EnhancedViewerWithContours 
                 seriesId={selectedSeries.id}
                 studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-                selectedStructure={selectedStructure}
-                editMode={editMode}
+                rtStructures={rtStructures?.structures || []}
               />
             ) : (
               <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
