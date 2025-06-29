@@ -127,8 +127,8 @@ export function SeriesSelector({
                         className={`
                           p-3 rounded-lg border cursor-pointer transition-all duration-200
                           ${selectedSeries?.id === seriesItem.id
-                            ? 'bg-dicom-yellow/20 border-dicom-yellow shadow-lg'
-                            : 'bg-dicom-indigo/10 border-dicom-indigo/30 hover:border-dicom-yellow/50 hover:bg-dicom-yellow/5'
+                            ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                            : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
                           }
                         `}
                         onClick={() => onSeriesSelect(seriesItem)}
@@ -137,10 +137,10 @@ export function SeriesSelector({
                           <Badge 
                             variant="outline" 
                             className={`
-                              text-xs font-medium
+                              text-xs font-semibold
                               ${selectedSeries?.id === seriesItem.id
-                                ? 'border-dicom-yellow text-dicom-yellow'
-                                : 'border-dicom-indigo text-dicom-indigo'
+                                ? 'border-blue-400 text-blue-400'
+                                : 'border-blue-500 text-blue-500'
                               }
                             `}
                           >
@@ -153,7 +153,7 @@ export function SeriesSelector({
                         
                         <h4 className={`
                           text-sm font-medium mb-1
-                          ${selectedSeries?.id === seriesItem.id ? 'text-dicom-yellow' : 'text-white'}
+                          ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
                         `}>
                           {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
                         </h4>
@@ -165,24 +165,24 @@ export function SeriesSelector({
 
                       {/* RT Structure Series nested under CT */}
                       {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
-                        <div className="ml-4 mt-2 space-y-1">
+                        <div className="ml-2 mt-2 space-y-1 border-l-2 border-green-500/30 pl-3">
                           {rtSeries.map((rtS) => (
                             <Button
                               key={rtS.id}
                               variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
-                              className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                              className={`w-full p-3 h-auto text-left justify-start text-sm ${
                                 selectedRTSeries?.id === rtS.id 
-                                  ? 'bg-green-600 text-white' 
-                                  : 'hover:bg-green-600/20 text-gray-300'
-                              }`}
+                                  ? 'bg-green-600 text-white border-green-500' 
+                                  : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
+                              } border rounded-lg`}
                               onClick={() => handleRTSeriesSelect(rtS)}
                             >
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="border-green-500 text-green-400 text-xs">
-                                  RTSTRUCT
+                              <div className="flex items-center space-x-3">
+                                <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
+                                  RT
                                 </Badge>
-                                <span className="truncate">
-                                  {rtS.seriesDescription || 'RT Structure Set'}
+                                <span className="truncate font-medium">
+                                  {rtS.seriesDescription || 'Structure Set'}
                                 </span>
                               </div>
                             </Button>
@@ -205,11 +205,11 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
                     {rtStructures.structures.map((structure: any) => (
                       <div 
                         key={structure.roiNumber}
-                        className="flex items-center space-x-3 p-3 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
+                        className="flex items-center space-x-3 p-2 rounded-lg hover:bg-dicom-indigo/10 border border-dicom-indigo/20"
                       >
                         <Checkbox
                           checked={structureVisibility.get(structure.roiNumber) ?? true}
@@ -220,14 +220,9 @@ export function SeriesSelector({
                           className="w-4 h-4 rounded border border-gray-400"
                           style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                         />
-                        <div className="flex-1">
-                          <span className="text-sm text-white font-medium">
-                            {structure.structureName}
-                          </span>
-                          <div className="text-xs text-gray-400">
-                            {structure.contours.length} contours • ROI {structure.roiNumber}
-                          </div>
-                        </div>
+                        <span className="text-sm text-white font-medium flex-1">
+                          {structure.structureName}
+                        </span>
                       </div>
                     ))}
                   </div>
