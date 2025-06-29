@@ -15,23 +15,22 @@ function extractDICOMMetadata(filePath: string) {
     const buffer = fs.readFileSync(filePath);
     const byteArray = new Uint8Array(buffer);
     const dataSet = dicomParser.parseDicom(byteArray, {
-      untilTag: 'x7fe00010', // stop before pixel data
-      stopAtPixelData: true
+      untilTag: 'x7fe00010' // stop before pixel data
     });
 
     return {
-      patientName: getString('x00100010'),
-      patientID: getString('x00100020'),
-      studyInstanceUID: getString('x0020000d'),
-      seriesInstanceUID: getString('x0020000e'),
-      sopInstanceUID: getString('x00080018'),
-      modality: getString('x00080060'),
-      studyDate: getString('x00080020'),
-      seriesDescription: getString('x0008103e'),
-      instanceNumber: getString('x00200013'),
-      pixelSpacing: getArray('x00280030'),             // [rowSpacing, colSpacing]
-      imagePositionPatient: getArray('x00200032'),     // [x, y, z]
-      imageOrientationPatient: getArray('x00200037')   // [rx, ry, rz, cx, cy, cz]
+      patientName: getTagString(dataSet, 'x00100010'),
+      patientID: getTagString(dataSet, 'x00100020'),
+      studyInstanceUID: getTagString(dataSet, 'x0020000d'),
+      seriesInstanceUID: getTagString(dataSet, 'x0020000e'),
+      sopInstanceUID: getTagString(dataSet, 'x00080018'),
+      modality: getTagString(dataSet, 'x00080060'),
+      studyDate: getTagString(dataSet, 'x00080020'),
+      seriesDescription: getTagString(dataSet, 'x0008103e'),
+      instanceNumber: getTagString(dataSet, 'x00200013'),
+      pixelSpacing: getTagArray(dataSet, 'x00280030'),             // [rowSpacing, colSpacing]
+      imagePositionPatient: getTagArray(dataSet, 'x00200032'),     // [x, y, z]
+      imageOrientationPatient: getTagArray(dataSet, 'x00200037')   // [rx, ry, rz, cx, cy, cz]
     };
   } catch (error) {
     console.error('DICOM parse error:', error);
@@ -39,37 +38,7 @@ function extractDICOMMetadata(filePath: string) {
   }
 }
 
-function getTagString(dataSet: any, tag: string): string | null {
-  try {
-    return dataSet.string(tag)?.trim() || null;
-  } catch {
-    return null;
-  }
-}
 
-function getTagArray(dataSet: any, tag: string): number[] | null {
-  try {
-    const value = dataSet.string(tag);
-    return value ? value.split('\\').map(Number) : null;
-  } catch {
-    return null;
-  }
-}
-
-function extractTag(buffer: Buffer, tag: string): string | null {
-  try {
-    const byteArray = new Uint8Array(buffer);
-    const dataSet = (dicomParser as any).parseDicom(byteArray, {});
-    return getTagString(dataSet, tag);
-  } catch (error: any) {
-    console.warn(`Failed to extract DICOM tag ${tag}:`, error.message);
-    return null;
-  }
-}
-
-function generateUID(): string {
-  return `2.16.840.1.114362.1.11932039.${Date.now()}.${Math.floor(Math.random() * 10000)}`;
-}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
