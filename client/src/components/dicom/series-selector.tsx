@@ -201,7 +201,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-1 flex-1 overflow-y-auto">
+                  <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 500px)' }}>
                     {rtStructures.structures.map((structure: any) => (
                       <div 
                         key={structure.roiNumber}
