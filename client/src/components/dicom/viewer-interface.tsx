@@ -186,6 +186,13 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
       visibilityMap.set(structure.roiNumber, true);
     });
     setStructureVisibility(visibilityMap);
+    
+    // Auto-launch contour editing when RT structures are loaded
+    setContourMode(true);
+    // Select the first structure by default
+    if (rtStructData.structures.length > 0) {
+      setSelectedStructure(rtStructData.structures[0].roiNumber);
+    }
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {

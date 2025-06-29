@@ -89,16 +89,17 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 29, 2025: Integrated Contour Editing Within Enhanced Viewer - COMPLETED
-  - ✅ Integrated contour editing directly into enhanced viewer as contextual panel
-  - ✅ Added brush and eraser tools with customizable size and opacity settings
-  - ✅ Created contour mode toggle button that only appears when RT structures are loaded
-  - ✅ Implemented professional contour editing panel with structure selection
-  - ✅ Added structure visibility controls and real-time editing capabilities
-  - ✅ Removed separate contour editor page per user requirements
-  - ✅ Enhanced viewer now provides complete medical imaging workflow in single interface
-  - ✅ Contour editing tools only activate when RT structure sets are present
-  - ✅ Optimized for radiation therapy planning within viewer context
+- June 29, 2025: Consolidated Structure Management with Auto-Launch - COMPLETED
+  - ✅ Consolidated structure management into left sidebar with search functionality
+  - ✅ Added search bar for filtering structures by name
+  - ✅ Implemented grouping for _L/_R structure pairs with expandable headings
+  - ✅ Reduced structure list item heights for better space utilization
+  - ✅ Integrated visibility controls and color editing into structure list
+  - ✅ Removed redundant structure management from contour editor panel
+  - ✅ Auto-launch contour editing mode when RT structures are loaded
+  - ✅ Auto-select first structure when contour mode activates
+  - ✅ Added pen/polygon tool with medical imaging standard controls
+  - ✅ Enhanced viewer border shows selected structure color and editing label
 - June 29, 2025: Instant CT Scan Loading Optimization - COMPLETED
   - ✅ Implemented database-stored DICOM metadata for instant viewer loading
   - ✅ Added comprehensive range request support for efficient file serving

@@ -137,69 +137,6 @@ export function ContourEditorPanel({
 
           <Separator />
 
-          {/* Structure Management */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-white">Structure Management</h3>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {structures.map((structure: any) => (
-                <div 
-                  key={structure.roiNumber} 
-                  className={`flex items-center justify-between p-3 rounded border cursor-pointer transition-all ${
-                    selectedStructure === structure.roiNumber 
-                      ? 'border-blue-400 bg-blue-500/20' 
-                      : 'border-gray-700 hover:border-gray-600'
-                  }`}
-                  onClick={() => onSelectedStructureChange(structure.roiNumber)}
-                >
-                  <div className="flex items-center gap-3 flex-1">
-                    <div 
-                      className="w-4 h-4 rounded-full border-2 border-white/20"
-                      style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm text-white font-medium truncate">
-                        {structure.structureName}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        ROI #{structure.roiNumber}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStructureVisibilityChange(structure.roiNumber, !structureVisibility.get(structure.roiNumber));
-                      }}
-                      className="h-8 w-8 p-0"
-                    >
-                      {structureVisibility.get(structure.roiNumber) ? (
-                        <Eye className="h-4 w-4 text-blue-400" />
-                      ) : (
-                        <EyeOff className="h-4 w-4 text-gray-500" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Color picker functionality can be added here
-                      }}
-                      className="h-8 w-8 p-0"
-                    >
-                      <Palette className="h-4 w-4 text-gray-400" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
           {/* Tool Settings */}
           {editMode === 'polygon' && (
             <div className="space-y-4">
