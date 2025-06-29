@@ -345,8 +345,19 @@ export function WorkingViewer({
         ctx.fillStyle = `rgba(${structure.color?.join(',') || '255,0,0'}, 0.2)`;
         ctx.lineWidth = 2;
         
-        contour.points.forEach((point: number[], i: number) => {
-          const [dicomX, dicomY] = point;
+        contour.points.forEach((point: any, i: number) => {
+          let dicomX, dicomY;
+          
+          // Handle different point formats
+          if (Array.isArray(point) && point.length >= 2) {
+            [dicomX, dicomY] = point;
+          } else if (point && typeof point === 'object' && 'x' in point && 'y' in point) {
+            dicomX = point.x;
+            dicomY = point.y;
+          } else {
+            console.warn('Invalid point format:', point);
+            return;
+          }
           
           // Transform DICOM coordinates to pixel coordinates
           const pixelX = imageWidth - (dicomX * 0.8 + imageWidth / 2);
