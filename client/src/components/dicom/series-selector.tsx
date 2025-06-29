@@ -21,6 +21,8 @@ interface SeriesSelectorProps {
   onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
   onStructureColorChange?: (structureId: number, color: [number, number, number]) => void;
   onStructureSelection?: (structureId: number, selected: boolean) => void;
+  selectedForEdit?: number | null;
+  onSelectedForEditChange?: (roiNumber: number | null) => void;
 }
 
 export function SeriesSelector({
@@ -46,6 +48,17 @@ export function SeriesSelector({
   const [groupingEnabled, setGroupingEnabled] = useState(true);
   const [allVisible, setAllVisible] = useState(true);
   const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
+
+  // Handler for structure editing selection
+  const handleStructureEditSelection = (roiNumber: number) => {
+    const newSelected = selectedForEdit === roiNumber ? null : roiNumber;
+    setSelectedForEdit(newSelected);
+    
+    // Call parent callback if provided
+    if (onSelectedForEditChange) {
+      onSelectedForEditChange(newSelected);
+    }
+  };
 
   // Load RT structure series for the study
   useEffect(() => {
@@ -549,7 +562,7 @@ export function SeriesSelector({
                                   />
                                   <span 
                                     className="text-sm text-white font-medium flex-1 truncate cursor-pointer hover:text-green-300 transition-colors"
-                                    onClick={() => setSelectedForEdit(selectedForEdit === structure.roiNumber ? null : structure.roiNumber)}
+                                    onClick={() => handleStructureEditSelection(structure.roiNumber)}
                                   >
                                     {structure.structureName}
                                   </span>

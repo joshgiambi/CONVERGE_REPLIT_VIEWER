@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
+import { ContourEditToolbar } from './contour-edit-toolbar';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
@@ -333,11 +334,35 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           onPanTool={handlePanTool}
           onMeasureTool={handleMeasureTool}
           onAnnotateTool={handleAnnotateTool}
-          onRotate={handleRotate}
-          onFlip={handleFlip}
+          onContourEdit={() => {
+            if (selectedForEdit) {
+              setIsContourEditMode(true);
+            }
+          }}
+          onContourSettings={() => {
+            // Open contour settings dialog
+          }}
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
+        />
+      )}
+
+      {/* Contour Edit Toolbar */}
+      {selectedForEdit && rtStructures && (
+        <ContourEditToolbar
+          selectedStructure={rtStructures.find((s: any) => s.roiNumber === selectedForEdit)}
+          isVisible={isContourEditMode}
+          onClose={() => {
+            setIsContourEditMode(false);
+            setSelectedForEdit(null);
+          }}
+          onStructureNameChange={(name: string) => {
+            // Update structure name
+          }}
+          onStructureColorChange={(color: string) => {
+            // Update structure color
+          }}
         />
       )}
 
