@@ -27,6 +27,11 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [contourSettings, setContourSettings] = useState({ thickness: 2, opacity: 0.8 });
+  const [brushToolState, setBrushToolState] = useState({
+    tool: null as string | null,
+    brushSize: 3,
+    isActive: false
+  });
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -301,6 +306,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                 onWindowLevelChange={setWindowLevel}
                 rtStructures={rtStructures}
                 structureVisibility={structureVisibility}
+                brushToolState={brushToolState}
+                selectedForEdit={selectedForEdit}
               />
               
               {/* Structure Tags on Right Side */}
@@ -375,6 +382,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           }}
           onStructureColorChange={(color: string) => {
             // Update structure color
+          }}
+          onToolChange={(toolState) => {
+            setBrushToolState(toolState);
           }}
         />
       )}

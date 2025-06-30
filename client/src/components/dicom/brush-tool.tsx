@@ -63,14 +63,15 @@ export function BrushTool({
       setOverlayCanvas(overlay);
     }
 
-    overlayCanvas.width = canvas.width;
-    overlayCanvas.height = canvas.height;
-    overlayCanvas.style.width = canvas.style.width;
-    overlayCanvas.style.height = canvas.style.height;
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    overlay.style.width = canvas.style.width;
+    overlay.style.height = canvas.style.height;
 
     return () => {
-      if (overlayCanvas && overlayCanvas.parentElement) {
-        overlayCanvas.parentElement.removeChild(overlayCanvas);
+      if (overlay && overlay.parentElement) {
+        overlay.parentElement.removeChild(overlay);
+        setOverlayCanvas(null);
       }
     };
   }, [canvasRef, isActive]);
@@ -136,18 +137,18 @@ export function BrushTool({
 
   // Draw brush preview
   const drawBrushPreview = () => {
-    if (!overlayCanvasRef.current || !cursorPosition || !isActive) return;
+    if (!overlayCanvas || !cursorPosition || !isActive) return;
 
-    const ctx = overlayCanvasRef.current.getContext('2d');
+    const ctx = overlayCanvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
     // Apply same transformations as main canvas
     ctx.save();
-    ctx.translate(overlayCanvasRef.current.width / 2, overlayCanvasRef.current.height / 2);
+    ctx.translate(overlayCanvas.width / 2, overlayCanvas.height / 2);
     ctx.scale(zoom, zoom);
-    ctx.translate(-overlayCanvasRef.current.width / 2 + panX, -overlayCanvasRef.current.height / 2 + panY);
+    ctx.translate(-overlayCanvas.width / 2 + panX, -overlayCanvas.height / 2 + panY);
 
     // Draw brush circle
     const color = isInsideContour ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 0, 0, 0.5)';
