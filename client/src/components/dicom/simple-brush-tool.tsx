@@ -125,26 +125,28 @@ export function SimpleBrushTool({
 
     ctx.save();
     
-    // Determine opacity based on drawing state
-    const baseOpacity = isDrawing ? 0.6 : 0.3;
-    const strokeOpacity = isDrawing ? 1.0 : 0.7;
-    
     // Choose color based on inside/outside contour - green for add, red for subtract
-    const fillColor = isInsideContour ? 
-      `rgba(0, 255, 0, ${baseOpacity})` : 
-      `rgba(255, 0, 0, ${baseOpacity})`;
     const strokeColor = isInsideContour ? 
-      `rgba(0, 255, 0, ${strokeOpacity})` : 
-      `rgba(255, 0, 0, ${strokeOpacity})`;
+      `rgba(0, 255, 0, 0.8)` : 
+      `rgba(255, 0, 0, 0.8)`;
     
-    ctx.fillStyle = fillColor;
+    // Set up stroke style - dashed when inactive, solid when drawing
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    
+    if (isDrawing) {
+      // Solid line when actively drawing
+      ctx.setLineDash([]);
+    } else {
+      // Dashed line when inactive
+      ctx.setLineDash([5, 5]);
+    }
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = isDrawing ? 3 : 2;
     
-    // Draw main brush circle
+    // Draw main brush circle (outline only, no fill)
     ctx.beginPath();
     ctx.arc(x, y, brushSize * zoom, 0, 2 * Math.PI);
-    ctx.fill();
     ctx.stroke();
     
     // Add center dot for precision
@@ -214,20 +216,23 @@ export function SimpleBrushTool({
     const handleMouseDown = (e: MouseEvent) => {
       e.preventDefault();
       
+      const coords = getCanvasCoordinates(e.clientX, e.clientY);
+      
       if (e.button === 2) { // Right click for resizing
         setIsResizing(true);
+        setResizeStartPosition(coords); // Store initial position for fixed centroid
         return;
       }
 
       if (e.button === 0) { // Left click for drawing
-        const coords = getCanvasCoordinates(e.clientX, e.clientY);
         const inside = checkInsideContour(coords.x, coords.y);
         setIsInsideContour(inside);
         setIsDrawing(true);
+        setBrushStrokes([{x: coords.x, y: coords.y, isAdditive: !inside}]);
         
         console.log('Brush stroke started:', {
           position: coords,
-          isAdditive: inside,
+          isAdditive: !inside,
           brushSize,
           slicePosition: currentSlicePosition
         });
@@ -243,11 +248,14 @@ export function SimpleBrushTool({
         setIsInsideContour(inside);
       }
 
-      if (isResizing) {
-        // Right-click drag to resize brush
-        const deltaY = e.movementY;
-        const newSize = Math.max(1, Math.min(50, brushSize - deltaY * 0.5));
+      if (isResizing && resizeStartPosition) {
+        // Right-click drag to resize brush - keep centroid fixed
+        const deltaY = coords.y - resizeStartPosition.y;
+        const newSize = Math.max(1, Math.min(50, brushSize - deltaY * 0.1));
         onBrushSizeChange(newSize);
+        // Keep cursor position at the original resize start position for fixed centroid
+        setMousePosition(resizeStartPosition);
+        return; // Don't update mouse position during resize
       }
 
       if (isDrawing) {
@@ -267,13 +275,14 @@ export function SimpleBrushTool({
 
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawing) {
-        console.log('Brush stroke completed');
+        console.log('Brush stroke completed, applying changes');
         applyBrushStroke();
         setIsDrawing(false);
         setBrushStrokes([]);
       }
       if (isResizing) {
         setIsResizing(false);
+        setResizeStartPosition(null);
       }
     };
 
