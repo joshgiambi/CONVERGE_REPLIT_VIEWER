@@ -25,6 +25,7 @@ interface ContourEditToolbarProps {
   onClose: () => void;
   onStructureNameChange: (name: string) => void;
   onStructureColorChange: (color: string) => void;
+  onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean }) => void;
 }
 
 export function ContourEditToolbar({ 
@@ -32,13 +33,30 @@ export function ContourEditToolbar({
   isVisible, 
   onClose,
   onStructureNameChange,
-  onStructureColorChange 
+  onStructureColorChange,
+  onToolChange
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
   const [brushThickness, setBrushThickness] = useState([3]);
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
+
+  // Notify parent when brush tool is activated
+  const handleToolActivation = (toolId: string) => {
+    const isActive = activeTool === toolId;
+    const newTool = isActive ? null : toolId;
+    setActiveTool(newTool);
+    
+    // Pass brush tool state to parent
+    if (onToolChange) {
+      onToolChange({
+        tool: newTool,
+        brushSize: brushThickness[0],
+        isActive: newTool === 'brush'
+      });
+    }
+  };
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -241,7 +259,7 @@ export function ContourEditToolbar({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setActiveTool(isActive ? null : tool.id)}
+                  onClick={() => handleToolActivation(tool.id)}
                   className={`h-9 px-3 transition-all duration-200 ${
                     isActive 
                       ? 'border-2 text-white shadow-lg' 
