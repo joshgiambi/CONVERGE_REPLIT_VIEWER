@@ -1,8 +1,8 @@
-# DICOM Medical Imaging System
+# Superbeam - DICOM Medical Imaging System
 
 ## Overview
 
-This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medical imaging application built with React, Express.js, and PostgreSQL. The system allows users to upload, manage, and view medical images with proper DICOM metadata handling. It includes a complete PACS-like interface for medical imaging workflows.
+Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine) medical imaging application built with React, Express.js, and PostgreSQL. The system allows users to upload, manage, and view medical images with proper DICOM metadata handling. It includes a complete PACS-like interface for medical imaging workflows with advanced contour editing capabilities.
 
 ## System Architecture
 
@@ -89,6 +89,12 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
+- June 30, 2025: Contour Delete Operations & Superbeam Rebranding - COMPLETED
+  - ✅ Added three delete buttons to contour toolbar: Delete Current Slice, Delete Nth Slice, Clear All Slices
+  - ✅ Delete operations appear in Operations settings panel with red destructive styling
+  - ✅ Rebranded application from CONVERGE to Superbeam with vibrant gradient lettering
+  - ✅ Each letter features unique color gradients (cyan to purple to pink) with glow effects
+  - ✅ Updated project documentation to reflect new Superbeam branding
 - June 30, 2025: Smart Brush Contour Detection - COMPLETED
   - ✅ Implemented intelligent brush mode detection based on contour intersection
   - ✅ Green brush cursor when touching selected structure's contour (add mode)

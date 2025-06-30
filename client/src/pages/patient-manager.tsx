@@ -341,45 +341,53 @@ export default function PatientManager() {
           <div>
             <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
                 fontWeight: '900'
-              }}>C</span>
+              }}>S</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
                 fontWeight: '900'
-              }}>O</span>
+              }}>U</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
                 fontWeight: '900'
-              }}>N</span>
+              }}>P</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
-                fontWeight: '900'
-              }}>V</span>
-              <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                color: 'black',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
                 fontWeight: '900'
-              }}>G</span>
+              }}>B</span>
               <span style={{
-                color: 'white',
-                WebkitTextStroke: '2px black',
+                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
                 fontWeight: '900'
               }}>E</span>
+              <span style={{
+                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                fontWeight: '900'
+              }}>A</span>
+              <span style={{
+                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                fontWeight: '900'
+              }}>M</span>
             </h1>
           </div>
           <div className="flex gap-2">

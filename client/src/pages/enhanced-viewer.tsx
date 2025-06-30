@@ -60,47 +60,54 @@ export default function EnhancedViewer() {
             <div>
               <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #22c55e',
+                  color: 'black',
                   fontWeight: '900'
-                }}>C</span>
+                }}>S</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #10b981',
+                  color: 'black',
                   fontWeight: '900'
-                }}>O</span>
+                }}>U</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #3b82f6',
+                  color: 'black',
                   fontWeight: '900'
-                }}>N</span>
+                }}>P</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #2563eb',
-                  fontWeight: '900'
-                }}>V</span>
-                <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #1d4ed8',
+                  color: 'black',
                   fontWeight: '900'
                 }}>E</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #1e40af',
+                  color: 'black',
                   fontWeight: '900'
                 }}>R</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #1e3a8a',
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
-                }}>G</span>
+                }}>B</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #312e81',
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
                 }}>E</span>
+                <span style={{
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  fontWeight: '900'
+                }}>A</span>
+                <span style={{
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  fontWeight: '900'
+                }}>M</span>
               </h1>
-              <p className="text-green-400 text-xs mt-1 font-medium">Enhanced RT Structure Viewer</p>
             </div>
             
             {currentStudy && (

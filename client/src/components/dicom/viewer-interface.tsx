@@ -32,6 +32,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     brushSize: 3,
     isActive: false
   });
+  const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
