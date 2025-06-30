@@ -1,0 +1,116 @@
+RT Structure Integration Instructions for Developer
+
+⸻
+
+GOAL
+
+Fix the structure visibility system and the brush tool to properly update and reflect changes in the RT structure dataset used for rendering.
+
+⸻
+
+ISSUE #1: Structure Visibility Not Working
+
+Root Problem: The structureVisibility Map is not reactive — it’s recreated in downstream components, and visibility changes are not triggering canvas redraws.
+
+Fix Instructions:
+	1.	Own the visibility Map in ViewerInterface.
+
+const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
+
+	2.	Always create a new reference when toggling.
+
+const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
+  setStructureVisibility(prev => {
+    const next = new Map(prev);
+    next.set(structureId, visible);
+    return next;
+  });
+};
+
+	3.	Pass it downstream without modification.
+
+<WorkingViewer 
+  ... 
+  structureVisibility={structureVisibility} 
+/>
+
+	4.	Remove any line like this in WorkingViewer:
+
+// ❌ Do not reset or fallback
+const structureVisibility = externalStructureVisibility || new Map();
+
+	5.	Ensure your rendering useEffect listens to it:
+
+useEffect(() => {
+  renderRTStructures(...);
+}, [canvasRef, rtStructures, currentSlicePosition, zoom, panX, panY, structureVisibility]);
+
+
+⸻
+
+ISSUE #2: Brush Tool Doesn’t Modify RT Structures
+
+Root Problems:
+	•	Brush tool generates temporary overlays.
+	•	Changes aren’t written into rtStructures.
+	•	Coordinate transforms are inconsistent.
+
+Fix Instructions:
+	1.	Lift rtStructures into the top-level component (ViewerInterface).
+
+const [rtStructures, setRTStructures] = useState<RTStructureSet | null>(null);
+
+	2.	Pass both the data and the update function down.
+
+<WorkingViewer 
+  ... 
+  rtStructures={rtStructures} 
+  onContourUpdate={setRTStructures} 
+/>
+
+	3.	Modify contours directly (mutate + clone) inside the brush tool.
+
+const updateContour = (structure, slicePos, newPoints) => {
+  const c = structure.contours.find(c => Math.abs(c.slicePosition - slicePos) <= 1.5)
+          || (() => {
+               const blank = { slicePosition: slicePos, points: [], numberOfPoints: 0 };
+               structure.contours.push(blank);
+               return blank;
+             })();
+  c.points = newPoints;
+  c.numberOfPoints = newPoints.length / 3;
+};
+
+const applyBrushStroke = () => {
+  const updated = structuredClone(rtStructures);
+  const struct = updated.structures.find(s => s.roiNumber === selectedROI);
+  if (struct) updateContour(struct, currentSlice, circlePoints);
+  onContourUpdate?.(updated);
+};
+
+	4.	Trigger re-render by adding rtStructures to effect deps:
+
+useEffect(() => {
+  if (images.length) displayCurrentImage();
+}, [images, currentIndex, currentWindowLevel, rtStructures]);
+
+	5.	Ensure consistent coordinate conversions.
+Export a shared dicomToCanvas() utility and use it both when rendering and drawing.
+
+⸻
+
+Summary of Integration Flow
+
+Visibility:
+Sidebar toggle → state update → new Map → passed to canvas → useEffect → canvas redraw
+
+Brush Tool:
+Mouse drag → generate points → modify real RT structure → update state → trigger redraw
+
+⸻
+
+Next Steps
+	1.	Fix state flow and lifecycles as per above.
+	2.	Refactor overlay tools to operate on rtStructures, not temp data.
+	3.	Confirm brush changes are persistent and reflected on canvas.
+	4.	Confirm visibility toggles reflect in the rendered output.

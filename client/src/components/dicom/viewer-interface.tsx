@@ -219,7 +219,11 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
-    setStructureVisibility(prev => new Map(prev.set(structureId, visible)));
+    setStructureVisibility(prev => {
+      const next = new Map(prev);
+      next.set(structureId, visible);
+      return next;
+    });
   };
 
   const handleStructureColorChange = (structureId: number, color: [number, number, number]) => {
@@ -314,6 +318,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                 rtStructures={rtStructures}
                 structureVisibility={structureVisibility}
                 brushToolState={brushToolState}
+                selectedForEdit={selectedForEdit}
+                onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
+                onContourUpdate={setRTStructures}
                 selectedForEdit={selectedForEdit}
                 onBrushSizeChange={(newSize) => {
                   setBrushToolState(prev => prev ? { ...prev, brushSize: newSize } : null);
