@@ -825,22 +825,25 @@ export function WorkingViewer({
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
-              onBrushSizeChange={onBrushSizeChange || ((newSize) => {
-                console.log('Brush size changed to:', newSize);
-              })}
-              onContourUpdate={onContourUpdate}
-              rtStructures={externalRTStructures}
-              selectedStructure={externalRTStructures?.structures?.find(
-                (s: any) => s.roiNumber === selectedForEdit
-              )}
+              selectedStructure={selectedForEdit}
+              rtStructures={rtStructures}
               currentSlicePosition={images.length > 0 && images[currentIndex] ? 
                 (images[currentIndex].parsedSliceLocation ?? 
                  images[currentIndex].parsedZPosition ??
                  currentIndex) : 0
               }
+              onContourUpdate={(updatedStructures) => {
+                if (onContourUpdate) {
+                  onContourUpdate(updatedStructures);
+                } else {
+                  console.log('Contour updated:', updatedStructures);
+                }
+              }}
               zoom={zoom}
               panX={panX}
               panY={panY}
+              currentImage={images.length > 0 ? images[currentIndex] : null}
+              imageMetadata={imageMetadata}
             />
           )}
           
