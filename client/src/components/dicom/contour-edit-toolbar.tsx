@@ -10,12 +10,14 @@ import {
   Pen, 
   Scissors,
   Settings,
-  X,
-  ChevronLeft
+  X
 } from 'lucide-react';
 
 interface ContourEditToolbarProps {
-  selectedStructure: any;
+  selectedStructure: {
+    structureName: string;
+    color: number[];
+  } | null;
   isVisible: boolean;
   onClose: () => void;
   onStructureNameChange: (name: string) => void;
@@ -30,6 +32,7 @@ export function ContourEditToolbar({
   onStructureColorChange 
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState<string | null>(null);
   const [brushThickness, setBrushThickness] = useState([3]);
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
@@ -44,63 +47,70 @@ export function ContourEditToolbar({
   const structureColorRgb = `rgb(${selectedStructure.color.join(',')})`;
 
   const mainTools = [
-    { id: 'brush', icon: Brush, label: 'Brush', color: 'text-blue-400 hover:bg-blue-500/20' },
-    { id: 'pen', icon: Pen, label: 'Pen', color: 'text-purple-400 hover:bg-purple-500/20' },
-    { id: 'erase', icon: Scissors, label: 'Erase', color: 'text-red-400 hover:bg-red-500/20' },
-    { id: 'operations', icon: Settings, label: 'Operations', color: 'text-green-400 hover:bg-green-500/20' }
+    { id: 'brush', icon: Brush, label: 'Brush' },
+    { id: 'pen', icon: Pen, label: 'Pen' },
+    { id: 'erase', icon: Scissors, label: 'Erase' },
+    { id: 'operations', icon: Settings, label: 'Operations' }
   ];
 
-  const renderSidePanel = () => {
-    if (!activeTool) return null;
+  const renderSettingsPanel = () => {
+    if (!showSettings) return null;
 
     return (
-      <div className="absolute right-full top-0 mr-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-64 shadow-2xl">
+      <div className="absolute left-full top-0 ml-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-80 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-medium text-white capitalize">{activeTool} Settings</h4>
+          <h4 className="text-sm font-medium text-white capitalize">{showSettings} Settings</h4>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setActiveTool(null)}
+            onClick={() => setShowSettings(null)}
             className="text-gray-400 hover:text-white h-6 w-6 p-0"
           >
-            <ChevronLeft size={12} />
+            <X size={12} />
           </Button>
         </div>
         
-        <div className="space-y-4">
-          <div>
-            <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
-            <Slider
-              value={brushThickness}
-              onValueChange={setBrushThickness}
-              max={20}
-              min={1}
-              step={1}
-              className="w-full"
-            />
-            <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
+              <Slider
+                value={brushThickness}
+                onValueChange={setBrushThickness}
+                max={20}
+                min={1}
+                step={1}
+                className="w-full"
+              />
+              <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-gray-300">3D Mode</Label>
+              <Switch
+                checked={is3D}
+                onCheckedChange={setIs3D}
+                className="data-[state=checked]:bg-blue-500"
+              />
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-gray-300">Smart Brush</Label>
+              <Switch
+                checked={smartBrush}
+                onCheckedChange={setSmartBrush}
+                className="data-[state=checked]:bg-green-500"
+              />
+            </div>
           </div>
           
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-gray-300">3D Mode</Label>
-            <Switch
-              checked={is3D}
-              onCheckedChange={setIs3D}
-              className="data-[state=checked]:bg-blue-500"
-            />
-          </div>
-          
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-gray-300">Smart Brush</Label>
-            <Switch
-              checked={smartBrush}
-              onCheckedChange={setSmartBrush}
-              className="data-[state=checked]:bg-green-500"
-            />
-          </div>
-          
-          <div className="text-xs text-gray-500 mt-3">
-            Placeholder panel - {activeTool} tools will be implemented here
+          <div className="space-y-2">
+            <div className="text-xs text-gray-500">
+              Placeholder panel - {showSettings} tools will be implemented here
+            </div>
+            <div className="text-xs text-gray-600">
+              Additional controls and options for the selected tool will appear in this area.
+            </div>
           </div>
         </div>
       </div>
@@ -110,8 +120,8 @@ export function ContourEditToolbar({
   return (
     <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
       <div 
-        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-lg p-3 shadow-2xl"
-        style={{ borderColor: structureColorRgb }}
+        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-lg p-3 shadow-2xl w-auto"
+        style={{ borderColor: `${structureColorRgb}60` }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
@@ -151,26 +161,48 @@ export function ContourEditToolbar({
           {mainTools.map((tool) => {
             const IconComponent = tool.icon;
             const isActive = activeTool === tool.id;
+            const hasSettings = showSettings === tool.id;
             return (
-              <Button
-                key={tool.id}
-                variant="outline"
-                size="sm"
-                onClick={() => setActiveTool(isActive ? null : tool.id)}
-                className={`h-9 px-3 bg-gray-800/70 ${tool.color} border-gray-600 transition-all duration-200 ${
-                  isActive ? 'ring-2 ring-offset-2 ring-offset-black' : ''
-                }`}
-                style={isActive ? { ringColor: structureColorRgb } : {}}
-              >
-                <IconComponent className="w-4 h-4 mr-2" />
-                <span className="text-sm">{tool.label}</span>
-              </Button>
+              <div key={tool.id} className="relative flex items-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setActiveTool(isActive ? null : tool.id)}
+                  className={`h-9 px-3 transition-all duration-200 ${
+                    isActive 
+                      ? 'border-2 text-white shadow-lg' 
+                      : 'bg-black border border-gray-500 text-white hover:bg-gray-800'
+                  }`}
+                  style={isActive ? { 
+                    borderColor: `${structureColorRgb}`,
+                    backgroundColor: `${structureColorRgb}20`,
+                    boxShadow: `0 0 8px ${structureColorRgb}40`
+                  } : {}}
+                >
+                  <IconComponent className="w-4 h-4 mr-2" />
+                  <span className="text-sm">{tool.label}</span>
+                </Button>
+                
+                {/* Settings expand button */}
+                {isActive && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowSettings(hasSettings ? null : tool.id)}
+                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700 transition-all duration-200 ${
+                      hasSettings ? 'bg-gray-700 text-white' : ''
+                    }`}
+                  >
+                    <Settings size={12} />
+                  </Button>
+                )}
+              </div>
             );
           })}
         </div>
 
-        {/* Side Panel */}
-        {renderSidePanel()}
+        {/* Settings Panel */}
+        {renderSettingsPanel()}
       </div>
     </div>
   );
