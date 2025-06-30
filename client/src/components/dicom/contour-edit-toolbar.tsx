@@ -10,7 +10,10 @@ import {
   Pen, 
   Scissors,
   Settings,
-  X
+  X,
+  Trash2,
+  Layers,
+  RotateCcw
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +29,8 @@ interface ContourEditToolbarProps {
   onStructureNameChange: (name: string) => void;
   onStructureColorChange: (color: string) => void;
   onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean }) => void;
+  currentSlicePosition?: number;
+  onContourUpdate?: (updatedStructures: any) => void;
 }
 
 export function ContourEditToolbar({ 
@@ -34,13 +39,16 @@ export function ContourEditToolbar({
   onClose,
   onStructureNameChange,
   onStructureColorChange,
-  onToolChange
+  onToolChange,
+  currentSlicePosition,
+  onContourUpdate
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
   const [brushThickness, setBrushThickness] = useState([3]);
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
+  const [targetSliceNumber, setTargetSliceNumber] = useState('');
 
   // Notify parent when brush tool is activated
   const handleToolActivation = (toolId: string) => {
@@ -100,6 +108,66 @@ export function ContourEditToolbar({
       toast({ title: "Failed to update structure color", variant: "destructive" });
     }
   });
+
+  // Delete operations functions
+  const handleDeleteCurrentSlice = () => {
+    if (!selectedStructure || !currentSlicePosition) return;
+    
+    console.log(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${currentSlicePosition}`);
+    
+    // Create notification for local update
+    if (onContourUpdate) {
+      // This would trigger a local update to remove the contour from current slice
+      const updatePayload = {
+        action: 'delete_slice',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: currentSlicePosition
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Deleted contour from current slice (${currentSlicePosition})` });
+  };
+
+  const handleDeleteNthSlice = () => {
+    if (!selectedStructure || !targetSliceNumber) return;
+    
+    const sliceNum = parseFloat(targetSliceNumber);
+    if (isNaN(sliceNum)) {
+      toast({ title: "Please enter a valid slice number", variant: "destructive" });
+      return;
+    }
+    
+    console.log(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${sliceNum}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'delete_slice',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: sliceNum
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Deleted contour from slice ${sliceNum}` });
+    setTargetSliceNumber('');
+  };
+
+  const handleClearAllSlices = () => {
+    if (!selectedStructure) return;
+    
+    console.log(`Clearing all contours for structure ${selectedStructure.roiNumber}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'clear_all',
+        structureId: selectedStructure.roiNumber
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Cleared all contours for ${selectedStructure.structureName}` });
+  };
 
   if (!isVisible || !selectedStructure) return null;
 
@@ -194,13 +262,61 @@ export function ContourEditToolbar({
             </div>
           </div>
           
-          <div className="space-y-2">
-            <div className="text-xs text-gray-500">
-              Placeholder panel - {showSettings} tools will be implemented here
-            </div>
-            <div className="text-xs text-gray-600">
-              Additional controls and options for the selected tool will appear in this area.
-            </div>
+          <div className="space-y-3">
+            {showSettings === 'operations' && (
+              <>
+                <div className="space-y-2">
+                  <Label className="text-xs text-gray-300">Delete Operations</Label>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteCurrentSlice}
+                    className="w-full h-8 bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
+                    disabled={!currentSlicePosition}
+                  >
+                    <Trash2 className="w-3 h-3 mr-2" />
+                    Delete Current Slice
+                  </Button>
+                  
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="Slice #"
+                      value={targetSliceNumber}
+                      onChange={(e) => setTargetSliceNumber(e.target.value)}
+                      className="flex-1 h-8 bg-gray-800/70 border-gray-600 text-white text-xs"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDeleteNthSlice}
+                      className="h-8 bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
+                      disabled={!targetSliceNumber}
+                    >
+                      <Layers className="w-3 h-3 mr-1" />
+                      Delete
+                    </Button>
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClearAllSlices}
+                    className="w-full h-8 bg-red-900/30 hover:bg-red-900/40 border-red-500/60 text-red-300 hover:text-red-200"
+                  >
+                    <RotateCcw className="w-3 h-3 mr-2" />
+                    Clear All Slices
+                  </Button>
+                </div>
+              </>
+            )}
+            
+            {showSettings !== 'operations' && (
+              <div className="text-xs text-gray-500">
+                {showSettings} tool settings will be implemented here
+              </div>
+            )}
           </div>
         </div>
       </div>

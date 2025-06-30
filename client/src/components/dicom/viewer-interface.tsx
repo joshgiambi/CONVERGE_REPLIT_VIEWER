@@ -396,6 +396,8 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           onToolChange={(toolState) => {
             setBrushToolState(toolState);
           }}
+          currentSlicePosition={currentSlicePosition}
+          onContourUpdate={handleContourUpdate}
         />
       )}
 
