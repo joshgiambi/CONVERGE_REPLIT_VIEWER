@@ -127,8 +127,8 @@ function renderRTStructures(
   ctx.translate(-canvas.width / 2 + panX, -canvas.height / 2 + panY);
   
   // Set overlay drawing properties
-  ctx.lineWidth = 2 / zoom; // Adjust line width for zoom
-  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = contourWidth / zoom; // Use actual contour width setting
+  ctx.globalAlpha = 1; // Keep stroke at full opacity
   
   // Find contours that match the current slice position (within tolerance)
   const tolerance = 2.0; // mm tolerance for slice matching
@@ -137,7 +137,7 @@ function renderRTStructures(
     // Set color for this structure
     const [r, g, b] = structure.color;
     ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${contourOpacity / 100})`;
     
     structure.contours.forEach(contour => {
       // Check if this contour is on the current slice

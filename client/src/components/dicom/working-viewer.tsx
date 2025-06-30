@@ -436,11 +436,13 @@ export function WorkingViewer({
     ctx.save();
     
     // Apply global contour settings
-    const width = contourSettings?.width || 2;
-    const opacity = (contourSettings?.opacity || 80) / 100;
+    const lineWidth = contourSettings?.width || 2;
+    const fillOpacity = (contourSettings?.opacity || 80) / 100;
     
-    ctx.lineWidth = width;
-    ctx.globalAlpha = opacity;
+    // Set line width (scaled for zoom)
+    ctx.lineWidth = lineWidth / zoom;
+    // Keep stroke at full opacity - only fill should be affected by opacity setting
+    ctx.globalAlpha = 1;
     
     rtStructures.structures.forEach((structure: any) => {
       // Check if this structure is visible or if it's selected for editing
@@ -454,7 +456,7 @@ export function WorkingViewer({
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
       const [r, g, b] = color;
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.2)`;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
       
       structure.contours.forEach((contour: any) => {
         // Check if this contour is on the current slice
