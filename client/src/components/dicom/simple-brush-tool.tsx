@@ -30,6 +30,7 @@ export function SimpleBrushTool({
   const [isDrawing, setIsDrawing] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
+  const [resizeStartPosition, setResizeStartPosition] = useState<{ x: number; y: number } | null>(null);
   const [isInsideContour, setIsInsideContour] = useState(false);
   const [brushStrokes, setBrushStrokes] = useState<Array<{x: number, y: number, isAdditive: boolean}>>([]);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
