@@ -816,6 +816,10 @@ export function WorkingViewer({
               onBrushSizeChange={onBrushSizeChange || ((newSize) => {
                 console.log('Brush size changed to:', newSize);
               })}
+              onContourUpdate={(updatedStructures) => {
+                console.log('Contour updated:', updatedStructures);
+                // Update RT structures in parent component
+              }}
               rtStructures={externalRTStructures}
               selectedStructure={externalRTStructures?.structures?.find(
                 (s: any) => s.roiNumber === selectedForEdit

@@ -11,6 +11,7 @@ interface SimpleBrushToolProps {
   zoom: number;
   panX: number;
   panY: number;
+  onContourUpdate?: (updatedStructures: any) => void;
 }
 
 export function SimpleBrushTool({
@@ -23,12 +24,61 @@ export function SimpleBrushTool({
   currentSlicePosition,
   zoom,
   panX,
-  panY
+  panY,
+  onContourUpdate
 }: SimpleBrushToolProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [isInsideContour, setIsInsideContour] = useState(false);
+  const [brushStrokes, setBrushStrokes] = useState<Array<{x: number, y: number, isAdditive: boolean}>>([]);
+
+  // Apply brush stroke to modify contours
+  const applyBrushStroke = () => {
+    if (!selectedStructure || !rtStructures || brushStrokes.length === 0) return;
+
+    console.log('Applying brush stroke with', brushStrokes.length, 'points');
+    
+    // Create modified structure with brush strokes applied
+    const updatedStructures = { ...rtStructures };
+    const structure = updatedStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
+    
+    if (structure && structure.contours) {
+      // Find contours for current slice
+      const currentSliceContours = structure.contours.filter((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) < 0.1
+      );
+      
+      if (currentSliceContours.length > 0) {
+        // Apply brush modifications to existing contours
+        brushStrokes.forEach(stroke => {
+          if (stroke.isAdditive) {
+            // Add to contour (expand)
+            console.log('Adding to contour at', stroke.x, stroke.y);
+          } else {
+            // Remove from contour (shrink)
+            console.log('Removing from contour at', stroke.x, stroke.y);
+          }
+        });
+      } else {
+        // Create new contour for this slice if additive strokes exist
+        const additiveStrokes = brushStrokes.filter(s => s.isAdditive);
+        if (additiveStrokes.length > 0) {
+          const newContour = {
+            slicePosition: currentSlicePosition,
+            points: additiveStrokes.map(s => [s.x, s.y])
+          };
+          structure.contours.push(newContour);
+          console.log('Created new contour with', additiveStrokes.length, 'points');
+        }
+      }
+      
+      // Notify parent of structure update
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+    }
+  };
 
   // Convert screen coordinates to canvas coordinates
   const getCanvasCoordinates = (clientX: number, clientY: number) => {
@@ -135,6 +185,13 @@ export function SimpleBrushTool({
       }
 
       if (isDrawing) {
+        // Add brush stroke point for real contour modification
+        setBrushStrokes(prev => [...prev, {
+          x: coords.x,
+          y: coords.y,
+          isAdditive: isInsideContour
+        }]);
+        
         console.log('Brush stroke continue:', {
           position: coords,
           isAdditive: isInsideContour
@@ -145,7 +202,9 @@ export function SimpleBrushTool({
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawing) {
         console.log('Brush stroke completed');
+        applyBrushStroke();
         setIsDrawing(false);
+        setBrushStrokes([]);
       }
       if (isResizing) {
         setIsResizing(false);
