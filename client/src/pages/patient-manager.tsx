@@ -336,97 +336,63 @@ export default function PatientManager() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header with sleek dark styling */}
-        <header className="mb-8 bg-gray-900/80 backdrop-blur-md border border-gray-700/30 rounded-2xl px-6 py-4 shadow-xl">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
-              <span style={{
-                color: 'white',
-                fontWeight: '900'
-              }}>S</span>
-              <span style={{
-                color: 'white',
-                fontWeight: '900'
-              }}>U</span>
-              <span style={{
-                color: 'white',
-                fontWeight: '900'
-              }}>P</span>
-              <span style={{
-                color: 'white',
-                fontWeight: '900'
-              }}>E</span>
-              <span style={{
-                color: 'white',
-                fontWeight: '900'
-              }}>R</span>
-              <span style={{
-                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                fontWeight: '900'
-              }}>B</span>
-              <span style={{
-                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                fontWeight: '900'
-              }}>E</span>
-              <span style={{
-                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                fontWeight: '900'
-              }}>A</span>
-              <span style={{
-                background: 'linear-gradient(45deg, #9333ea, #dc2626)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                fontWeight: '900'
-              }}>M</span>
-            </h1>
-            </div>
-            <div className="flex gap-2">
-            <Button 
-              variant="outline"
-              onClick={() => setActiveTab("import")}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Import DICOM
-            </Button>
-            <Button 
-              variant="outline"
-              onClick={() => {
-                // Open the first available study in the viewer
-                if (studies.length > 0) {
-                  window.open(`/dicom-viewer?studyId=${studies[0].id}`, '_blank');
-                } else {
-                  window.open('/dicom-viewer', '_blank');
-                }
-              }}
-            >
-              <Eye className="h-4 w-4 mr-2" />
-              Open Viewer
-            </Button>
-            <Button 
-              onClick={() => {
-                // Open the first available study in the enhanced viewer with RT structures
-                if (studies.length > 0) {
-                  window.open(`/enhanced-viewer?studyId=${studies[0].id}`, '_blank');
-                } else {
-                  window.open('/enhanced-viewer', '_blank');
-                }
-              }}
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Enhanced Viewer
-            </Button>
+      <div className="container mx-auto px-4 pt-24 pb-8">
+        {/* Header matching viewer interface */}
+        <header className="fixed top-4 left-4 right-4 bg-gray-900/80 backdrop-blur-md border border-gray-700/30 rounded-2xl px-6 py-3 z-50 shadow-xl">
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center space-x-4">
+              <div>
+                <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
+                  <span style={{
+                    color: 'white',
+                    fontWeight: '900'
+                  }}>S</span>
+                  <span style={{
+                    color: 'white',
+                    fontWeight: '900'
+                  }}>U</span>
+                  <span style={{
+                    color: 'white',
+                    fontWeight: '900'
+                  }}>P</span>
+                  <span style={{
+                    color: 'white',
+                    fontWeight: '900'
+                  }}>E</span>
+                  <span style={{
+                    color: 'white',
+                    fontWeight: '900'
+                  }}>R</span>
+                  <span style={{
+                    background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                    fontWeight: '900'
+                  }}>B</span>
+                  <span style={{
+                    background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                    fontWeight: '900'
+                  }}>E</span>
+                  <span style={{
+                    background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                    fontWeight: '900'
+                  }}>A</span>
+                  <span style={{
+                    background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                    fontWeight: '900'
+                  }}>M</span>
+                </h1>
+              </div>
             </div>
           </div>
         </header>
