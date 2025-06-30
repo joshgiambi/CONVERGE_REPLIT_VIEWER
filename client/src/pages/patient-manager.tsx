@@ -445,16 +445,16 @@ export default function PatientManager() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="patients" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-4 bg-gray-900/60 border-gray-700/50">
+            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2">
+            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
               <Upload className="h-4 w-4" />
               Import DICOM
             </TabsTrigger>
-            <TabsTrigger value="pacs" className="flex items-center gap-2">
+            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
               <Network className="h-4 w-4" />
               PACS
             </TabsTrigger>
