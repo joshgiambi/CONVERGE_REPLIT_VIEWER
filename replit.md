@@ -89,6 +89,14 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
+- June 30, 2025: Smart Brush Contour Detection - COMPLETED
+  - ✅ Implemented intelligent brush mode detection based on contour intersection
+  - ✅ Green brush cursor when touching selected structure's contour (add mode)
+  - ✅ Red brush cursor when not touching contour (delete mode)
+  - ✅ Contour intersection detection applies only to the structure being edited
+  - ✅ Brush mode locks during stroke to maintain consistent behavior throughout drawing
+  - ✅ Real-time visual feedback provides immediate guidance for contour editing operations
+  - ✅ Fixed Vite React plugin preamble detection issue preventing page loading
 - June 30, 2025: Contour Editing Toolbar Redesign - COMPLETED
   - ✅ Redesigned 4-button main toolbar: Brush, Pen, Erase, Operations with grey border/black background styling
   - ✅ Implemented persistent active tool states with enhanced visual feedback (structure color border and glow)
