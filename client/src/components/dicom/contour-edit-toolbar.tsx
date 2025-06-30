@@ -1,18 +1,17 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { 
   Brush, 
   Pen, 
-  Wand2, 
-  Shuffle, 
-  Expand, 
-  Shrink,
-  Square,
-  X,
   Scissors,
-  Copy 
+  Settings,
+  X,
+  ChevronLeft
 } from 'lucide-react';
 
 interface ContourEditToolbarProps {
@@ -30,6 +29,11 @@ export function ContourEditToolbar({
   onStructureNameChange,
   onStructureColorChange 
 }: ContourEditToolbarProps) {
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [brushThickness, setBrushThickness] = useState([3]);
+  const [is3D, setIs3D] = useState(false);
+  const [smartBrush, setSmartBrush] = useState(false);
+
   if (!isVisible || !selectedStructure) return null;
 
   const rgbToHex = (rgb: number[]) => {
@@ -37,39 +41,92 @@ export function ContourEditToolbar({
   };
 
   const currentColor = rgbToHex(selectedStructure.color || [255, 255, 255]);
+  const structureColorRgb = `rgb(${selectedStructure.color.join(',')})`;
 
-  const tools = [
-    { id: 'brush', icon: Brush, label: 'Brush', color: 'text-blue-400 border-blue-500 hover:bg-blue-500/20' },
-    { id: 'pen', icon: Pen, label: 'Pen', color: 'text-purple-400 border-purple-500 hover:bg-purple-500/20' },
-    { id: 'erase', icon: Scissors, label: 'Erase', color: 'text-red-400 border-red-500 hover:bg-red-500/20' },
-    { id: 'smooth', icon: Wand2, label: 'Smooth', color: 'text-yellow-400 border-yellow-500 hover:bg-yellow-500/20' },
-    { id: 'interpolate', icon: Shuffle, label: 'Interpolate', color: 'text-green-400 border-green-500 hover:bg-green-500/20' },
-    { id: 'expand', icon: Expand, label: 'Expand', color: 'text-orange-400 border-orange-500 hover:bg-orange-500/20' },
-    { id: 'shrink', icon: Shrink, label: 'Shrink', color: 'text-cyan-400 border-cyan-500 hover:bg-cyan-500/20' },
-    { id: 'boolean', icon: Square, label: 'Boolean', color: 'text-pink-400 border-pink-500 hover:bg-pink-500/20' },
-    { id: 'copy', icon: Copy, label: 'Copy', color: 'text-indigo-400 border-indigo-500 hover:bg-indigo-500/20' }
+  const mainTools = [
+    { id: 'brush', icon: Brush, label: 'Brush', color: 'text-blue-400 hover:bg-blue-500/20' },
+    { id: 'pen', icon: Pen, label: 'Pen', color: 'text-purple-400 hover:bg-purple-500/20' },
+    { id: 'erase', icon: Scissors, label: 'Erase', color: 'text-red-400 hover:bg-red-500/20' },
+    { id: 'operations', icon: Settings, label: 'Operations', color: 'text-green-400 hover:bg-green-500/20' }
   ];
 
+  const renderSidePanel = () => {
+    if (!activeTool) return null;
+
+    return (
+      <div className="absolute right-full top-0 mr-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-64 shadow-2xl">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-medium text-white capitalize">{activeTool} Settings</h4>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setActiveTool(null)}
+            className="text-gray-400 hover:text-white h-6 w-6 p-0"
+          >
+            <ChevronLeft size={12} />
+          </Button>
+        </div>
+        
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
+            <Slider
+              value={brushThickness}
+              onValueChange={setBrushThickness}
+              max={20}
+              min={1}
+              step={1}
+              className="w-full"
+            />
+            <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-gray-300">3D Mode</Label>
+            <Switch
+              checked={is3D}
+              onCheckedChange={setIs3D}
+              className="data-[state=checked]:bg-blue-500"
+            />
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-gray-300">Smart Brush</Label>
+            <Switch
+              checked={smartBrush}
+              onCheckedChange={setSmartBrush}
+              className="data-[state=checked]:bg-green-500"
+            />
+          </div>
+          
+          <div className="text-xs text-gray-500 mt-3">
+            Placeholder panel - {activeTool} tools will be implemented here
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 w-2/5 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 z-50 shadow-2xl">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
+      <div 
+        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-lg p-3 shadow-2xl"
+        style={{ borderColor: structureColorRgb }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center space-x-3">
             <div 
               className="w-4 h-4 rounded border border-gray-400"
-              style={{ backgroundColor: `rgb(${selectedStructure.color.join(',')})` }}
+              style={{ backgroundColor: structureColorRgb }}
             />
-            <Label className="text-gray-300 text-sm font-medium">
-              Editing:
-            </Label>
+            <span className="text-white text-sm font-medium">Editing:</span>
             <Input
               value={selectedStructure.structureName || ''}
               onChange={(e) => onStructureNameChange(e.target.value)}
               className="w-32 h-7 bg-gray-800/70 border-gray-600 text-white text-sm"
             />
-          </div>
-          <div className="flex items-center space-x-2">
-            <Label className="text-gray-300 text-sm">Color:</Label>
+            <span className="text-gray-300 text-sm">Color:</span>
             <input
               type="color"
               value={currentColor}
@@ -77,34 +134,43 @@ export function ContourEditToolbar({
               className="w-7 h-7 rounded border border-gray-600 bg-gray-800 cursor-pointer"
             />
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="text-gray-400 hover:text-white hover:bg-gray-700 h-7 w-7 p-0"
+          >
+            <X size={14} />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="text-gray-400 hover:text-white hover:bg-gray-700 h-7 w-7 p-0"
-        >
-          <X size={14} />
-        </Button>
-      </div>
 
-      <Separator className="my-2 bg-gray-700" />
+        <Separator className="my-2 bg-gray-700" />
 
-      <div className="flex items-center justify-center space-x-1">
-        {tools.map((tool, index) => {
-          const IconComponent = tool.icon;
-          return (
-            <Button
-              key={tool.id}
-              variant="outline"
-              size="sm"
-              className={`h-8 px-2 bg-gray-800/70 ${tool.color} border transition-all duration-200`}
-            >
-              <IconComponent className="w-3 h-3 mr-1" />
-              <span className="text-xs">{tool.label}</span>
-            </Button>
-          );
-        })}
+        {/* Tool Buttons */}
+        <div className="flex items-center justify-center space-x-2">
+          {mainTools.map((tool) => {
+            const IconComponent = tool.icon;
+            const isActive = activeTool === tool.id;
+            return (
+              <Button
+                key={tool.id}
+                variant="outline"
+                size="sm"
+                onClick={() => setActiveTool(isActive ? null : tool.id)}
+                className={`h-9 px-3 bg-gray-800/70 ${tool.color} border-gray-600 transition-all duration-200 ${
+                  isActive ? 'ring-2 ring-offset-2 ring-offset-black' : ''
+                }`}
+                style={isActive ? { ringColor: structureColorRgb } : {}}
+              >
+                <IconComponent className="w-4 h-4 mr-2" />
+                <span className="text-sm">{tool.label}</span>
+              </Button>
+            );
+          })}
+        </div>
+
+        {/* Side Panel */}
+        {renderSidePanel()}
       </div>
     </div>
   );
