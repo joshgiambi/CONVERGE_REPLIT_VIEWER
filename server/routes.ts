@@ -824,5 +824,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update RT structure name
+  app.patch("/api/rt-structures/:structureId/name", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const structureId = parseInt(req.params.structureId);
+      const { name } = req.body;
+      
+      if (!name || typeof name !== 'string') {
+        return res.status(400).json({ message: "Name is required" });
+      }
+
+      await storage.updateRTStructureName(structureId, name);
+      res.json({ success: true, message: "Structure name updated" });
+    } catch (error) {
+      console.error('Error updating structure name:', error);
+      next(error);
+    }
+  });
+
+  // Update RT structure color
+  app.patch("/api/rt-structures/:structureId/color", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const structureId = parseInt(req.params.structureId);
+      const { color } = req.body;
+      
+      if (!color || !Array.isArray(color) || color.length !== 3) {
+        return res.status(400).json({ message: "Color must be an RGB array [r, g, b]" });
+      }
+
+      await storage.updateRTStructureColor(structureId, color);
+      res.json({ success: true, message: "Structure color updated" });
+    } catch (error) {
+      console.error('Error updating structure color:', error);
+      next(error);
+    }
+  });
+
   return { close: () => {} } as Server;
 }

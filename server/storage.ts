@@ -2,6 +2,14 @@ import { studies, series, images, patients, pacsConnections, type Study, type Se
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
+// In-memory storage for RT structure modifications
+interface RTStructureModification {
+  structureName?: string;
+  color?: number[];
+}
+
+const rtStructureModifications = new Map<number, RTStructureModification>();
+
 export interface IStorage {
   // Patient operations
   createPatient(patient: InsertPatient): Promise<Patient>;
@@ -41,6 +49,10 @@ export interface IStorage {
   // Update operations
   updateSeriesImageCount(seriesId: number, count: number): Promise<void>;
   updateStudyCounts(studyId: number, seriesCount: number, imageCount: number): Promise<void>;
+  
+  // RT Structure operations
+  updateRTStructureName(structureId: number, name: string): Promise<void>;
+  updateRTStructureColor(structureId: number, color: number[]): Promise<void>;
   
   // Clear all data
   clearAll(): void;
