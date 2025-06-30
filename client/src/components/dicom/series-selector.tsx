@@ -535,13 +535,7 @@ export function SeriesSelector({
                                         : ''
                                     }`}
                                   >
-                                    {/* Tree connector lines */}
-                                    <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-700 opacity-50"></div>
-                                    <div className="absolute left-0 top-1/2 w-3 h-px bg-gray-700 opacity-50"></div>
-                                    {/* Last item gets shorter vertical line */}
-                                    {index === groupStructures.length - 1 && (
-                                      <div className="absolute left-0 top-0 w-px bg-gray-700 opacity-50" style={{ height: '50%' }}></div>
-                                    )}
+
                                     <Checkbox
                                       checked={selectedStructures.has(structure.roiNumber)}
                                       onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}

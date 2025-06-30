@@ -27,6 +27,7 @@ interface ViewerToolbarProps {
   currentSlice?: number;
   totalSlices?: number;
   windowLevel?: { window: number; level: number };
+  isContourEditActive?: boolean;
 }
 
 export function ViewerToolbar({
@@ -40,7 +41,8 @@ export function ViewerToolbar({
   onContourSettings,
   currentSlice,
   totalSlices,
-  windowLevel
+  windowLevel,
+  isContourEditActive
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -81,6 +83,7 @@ export function ViewerToolbar({
 
             const IconComponent = tool.icon!;
             const isActive = tool.selectable && activeTool === tool.id;
+            const isContourEditActive = tool.id === 'contour-edit' && isContourEditActive;
 
             return (
               <div key={tool.id} className="relative group">
