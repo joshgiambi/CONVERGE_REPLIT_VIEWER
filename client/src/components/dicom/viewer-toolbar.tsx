@@ -93,6 +93,8 @@ export function ViewerToolbar({
                     p-2 rounded-full transition-all duration-200 hover:scale-110
                     ${isActive 
                       ? 'bg-dicom-yellow/20 text-dicom-yellow border border-dicom-yellow' 
+                      : tool.id === 'contour-edit' && isContourEditActive
+                      ? 'bg-green-500/20 text-green-400 border border-green-400'
                       : 'hover:bg-dicom-yellow/20 text-dicom-yellow hover:text-dicom-yellow'
                     }
                   `}

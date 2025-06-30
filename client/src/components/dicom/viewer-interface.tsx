@@ -357,6 +357,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
+          isContourEditActive={selectedForEdit !== null}
         />
       )}
 
