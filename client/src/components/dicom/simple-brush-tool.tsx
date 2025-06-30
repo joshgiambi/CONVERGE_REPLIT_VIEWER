@@ -29,39 +29,89 @@ export function SimpleBrushTool({
   currentImage,
   imageMetadata
 }: SimpleBrushToolProps) {
+  console.log('Brush active?', isActive);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushMode, setBrushMode] = useState<'add' | 'delete'>('add');
   const [currentStroke, setCurrentStroke] = useState<{x: number, y: number}[]>([]);
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const brushModeRef = useRef<'add' | 'delete'>('add');
 
-  // Update brush mode based on contour intersection when tool becomes active
+  // Create cursor overlay canvas
   useEffect(() => {
-    if (!isActive || !canvasRef.current || !selectedStructure || !rtStructures) return;
+    if (!isActive || !canvasRef.current) return;
 
-    const canvas = canvasRef.current;
+    const mainCanvas = canvasRef.current;
+    const cursorCanvas = document.createElement('canvas');
+    
+    // Position overlay canvas
+    cursorCanvas.style.position = 'absolute';
+    cursorCanvas.style.top = '0';
+    cursorCanvas.style.left = '0';
+    cursorCanvas.style.pointerEvents = 'none';
+    cursorCanvas.style.zIndex = '999';
+    
+    // Match main canvas dimensions
+    cursorCanvas.width = mainCanvas.width;
+    cursorCanvas.height = mainCanvas.height;
+    cursorCanvas.style.width = mainCanvas.style.width || `${mainCanvas.width}px`;
+    cursorCanvas.style.height = mainCanvas.style.height || `${mainCanvas.height}px`;
+    
+    // Add to parent container
+    mainCanvas.parentElement?.appendChild(cursorCanvas);
+    
+    const ctx = cursorCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Track mouse position and update brush mode
     const updateBrushMode = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
+      const rect = mainCanvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       
+      setMousePosition({ x, y });
       const mode = detectBrushMode(x, y);
       setBrushMode(mode);
-      canvas.style.cursor = mode === 'add' ? 
-        `url("data:image/svg+xml,${encodeURIComponent(`
-          <svg xmlns='http://www.w3.org/2000/svg' width='${brushSize * 2}' height='${brushSize * 2}' viewBox='0 0 ${brushSize * 2} ${brushSize * 2}'>
-            <circle cx='${brushSize}' cy='${brushSize}' r='${brushSize - 1}' fill='none' stroke='#10b981' stroke-width='2'/>
-          </svg>
-        `)}")` : 
-        `url("data:image/svg+xml,${encodeURIComponent(`
-          <svg xmlns='http://www.w3.org/2000/svg' width='${brushSize * 2}' height='${brushSize * 2}' viewBox='0 0 ${brushSize * 2} ${brushSize * 2}'>
-            <circle cx='${brushSize}' cy='${brushSize}' r='${brushSize - 1}' fill='none' stroke='#ef4444' stroke-width='2'/>
-          </svg>
-        `)}")`;
     };
 
-    canvas.addEventListener('mousemove', updateBrushMode);
-    return () => canvas.removeEventListener('mousemove', updateBrushMode);
-  }, [isActive, brushSize, selectedStructure, rtStructures, currentSlicePosition]);
+    const clearCursor = () => {
+      setMousePosition(null);
+    };
+
+    mainCanvas.addEventListener('mousemove', updateBrushMode);
+    mainCanvas.addEventListener('mouseleave', clearCursor);
+    
+    return () => {
+      mainCanvas.removeEventListener('mousemove', updateBrushMode);
+      mainCanvas.removeEventListener('mouseleave', clearCursor);
+      cursorCanvas.remove();
+    };
+  }, [isActive, selectedStructure, rtStructures, currentSlicePosition]);
+
+  // Draw cursor overlay
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) return;
+
+    const mainCanvas = canvasRef.current;
+    const cursorCanvas = mainCanvas.parentElement?.querySelector('canvas[style*="z-index: 999"]') as HTMLCanvasElement;
+    if (!cursorCanvas) return;
+
+    const ctx = cursorCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+
+    // Draw cursor if mouse is over canvas
+    if (mousePosition) {
+      const color = brushMode === 'add' ? '#10b981' : '#ef4444';
+      
+      ctx.beginPath();
+      ctx.arc(mousePosition.x, mousePosition.y, brushSize, 0, 2 * Math.PI);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }, [isActive, mousePosition, brushMode, brushSize]);
 
   const detectBrushMode = (canvasX: number, canvasY: number): 'add' | 'delete' => {
     if (!selectedStructure || !rtStructures || !currentImage) return 'add';
