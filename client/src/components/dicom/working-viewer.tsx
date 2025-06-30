@@ -21,6 +21,7 @@ interface WorkingViewerProps {
     isActive: boolean;
   };
   selectedForEdit?: number | null;
+  onBrushSizeChange?: (size: number) => void;
 }
 
 export function WorkingViewer({ 
@@ -34,7 +35,8 @@ export function WorkingViewer({
   rtStructures: externalRTStructures, 
   structureVisibility: externalStructureVisibility,
   brushToolState,
-  selectedForEdit
+  selectedForEdit,
+  onBrushSizeChange
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -811,11 +813,9 @@ export function WorkingViewer({
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
-              onBrushSizeChange={(newSize) => {
-                // Update brush size in parent component state management
-                // This would typically call a callback to update the toolbar state
+              onBrushSizeChange={onBrushSizeChange || ((newSize) => {
                 console.log('Brush size changed to:', newSize);
-              }}
+              })}
               rtStructures={externalRTStructures}
               selectedStructure={externalRTStructures?.structures?.find(
                 (s: any) => s.roiNumber === selectedForEdit

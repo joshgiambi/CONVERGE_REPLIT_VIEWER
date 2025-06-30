@@ -308,6 +308,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                 structureVisibility={structureVisibility}
                 brushToolState={brushToolState}
                 selectedForEdit={selectedForEdit}
+                onBrushSizeChange={(newSize) => {
+                  setBrushToolState(prev => prev ? { ...prev, brushSize: newSize } : null);
+                }}
               />
               
               {/* Structure Tags on Right Side */}
