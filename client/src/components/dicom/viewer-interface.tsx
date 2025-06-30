@@ -361,9 +361,9 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
       )}
 
       {/* Contour Edit Toolbar */}
-      {selectedForEdit && rtStructures && (
+      {selectedForEdit && rtStructures && rtStructures.structures && (
         <ContourEditToolbar
-          selectedStructure={rtStructures.find((s: any) => s.roiNumber === selectedForEdit)}
+          selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
           isVisible={isContourEditMode}
           onClose={() => {
             setIsContourEditMode(false);

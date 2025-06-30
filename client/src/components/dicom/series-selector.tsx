@@ -523,7 +523,7 @@ export function SeriesSelector({
                             ))}
 
                             {/* Individual nested structures below group headers */}
-                            {Object.entries(groups).map(([groupName, groupStructures]: [string, any[]]) => 
+                            {Array.from(groups.entries()).map(([groupName, groupStructures]) => 
                               expandedGroups.get(groupName) ? groupStructures.map((structure: any, index: number) => (
                                 <div 
                                   key={`nested-${structure.roiNumber}`}
