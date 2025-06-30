@@ -232,6 +232,12 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     }
   };
 
+  const handleContourUpdate = (updatedRTStructures: any) => {
+    console.log('Contour update received:', updatedRTStructures);
+    // Update the RT structures state with the modified contours
+    setRTStructures(updatedRTStructures);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">

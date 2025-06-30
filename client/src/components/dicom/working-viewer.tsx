@@ -22,6 +22,7 @@ interface WorkingViewerProps {
   };
   selectedForEdit?: number | null;
   onBrushSizeChange?: (size: number) => void;
+  onContourUpdate?: (updatedStructures: any) => void;
 }
 
 export function WorkingViewer({ 
@@ -36,7 +37,8 @@ export function WorkingViewer({
   structureVisibility: externalStructureVisibility,
   brushToolState,
   selectedForEdit,
-  onBrushSizeChange
+  onBrushSizeChange,
+  onContourUpdate
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -819,10 +821,7 @@ export function WorkingViewer({
               onBrushSizeChange={onBrushSizeChange || ((newSize) => {
                 console.log('Brush size changed to:', newSize);
               })}
-              onContourUpdate={(updatedStructures) => {
-                console.log('Contour updated:', updatedStructures);
-                // Update RT structures in parent component
-              }}
+              onContourUpdate={onContourUpdate}
               rtStructures={externalRTStructures}
               selectedStructure={externalRTStructures?.structures?.find(
                 (s: any) => s.roiNumber === selectedForEdit

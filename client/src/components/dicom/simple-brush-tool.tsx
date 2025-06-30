@@ -39,43 +39,86 @@ export function SimpleBrushTool({
   const applyBrushStroke = () => {
     if (!selectedStructure || !rtStructures || brushStrokes.length === 0) return;
 
-    console.log('Applying brush stroke with', brushStrokes.length, 'points');
+    console.log('Applying brush stroke with', brushStrokes.length, 'points to structure', selectedStructure.roiNumber);
     
-    // Create modified structure with brush strokes applied
-    const updatedStructures = { ...rtStructures };
+    // Create deep copy of RT structures for modification
+    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
     
     if (structure && structure.contours) {
-      // Find contours for current slice
-      const currentSliceContours = structure.contours.filter((contour: any) => 
-        Math.abs(contour.slicePosition - currentSlicePosition) < 0.1
+      const tolerance = 2.5; // Slice tolerance
+      let currentSliceContours = structure.contours.filter((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
       );
       
+      // Convert brush strokes to world coordinates for proper DICOM storage
+      const worldStrokes = brushStrokes.map(stroke => {
+        // Convert canvas coordinates back to DICOM world coordinates
+        const worldX = (stroke.x - (canvasRef.current?.width || 512) / 2) / zoom + currentSlicePosition;
+        const worldY = (stroke.y - (canvasRef.current?.height || 512) / 2) / zoom + currentSlicePosition;
+        return {
+          worldX,
+          worldY,
+          z: currentSlicePosition,
+          isAdditive: stroke.isAdditive
+        };
+      });
+      
       if (currentSliceContours.length > 0) {
-        // Apply brush modifications to existing contours
-        brushStrokes.forEach(stroke => {
-          if (stroke.isAdditive) {
-            // Add to contour (expand)
-            console.log('Adding to contour at', stroke.x, stroke.y);
-          } else {
-            // Remove from contour (shrink)
-            console.log('Removing from contour at', stroke.x, stroke.y);
-          }
+        // Modify existing contours
+        currentSliceContours.forEach((contour: any) => {
+          worldStrokes.forEach(stroke => {
+            if (stroke.isAdditive) {
+              // Add points to expand contour
+              const newPoints = [stroke.worldX, stroke.worldY, stroke.z];
+              contour.points.push(...newPoints);
+              console.log('Added point to existing contour:', newPoints);
+            } else {
+              // Remove nearby points to shrink contour
+              const removeRadius = brushSize * 2;
+              contour.points = contour.points.filter((_: any, index: number) => {
+                if (index % 3 === 0) { // X coordinate
+                  const x = contour.points[index];
+                  const y = contour.points[index + 1];
+                  const distance = Math.sqrt(Math.pow(x - stroke.worldX, 2) + Math.pow(y - stroke.worldY, 2));
+                  return distance > removeRadius;
+                }
+                return true;
+              });
+              console.log('Removed points near:', stroke.worldX, stroke.worldY);
+            }
+          });
         });
       } else {
-        // Create new contour for this slice if additive strokes exist
-        const additiveStrokes = brushStrokes.filter(s => s.isAdditive);
+        // Create new contour for this slice from additive strokes
+        const additiveStrokes = worldStrokes.filter(s => s.isAdditive);
         if (additiveStrokes.length > 0) {
+          // Create circular contour from brush strokes
+          const centerX = additiveStrokes.reduce((sum, s) => sum + s.worldX, 0) / additiveStrokes.length;
+          const centerY = additiveStrokes.reduce((sum, s) => sum + s.worldY, 0) / additiveStrokes.length;
+          const radius = brushSize;
+          
+          // Generate circular contour points
+          const points: number[] = [];
+          const numPoints = 16; // Number of points in circle
+          for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * 2 * Math.PI;
+            const x = centerX + radius * Math.cos(angle);
+            const y = centerY + radius * Math.sin(angle);
+            points.push(x, y, currentSlicePosition);
+          }
+          
           const newContour = {
             slicePosition: currentSlicePosition,
-            points: additiveStrokes.map(s => [s.x, s.y])
+            points: points
           };
+          
           structure.contours.push(newContour);
-          console.log('Created new contour with', additiveStrokes.length, 'points');
+          console.log('Created new circular contour with', numPoints, 'points at slice', currentSlicePosition);
         }
       }
       
-      // Notify parent of structure update
+      // Notify parent of structure update with modified data
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
