@@ -9,6 +9,13 @@ import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
+// TypeScript declaration for cornerstone
+declare global {
+  interface Window {
+    cornerstone: any;
+  }
+}
+
 
 interface ViewerInterfaceProps {
   studyData: any;
@@ -349,23 +356,26 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onContourSettingsChange={onContourSettingsChange}
             onAutoZoom={(zoom) => {
               console.log('ViewerInterface onAutoZoom called with zoom:', zoom);
-              // Apply auto-zoom using cornerstone's zoom functionality
+              // Apply auto-zoom using direct window.cornerstone if available
               try {
-                const cornerstone = cornerstoneConfig.getCornerstone();
-                const elements = document.querySelectorAll('.cornerstone-viewport');
-                console.log('Found viewport elements:', elements.length);
-                
-                elements.forEach((element: any) => {
-                  if (element) {
-                    const viewport = cornerstone.getViewport(element);
-                    console.log('Current viewport:', viewport);
-                    if (viewport) {
-                      viewport.scale = zoom;
-                      cornerstone.setViewport(element, viewport);
-                      console.log('Applied zoom:', zoom);
+                if (window.cornerstone) {
+                  const elements = document.querySelectorAll('.cornerstone-viewport');
+                  console.log('Found viewport elements:', elements.length);
+                  
+                  elements.forEach((element: any) => {
+                    if (element) {
+                      const viewport = window.cornerstone.getViewport(element);
+                      console.log('Current viewport:', viewport);
+                      if (viewport) {
+                        viewport.scale = zoom;
+                        window.cornerstone.setViewport(element, viewport);
+                        console.log('Applied zoom:', zoom);
+                      }
                     }
-                  }
-                });
+                  });
+                } else {
+                  console.warn('Cornerstone not available for auto-zoom');
+                }
               } catch (error) {
                 console.warn('Error applying auto-zoom:', error);
               }
@@ -374,23 +384,26 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               console.log('ViewerInterface onAutoLocalize called with coordinates:', x, y, z);
               // Apply auto-localize by centering view on coordinates
               try {
-                const cornerstone = cornerstoneConfig.getCornerstone();
-                const elements = document.querySelectorAll('.cornerstone-viewport');
-                console.log('Found viewport elements for localize:', elements.length);
-                
-                elements.forEach((element: any) => {
-                  if (element) {
-                    const viewport = cornerstone.getViewport(element);
-                    console.log('Current viewport for localize:', viewport);
-                    if (viewport) {
-                      // Convert world coordinates to viewport center offset
-                      viewport.translation.x = -x;
-                      viewport.translation.y = -y;
-                      cornerstone.setViewport(element, viewport);
-                      console.log('Applied localize translation:', -x, -y);
+                if (window.cornerstone) {
+                  const elements = document.querySelectorAll('.cornerstone-viewport');
+                  console.log('Found viewport elements for localize:', elements.length);
+                  
+                  elements.forEach((element: any) => {
+                    if (element) {
+                      const viewport = window.cornerstone.getViewport(element);
+                      console.log('Current viewport for localize:', viewport);
+                      if (viewport) {
+                        // Convert world coordinates to viewport center offset
+                        viewport.translation.x = -x;
+                        viewport.translation.y = -y;
+                        window.cornerstone.setViewport(element, viewport);
+                        console.log('Applied localize translation:', -x, -y);
+                      }
                     }
-                  }
-                });
+                  });
+                } else {
+                  console.warn('Cornerstone not available for auto-localize');
+                }
               } catch (error) {
                 console.warn('Error applying auto-localize:', error);
               }
