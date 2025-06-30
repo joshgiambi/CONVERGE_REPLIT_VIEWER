@@ -60,23 +60,23 @@ export default function EnhancedViewer() {
             <div>
               <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                 <span style={{
-                  color: 'black',
+                  color: 'white',
                   fontWeight: '900'
                 }}>S</span>
                 <span style={{
-                  color: 'black',
+                  color: 'white',
                   fontWeight: '900'
                 }}>U</span>
                 <span style={{
-                  color: 'black',
+                  color: 'white',
                   fontWeight: '900'
                 }}>P</span>
                 <span style={{
-                  color: 'black',
+                  color: 'white',
                   fontWeight: '900'
                 }}>E</span>
                 <span style={{
-                  color: 'black',
+                  color: 'white',
                   fontWeight: '900'
                 }}>R</span>
                 <span style={{

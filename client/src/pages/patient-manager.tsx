@@ -335,29 +335,31 @@ export default function PatientManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-indigo-900">
+    <div className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8 flex justify-between items-start">
-          <div>
-            <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
+        {/* Header with sleek dark styling */}
+        <header className="mb-8 bg-gray-900/80 backdrop-blur-md border border-gray-700/30 rounded-2xl px-6 py-4 shadow-xl">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-5xl font-black tracking-widest mb-2" style={{ letterSpacing: '0.3em' }}>
               <span style={{
-                color: 'black',
+                color: 'white',
                 fontWeight: '900'
               }}>S</span>
               <span style={{
-                color: 'black',
+                color: 'white',
                 fontWeight: '900'
               }}>U</span>
               <span style={{
-                color: 'black',
+                color: 'white',
                 fontWeight: '900'
               }}>P</span>
               <span style={{
-                color: 'black',
+                color: 'white',
                 fontWeight: '900'
               }}>E</span>
               <span style={{
-                color: 'black',
+                color: 'white',
                 fontWeight: '900'
               }}>R</span>
               <span style={{
@@ -389,8 +391,8 @@ export default function PatientManager() {
                 fontWeight: '900'
               }}>M</span>
             </h1>
-          </div>
-          <div className="flex gap-2">
+            </div>
+            <div className="flex gap-2">
             <Button 
               variant="outline"
               onClick={() => setActiveTab("import")}
@@ -425,10 +427,11 @@ export default function PatientManager() {
               <Activity className="h-4 w-4 mr-2" />
               Enhanced Viewer
             </Button>
+            </div>
           </div>
-        </div>
+        </header>
 
-        {/* Search Bar */}
+        {/* Search Bar with dark styling */}
         <div className="mb-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -436,7 +439,7 @@ export default function PatientManager() {
               placeholder="Search patients, studies, or modalities..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+              className="pl-10 bg-gray-900/60 border-gray-700/50 text-white placeholder:text-gray-400 focus:border-gray-600"
             />
           </div>
         </div>
