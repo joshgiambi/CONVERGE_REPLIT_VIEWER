@@ -12,11 +12,14 @@ import {
   Settings,
   X
 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
     structureName: string;
     color: number[];
+    roiNumber: number;
   } | null;
   isVisible: boolean;
   onClose: () => void;
@@ -37,10 +40,79 @@ export function ContourEditToolbar({
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
 
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Mutation for updating structure name
+  const updateNameMutation = useMutation({
+    mutationFn: async ({ structureId, name }: { structureId: number; name: string }) => {
+      const response = await fetch(`/api/rt-structures/${structureId}/name`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!response.ok) throw new Error('Failed to update structure name');
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Structure name updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
+    },
+    onError: () => {
+      toast({ title: "Failed to update structure name", variant: "destructive" });
+    }
+  });
+
+  // Mutation for updating structure color
+  const updateColorMutation = useMutation({
+    mutationFn: async ({ structureId, color }: { structureId: number; color: number[] }) => {
+      const response = await fetch(`/api/rt-structures/${structureId}/color`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color })
+      });
+      if (!response.ok) throw new Error('Failed to update structure color');
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Structure color updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
+    },
+    onError: () => {
+      toast({ title: "Failed to update structure color", variant: "destructive" });
+    }
+  });
+
   if (!isVisible || !selectedStructure) return null;
 
   const rgbToHex = (rgb: number[]) => {
     return '#' + rgb.map(x => x.toString(16).padStart(2, '0')).join('');
+  };
+
+  const hexToRgb = (hex: string): number[] => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+      parseInt(result[1], 16),
+      parseInt(result[2], 16),
+      parseInt(result[3], 16)
+    ] : [255, 255, 255];
+  };
+
+  const handleNameChange = (name: string) => {
+    onStructureNameChange(name); // Update UI immediately
+    updateNameMutation.mutate({ 
+      structureId: selectedStructure.roiNumber, 
+      name 
+    });
+  };
+
+  const handleColorChange = (hexColor: string) => {
+    const rgbColor = hexToRgb(hexColor);
+    onStructureColorChange(hexColor); // Update UI immediately
+    updateColorMutation.mutate({ 
+      structureId: selectedStructure.roiNumber, 
+      color: rgbColor 
+    });
   };
 
   const currentColor = rgbToHex(selectedStructure.color || [255, 255, 255]);
@@ -133,15 +205,17 @@ export function ContourEditToolbar({
             <span className="text-white text-sm font-medium">Editing:</span>
             <Input
               value={selectedStructure.structureName || ''}
-              onChange={(e) => onStructureNameChange(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
               className="w-32 h-7 bg-gray-800/70 border-gray-600 text-white text-sm"
+              disabled={updateNameMutation.isPending}
             />
             <span className="text-gray-300 text-sm">Color:</span>
             <input
               type="color"
               value={currentColor}
-              onChange={(e) => onStructureColorChange(e.target.value)}
+              onChange={(e) => handleColorChange(e.target.value)}
               className="w-7 h-7 rounded border border-gray-600 bg-gray-800 cursor-pointer"
+              disabled={updateColorMutation.isPending}
             />
           </div>
           <Button

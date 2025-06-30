@@ -376,6 +376,19 @@ export class DatabaseStorage implements IStorage {
       .where(eq(series.studyId, studyId));
   }
 
+  // RT Structure operations
+  async updateRTStructureName(structureId: number, name: string): Promise<void> {
+    const existing = rtStructureModifications.get(structureId) || {};
+    rtStructureModifications.set(structureId, { ...existing, structureName: name });
+    console.log(`Updated RT structure ${structureId} name to: ${name}`);
+  }
+
+  async updateRTStructureColor(structureId: number, color: number[]): Promise<void> {
+    const existing = rtStructureModifications.get(structureId) || {};
+    rtStructureModifications.set(structureId, { ...existing, color });
+    console.log(`Updated RT structure ${structureId} color to: ${color}`);
+  }
+
   clearAll(): void {
     // This would be implemented as database truncation
     throw new Error('Database clearAll not implemented - use proper migration tools');
