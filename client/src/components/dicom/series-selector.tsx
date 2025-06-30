@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Minimize2, FolderTree, X } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -26,6 +26,8 @@ interface SeriesSelectorProps {
   selectedForEdit?: number | null;
   onSelectedForEditChange?: (roiNumber: number | null) => void;
   onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
+  onAutoZoom?: (zoom: number) => void;
+  onAutoLocalize?: (x: number, y: number, z: number) => void;
 }
 
 export function SeriesSelector({
@@ -88,6 +90,75 @@ export function SeriesSelector({
       onSelectedForEditChange(newSelected);
     } else {
       setLocalSelectedForEdit(newSelected);
+    }
+    
+    // Apply auto-zoom and auto-localize if enabled
+    if (newSelected && rtStructures?.structures) {
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === newSelected);
+      if (structure && (autoZoomEnabled || autoLocalizeEnabled)) {
+        applyAutoZoomAndLocalize(structure);
+      }
+    }
+  };
+
+  // Calculate contour centroid and apply auto-zoom/localize
+  const applyAutoZoomAndLocalize = (structure: any) => {
+    if (!structure.contours || structure.contours.length === 0) return;
+    
+    let totalX = 0, totalY = 0, totalZ = 0, totalPoints = 0;
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    // Calculate centroid and bounding box across all contours
+    structure.contours.forEach((contour: any) => {
+      if (contour.points && contour.points.length >= 6) {
+        for (let i = 0; i < contour.points.length; i += 3) {
+          const x = contour.points[i];
+          const y = contour.points[i + 1];
+          const z = contour.points[i + 2];
+          
+          totalX += x;
+          totalY += y;
+          totalZ += z;
+          totalPoints++;
+          
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+          minZ = Math.min(minZ, z);
+          maxZ = Math.max(maxZ, z);
+        }
+      }
+    });
+    
+    if (totalPoints === 0) return;
+    
+    const centroidX = totalX / totalPoints;
+    const centroidY = totalY / totalPoints;
+    const centroidZ = totalZ / totalPoints;
+    
+    // Calculate zoom level based on bounding box size
+    if (autoZoomEnabled) {
+      const width = maxX - minX;
+      const height = maxY - minY;
+      const maxDimension = Math.max(width, height);
+      
+      if (maxDimension > 0) {
+        // Calculate zoom to fit structure with fill factor
+        const fillFactor = zoomFillFactor[0] / 100;
+        const targetZoom = (300 * fillFactor) / maxDimension; // Assuming 300px viewport
+        
+        if (onAutoZoom) {
+          onAutoZoom(Math.max(0.5, Math.min(5, targetZoom)));
+        }
+      }
+    }
+    
+    // Pan to centroid
+    if (autoLocalizeEnabled && onAutoLocalize) {
+      onAutoLocalize(centroidX, centroidY, centroidZ);
     }
   };
 
@@ -371,25 +442,15 @@ export function SeriesSelector({
               <AccordionContent className="px-4 pb-4">
                 {rtStructures?.structures ? (
                   <div className="space-y-3">
-                    {/* Search Bar with Settings Icon */}
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <Input
-                          placeholder="Search structures..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-10 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-green-500"
-                        />
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowStructureSettings(!showStructureSettings)}
-                        className="px-2 bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </Button>
+                    {/* Search Bar */}
+                    <div className="relative mb-4">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input
+                        placeholder="Search structures..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-green-500"
+                      />
                     </div>
 
                     {/* Control Buttons Row */}
@@ -398,46 +459,41 @@ export function SeriesSelector({
                         variant="outline"
                         size="sm"
                         onClick={toggleAllVisibility}
-                        className="flex-1 justify-center text-xs bg-green-600/80 border-green-500 text-white hover:bg-green-700"
+                        className="bg-green-600/80 border-green-500 text-white hover:bg-green-700"
+                        title={allVisible ? 'Hide all structures' : 'Show all structures'}
                       >
-                        {allVisible ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
-                        {allVisible ? 'Hide All' : 'Show All'}
+                        {allVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </Button>
                       
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={toggleGrouping}
-                        className="flex-1 justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
+                        className="bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
+                        title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
                       >
-                        <FolderTree className="w-4 h-4 mr-2" />
-                        {groupingEnabled ? 'Ungroup' : 'Group'}
+                        <FolderTree className="w-4 h-4" />
                       </Button>
                       
-                      {groupingEnabled && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={toggleAllExpansion}
-                          className="flex-1 justify-center text-xs bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
-                        >
-                          <Minimize2 className="w-4 h-4 mr-2" />
-                          {allCollapsed ? 'Expand All' : 'Collapse All'}
-                        </Button>
-                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={toggleAllExpansion}
+                        className="bg-yellow-600/80 border-yellow-500 text-white hover:bg-yellow-700"
+                        title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                      >
+                        {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                      </Button>
                       
-                      {/* Operations Button - show when structures are selected */}
-                      {selectedStructures.size > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {/* Handle operations */}}
-                          className="flex-1 justify-center text-xs bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
-                        >
-                          <Settings className="w-4 h-4 mr-2" />
-                          Operations ({selectedStructures.size})
-                        </Button>
-                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowStructureSettings(!showStructureSettings)}
+                        className="bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
+                        title="Structure Settings"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </Button>
                     </div>
 
                     {/* Structure Settings Panel */}
