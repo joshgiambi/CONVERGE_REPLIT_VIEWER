@@ -83,7 +83,6 @@ export function ViewerToolbar({
 
             const IconComponent = tool.icon!;
             const isActive = tool.selectable && activeTool === tool.id;
-            const isContourEditActive = tool.id === 'contour-edit' && isContourEditActive;
 
             return (
               <div key={tool.id} className="relative group">
