@@ -31,6 +31,11 @@ interface ContourEditToolbarProps {
   onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
+  onAutoZoomSettingsChange?: (settings: {
+    autoZoomEnabled: boolean;
+    autoLocalizeEnabled: boolean;
+    zoomFillFactor: number;
+  }) => void;
 }
 
 export function ContourEditToolbar({ 
@@ -49,6 +54,9 @@ export function ContourEditToolbar({
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
   const [targetSliceNumber, setTargetSliceNumber] = useState('');
+  const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
+  const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
+  const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
 
   // Notify parent when brush tool is activated
   const handleToolActivation = (toolId: string) => {
@@ -265,6 +273,43 @@ export function ContourEditToolbar({
           <div className="space-y-3">
             {showSettings === 'operations' && (
               <>
+                <div className="space-y-2">
+                  <Label className="text-xs text-gray-300">Structure Navigation</Label>
+                  
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-gray-300">Auto-Zoom</Label>
+                    <Switch
+                      checked={autoZoomEnabled}
+                      onCheckedChange={setAutoZoomEnabled}
+                      className="data-[state=checked]:bg-blue-500"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-gray-300">Auto-Localize</Label>
+                    <Switch
+                      checked={autoLocalizeEnabled}
+                      onCheckedChange={setAutoLocalizeEnabled}
+                      className="data-[state=checked]:bg-green-500"
+                    />
+                  </div>
+                  
+                  {autoZoomEnabled && (
+                    <div>
+                      <Label className="text-xs text-gray-300 mb-2 block">Zoom Fill Factor</Label>
+                      <Slider
+                        value={zoomFillFactor}
+                        onValueChange={setZoomFillFactor}
+                        max={80}
+                        min={20}
+                        step={5}
+                        className="w-full"
+                      />
+                      <div className="text-xs text-gray-400 mt-1">{zoomFillFactor[0]}% of screen</div>
+                    </div>
+                  )}
+                </div>
+                
                 <div className="space-y-2">
                   <Label className="text-xs text-gray-300">Delete Operations</Label>
                   
