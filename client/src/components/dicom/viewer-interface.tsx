@@ -347,6 +347,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             selectedForEdit={selectedForEdit}
             onSelectedForEditChange={setSelectedForEdit}
             onContourSettingsChange={onContourSettingsChange}
+            onAutoZoom={(zoom) => {
+              // Apply auto-zoom by updating zoom state
+              // This would need to be connected to WorkingViewer zoom controls
+              console.log('Auto-zoom to:', zoom);
+            }}
+            onAutoLocalize={(x, y, z) => {
+              // Apply auto-localize by centering view on coordinates
+              // This would need to be connected to WorkingViewer pan controls
+              console.log('Auto-localize to:', x, y, z);
+            }}
           />
         </div>
 

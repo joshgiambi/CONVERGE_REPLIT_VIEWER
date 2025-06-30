@@ -44,7 +44,9 @@ export function SeriesSelector({
   onStructureSelection,
   selectedForEdit: externalSelectedForEdit,
   onSelectedForEditChange,
-  onContourSettingsChange
+  onContourSettingsChange,
+  onAutoZoom,
+  onAutoLocalize
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
