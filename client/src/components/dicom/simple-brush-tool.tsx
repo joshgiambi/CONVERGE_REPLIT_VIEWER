@@ -40,38 +40,38 @@ export function SimpleBrushTool({
   // Check if brush intersects with the selected structure's contour on current slice
   const checkBrushContourIntersection = (mouseX: number, mouseY: number): boolean => {
     if (!selectedStructure || !rtStructures) return false;
-    
+
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
     if (!structure || !structure.contours) return false;
-    
+
     // Find contours for current slice
     const tolerance = 2.5;
     const currentSliceContours = structure.contours.filter((contour: any) => 
       Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
     );
-    
+
     if (currentSliceContours.length === 0) return false;
-    
+
     // Check if brush circle intersects with any contour points
     const brushRadius = brushSize;
     for (const contour of currentSliceContours) {
       if (!contour.points || contour.points.length === 0) continue;
-      
+
       // Convert contour points to canvas coordinates and check intersection
       for (let i = 0; i < contour.points.length; i += 3) {
         const worldX = contour.points[i];
         const worldY = contour.points[i + 1];
-        
+
         // Transform world coordinates to canvas coordinates
         const canvas = canvasRef.current;
         if (!canvas) continue;
-        
+
         const canvasCenterX = canvas.width / 2;
         const canvasCenterY = canvas.height / 2;
-        
+
         const canvasX = canvasCenterX + (worldX * zoom) + panX;
         const canvasY = canvasCenterY + (worldY * zoom) + panY;
-        
+
         // Check if this contour point is within brush radius
         const distance = Math.sqrt(Math.pow(canvasX - mouseX, 2) + Math.pow(canvasY - mouseY, 2));
         if (distance <= brushRadius) {
@@ -79,7 +79,7 @@ export function SimpleBrushTool({
         }
       }
     }
-    
+
     return false;
   };
 
@@ -88,32 +88,32 @@ export function SimpleBrushTool({
     if (!selectedStructure || !rtStructures || brushStrokes.length === 0) return;
 
     console.log('Applying brush stroke with', brushStrokes.length, 'points to structure', selectedStructure.roiNumber);
-    
+
     // Create deep copy of RT structures for modification
     const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
-    
+
     if (structure && structure.contours) {
       const tolerance = 2.5; // Slice tolerance
       let currentSliceContours = structure.contours.filter((contour: any) => 
         Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
       );
-      
+
       // Convert brush strokes to DICOM world coordinates using proper transformation
       const worldStrokes = brushStrokes.map(stroke => {
         const canvas = canvasRef.current;
         if (!canvas) return { worldX: 0, worldY: 0, z: currentSlicePosition, isAdditive: stroke.isAdditive };
-        
+
         // Apply inverse transformations to get world coordinates
         // Account for canvas offset, zoom, and pan
         const canvasCenterX = canvas.width / 2;
         const canvasCenterY = canvas.height / 2;
-        
+
         // Convert from canvas pixel to world coordinates
         // Assuming image center is at world coordinates (0, 0) for the current slice
         const worldX = (stroke.x - canvasCenterX - panX) / zoom;
         const worldY = (stroke.y - canvasCenterY - panY) / zoom;
-        
+
         return {
           worldX,
           worldY,
@@ -121,52 +121,90 @@ export function SimpleBrushTool({
           isAdditive: stroke.isAdditive
         };
       });
-      
-      // Always create a new visible contour for testing
-      if (worldStrokes.length > 0) {
-        // Create a simple circular contour at the brush location
-        const firstStroke = worldStrokes[0];
-        const radius = brushSize / zoom; // Scale radius by zoom
-        
-        // Generate circular contour points in world coordinates
-        const points: number[] = [];
-        const numPoints = 12; // Simple circle
-        for (let i = 0; i < numPoints; i++) {
-          const angle = (i / numPoints) * 2 * Math.PI;
-          const x = firstStroke.worldX + radius * Math.cos(angle);
-          const y = firstStroke.worldY + radius * Math.sin(angle);
-          points.push(x, y, currentSlicePosition);
+
+      // Create brush stroke modification with proper circular contours
+      if (brushStrokes.length > 0) {
+        const firstStroke = brushStrokes[0];
+
+        // Convert canvas coordinates back to world coordinates
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const canvasCenterX = canvas.width / 2;
+        const canvasCenterY = canvas.height / 2;
+
+        const worldX = (firstStroke.x - canvasCenterX - panX) / zoom;
+        const worldY = (firstStroke.y - canvasCenterY - panY) / zoom;
+
+        // Find or create contour for current slice
+        let targetContour = structure.contours?.find((contour: any) => 
+          Math.abs(contour.slicePosition - currentSlicePosition) <= 2.5
+        );
+
+        if (!targetContour) {
+          // Create new contour for this slice
+          if (!structure.contours) structure.contours = [];
+
+          targetContour = {
+            points: [],
+            slicePosition: currentSlicePosition,
+            geometricType: 'CLOSED_PLANAR'
+          };
+          structure.contours.push(targetContour);
         }
-        
-        // Create new contour or replace existing one
-        const newContour = {
-          slicePosition: currentSlicePosition,
-          points: points
-        };
-        
-        if (currentSliceContours.length > 0) {
-          // Replace the first existing contour
-          const contourIndex = structure.contours.findIndex((c: any) => 
-            Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
-          );
-          if (contourIndex !== -1) {
-            structure.contours[contourIndex] = newContour;
-            console.log('Replaced existing contour at slice', currentSlicePosition);
+
+        // Generate proper circular brush contour
+        const radius = brushSize / zoom; // Convert to world coordinates
+        const numPoints = Math.max(12, Math.floor(radius * 4)); // More points for smoother circles
+
+        if (firstStroke.isAdditive) {
+          // Create a new circular contour
+          const circularContour = {
+            points: [] as number[],
+            slicePosition: currentSlicePosition,
+            geometricType: 'CLOSED_PLANAR'
+          };
+
+          // Generate circular points
+          for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * 2 * Math.PI;
+            const x = worldX + radius * Math.cos(angle);
+            const y = worldY + radius * Math.sin(angle);
+            const z = currentSlicePosition;
+
+            circularContour.points.push(x, y, z);
           }
+
+          // Replace or add the circular contour
+          if (targetContour.points && targetContour.points.length > 0) {
+            // For now, replace existing contour with new circular one
+            // In a more sophisticated implementation, you'd merge overlapping regions
+            targetContour.points = circularContour.points;
+          } else {
+            targetContour.points = circularContour.points;
+          }
+
+          console.log('Created circular brush contour at slice', currentSlicePosition, 'with', numPoints, 'points');
         } else {
-          // Add new contour
-          structure.contours.push(newContour);
-          console.log('Created new contour at slice', currentSlicePosition);
+          // For subtractive mode, remove the entire contour or create a hole
+          if (targetContour.points && targetContour.points.length > 0) {
+            // Simple approach: clear the contour if brush intersects
+            // In a more sophisticated implementation, you'd create holes or subtract geometry
+            targetContour.points = [];
+          }
+
+          console.log('Removed contour at slice', currentSlicePosition);
         }
-        
+
         console.log('Brush modification applied:', {
           slice: currentSlicePosition,
-          brushCenter: [firstStroke.worldX, firstStroke.worldY],
+          brushCenter: [worldX, worldY],
           radius: radius,
+          mode: firstStroke.isAdditive ? 'add' : 'subtract',
           pointCount: numPoints
         });
       }
-      
+
       // Notify parent of structure update with modified data
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
@@ -177,19 +215,19 @@ export function SimpleBrushTool({
   // Convert screen coordinates to canvas coordinates
   const getCanvasCoordinates = (clientX: number, clientY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
-    
+
     return { x, y };
   };
 
   // Check if point is inside any contour (simplified)
   const checkInsideContour = (x: number, y: number): boolean => {
     if (!selectedStructure || !rtStructures?.structures) return false;
-    
+
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
     if (!structure || !structure.contours) return false;
 
@@ -198,7 +236,7 @@ export function SimpleBrushTool({
     const hasContours = structure.contours.some((contour: any) => 
       Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
     );
-    
+
     // Simple geometric check - if cursor is in central area, assume inside
     if (hasContours && canvasRef.current) {
       const canvas = canvasRef.current;
@@ -207,7 +245,7 @@ export function SimpleBrushTool({
       const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
       return distance < 150; // Simplified inside detection
     }
-    
+
     return false;
   };
 
@@ -216,19 +254,19 @@ export function SimpleBrushTool({
     if (!isActive) return;
 
     ctx.save();
-    
+
     // Check if brush intersects with the selected structure's contour
     const intersectsContour = checkBrushContourIntersection(x, y);
-    
+
     // Green when touching the selected structure's contour (add mode)
     // Red when not touching (delete mode)
     const strokeColor = intersectsContour ? '#00ff00' : '#ff0000';
     const fillColor = intersectsContour ? 'rgba(0, 255, 0, 0.15)' : 'rgba(255, 0, 0, 0.15)';
-    
+
     // Set up stroke style - dashed when inactive, solid when drawing
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 2;
-    
+
     if (isDrawing) {
       // Solid line when actively drawing
       ctx.setLineDash([]);
@@ -238,22 +276,22 @@ export function SimpleBrushTool({
     }
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = isDrawing ? 3 : 2;
-    
+
     // Draw main brush circle with subtle fill when in add mode
     ctx.beginPath();
     ctx.arc(x, y, brushSize * zoom, 0, 2 * Math.PI);
-    
+
     // Add subtle fill for visual feedback
     ctx.fillStyle = fillColor;
     ctx.fill();
     ctx.stroke();
-    
+
     // Add center dot for precision
     ctx.fillStyle = strokeColor;
     ctx.beginPath();
     ctx.arc(x, y, 2, 0, 2 * Math.PI);
     ctx.fill();
-    
+
     ctx.restore();
   };
 
@@ -275,10 +313,10 @@ export function SimpleBrushTool({
     cursorCanvas.style.pointerEvents = 'none';
     cursorCanvas.style.zIndex = '10';
     cursorCanvasRef.current = cursorCanvas;
-    
+
     // Insert cursor canvas after main canvas
     container.appendChild(cursorCanvas);
-    
+
     // Hide default cursor on main canvas
     mainCanvas.style.cursor = 'none';
 
@@ -301,7 +339,7 @@ export function SimpleBrushTool({
 
     // Clear previous cursor
     ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
-    
+
     // Draw new cursor at mouse position
     drawBrushCursor(ctx, mousePosition.x, mousePosition.y);
   }, [mousePosition, brushSize, isInsideContour, isDrawing, zoom, isActive]);
@@ -314,9 +352,9 @@ export function SimpleBrushTool({
 
     const handleMouseDown = (e: MouseEvent) => {
       e.preventDefault();
-      
+
       const coords = getCanvasCoordinates(e.clientX, e.clientY);
-      
+
       if (e.button === 2) { // Right click for resizing
         setIsResizing(true);
         setResizeStartPosition(coords); // Store initial position for fixed centroid
@@ -327,12 +365,12 @@ export function SimpleBrushTool({
         // Check if brush intersects with selected structure's contour
         const intersectsContour = checkBrushContourIntersection(coords.x, coords.y);
         const isAdditive = intersectsContour; // Green mode = add, Red mode = delete
-        
+
         setIsInsideContour(intersectsContour);
         setCurrentStrokeMode(isAdditive); // Lock the mode for this stroke
         setIsDrawing(true);
         setBrushStrokes([{x: coords.x, y: coords.y, isAdditive}]);
-        
+
         console.log('Brush stroke started:', {
           position: coords,
           isAdditive,
@@ -346,7 +384,7 @@ export function SimpleBrushTool({
     const handleMouseMove = (e: MouseEvent) => {
       const coords = getCanvasCoordinates(e.clientX, e.clientY);
       setMousePosition(coords);
-      
+
       if (!isDrawing && !isResizing) {
         // Check if brush intersects with selected structure's contour for dynamic color feedback
         const intersectsContour = checkBrushContourIntersection(coords.x, coords.y);
@@ -370,7 +408,7 @@ export function SimpleBrushTool({
           y: coords.y,
           isAdditive: currentStrokeMode
         }]);
-        
+
         console.log('Brush stroke continue:', {
           position: coords,
           isAdditive: currentStrokeMode
