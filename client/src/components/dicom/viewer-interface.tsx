@@ -41,6 +41,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     isActive: false
   });
   const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
+  const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
+  const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -363,50 +365,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onSelectedForEditChange={setSelectedForEdit}
             onContourSettingsChange={onContourSettingsChange}
             onAutoZoom={(zoom) => {
-              // Apply auto-zoom using direct window.cornerstone if available
-              try {
-                if (window.cornerstone) {
-                  const elements = document.querySelectorAll('.cornerstone-viewport');
-                  
-                  elements.forEach((element: any) => {
-                    if (element) {
-                      const viewport = window.cornerstone.getViewport(element);
-                      if (viewport) {
-                        viewport.scale = zoom;
-                        window.cornerstone.setViewport(element, viewport);
-                      }
-                    }
-                  });
-                } else {
-                  console.warn('Cornerstone not available for auto-zoom');
-                }
-              } catch (error) {
-                console.warn('Error applying auto-zoom:', error);
-              }
+              // Set auto-zoom level for WorkingViewer
+              setAutoZoomLevel(zoom);
+              // Clear after a short delay to allow component to react
+              setTimeout(() => setAutoZoomLevel(undefined), 100);
             }}
             onAutoLocalize={(x, y, z) => {
-              // Apply auto-localize by centering view on coordinates
-              try {
-                if (window.cornerstone) {
-                  const elements = document.querySelectorAll('.cornerstone-viewport');
-                  
-                  elements.forEach((element: any) => {
-                    if (element) {
-                      const viewport = window.cornerstone.getViewport(element);
-                      if (viewport) {
-                        // Convert world coordinates to viewport center offset
-                        viewport.translation.x = -x;
-                        viewport.translation.y = -y;
-                        window.cornerstone.setViewport(element, viewport);
-                      }
-                    }
-                  });
-                } else {
-                  console.warn('Cornerstone not available for auto-localize');
-                }
-              } catch (error) {
-                console.warn('Error applying auto-localize:', error);
-              }
+              // Set auto-localize target for WorkingViewer
+              setAutoLocalizeTarget({ x, y, z });
+              // Clear after a short delay to allow component to react
+              setTimeout(() => setAutoLocalizeTarget(undefined), 100);
             }}
           />
         </div>
@@ -456,6 +424,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
                 contourSettings={contourSettings}
+                autoZoomLevel={autoZoomLevel}
+                autoLocalizeTarget={autoLocalizeTarget}
               />
               
               {/* Structure Tags on Right Side */}

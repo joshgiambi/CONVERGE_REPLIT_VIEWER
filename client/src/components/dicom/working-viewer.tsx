@@ -43,8 +43,8 @@ export function WorkingViewer({
   onBrushSizeChange,
   onContourUpdate,
   contourSettings,
-  onAutoZoom,
-  onAutoLocalize
+  autoZoomLevel,
+  autoLocalizeTarget
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -88,40 +88,32 @@ export function WorkingViewer({
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
-  // Auto-zoom function  
-  const handleAutoZoom = (newZoom: number) => {
-    setZoom(newZoom);
-    if (images.length > 0) {
-      displayCurrentImage();
-    }
-  };
-
-  // Auto-localize function
-  const handleAutoLocalize = (x: number, y: number, z: number) => {
-    // Convert world coordinates to pan offsets
-    // Scale the coordinates appropriately for the canvas
-    const scaleFactor = 0.1; // Adjust this value as needed
-    setPanX(-x * scaleFactor);
-    setPanY(-y * scaleFactor);
-    setLastPanX(-x * scaleFactor);
-    setLastPanY(-y * scaleFactor);
-    if (images.length > 0) {
-      displayCurrentImage();
-    }
-  };
-
-  // Expose functions to parent via callback refs
+  // Handle auto-zoom when autoZoomLevel prop changes
   useEffect(() => {
-    if (onAutoZoom) {
-      onAutoZoom(handleAutoZoom);
+    if (autoZoomLevel && autoZoomLevel !== zoom) {
+      setZoom(autoZoomLevel);
+      if (images.length > 0) {
+        displayCurrentImage();
+      }
     }
-  }, [onAutoZoom]);
+  }, [autoZoomLevel, zoom, images.length]);
 
+  // Handle auto-localize when autoLocalizeTarget prop changes
   useEffect(() => {
-    if (onAutoLocalize) {
-      onAutoLocalize(handleAutoLocalize);
+    if (autoLocalizeTarget) {
+      const { x, y, z } = autoLocalizeTarget;
+      // Convert world coordinates to pan offsets
+      // Scale the coordinates appropriately for the canvas
+      const scaleFactor = 0.1; // Adjust this value as needed
+      setPanX(-x * scaleFactor);
+      setPanY(-y * scaleFactor);
+      setLastPanX(-x * scaleFactor);
+      setLastPanY(-y * scaleFactor);
+      if (images.length > 0) {
+        displayCurrentImage();
+      }
     }
-  }, [onAutoLocalize]);
+  }, [autoLocalizeTarget, images.length]);
 
   useEffect(() => {
     loadImages();
