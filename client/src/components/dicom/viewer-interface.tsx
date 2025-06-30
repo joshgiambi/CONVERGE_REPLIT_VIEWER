@@ -348,17 +348,21 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onSelectedForEditChange={setSelectedForEdit}
             onContourSettingsChange={onContourSettingsChange}
             onAutoZoom={(zoom) => {
+              console.log('ViewerInterface onAutoZoom called with zoom:', zoom);
               // Apply auto-zoom using cornerstone's zoom functionality
               try {
                 const cornerstone = cornerstoneConfig.getCornerstone();
                 const elements = document.querySelectorAll('.cornerstone-viewport');
+                console.log('Found viewport elements:', elements.length);
                 
                 elements.forEach((element: any) => {
                   if (element) {
                     const viewport = cornerstone.getViewport(element);
+                    console.log('Current viewport:', viewport);
                     if (viewport) {
                       viewport.scale = zoom;
                       cornerstone.setViewport(element, viewport);
+                      console.log('Applied zoom:', zoom);
                     }
                   }
                 });
@@ -367,19 +371,23 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               }
             }}
             onAutoLocalize={(x, y, z) => {
+              console.log('ViewerInterface onAutoLocalize called with coordinates:', x, y, z);
               // Apply auto-localize by centering view on coordinates
               try {
                 const cornerstone = cornerstoneConfig.getCornerstone();
                 const elements = document.querySelectorAll('.cornerstone-viewport');
+                console.log('Found viewport elements for localize:', elements.length);
                 
                 elements.forEach((element: any) => {
                   if (element) {
                     const viewport = cornerstone.getViewport(element);
+                    console.log('Current viewport for localize:', viewport);
                     if (viewport) {
                       // Convert world coordinates to viewport center offset
                       viewport.translation.x = -x;
                       viewport.translation.y = -y;
                       cornerstone.setViewport(element, viewport);
+                      console.log('Applied localize translation:', -x, -y);
                     }
                   }
                 });
