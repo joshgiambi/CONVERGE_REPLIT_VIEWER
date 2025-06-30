@@ -809,7 +809,7 @@ export function WorkingViewer({
             onContextMenu={(e) => e.preventDefault()}
             className={`max-w-full max-h-full object-contain rounded ${
               brushToolState?.isActive && brushToolState?.tool === 'brush' 
-                ? 'cursor-none' 
+                ? '' 
                 : 'cursor-move'
             }`}
             style={{ 

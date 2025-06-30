@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -48,7 +48,13 @@ export function SeriesSelector({
   const [expandedGroups, setExpandedGroups] = useState<Map<string, boolean>>(new Map());
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [groupingEnabled, setGroupingEnabled] = useState(true);
-  const [allVisible, setAllVisible] = useState(true);
+  // Calculate allVisible dynamically based on current visibility state
+  const allVisible = useMemo(() => {
+    if (!rtStructures?.structures || structureVisibility.size === 0) return true;
+    return rtStructures.structures.every((structure: any) => 
+      structureVisibility.get(structure.roiNumber) === true
+    );
+  }, [rtStructures?.structures, structureVisibility]);
   const [localSelectedForEdit, setLocalSelectedForEdit] = useState<number | null>(null);
   
   // Use external selectedForEdit if provided, otherwise use local state
@@ -215,8 +221,6 @@ export function SeriesSelector({
       
       return newMap;
     });
-    
-    setAllVisible(!allVisible);
   };
 
   const toggleGroupVisibility = (groupStructures: any[]) => {
