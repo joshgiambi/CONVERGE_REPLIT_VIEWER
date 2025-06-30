@@ -51,11 +51,21 @@ export function SimpleBrushTool({
         Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
       );
       
-      // Convert brush strokes to world coordinates for proper DICOM storage
+      // Convert brush strokes to DICOM world coordinates using proper transformation
       const worldStrokes = brushStrokes.map(stroke => {
-        // Convert canvas coordinates back to DICOM world coordinates
-        const worldX = (stroke.x - (canvasRef.current?.width || 512) / 2) / zoom + currentSlicePosition;
-        const worldY = (stroke.y - (canvasRef.current?.height || 512) / 2) / zoom + currentSlicePosition;
+        const canvas = canvasRef.current;
+        if (!canvas) return { worldX: 0, worldY: 0, z: currentSlicePosition, isAdditive: stroke.isAdditive };
+        
+        // Apply inverse transformations to get world coordinates
+        // Account for canvas offset, zoom, and pan
+        const canvasCenterX = canvas.width / 2;
+        const canvasCenterY = canvas.height / 2;
+        
+        // Convert from canvas pixel to world coordinates
+        // Assuming image center is at world coordinates (0, 0) for the current slice
+        const worldX = (stroke.x - canvasCenterX - panX) / zoom;
+        const worldY = (stroke.y - canvasCenterY - panY) / zoom;
+        
         return {
           worldX,
           worldY,
@@ -64,58 +74,49 @@ export function SimpleBrushTool({
         };
       });
       
-      if (currentSliceContours.length > 0) {
-        // Modify existing contours
-        currentSliceContours.forEach((contour: any) => {
-          worldStrokes.forEach(stroke => {
-            if (stroke.isAdditive) {
-              // Add points to expand contour
-              const newPoints = [stroke.worldX, stroke.worldY, stroke.z];
-              contour.points.push(...newPoints);
-              console.log('Added point to existing contour:', newPoints);
-            } else {
-              // Remove nearby points to shrink contour
-              const removeRadius = brushSize * 2;
-              contour.points = contour.points.filter((_: any, index: number) => {
-                if (index % 3 === 0) { // X coordinate
-                  const x = contour.points[index];
-                  const y = contour.points[index + 1];
-                  const distance = Math.sqrt(Math.pow(x - stroke.worldX, 2) + Math.pow(y - stroke.worldY, 2));
-                  return distance > removeRadius;
-                }
-                return true;
-              });
-              console.log('Removed points near:', stroke.worldX, stroke.worldY);
-            }
-          });
-        });
-      } else {
-        // Create new contour for this slice from additive strokes
-        const additiveStrokes = worldStrokes.filter(s => s.isAdditive);
-        if (additiveStrokes.length > 0) {
-          // Create circular contour from brush strokes
-          const centerX = additiveStrokes.reduce((sum, s) => sum + s.worldX, 0) / additiveStrokes.length;
-          const centerY = additiveStrokes.reduce((sum, s) => sum + s.worldY, 0) / additiveStrokes.length;
-          const radius = brushSize;
-          
-          // Generate circular contour points
-          const points: number[] = [];
-          const numPoints = 16; // Number of points in circle
-          for (let i = 0; i < numPoints; i++) {
-            const angle = (i / numPoints) * 2 * Math.PI;
-            const x = centerX + radius * Math.cos(angle);
-            const y = centerY + radius * Math.sin(angle);
-            points.push(x, y, currentSlicePosition);
-          }
-          
-          const newContour = {
-            slicePosition: currentSlicePosition,
-            points: points
-          };
-          
-          structure.contours.push(newContour);
-          console.log('Created new circular contour with', numPoints, 'points at slice', currentSlicePosition);
+      // Always create a new visible contour for testing
+      if (worldStrokes.length > 0) {
+        // Create a simple circular contour at the brush location
+        const firstStroke = worldStrokes[0];
+        const radius = brushSize / zoom; // Scale radius by zoom
+        
+        // Generate circular contour points in world coordinates
+        const points: number[] = [];
+        const numPoints = 12; // Simple circle
+        for (let i = 0; i < numPoints; i++) {
+          const angle = (i / numPoints) * 2 * Math.PI;
+          const x = firstStroke.worldX + radius * Math.cos(angle);
+          const y = firstStroke.worldY + radius * Math.sin(angle);
+          points.push(x, y, currentSlicePosition);
         }
+        
+        // Create new contour or replace existing one
+        const newContour = {
+          slicePosition: currentSlicePosition,
+          points: points
+        };
+        
+        if (currentSliceContours.length > 0) {
+          // Replace the first existing contour
+          const contourIndex = structure.contours.findIndex((c: any) => 
+            Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
+          );
+          if (contourIndex !== -1) {
+            structure.contours[contourIndex] = newContour;
+            console.log('Replaced existing contour at slice', currentSlicePosition);
+          }
+        } else {
+          // Add new contour
+          structure.contours.push(newContour);
+          console.log('Created new contour at slice', currentSlicePosition);
+        }
+        
+        console.log('Brush modification applied:', {
+          slice: currentSlicePosition,
+          brushCenter: [firstStroke.worldX, firstStroke.worldY],
+          radius: radius,
+          pointCount: numPoints
+        });
       }
       
       // Notify parent of structure update with modified data

@@ -46,9 +46,16 @@ export function WorkingViewer({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Use external RT structures if provided, otherwise load our own
-  const rtStructures = externalRTStructures;
+  const [localRTStructures, setLocalRTStructures] = useState(externalRTStructures);
+  const rtStructures = localRTStructures || externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
+  const [renderTrigger, setRenderTrigger] = useState(0);
+
+  // Update local structures when external ones change
+  useEffect(() => {
+    setLocalRTStructures(externalRTStructures);
+  }, [externalRTStructures]);
 
   // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
