@@ -148,7 +148,11 @@ export default function EnhancedViewer() {
 
       {/* Main Content Area */}
       <div className="pt-24 pb-8 px-4">
-        <ViewerInterface studyData={studyData} />
+        <ViewerInterface 
+          studyData={studyData} 
+          onContourSettingsChange={setContourSettings}
+          contourSettings={contourSettings}
+        />
       </div>
     </div>
   );

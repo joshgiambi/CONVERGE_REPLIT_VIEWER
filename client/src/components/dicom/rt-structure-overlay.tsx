@@ -28,6 +28,8 @@ interface RTStructureOverlayProps {
   zoom: number;
   panX: number;
   panY: number;
+  contourWidth?: number;
+  contourOpacity?: number;
 }
 
 export function RTStructureOverlay({
@@ -38,7 +40,9 @@ export function RTStructureOverlay({
   imageHeight,
   zoom,
   panX,
-  panY
+  panY,
+  contourWidth = 2,
+  contourOpacity = 80
 }: RTStructureOverlayProps) {
   const [rtStructures, setRTStructures] = useState<RTStructureSet | null>(null);
   const [isLoading, setIsLoading] = useState(false);

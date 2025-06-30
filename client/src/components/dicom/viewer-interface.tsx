@@ -12,9 +12,11 @@ import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
 interface ViewerInterfaceProps {
   studyData: any;
+  onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
+  contourSettings?: { width: number; opacity: number };
 }
 
-export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
+export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings }: ViewerInterfaceProps) {
   const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
@@ -26,7 +28,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
   const [selectedStructureColors, setSelectedStructureColors] = useState<string[]>([]);
   const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
   const [isContourEditMode, setIsContourEditMode] = useState(false);
-  const [contourSettings, setContourSettings] = useState({ thickness: 2, opacity: 0.8 });
   const [brushToolState, setBrushToolState] = useState({
     tool: null as string | null,
     brushSize: 3,
@@ -345,6 +346,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
             onStructureSelection={handleStructureSelection}
             selectedForEdit={selectedForEdit}
             onSelectedForEditChange={setSelectedForEdit}
+            onContourSettingsChange={onContourSettingsChange}
           />
         </div>
 
