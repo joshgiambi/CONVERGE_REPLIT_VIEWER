@@ -5,8 +5,10 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Minimize2, FolderTree } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Minimize2, FolderTree, X } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -56,6 +58,12 @@ export function SeriesSelector({
     );
   }, [rtStructures?.structures, structureVisibility]);
   const [localSelectedForEdit, setLocalSelectedForEdit] = useState<number | null>(null);
+  const [showStructureSettings, setShowStructureSettings] = useState(false);
+  const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
+  const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
+  const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
+  const [contourWidth, setContourWidth] = useState([2]);
+  const [contourOpacity, setContourOpacity] = useState([80]);
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
@@ -396,6 +404,17 @@ export function SeriesSelector({
                         </Button>
                       )}
                       
+                      {/* Structure Settings Button */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowStructureSettings(!showStructureSettings)}
+                        className="flex-1 justify-center text-xs bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
+                      >
+                        <Settings className="w-4 h-4 mr-2" />
+                        Structure Settings
+                      </Button>
+                      
                       {/* Operations Button - show when structures are selected */}
                       {selectedStructures.size > 0 && (
                         <Button
@@ -409,6 +428,88 @@ export function SeriesSelector({
                         </Button>
                       )}
                     </div>
+
+                    {/* Structure Settings Panel */}
+                    {showStructureSettings && (
+                      <div className="mb-4 p-3 bg-black/30 border border-purple-500/30 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-medium text-purple-400">Global Structure Settings</h4>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowStructureSettings(false)}
+                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs text-gray-300">Auto-Zoom</Label>
+                              <Switch
+                                checked={autoZoomEnabled}
+                                onCheckedChange={setAutoZoomEnabled}
+                                className="data-[state=checked]:bg-blue-500"
+                              />
+                            </div>
+                            
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs text-gray-300">Auto-Localize</Label>
+                              <Switch
+                                checked={autoLocalizeEnabled}
+                                onCheckedChange={setAutoLocalizeEnabled}
+                                className="data-[state=checked]:bg-green-500"
+                              />
+                            </div>
+                            
+                            {autoZoomEnabled && (
+                              <div>
+                                <Label className="text-xs text-gray-300 mb-1 block">Zoom Fill Factor</Label>
+                                <Slider
+                                  value={zoomFillFactor}
+                                  onValueChange={setZoomFillFactor}
+                                  max={80}
+                                  min={20}
+                                  step={5}
+                                  className="w-full"
+                                />
+                                <div className="text-xs text-gray-400 mt-1">{zoomFillFactor[0]}%</div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <div>
+                              <Label className="text-xs text-gray-300 mb-1 block">Contour Width</Label>
+                              <Slider
+                                value={contourWidth}
+                                onValueChange={setContourWidth}
+                                max={8}
+                                min={1}
+                                step={1}
+                                className="w-full"
+                              />
+                              <div className="text-xs text-gray-400 mt-1">{contourWidth[0]}px</div>
+                            </div>
+                            
+                            <div>
+                              <Label className="text-xs text-gray-300 mb-1 block">Contour Opacity</Label>
+                              <Slider
+                                value={contourOpacity}
+                                onValueChange={setContourOpacity}
+                                max={100}
+                                min={10}
+                                step={5}
+                                className="w-full"
+                              />
+                              <div className="text-xs text-gray-400 mt-1">{contourOpacity[0]}%</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Structures List - Grouped and Individual */}
                     <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 600px)' }}>
