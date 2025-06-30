@@ -24,6 +24,8 @@ interface WorkingViewerProps {
   onBrushSizeChange?: (size: number) => void;
   onContourUpdate?: (updatedStructures: any) => void;
   contourSettings?: { width: number; opacity: number };
+  autoZoomLevel?: number;
+  autoLocalizeTarget?: { x: number; y: number; z: number };
 }
 
 export function WorkingViewer({ 
@@ -40,7 +42,9 @@ export function WorkingViewer({
   selectedForEdit,
   onBrushSizeChange,
   onContourUpdate,
-  contourSettings
+  contourSettings,
+  onAutoZoom,
+  onAutoLocalize
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -84,6 +88,40 @@ export function WorkingViewer({
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
+  // Auto-zoom function  
+  const handleAutoZoom = (newZoom: number) => {
+    setZoom(newZoom);
+    if (images.length > 0) {
+      displayCurrentImage();
+    }
+  };
+
+  // Auto-localize function
+  const handleAutoLocalize = (x: number, y: number, z: number) => {
+    // Convert world coordinates to pan offsets
+    // Scale the coordinates appropriately for the canvas
+    const scaleFactor = 0.1; // Adjust this value as needed
+    setPanX(-x * scaleFactor);
+    setPanY(-y * scaleFactor);
+    setLastPanX(-x * scaleFactor);
+    setLastPanY(-y * scaleFactor);
+    if (images.length > 0) {
+      displayCurrentImage();
+    }
+  };
+
+  // Expose functions to parent via callback refs
+  useEffect(() => {
+    if (onAutoZoom) {
+      onAutoZoom(handleAutoZoom);
+    }
+  }, [onAutoZoom]);
+
+  useEffect(() => {
+    if (onAutoLocalize) {
+      onAutoLocalize(handleAutoLocalize);
+    }
+  }, [onAutoLocalize]);
 
   useEffect(() => {
     loadImages();
