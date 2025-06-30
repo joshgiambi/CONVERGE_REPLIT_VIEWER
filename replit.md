@@ -89,14 +89,15 @@ This is a full-stack DICOM (Digital Imaging and Communications in Medicine) medi
 
 ## Changelog
 
-- June 30, 2025: Contour Editing Interface Refinement - COMPLETED
-  - ✅ Removed tree connector lines causing visual overlap in nested structure display
-  - ✅ Simplified contour editing to single horizontal panel only (removed dual panel system)
-  - ✅ Positioned contour panel with translucent background hovering over bottom toolbar
-  - ✅ Constrained panel width to viewer bounds for proper alignment
-  - ✅ Added contour edit button highlighting when active (green color scheme)
-  - ✅ Enhanced panel with comprehensive editing tools: brush, pen, smooth, interpolate, expand, shrink, boolean operations
-  - ✅ Streamlined contour editing workflow with immediate visual feedback
+- June 30, 2025: Contour Editing Toolbar Redesign - COMPLETED
+  - ✅ Redesigned 4-button main toolbar: Brush, Pen, Erase, Operations with grey border/black background styling
+  - ✅ Implemented persistent active tool states with enhanced visual feedback (structure color border and glow)
+  - ✅ Added expandable settings panels that pop out horizontally to the right
+  - ✅ Created hover expand button system for accessing advanced tool settings only when needed
+  - ✅ Integrated brush thickness slider, 3D/2D mode toggle, and smart brush controls
+  - ✅ Applied muted structure color borders (60% opacity) for subtle visual consistency
+  - ✅ Positioned toolbar above main interface with proper z-index stacking
+  - ✅ Maintained structure color matching for visual cohesion across interface elements
 - June 29, 2025: Structure Selection and Operations System - COMPLETED
   - ✅ Enhanced structure sidebar with advanced search functionality and nested _L/_R grouping
   - ✅ Added parent rows displaying combined structure colors and counts with badges  
