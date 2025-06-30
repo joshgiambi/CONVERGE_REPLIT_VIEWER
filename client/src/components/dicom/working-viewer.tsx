@@ -428,9 +428,12 @@ export function WorkingViewer({
     ctx.globalAlpha = 0.8;
     
     rtStructures.structures.forEach((structure: any) => {
-      // Check if this structure is visible
+      // Check if this structure is visible or if it's selected for editing
       const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
-      if (!isVisible) return;
+      const isSelectedForEdit = selectedForEdit === structure.roiNumber;
+      
+      // Always show selected structure for editing, even if visibility is off
+      if (!isVisible && !isSelectedForEdit) return;
       
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color

@@ -32,6 +32,7 @@ export function SimpleBrushTool({
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [isInsideContour, setIsInsideContour] = useState(false);
   const [brushStrokes, setBrushStrokes] = useState<Array<{x: number, y: number, isAdditive: boolean}>>([]);
+  const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Apply brush stroke to modify contours
   const applyBrushStroke = () => {
@@ -154,22 +155,54 @@ export function SimpleBrushTool({
     ctx.restore();
   };
 
-  // Set custom cursor style when brush tool is active
+  // Create cursor overlay canvas
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !isActive) return;
 
-    const canvas = canvasRef.current;
+    const mainCanvas = canvasRef.current;
+    const container = mainCanvas.parentElement;
+    if (!container) return;
+
+    // Create cursor overlay canvas
+    const cursorCanvas = document.createElement('canvas');
+    cursorCanvas.width = mainCanvas.width;
+    cursorCanvas.height = mainCanvas.height;
+    cursorCanvas.style.position = 'absolute';
+    cursorCanvas.style.top = '0';
+    cursorCanvas.style.left = '0';
+    cursorCanvas.style.pointerEvents = 'none';
+    cursorCanvas.style.zIndex = '10';
+    cursorCanvasRef.current = cursorCanvas;
     
-    if (isActive) {
-      canvas.style.cursor = 'none'; // Hide default cursor
-    } else {
-      canvas.style.cursor = 'default';
-    }
+    // Insert cursor canvas after main canvas
+    container.appendChild(cursorCanvas);
+    
+    // Hide default cursor on main canvas
+    mainCanvas.style.cursor = 'none';
 
     return () => {
-      canvas.style.cursor = 'default';
+      if (cursorCanvasRef.current && container.contains(cursorCanvasRef.current)) {
+        container.removeChild(cursorCanvasRef.current);
+      }
+      mainCanvas.style.cursor = 'default';
+      cursorCanvasRef.current = null;
     };
   }, [isActive]);
+
+  // Render cursor on overlay canvas
+  useEffect(() => {
+    if (!isActive || !mousePosition || !cursorCanvasRef.current) return;
+
+    const cursorCanvas = cursorCanvasRef.current;
+    const ctx = cursorCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Clear previous cursor
+    ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+    
+    // Draw new cursor at mouse position
+    drawBrushCursor(ctx, mousePosition.x, mousePosition.y);
+  }, [mousePosition, brushSize, isInsideContour, isDrawing, zoom, isActive]);
 
   // Handle mouse events
   useEffect(() => {
