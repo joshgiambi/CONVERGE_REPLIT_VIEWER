@@ -35,6 +35,7 @@ export function SimpleBrushTool({
   const [brushStrokes, setBrushStrokes] = useState<Array<{x: number, y: number, isAdditive: boolean}>>([]);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [brushMode, setBrushMode] = useState<'add' | 'delete'>('delete'); // Default to delete mode
+  const [currentStrokeMode, setCurrentStrokeMode] = useState<boolean>(false); // Mode for current stroke
 
   // Check if brush intersects with the selected structure's contour on current slice
   const checkBrushContourIntersection = (mouseX: number, mouseY: number): boolean => {
@@ -323,14 +324,19 @@ export function SimpleBrushTool({
       }
 
       if (e.button === 0) { // Left click for drawing
-        const inside = checkInsideContour(coords.x, coords.y);
-        setIsInsideContour(inside);
+        // Check if brush intersects with selected structure's contour
+        const intersectsContour = checkBrushContourIntersection(coords.x, coords.y);
+        const isAdditive = intersectsContour; // Green mode = add, Red mode = delete
+        
+        setIsInsideContour(intersectsContour);
+        setCurrentStrokeMode(isAdditive); // Lock the mode for this stroke
         setIsDrawing(true);
-        setBrushStrokes([{x: coords.x, y: coords.y, isAdditive: !inside}]);
+        setBrushStrokes([{x: coords.x, y: coords.y, isAdditive}]);
         
         console.log('Brush stroke started:', {
           position: coords,
-          isAdditive: !inside,
+          isAdditive,
+          intersectsContour,
           brushSize,
           slicePosition: currentSlicePosition
         });
@@ -342,8 +348,9 @@ export function SimpleBrushTool({
       setMousePosition(coords);
       
       if (!isDrawing && !isResizing) {
-        const inside = checkInsideContour(coords.x, coords.y);
-        setIsInsideContour(inside);
+        // Check if brush intersects with selected structure's contour for dynamic color feedback
+        const intersectsContour = checkBrushContourIntersection(coords.x, coords.y);
+        setIsInsideContour(intersectsContour);
       }
 
       if (isResizing && resizeStartPosition) {
@@ -357,16 +364,16 @@ export function SimpleBrushTool({
       }
 
       if (isDrawing) {
-        // Add brush stroke point for real contour modification
+        // Add brush stroke point using locked stroke mode
         setBrushStrokes(prev => [...prev, {
           x: coords.x,
           y: coords.y,
-          isAdditive: isInsideContour
+          isAdditive: currentStrokeMode
         }]);
         
         console.log('Brush stroke continue:', {
           position: coords,
-          isAdditive: isInsideContour
+          isAdditive: currentStrokeMode
         });
       }
     };
