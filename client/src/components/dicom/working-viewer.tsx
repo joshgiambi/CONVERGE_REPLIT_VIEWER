@@ -23,6 +23,7 @@ interface WorkingViewerProps {
   selectedForEdit?: number | null;
   onBrushSizeChange?: (size: number) => void;
   onContourUpdate?: (updatedStructures: any) => void;
+  contourSettings?: { width: number; opacity: number };
 }
 
 export function WorkingViewer({ 

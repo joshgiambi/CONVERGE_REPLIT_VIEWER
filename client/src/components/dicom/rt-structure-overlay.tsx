@@ -98,9 +98,9 @@ export function RTStructureOverlay({
     if (!ctx) return;
 
     // Clear any existing overlays (we'll redraw them)
-    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY);
+    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity);
 
-  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY]);
+  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity]);
 
   return null; // This component only draws on the existing canvas
 }
@@ -114,7 +114,9 @@ function renderRTStructures(
   imageHeight: number,
   zoom: number,
   panX: number,
-  panY: number
+  panY: number,
+  contourWidth: number = 2,
+  contourOpacity: number = 80
 ) {
   // Save current context state
   ctx.save();
@@ -140,7 +142,7 @@ function renderRTStructures(
     structure.contours.forEach(contour => {
       // Check if this contour is on the current slice
       if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
-        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight);
+        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity);
       }
     });
   });
@@ -185,7 +187,9 @@ function drawContour(
   canvasWidth: number,
   canvasHeight: number,
   imageWidth: number,
-  imageHeight: number
+  imageHeight: number,
+  contourWidth: number = 2,
+  contourOpacity: number = 80
 ) {
   if (contour.points.length < 6) return;
 
@@ -194,6 +198,10 @@ function drawContour(
   const pixelSpacing: [number, number] = [1.171875, 1.171875];
   const dicomImageWidth = 512; // Standard DICOM matrix size
   const dicomImageHeight = 512;
+
+  // Apply global contour width and opacity settings
+  ctx.lineWidth = contourWidth;
+  ctx.globalAlpha = contourOpacity / 100;
 
   ctx.beginPath();
 
@@ -214,13 +222,6 @@ function drawContour(
 
     if (i === 0) {
       ctx.moveTo(canvasX, canvasY);
-      // Debug transformation to verify it's actually running
-      console.log('RT STRUCTURE DEBUG:');
-      console.log('World coords:', [worldX, worldY]);
-      console.log('Pixel coords (j,i):', [j, i]);
-      console.log('Rotated coords:', [rotatedJ, rotatedI]);
-      console.log('Canvas coords:', [canvasX, canvasY]);
-      console.log('Canvas dimensions:', [canvasWidth, canvasHeight]);
     } else {
       ctx.lineTo(canvasX, canvasY);
     }
@@ -229,4 +230,7 @@ function drawContour(
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  
+  // Reset alpha for subsequent drawing operations
+  ctx.globalAlpha = 1.0;
 }
