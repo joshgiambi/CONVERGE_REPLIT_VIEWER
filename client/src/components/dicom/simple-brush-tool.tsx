@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -117,27 +117,59 @@ export function SimpleBrushTool({
     return false;
   };
 
-  // Draw brush preview cursor
+  // Draw brush preview cursor with consistent visibility
   const drawBrushCursor = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    if (!isActive || !mousePosition) return;
+    if (!isActive) return;
 
     ctx.save();
     
-    // Draw brush circle
-    const color = isInsideContour ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.3)';
-    const strokeColor = isInsideContour ? 'rgb(0, 255, 0)' : 'rgb(255, 0, 0)';
+    // Determine opacity based on drawing state
+    const baseOpacity = isDrawing ? 0.6 : 0.3;
+    const strokeOpacity = isDrawing ? 1.0 : 0.7;
     
-    ctx.fillStyle = color;
+    // Choose color based on inside/outside contour - green for add, red for subtract
+    const fillColor = isInsideContour ? 
+      `rgba(0, 255, 0, ${baseOpacity})` : 
+      `rgba(255, 0, 0, ${baseOpacity})`;
+    const strokeColor = isInsideContour ? 
+      `rgba(0, 255, 0, ${strokeOpacity})` : 
+      `rgba(255, 0, 0, ${strokeOpacity})`;
+    
+    ctx.fillStyle = fillColor;
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = isDrawing ? 3 : 2;
     
+    // Draw main brush circle
     ctx.beginPath();
     ctx.arc(x, y, brushSize * zoom, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
     
+    // Add center dot for precision
+    ctx.fillStyle = strokeColor;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, 2 * Math.PI);
+    ctx.fill();
+    
     ctx.restore();
   };
+
+  // Set custom cursor style when brush tool is active
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    
+    if (isActive) {
+      canvas.style.cursor = 'none'; // Hide default cursor
+    } else {
+      canvas.style.cursor = 'default';
+    }
+
+    return () => {
+      canvas.style.cursor = 'default';
+    };
+  }, [isActive]);
 
   // Handle mouse events
   useEffect(() => {
