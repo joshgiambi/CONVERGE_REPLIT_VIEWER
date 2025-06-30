@@ -8,6 +8,7 @@ import { ArrowLeft, Home, Download } from 'lucide-react';
 export default function EnhancedViewer() {
   const [studyData, setStudyData] = useState<any>(null);
   const [, setLocation] = useLocation();
+  const [contourSettings, setContourSettings] = useState({ width: 2, opacity: 80 });
   
   const { data: studies } = useQuery({
     queryKey: ['/api/studies'],

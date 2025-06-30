@@ -25,6 +25,7 @@ interface SeriesSelectorProps {
   onStructureSelection?: (structureId: number, selected: boolean) => void;
   selectedForEdit?: number | null;
   onSelectedForEditChange?: (roiNumber: number | null) => void;
+  onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
 }
 
 export function SeriesSelector({
@@ -40,7 +41,8 @@ export function SeriesSelector({
   onStructureColorChange,
   onStructureSelection,
   selectedForEdit: externalSelectedForEdit,
-  onSelectedForEditChange
+  onSelectedForEditChange,
+  onContourSettingsChange
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -67,6 +69,16 @@ export function SeriesSelector({
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
+
+  // Notify parent when contour settings change
+  useEffect(() => {
+    if (onContourSettingsChange) {
+      onContourSettingsChange({
+        width: contourWidth[0],
+        opacity: contourOpacity[0]
+      });
+    }
+  }, [contourWidth, contourOpacity, onContourSettingsChange]);
 
   // Handler for structure editing selection
   const handleStructureEditSelection = (roiNumber: number) => {
@@ -359,15 +371,25 @@ export function SeriesSelector({
               <AccordionContent className="px-4 pb-4">
                 {rtStructures?.structures ? (
                   <div className="space-y-3">
-                    {/* Search Bar */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        placeholder="Search structures..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-green-500"
-                      />
+                    {/* Search Bar with Settings Icon */}
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                          placeholder="Search structures..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-green-500"
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowStructureSettings(!showStructureSettings)}
+                        className="px-2 bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </Button>
                     </div>
 
                     {/* Control Buttons Row */}
@@ -403,17 +425,6 @@ export function SeriesSelector({
                           {allCollapsed ? 'Expand All' : 'Collapse All'}
                         </Button>
                       )}
-                      
-                      {/* Structure Settings Button */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowStructureSettings(!showStructureSettings)}
-                        className="flex-1 justify-center text-xs bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
-                      >
-                        <Settings className="w-4 h-4 mr-2" />
-                        Structure Settings
-                      </Button>
                       
                       {/* Operations Button - show when structures are selected */}
                       {selectedStructures.size > 0 && (
