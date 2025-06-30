@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { SimpleBrushTool } from './simple-brush-tool';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -14,9 +15,27 @@ interface WorkingViewerProps {
   onResetZoom?: () => void;
   rtStructures?: any;
   structureVisibility?: Map<number, boolean>;
+  brushToolState?: {
+    tool: string | null;
+    brushSize: number;
+    isActive: boolean;
+  };
+  selectedForEdit?: number | null;
 }
 
-export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLevel, onWindowLevelChange, onZoomIn, onZoomOut, onResetZoom, rtStructures: externalRTStructures, structureVisibility: externalStructureVisibility }: WorkingViewerProps) {
+export function WorkingViewer({ 
+  seriesId, 
+  studyId, 
+  windowLevel: externalWindowLevel, 
+  onWindowLevelChange, 
+  onZoomIn, 
+  onZoomOut, 
+  onResetZoom, 
+  rtStructures: externalRTStructures, 
+  structureVisibility: externalStructureVisibility,
+  brushToolState,
+  selectedForEdit
+}: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -572,12 +591,15 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
     e.preventDefault();
     e.stopPropagation();
     
-    if (e.button === 0) { // Left click for pan
+    // Check if brush tool is active - if so, skip pan functionality
+    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    
+    if (e.button === 0 && !isBrushActive) { // Left click for pan (disabled during brush mode)
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
       setLastPanX(panX);
       setLastPanY(panY);
-    } else if (e.button === 2) { // Right click for window/level
+    } else if (e.button === 2 && !isBrushActive) { // Right click for window/level (disabled during brush mode)
       const startX = e.clientX;
       const startY = e.clientY;
       const startWindow = currentWindowLevel.width;
@@ -606,7 +628,10 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isDragging) {
+    // Skip pan functionality if brush tool is active
+    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    
+    if (isDragging && !isBrushActive) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
       setPanX(lastPanX + deltaX);
@@ -615,7 +640,12 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
   };
 
   const handleCanvasMouseUp = () => {
-    setIsDragging(false);
+    // Skip pan functionality if brush tool is active
+    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    
+    if (!isBrushActive) {
+      setIsDragging(false);
+    }
   };
 
   const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -763,13 +793,44 @@ export function WorkingViewer({ seriesId, studyId, windowLevel: externalWindowLe
             onMouseUp={handleCanvasMouseUp}
             onWheel={handleCanvasWheel}
             onContextMenu={(e) => e.preventDefault()}
-            className="max-w-full max-h-full object-contain rounded cursor-move"
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === 'brush' 
+                ? 'cursor-none' 
+                : 'cursor-move'
+            }`}
             style={{ 
               backgroundColor: 'black',
               imageRendering: 'auto',
               userSelect: 'none'
             }}
           />
+          
+          {/* SimpleBrushTool overlay */}
+          {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
+            <SimpleBrushTool
+              canvasRef={canvasRef}
+              isActive={brushToolState.isActive}
+              brushSize={brushToolState.brushSize}
+              onBrushSizeChange={(newSize) => {
+                // Update brush size in parent component state management
+                // This would typically call a callback to update the toolbar state
+                console.log('Brush size changed to:', newSize);
+              }}
+              rtStructures={externalRTStructures}
+              selectedStructure={externalRTStructures?.structures?.find(
+                (s: any) => s.roiNumber === selectedForEdit
+              )}
+              currentSlicePosition={images.length > 0 && images[currentIndex] ? 
+                (images[currentIndex].parsedSliceLocation ?? 
+                 images[currentIndex].parsedZPosition ??
+                 currentIndex) : 0
+              }
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+            />
+          )}
+          
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
