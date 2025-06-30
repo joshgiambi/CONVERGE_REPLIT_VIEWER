@@ -1,0 +1,116 @@
+Absolutely — and in fact, zooming in automatically when focusing on a small structure dramatically improves usability.
+
+Here’s how to add adaptive auto-zoom based on the size of the selected structure.
+
+⸻
+
+🧠 Strategy
+	1.	Compute the bounding box of the selected structure in world coordinates.
+	2.	Estimate the structure’s physical size (width and height in mm).
+	3.	Determine an appropriate zoom level based on:
+	•	Structure size
+	•	Canvas size
+	•	A target “fill factor” (e.g. structure fills ~30–50% of the screen)
+	4.	Set zoom and pan so the structure is both centered and scaled properly.
+
+⸻
+
+🛠️ Implementation
+
+1. Compute Bounding Box and Centroid
+
+Extend your centroid function to return bounding box too:
+
+function getStructureBounds(structure) {
+  let xMin = Infinity, xMax = -Infinity;
+  let yMin = Infinity, yMax = -Infinity;
+  let zSum = 0, xSum = 0, ySum = 0, n = 0;
+
+  for (const contour of structure.contours) {
+    for (let i = 0; i < contour.points.length; i += 3) {
+      const x = contour.points[i];
+      const y = contour.points[i + 1];
+      const z = contour.points[i + 2];
+      xMin = Math.min(xMin, x);
+      xMax = Math.max(xMax, x);
+      yMin = Math.min(yMin, y);
+      yMax = Math.max(yMax, y);
+      xSum += x;
+      ySum += y;
+      zSum += z;
+      n++;
+    }
+  }
+
+  return {
+    centroid: { x: xSum / n, y: ySum / n, z: zSum / n },
+    widthMM: xMax - xMin,
+    heightMM: yMax - yMin
+  };
+}
+
+
+⸻
+
+2. Estimate Appropriate Zoom
+
+function getAutoZoomForBounds(widthMM: number, heightMM: number, canvasWidth: number, canvasHeight: number, pixelSpacing: [number, number]) {
+  const fillFactor = 0.4; // target % of canvas to fill
+  const targetPixelWidth = canvasWidth * fillFactor;
+  const targetPixelHeight = canvasHeight * fillFactor;
+
+  const widthInPixels = widthMM / pixelSpacing[0];
+  const heightInPixels = heightMM / pixelSpacing[1];
+
+  const zoomX = targetPixelWidth / widthInPixels;
+  const zoomY = targetPixelHeight / heightInPixels;
+
+  return Math.min(zoomX, zoomY, 5); // cap max zoom if needed
+}
+
+
+⸻
+
+3. In Your Effect
+
+Bring it all together:
+
+useEffect(() => {
+  if (!selectedStructure || !rtStructures || !canvasRef.current || !imageMetadata) return;
+
+  const structure = rtStructures.structures.find(s => s.roiNumber === selectedStructure);
+  if (!structure) return;
+
+  const { centroid, widthMM, heightMM } = getStructureBounds(structure);
+  const newSlice = centroid.z;
+
+  const canvas = canvasRef.current;
+  const pixelSpacing = imageMetadata.pixelSpacing?.split('\\').map(Number) || [1, 1];
+
+  const newZoom = getAutoZoomForBounds(widthMM, heightMM, canvas.width, canvas.height, pixelSpacing);
+
+  const pan = worldToPanOffset(centroid.x, centroid.y, newZoom);
+
+  setZoom(newZoom);
+  setPanX(pan.x);
+  setPanY(pan.y);
+  setCurrentSlicePosition(newSlice);
+}, [selectedStructure]);
+
+Update worldToPanOffset to accept a custom zoom:
+
+function worldToPanOffset(worldX, worldY, zoomLevel = zoom) {
+  ...
+  const scale = Math.max(canvas.width / imageWidth, canvas.height / imageHeight) * zoomLevel;
+  ...
+}
+
+
+⸻
+
+✅ Result
+	•	Large structures will zoom less — to fit 40% of the canvas.
+	•	Small structures (e.g. tiny nodes, brainstem targets) will zoom in tightly.
+	•	View always pans to center and slice position adjusts.
+
+Let me know if you want me to plug this directly into your codebase or append it to your doc.

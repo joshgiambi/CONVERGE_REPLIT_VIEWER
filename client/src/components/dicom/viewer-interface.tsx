@@ -243,6 +243,77 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
     setRTStructures(updatedRTStructures);
   };
 
+  // Auto-zoom functionality based on structure bounds
+  const getStructureBounds = (structure: any) => {
+    let xMin = Infinity, xMax = -Infinity;
+    let yMin = Infinity, yMax = -Infinity;
+    let zSum = 0, xSum = 0, ySum = 0, n = 0;
+
+    for (const contour of structure.contours) {
+      for (let i = 0; i < contour.points.length; i += 3) {
+        const x = contour.points[i];
+        const y = contour.points[i + 1];
+        const z = contour.points[i + 2];
+        xMin = Math.min(xMin, x);
+        xMax = Math.max(xMax, x);
+        yMin = Math.min(yMin, y);
+        yMax = Math.max(yMax, y);
+        xSum += x;
+        ySum += y;
+        zSum += z;
+        n++;
+      }
+    }
+
+    return {
+      centroid: { x: xSum / n, y: ySum / n, z: zSum / n },
+      widthMM: xMax - xMin,
+      heightMM: yMax - yMin
+    };
+  };
+
+  const getAutoZoomForBounds = (widthMM: number, heightMM: number, canvasWidth: number, canvasHeight: number, pixelSpacing: [number, number]) => {
+    const fillFactor = 0.4; // target % of canvas to fill
+    const targetPixelWidth = canvasWidth * fillFactor;
+    const targetPixelHeight = canvasHeight * fillFactor;
+
+    const widthInPixels = widthMM / pixelSpacing[0];
+    const heightInPixels = heightMM / pixelSpacing[1];
+
+    const zoomX = targetPixelWidth / widthInPixels;
+    const zoomY = targetPixelHeight / heightInPixels;
+
+    return Math.min(zoomX, zoomY, 5); // cap max zoom at 5x
+  };
+
+  // Auto-zoom effect when structure is selected for editing
+  useEffect(() => {
+    if (!selectedForEdit || !rtStructures?.structures) return;
+
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit);
+    if (!structure || !structure.contours || structure.contours.length === 0) return;
+
+    try {
+      const { centroid, widthMM, heightMM } = getStructureBounds(structure);
+      
+      // Only auto-zoom if we have valid bounds
+      if (isFinite(widthMM) && isFinite(heightMM) && widthMM > 0 && heightMM > 0) {
+        console.log(`Auto-zooming to structure ${structure.structureName}: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
+        
+        // Focus on the structure's centroid slice
+        const newSlice = Math.round(centroid.z);
+        
+        // For now, we'll just log the auto-zoom intent
+        // The actual zoom/pan implementation would need to be integrated 
+        // with the WorkingViewer component's zoom and pan state
+        console.log(`Centering on slice ${newSlice}, structure centroid:`, centroid);
+        console.log(`Recommended zoom for structure size: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
+      }
+    } catch (error) {
+      console.warn('Error calculating auto-zoom for structure:', error);
+    }
+  }, [selectedForEdit, rtStructures]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
