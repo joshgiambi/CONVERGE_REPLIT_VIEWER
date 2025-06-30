@@ -348,14 +348,44 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onSelectedForEditChange={setSelectedForEdit}
             onContourSettingsChange={onContourSettingsChange}
             onAutoZoom={(zoom) => {
-              // Apply auto-zoom by updating zoom state
-              // This would need to be connected to WorkingViewer zoom controls
-              console.log('Auto-zoom to:', zoom);
+              // Apply auto-zoom using cornerstone's zoom functionality
+              try {
+                const cornerstone = cornerstoneConfig.getCornerstone();
+                const elements = document.querySelectorAll('.cornerstone-viewport');
+                
+                elements.forEach((element: any) => {
+                  if (element) {
+                    const viewport = cornerstone.getViewport(element);
+                    if (viewport) {
+                      viewport.scale = zoom;
+                      cornerstone.setViewport(element, viewport);
+                    }
+                  }
+                });
+              } catch (error) {
+                console.warn('Error applying auto-zoom:', error);
+              }
             }}
             onAutoLocalize={(x, y, z) => {
               // Apply auto-localize by centering view on coordinates
-              // This would need to be connected to WorkingViewer pan controls
-              console.log('Auto-localize to:', x, y, z);
+              try {
+                const cornerstone = cornerstoneConfig.getCornerstone();
+                const elements = document.querySelectorAll('.cornerstone-viewport');
+                
+                elements.forEach((element: any) => {
+                  if (element) {
+                    const viewport = cornerstone.getViewport(element);
+                    if (viewport) {
+                      // Convert world coordinates to viewport center offset
+                      viewport.translation.x = -x;
+                      viewport.translation.y = -y;
+                      cornerstone.setViewport(element, viewport);
+                    }
+                  }
+                });
+              } catch (error) {
+                console.warn('Error applying auto-localize:', error);
+              }
             }}
           />
         </div>

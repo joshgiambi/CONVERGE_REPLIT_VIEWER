@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3 } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -66,6 +66,7 @@ export function SeriesSelector({
   const [localSelectedForEdit, setLocalSelectedForEdit] = useState<number | null>(null);
   const [showStructureSettings, setShowStructureSettings] = useState(false);
   const [showAddContour, setShowAddContour] = useState(false);
+  const [showContourOperations, setShowContourOperations] = useState(false);
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
@@ -503,6 +504,16 @@ export function SeriesSelector({
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => setShowContourOperations(!showContourOperations)}
+                        className="bg-orange-600/80 border-orange-500 text-white hover:bg-orange-700"
+                        title="Contour Operations"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </Button>
+                      
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => setShowStructureSettings(!showStructureSettings)}
                         className="bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
                         title="Structure Settings"
@@ -661,6 +672,61 @@ export function SeriesSelector({
                               Cancel
                             </Button>
                           </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Contour Operations Dialog */}
+                    {showContourOperations && (
+                      <div className="mb-4 p-3 bg-black/30 border border-orange-500/30 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-medium text-orange-400">Contour Operations</h4>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowContourOperations(false)}
+                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-2">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="w-full bg-red-600/80 hover:bg-red-700 border-red-500 text-white"
+                            onClick={() => {
+                              // Handle delete current slice contour
+                              console.log('Delete current slice contour');
+                            }}
+                          >
+                            Delete Current Slice
+                          </Button>
+                          
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="w-full bg-red-600/80 hover:bg-red-700 border-red-500 text-white"
+                            onClick={() => {
+                              // Handle delete nth slice contour
+                              console.log('Delete nth slice contour');
+                            }}
+                          >
+                            Delete Nth Slice
+                          </Button>
+                          
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="w-full bg-red-700/80 hover:bg-red-800 border-red-600 text-white"
+                            onClick={() => {
+                              // Handle clear all slices
+                              console.log('Clear all slices');
+                            }}
+                          >
+                            Clear All Slices
+                          </Button>
                         </div>
                       </div>
                     )}
