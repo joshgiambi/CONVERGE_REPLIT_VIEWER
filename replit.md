@@ -89,6 +89,13 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- June 30, 2025: Auto-Zoom & Auto-Localize Function Fix - COMPLETED
+  - ✅ Fixed cornerstone initialization errors by replacing unsafe cornerstoneConfig calls
+  - ✅ Implemented proper window.cornerstone access with availability checks
+  - ✅ Added robust error handling for viewport manipulation functions
+  - ✅ Fixed TypeScript declarations for global cornerstone object
+  - ✅ Auto-zoom and auto-localize now work when selecting structures for editing
+  - ✅ Cleaned up debugging console logs for better performance
 - June 30, 2025: Contour Delete Operations & Superbeam Rebranding - COMPLETED
   - ✅ Added three delete buttons to contour toolbar: Delete Current Slice, Delete Nth Slice, Clear All Slices
   - ✅ Delete operations appear in Operations settings panel with red destructive styling

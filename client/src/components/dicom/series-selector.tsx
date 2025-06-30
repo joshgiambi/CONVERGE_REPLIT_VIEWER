@@ -107,14 +107,7 @@ export function SeriesSelector({
 
   // Calculate contour centroid and apply auto-zoom/localize
   const applyAutoZoomAndLocalize = (structure: any) => {
-    console.log('applyAutoZoomAndLocalize called for structure:', structure.structureName);
-    console.log('autoZoomEnabled:', autoZoomEnabled, 'autoLocalizeEnabled:', autoLocalizeEnabled);
-    console.log('onAutoZoom available:', !!onAutoZoom, 'onAutoLocalize available:', !!onAutoLocalize);
-    
-    if (!structure.contours || structure.contours.length === 0) {
-      console.log('No contours found for structure');
-      return;
-    }
+    if (!structure.contours || structure.contours.length === 0) return;
     
     let totalX = 0, totalY = 0, totalZ = 0, totalPoints = 0;
     let minX = Infinity, maxX = -Infinity;
