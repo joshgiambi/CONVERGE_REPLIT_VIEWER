@@ -394,6 +394,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 selectedForEdit={selectedForEdit}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
+                contourSettings={contourSettings}
               />
               
               {/* Structure Tags on Right Side */}

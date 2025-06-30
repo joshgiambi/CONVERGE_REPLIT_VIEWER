@@ -39,7 +39,8 @@ export function WorkingViewer({
   brushToolState,
   selectedForEdit,
   onBrushSizeChange,
-  onContourUpdate
+  onContourUpdate,
+  contourSettings
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -434,8 +435,12 @@ export function WorkingViewer({
     // Save context state
     ctx.save();
     
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.8;
+    // Apply global contour settings
+    const width = contourSettings?.width || 2;
+    const opacity = (contourSettings?.opacity || 80) / 100;
+    
+    ctx.lineWidth = width;
+    ctx.globalAlpha = opacity;
     
     rtStructures.structures.forEach((structure: any) => {
       // Check if this structure is visible or if it's selected for editing
