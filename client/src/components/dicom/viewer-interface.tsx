@@ -317,6 +317,7 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                 onBrushSizeChange={(newSize) => {
                   setBrushToolState(prev => prev ? { ...prev, brushSize: newSize } : null);
                 }}
+                onContourUpdate={handleContourUpdate}
               />
               
               {/* Structure Tags on Right Side */}
