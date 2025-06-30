@@ -131,7 +131,7 @@ export function WorkingViewer({
           // Parse image position (z-coordinate is third value)
           let zPosition = null;
           if (imagePosition) {
-            const positions = imagePosition.split('\\').map(p => parseFloat(p));
+            const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
             zPosition = positions[2];
           }
           
@@ -438,7 +438,7 @@ export function WorkingViewer({
     
     rtStructures.structures.forEach((structure: any) => {
       // Check if this structure is visible or if it's selected for editing
-      const isVisible = structureVisibility.get(structure.roiNumber) ?? true;
+      const isVisible = structureVisibility.get(structure.roiNumber);
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
       
       // Always show selected structure for editing, even if visibility is off

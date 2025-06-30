@@ -320,11 +320,6 @@ export function ViewerInterface({ studyData }: ViewerInterfaceProps) {
                 brushToolState={brushToolState}
                 selectedForEdit={selectedForEdit}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
-                onContourUpdate={setRTStructures}
-                selectedForEdit={selectedForEdit}
-                onBrushSizeChange={(newSize) => {
-                  setBrushToolState(prev => prev ? { ...prev, brushSize: newSize } : null);
-                }}
                 onContourUpdate={handleContourUpdate}
               />
               

@@ -1,385 +1,290 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   isActive: boolean;
   brushSize: number;
-  onBrushSizeChange: (size: number) => void;
+  selectedStructure: number | null;
   rtStructures: any;
-  selectedStructure: any;
   currentSlicePosition: number;
+  onContourUpdate: (updatedRTStructures: any) => void;
   zoom: number;
   panX: number;
   panY: number;
-  onContourUpdate?: (updatedStructures: any) => void;
+  currentImage: any;
+  imageMetadata: any;
 }
 
 export function SimpleBrushTool({
   canvasRef,
   isActive,
   brushSize,
-  onBrushSizeChange,
-  rtStructures,
   selectedStructure,
+  rtStructures,
   currentSlicePosition,
+  onContourUpdate,
   zoom,
   panX,
   panY,
-  onContourUpdate
+  currentImage,
+  imageMetadata
 }: SimpleBrushToolProps) {
   const [isDrawing, setIsDrawing] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
-  const [resizeStartPosition, setResizeStartPosition] = useState<{ x: number; y: number } | null>(null);
-  const [isInsideContour, setIsInsideContour] = useState(false);
-  const [brushStrokes, setBrushStrokes] = useState<Array<{x: number, y: number, isAdditive: boolean}>>([]);
-  const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [brushMode, setBrushMode] = useState<'add' | 'delete'>('add');
+  const [currentStroke, setCurrentStroke] = useState<{x: number, y: number}[]>([]);
+  const brushModeRef = useRef<'add' | 'delete'>('add');
 
-  // Point-in-polygon algorithm for contour boundary detection
-  const pointInPolygon = (x: number, y: number, points: number[]): boolean => {
-    let inside = false;
-    const numPoints = points.length / 3; // x,y,z coordinates
+  // Update brush mode based on contour intersection when tool becomes active
+  useEffect(() => {
+    if (!isActive || !canvasRef.current || !selectedStructure || !rtStructures) return;
 
-    for (let i = 0, j = numPoints - 1; i < numPoints; j = i++) {
-      const xi = points[i * 3];     // x coordinate
-      const yi = points[i * 3 + 1]; // y coordinate
-      const xj = points[j * 3];     // x coordinate of previous point
-      const yj = points[j * 3 + 1]; // y coordinate of previous point
-
-      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  };
-
-  // Check if brush center or edge intersects with contour boundaries
-  const checkBrushContourIntersection = (mouseX: number, mouseY: number): boolean => {
-    if (!selectedStructure || !rtStructures) return false;
-
-    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
-    if (!structure || !structure.contours) return false;
-
-    // Convert mouse position to world coordinates
     const canvas = canvasRef.current;
-    if (!canvas) return false;
+    const updateBrushMode = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const mode = detectBrushMode(x, y);
+      setBrushMode(mode);
+      canvas.style.cursor = mode === 'add' ? 
+        `url("data:image/svg+xml,${encodeURIComponent(`
+          <svg xmlns='http://www.w3.org/2000/svg' width='${brushSize * 2}' height='${brushSize * 2}' viewBox='0 0 ${brushSize * 2} ${brushSize * 2}'>
+            <circle cx='${brushSize}' cy='${brushSize}' r='${brushSize - 1}' fill='none' stroke='#10b981' stroke-width='2'/>
+          </svg>
+        `)}")` : 
+        `url("data:image/svg+xml,${encodeURIComponent(`
+          <svg xmlns='http://www.w3.org/2000/svg' width='${brushSize * 2}' height='${brushSize * 2}' viewBox='0 0 ${brushSize * 2} ${brushSize * 2}'>
+            <circle cx='${brushSize}' cy='${brushSize}' r='${brushSize - 1}' fill='none' stroke='#ef4444' stroke-width='2'/>
+          </svg>
+        `)}")`;
+    };
 
-    const canvasCenterX = canvas.width / 2;
-    const canvasCenterY = canvas.height / 2;
+    canvas.addEventListener('mousemove', updateBrushMode);
+    return () => canvas.removeEventListener('mousemove', updateBrushMode);
+  }, [isActive, brushSize, selectedStructure, rtStructures, currentSlicePosition]);
 
-    // Convert canvas coordinates to world coordinates
-    const worldX = (mouseX - canvasCenterX - panX) / zoom;
-    const worldY = (mouseY - canvasCenterY - panY) / zoom;
+  const detectBrushMode = (canvasX: number, canvasY: number): 'add' | 'delete' => {
+    if (!selectedStructure || !rtStructures || !currentImage) return 'add';
+    
+    // Convert canvas coordinates to DICOM world coordinates
+    const worldCoords = canvasToWorld(canvasX, canvasY);
+    if (!worldCoords) return 'add';
 
-    // Find contours for current slice
-    const tolerance = 2.5;
-    const currentSliceContours = structure.contours.filter((contour: any) => 
-      Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
-    );
+    // Find the selected structure
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    if (!structure) return 'add';
 
-    if (currentSliceContours.length === 0) return false;
+    // Check if brush is touching any contour of the selected structure on current slice
+    const tolerance = 2.0; // mm tolerance for slice matching
+    const brushTolerance = brushSize * 0.5; // pixels converted to mm
 
-    // Check if brush center or any point on brush edge is inside any contour
-    const brushRadius = brushSize / zoom; // Convert to world coordinates
-
-    for (const contour of currentSliceContours) {
-      if (!contour.points || contour.points.length < 9) continue; // Need at least 3 points (x,y,z each)
-
-      // Check if brush center is inside contour
-      if (pointInPolygon(worldX, worldY, contour.points)) {
-        return true;
-      }
-
-      // Check if any point on brush circumference is inside contour
-      const numSamples = 8; // Sample 8 points around brush edge
-      for (let i = 0; i < numSamples; i++) {
-        const angle = (i / numSamples) * 2 * Math.PI;
-        const edgeX = worldX + brushRadius * Math.cos(angle);
-        const edgeY = worldY + brushRadius * Math.sin(angle);
-
-        if (pointInPolygon(edgeX, edgeY, contour.points)) {
-          return true;
+    for (const contour of structure.contours) {
+      if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+        // Check if brush center is near any contour point
+        for (let i = 0; i < contour.points.length; i += 3) {
+          const pointX = contour.points[i];
+          const pointY = contour.points[i + 1];
+          
+          const distance = Math.sqrt(
+            Math.pow(worldCoords.x - pointX, 2) + 
+            Math.pow(worldCoords.y - pointY, 2)
+          );
+          
+          if (distance <= brushTolerance) {
+            return 'add'; // Green brush - touching existing contour
+          }
         }
       }
     }
-
-    return false;
+    
+    return 'delete'; // Red brush - not touching contour
   };
 
-  // Apply brush stroke to modify contours
-  const applyBrushStroke = () => {
-    if (!selectedStructure || !rtStructures || brushStrokes.length === 0) return;
+  const canvasToWorld = (canvasX: number, canvasY: number) => {
+    if (!currentImage || !imageMetadata) return null;
 
-    console.log('Applying brush stroke with', brushStrokes.length, 'points to structure', selectedStructure.roiNumber);
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
 
-    // Create deep copy of RT structures for modification
-    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
-    const structure = updatedStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
+    // Get image dimensions
+    const imageWidth = currentImage.width || 512;
+    const imageHeight = currentImage.height || 512;
 
-    if (structure) {
-      const tolerance = 2.5;
-      const firstStroke = brushStrokes[0];
+    // Calculate scaling (same as image rendering)
+    const baseScale = Math.max(canvas.width / imageWidth, canvas.height / imageHeight);
+    const totalScale = baseScale * zoom;
+    const scaledWidth = imageWidth * totalScale;
+    const scaledHeight = imageHeight * totalScale;
 
-      // Convert canvas coordinates to world coordinates
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+    // Calculate image position with pan offset
+    const imageX = (canvas.width - scaledWidth) / 2 + panX;
+    const imageY = (canvas.height - scaledHeight) / 2 + panY;
 
-      const canvasCenterX = canvas.width / 2;
-      const canvasCenterY = canvas.height / 2;
-      const worldX = (firstStroke.x - canvasCenterX - panX) / zoom;
-      const worldY = (firstStroke.y - canvasCenterY - panY) / zoom;
-      const worldRadius = brushSize / zoom;
+    // Convert canvas coordinates to image pixel coordinates
+    const pixelX = (canvasX - imageX) / totalScale;
+    const pixelY = (canvasY - imageY) / totalScale;
 
-      // Find existing contour for this slice
-      let targetContour = structure.contours?.find((contour: any) => 
-        Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
+    // Convert to DICOM world coordinates using spatial metadata
+    if (imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
+      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+      const imageOrientation = imageMetadata.imageOrientation.split('\\').map(Number);
+
+      // Apply the same coordinate transformation as contour rendering
+      const worldX = imagePosition[0] + (pixelX * pixelSpacing[1] * imageOrientation[0]) + (pixelY * pixelSpacing[0] * imageOrientation[3]);
+      const worldY = imagePosition[1] + (pixelX * pixelSpacing[1] * imageOrientation[1]) + (pixelY * pixelSpacing[0] * imageOrientation[4]);
+
+      return { x: worldX, y: worldY };
+    }
+
+    return null;
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isActive || !selectedStructure) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setIsDrawing(true);
+    brushModeRef.current = brushMode; // Lock brush mode for this stroke
+    
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    setCurrentStroke([{ x, y }]);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDrawing || !isActive || !selectedStructure) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    setCurrentStroke(prev => [...prev, { x, y }]);
+  };
+
+  const handleMouseUp = () => {
+    if (!isDrawing || !selectedStructure || !rtStructures) return;
+    
+    setIsDrawing(false);
+    
+    // Convert stroke to contour points and update RT structures
+    if (currentStroke.length > 1) {
+      updateRTStructureContour();
+    }
+    
+    setCurrentStroke([]);
+  };
+
+  const updateRTStructureContour = () => {
+    if (!selectedStructure || !rtStructures || currentStroke.length === 0) return;
+
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    
+    if (!structure) return;
+
+    // Convert stroke points to DICOM world coordinates
+    const worldPoints: number[] = [];
+    
+    for (const point of currentStroke) {
+      const worldCoords = canvasToWorld(point.x, point.y);
+      if (worldCoords) {
+        worldPoints.push(worldCoords.x, worldCoords.y, currentSlicePosition);
+      }
+    }
+
+    if (worldPoints.length < 9) return; // Need at least 3 points (x,y,z each)
+
+    if (brushModeRef.current === 'add') {
+      // Add new contour or extend existing one
+      const existingContourIndex = structure.contours.findIndex((c: any) => 
+        Math.abs(c.slicePosition - currentSlicePosition) <= 2.0
       );
 
-      if (firstStroke.isAdditive) {
-        // ADD MODE: Create or expand contour
-        if (!targetContour) {
-          // Create new contour if none exists
-          if (!structure.contours) structure.contours = [];
-
-          targetContour = {
-            points: [],
-            slicePosition: currentSlicePosition,
-            geometricType: 'CLOSED_PLANAR'
-          };
-          structure.contours.push(targetContour);
-        }
-
-        // Generate circular brush contour
-        const numPoints = Math.max(16, Math.floor(worldRadius * 8));
-        const newPoints: number[] = [];
-
-        for (let i = 0; i < numPoints; i++) {
-          const angle = (i / numPoints) * 2 * Math.PI;
-          const x = worldX + worldRadius * Math.cos(angle);
-          const y = worldY + worldRadius * Math.sin(angle);
-          const z = currentSlicePosition;
-          newPoints.push(x, y, z);
-        }
-
-        // For simplicity, replace existing contour with new circular one
-        // In a more sophisticated implementation, you'd merge overlapping regions
-        targetContour.points = newPoints;
-
-        console.log('Added circular contour at slice', currentSlicePosition, 'with', numPoints, 'points');
+      if (existingContourIndex !== -1) {
+        // Extend existing contour
+        structure.contours[existingContourIndex].points.push(...worldPoints);
+        structure.contours[existingContourIndex].numberOfPoints = structure.contours[existingContourIndex].points.length / 3;
       } else {
-        // DELETE MODE: Remove or shrink contour
-        if (targetContour && targetContour.points && targetContour.points.length > 0) {
-          // Simple approach: clear the entire contour if brush intersects
-          // In a more sophisticated implementation, you'd subtract the brush area
-          targetContour.points = [];
-          console.log('Removed contour at slice', currentSlicePosition);
-        }
+        // Create new contour
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: worldPoints,
+          numberOfPoints: worldPoints.length / 3
+        });
       }
-
-      // Notify parent of structure update
-      if (onContourUpdate) {
-        onContourUpdate(updatedStructures);
-      }
-    }
-  };
-
-  // Convert screen coordinates to canvas coordinates
-  const getCanvasCoordinates = (clientX: number, clientY: number) => {
-    if (!canvasRef.current) return { x: 0, y: 0 };
-
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-
-    return { x, y };
-  };
-
-  // Draw brush preview cursor
-  const drawBrushCursor = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    if (!isActive) return;
-
-    ctx.save();
-
-    // Check if brush intersects with contour boundaries
-    const intersectsContour = checkBrushContourIntersection(x, y);
-
-    // Green when brush intersects contour (add mode), Red when not (delete mode)
-    const strokeColor = intersectsContour ? '#00ff00' : '#ff0000';
-    const fillColor = intersectsContour ? 'rgba(0, 255, 0, 0.2)' : 'rgba(255, 0, 0, 0.2)';
-
-    // Draw brush circle
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = isDrawing ? 3 : 2;
-    ctx.fillStyle = fillColor;
-
-    if (isDrawing) {
-      ctx.setLineDash([]);
     } else {
-      ctx.setLineDash([5, 5]);
+      // Delete mode - remove points near the stroke
+      structure.contours.forEach((contour: any) => {
+        if (Math.abs(contour.slicePosition - currentSlicePosition) <= 2.0) {
+          const filteredPoints: number[] = [];
+          
+          for (let i = 0; i < contour.points.length; i += 3) {
+            const pointX = contour.points[i];
+            const pointY = contour.points[i + 1];
+            const pointZ = contour.points[i + 2];
+            
+            let shouldKeepPoint = true;
+            
+            // Check if this point is near any stroke point
+            for (const strokePoint of currentStroke) {
+              const worldCoords = canvasToWorld(strokePoint.x, strokePoint.y);
+              if (worldCoords) {
+                const distance = Math.sqrt(
+                  Math.pow(worldCoords.x - pointX, 2) + 
+                  Math.pow(worldCoords.y - pointY, 2)
+                );
+                
+                if (distance <= brushSize * 0.5) {
+                  shouldKeepPoint = false;
+                  break;
+                }
+              }
+            }
+            
+            if (shouldKeepPoint) {
+              filteredPoints.push(pointX, pointY, pointZ);
+            }
+          }
+          
+          contour.points = filteredPoints;
+          contour.numberOfPoints = filteredPoints.length / 3;
+        }
+      });
+      
+      // Remove empty contours
+      structure.contours = structure.contours.filter((c: any) => c.numberOfPoints > 0);
     }
 
-    ctx.beginPath();
-    ctx.arc(x, y, brushSize, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.stroke();
-
-    // Add center dot for precision
-    ctx.fillStyle = strokeColor;
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.arc(x, y, 2, 0, 2 * Math.PI);
-    ctx.fill();
-
-    ctx.restore();
+    // Update the RT structures
+    onContourUpdate(updatedRTStructures);
   };
 
-  // Create cursor overlay canvas
-  useEffect(() => {
-    if (!canvasRef.current || !isActive) return;
-
-    const mainCanvas = canvasRef.current;
-    const container = mainCanvas.parentElement;
-    if (!container) return;
-
-    // Create cursor overlay canvas
-    const cursorCanvas = document.createElement('canvas');
-    cursorCanvas.width = mainCanvas.width;
-    cursorCanvas.height = mainCanvas.height;
-    cursorCanvas.style.position = 'absolute';
-    cursorCanvas.style.top = '0';
-    cursorCanvas.style.left = '0';
-    cursorCanvas.style.pointerEvents = 'none';
-    cursorCanvas.style.zIndex = '10';
-    cursorCanvasRef.current = cursorCanvas;
-
-    container.appendChild(cursorCanvas);
-    mainCanvas.style.cursor = 'none';
-
-    return () => {
-      if (cursorCanvasRef.current && container.contains(cursorCanvasRef.current)) {
-        container.removeChild(cursorCanvasRef.current);
-      }
-      mainCanvas.style.cursor = 'default';
-      cursorCanvasRef.current = null;
-    };
-  }, [isActive]);
-
-  // Render cursor on overlay canvas
-  useEffect(() => {
-    if (!isActive || !mousePosition || !cursorCanvasRef.current) return;
-
-    const cursorCanvas = cursorCanvasRef.current;
-    const ctx = cursorCanvas.getContext('2d');
-    if (!ctx) return;
-
-    // Clear previous cursor
-    ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
-
-    // Draw new cursor at mouse position
-    drawBrushCursor(ctx, mousePosition.x, mousePosition.y);
-  }, [mousePosition, brushSize, isDrawing, zoom, isActive, selectedStructure, currentSlicePosition]);
-
-  // Handle mouse events
+  // Set up mouse event listeners when active
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
-
-    const handleMouseDown = (e: MouseEvent) => {
-      e.preventDefault();
-
-      const coords = getCanvasCoordinates(e.clientX, e.clientY);
-
-      if (e.button === 2) { // Right click for resizing
-        setIsResizing(true);
-        setResizeStartPosition(coords);
-        return;
-      }
-
-      if (e.button === 0) { // Left click for drawing
-        const intersectsContour = checkBrushContourIntersection(coords.x, coords.y);
-
-        setIsDrawing(true);
-        setBrushStrokes([{x: coords.x, y: coords.y, isAdditive: intersectsContour}]);
-
-        console.log('Brush stroke started:', {
-          position: coords,
-          isAdditive: intersectsContour,
-          brushSize,
-          slicePosition: currentSlicePosition
-        });
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const coords = getCanvasCoordinates(e.clientX, e.clientY);
-      setMousePosition(coords);
-
-      if (isResizing && resizeStartPosition) {
-        const deltaY = coords.y - resizeStartPosition.y;
-        const newSize = Math.max(5, Math.min(100, brushSize - deltaY * 0.5));
-        onBrushSizeChange(newSize);
-        setMousePosition(resizeStartPosition);
-        return;
-      }
-
-      if (isDrawing) {
-        // Continue brush stroke with consistent mode
-        const firstStroke = brushStrokes[0];
-        setBrushStrokes(prev => [...prev, {
-          x: coords.x,
-          y: coords.y,
-          isAdditive: firstStroke.isAdditive
-        }]);
-      }
-    };
-
-    const handleMouseUp = (e: MouseEvent) => {
-      if (isDrawing) {
-        console.log('Brush stroke completed, applying changes');
-        applyBrushStroke();
-        setIsDrawing(false);
-        setBrushStrokes([]);
-      }
-      if (isResizing) {
-        setIsResizing(false);
-        setResizeStartPosition(null);
-      }
-    };
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-    };
-
-    const handleMouseLeave = () => {
-      setMousePosition(null);
-      if (isDrawing) {
-        console.log('Mouse left canvas, completing brush stroke');
-        applyBrushStroke();
-        setIsDrawing(false);
-        setBrushStrokes([]);
-      }
-      if (isResizing) {
-        setIsResizing(false);
-        setResizeStartPosition(null);
-      }
-    };
-
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
+    
+    canvas.addEventListener('mousedown', handleMouseDown as any);
+    canvas.addEventListener('mousemove', handleMouseMove as any);
     canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('contextmenu', handleContextMenu);
-    canvas.addEventListener('mouseleave', handleMouseLeave);
-
+    canvas.addEventListener('mouseleave', handleMouseUp);
+    
     return () => {
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mousedown', handleMouseDown as any);
+      canvas.removeEventListener('mousemove', handleMouseMove as any);
       canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('contextmenu', handleContextMenu);
-      canvas.removeEventListener('mouseleave', handleMouseLeave);
+      canvas.removeEventListener('mouseleave', handleMouseUp);
     };
-  }, [isActive, brushSize, isDrawing, isResizing, currentSlicePosition, selectedStructure, zoom, panX, panY, brushStrokes]);
+  }, [isActive, isDrawing, brushMode, selectedStructure, currentStroke]);
 
-  return null;
+  return null; // This component doesn't render anything visible
 }
