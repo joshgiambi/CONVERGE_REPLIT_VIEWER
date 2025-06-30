@@ -46,7 +46,7 @@ export function ContourEditToolbar({
   const currentColor = rgbToHex(selectedStructure.color || [255, 255, 255]);
 
   return (
-    <div className="absolute bottom-16 left-4 right-4 bg-black/60 backdrop-blur-sm border border-green-500 rounded-lg p-3 z-40" style={{ maxWidth: 'calc(100% - 2rem)' }}>
+    <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 w-2/5 bg-black/70 backdrop-blur-sm border border-gray-600 rounded-lg p-3 z-40">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-4">
           <h3 className="text-green-400 font-medium">Contour Editor</h3>
