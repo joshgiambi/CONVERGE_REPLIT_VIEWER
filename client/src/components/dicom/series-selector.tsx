@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 
 interface SeriesSelectorProps {
@@ -65,6 +65,7 @@ export function SeriesSelector({
   }, [rtStructures?.structures, structureVisibility]);
   const [localSelectedForEdit, setLocalSelectedForEdit] = useState<number | null>(null);
   const [showStructureSettings, setShowStructureSettings] = useState(false);
+  const [showAddContour, setShowAddContour] = useState(false);
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
@@ -477,14 +478,26 @@ export function SeriesSelector({
                         <FolderTree className="w-4 h-4" />
                       </Button>
                       
+                      {groupingEnabled && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={toggleAllExpansion}
+                          className="bg-yellow-600/80 border-yellow-500 text-white hover:bg-yellow-700"
+                          title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                        >
+                          {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                        </Button>
+                      )}
+                      
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={toggleAllExpansion}
-                        className="bg-yellow-600/80 border-yellow-500 text-white hover:bg-yellow-700"
-                        title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                        onClick={() => setShowAddContour(!showAddContour)}
+                        className="bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
+                        title="Add New Contour"
                       >
-                        {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                        <Plus className="w-4 h-4" />
                       </Button>
                       
                       <Button
@@ -575,6 +588,78 @@ export function SeriesSelector({
                               />
                               <div className="text-xs text-gray-400 mt-1">{contourOpacity[0]}%</div>
                             </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add Contour Dialog */}
+                    {showAddContour && (
+                      <div className="mb-4 p-3 bg-black/30 border border-blue-500/30 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-medium text-blue-400">Add New Contour</h4>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowAddContour(false)}
+                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="text-xs text-gray-300 mb-1 block">Contour Name</Label>
+                            <Input
+                              placeholder="Enter contour name..."
+                              className="bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="text-xs text-gray-300 mb-1 block">Color</Label>
+                            <div className="flex space-x-2">
+                              <Input
+                                type="color"
+                                defaultValue="#ff6b6b"
+                                className="w-12 h-8 p-1 border-gray-600 bg-black/20"
+                              />
+                              <Input
+                                placeholder="#ff6b6b"
+                                className="flex-1 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <Label className="text-xs text-gray-300 mb-1 block">Type</Label>
+                            <Input
+                              placeholder="Placeholder for contour type..."
+                              disabled
+                              className="bg-gray-800/50 border-gray-700 text-gray-500 placeholder-gray-500"
+                            />
+                          </div>
+                          
+                          <div className="flex space-x-2 pt-2">
+                            <Button
+                              size="sm"
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                              onClick={() => {
+                                // Handle create contour logic here
+                                setShowAddContour(false);
+                              }}
+                            >
+                              Create
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 border-gray-600 text-gray-300 hover:bg-gray-700"
+                              onClick={() => setShowAddContour(false)}
+                            >
+                              Cancel
+                            </Button>
                           </div>
                         </div>
                       </div>
