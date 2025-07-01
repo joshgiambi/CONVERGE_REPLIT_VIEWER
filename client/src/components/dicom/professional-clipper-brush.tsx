@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { ClipperLib, ClipType, JoinType, EndType, PolyFillType, PointInPolygonResult } from 'js-angusj-clipper/web';
 
 // Medical imaging scaling factor for precision (matches Limbus V2)
 const SCALING_FACTOR = 1000;
@@ -9,7 +8,12 @@ export enum BrushOperation {
   SUBTRACTIVE = 'SUBTRACTIVE',
 }
 
-interface ClipperBrushToolProps {
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface ProfessionalClipperBrushProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   isActive: boolean;
   brushSize: number;
@@ -25,7 +29,7 @@ interface ClipperBrushToolProps {
   imageMetadata: any;
 }
 
-export function ClipperBrushTool({
+export function ProfessionalClipperBrush({
   canvasRef,
   isActive,
   brushSize,
@@ -39,34 +43,64 @@ export function ClipperBrushTool({
   panY,
   currentImage,
   imageMetadata
-}: ClipperBrushToolProps) {
+}: ProfessionalClipperBrushProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [operation, setOperation] = useState<BrushOperation>(BrushOperation.ADDITIVE);
   const [operationLocked, setOperationLocked] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState<{x: number, y: number}[]>([]);
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
-  const [lastPosition, setLastPosition] = useState<{ x: number; y: number } | null>(null);
+  const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  const [mousePosition, setMousePosition] = useState<Point | null>(null);
+  const [lastPosition, setLastPosition] = useState<Point | null>(null);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [ctrlPressed, setCtrlPressed] = useState(false);
   const [fillMode, setFillMode] = useState(true);
-  // ClipperLib is available as a global import, no async loading needed
+  const [clipperLib, setClipperLib] = useState<any>(null);
+
+  // Initialize ClipperLib
+  useEffect(() => {
+    const initClipperLib = async () => {
+      try {
+        // Import ClipperLib dynamically
+        const { ClipperLib } = await import('js-angusj-clipper/web');
+        setClipperLib(ClipperLib);
+        console.log('Professional ClipperLib loaded successfully');
+      } catch (error) {
+        console.error('Failed to load ClipperLib:', error);
+      }
+    };
+
+    initClipperLib();
+  }, []);
+
+  // Create brush circle (32-point professional standard)
+  const makeBrushCircle = (center: Point, radius: number, steps = 32): Point[] => {
+    const points: Point[] = [];
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2;
+      points.push({
+        x: Math.round(center.x + Math.cos(angle) * radius),
+        y: Math.round(center.y + Math.sin(angle) * radius),
+      });
+    }
+    points.push(points[0]); // Close the ring
+    return points;
+  };
 
   // Convert world coordinates to scaled integer coordinates (Limbus V2 approach)
-  const worldToScaled = (worldX: number, worldY: number): { x: number; y: number } => ({
+  const worldToScaled = (worldX: number, worldY: number): Point => ({
     x: Math.round(worldX * SCALING_FACTOR),
     y: Math.round(worldY * SCALING_FACTOR),
   });
 
   // Convert scaled coordinates back to world coordinates
-  const scaledToWorld = (scaledX: number, scaledY: number): { x: number; y: number } => ({
+  const scaledToWorld = (scaledX: number, scaledY: number): Point => ({
     x: scaledX / SCALING_FACTOR,
     y: scaledY / SCALING_FACTOR,
   });
 
   // Generate 32-point circle for brush outline (professional medical standard)
-  const getBrushPoints = (centerX: number, centerY: number): { x: number; y: number }[] => {
-    const points: { x: number; y: number }[] = [];
+  const getBrushPoints = (centerX: number, centerY: number): Point[] => {
+    const points: Point[] = [];
     const steps = 32; // Professional medical imaging standard
     const radius = brushSize / 2;
 
@@ -82,7 +116,7 @@ export function ClipperBrushTool({
   };
 
   // Convert canvas coordinates to DICOM world coordinates
-  const canvasToWorld = (canvasX: number, canvasY: number) => {
+  const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !imageMetadata) return null;
 
     const canvas = canvasRef.current;
@@ -117,18 +151,18 @@ export function ClipperBrushTool({
   };
 
   // Get current contour as scaled polygon paths (Limbus V2 format)
-  const getCurrentContourPolygons = (): any[] => {
+  const getCurrentContourPolygons = (): Point[][] => {
     if (!selectedStructure || !rtStructures) return [];
 
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     if (!structure) return [];
 
     const tolerance = 2.0;
-    const polygons: any[] = [];
+    const polygons: Point[][] = [];
 
     for (const contour of structure.contours) {
       if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance && contour.numberOfPoints > 0) {
-        const path: { X: number; Y: number }[] = [];
+        const path: Point[] = [];
         
         // Convert DICOM contour points to scaled polygon
         for (let i = 0; i < contour.points.length; i += 3) {
@@ -138,6 +172,10 @@ export function ClipperBrushTool({
         }
         
         if (path.length > 2) {
+          // Ensure polygon is closed
+          if (path[0].x !== path[path.length - 1].x || path[0].y !== path[path.length - 1].y) {
+            path.push(path[0]);
+          }
           polygons.push(path);
         }
       }
@@ -196,35 +234,48 @@ export function ClipperBrushTool({
     }
   };
 
-  // Create brush stroke polygon using offset operations (Limbus V2 approach)
-  const createBrushStroke = (strokePoints: { x: number; y: number }[]): any[] => {
+  // Create brush stroke polygon using professional ClipperLib approach
+  const createBrushStroke = (strokePoints: Point[]): Point[][] => {
     if (!clipperLib || strokePoints.length < 2) return [];
 
-    // Convert stroke to world coordinates
-    const worldStroke: { X: number; Y: number }[] = [];
-    for (const point of strokePoints) {
-      const worldCoords = canvasToWorld(point.x, point.y);
-      if (worldCoords) {
-        worldStroke.push(worldToScaled(worldCoords.x, worldCoords.y));
-      }
-    }
-
-    if (worldStroke.length < 2) return [];
-
     try {
-      // Create rounded brush stroke using offset operation
-      const offsetDelta = Math.round((brushSize / 2) * SCALING_FACTOR);
-      
-      const offsetResult = clipperLib.offsetToPaths({
-        delta: offsetDelta,
-        offsetInputs: [{
-          data: [worldStroke],
-          joinType: clipperLib.JoinType.Round,
-          endType: clipperLib.EndType.OpenRound,
-        }],
+      // Convert stroke to world coordinates and scale
+      const worldStroke: Point[] = [];
+      for (const point of strokePoints) {
+        const worldCoords = canvasToWorld(point.x, point.y);
+        if (worldCoords) {
+          worldStroke.push(worldToScaled(worldCoords.x, worldCoords.y));
+        }
+      }
+
+      if (worldStroke.length < 2) return [];
+
+      // Create brush circle at each stroke point and union them
+      const brushRadius = Math.round((brushSize / 2) * SCALING_FACTOR);
+      const brushPolygons: Point[][] = [];
+
+      // For performance, sample stroke points
+      const step = Math.max(1, Math.floor(worldStroke.length / 10));
+      for (let i = 0; i < worldStroke.length; i += step) {
+        const brushCircle = makeBrushCircle(worldStroke[i], brushRadius);
+        brushPolygons.push(brushCircle);
+      }
+
+      // Union all brush circles into one stroke polygon
+      if (brushPolygons.length === 1) {
+        return brushPolygons;
+      }
+
+      // Union multiple brush circles
+      const polyTree = clipperLib.clipToPolyTree({
+        clipType: clipperLib.ClipType.Union,
+        subjectInputs: brushPolygons.slice(0, -1).map((ring: Point[]) => ({ data: ring, closed: true })),
+        clipInputs: brushPolygons.slice(-1).map((ring: Point[]) => ({ data: ring, closed: true })),
+        subjectFillType: clipperLib.PolyFillType.NonZero,
       });
 
-      return offsetResult || [];
+      return clipperLib.polyTreeToPaths(polyTree);
+
     } catch (error) {
       console.error('Brush stroke creation failed:', error);
       return [];
@@ -241,30 +292,32 @@ export function ClipperBrushTool({
     const currentPolygons = getCurrentContourPolygons();
     
     try {
-      let resultPolygons: any[];
+      let resultPolygons: Point[][];
 
       if (operation === BrushOperation.ADDITIVE) {
         // Union operation for additive mode
         if (currentPolygons.length === 0) {
           resultPolygons = brushStroke;
         } else {
-          resultPolygons = clipperLib.clipToPaths({
+          const polyTree = clipperLib.clipToPolyTree({
             clipType: clipperLib.ClipType.Union,
-            subjectInputs: currentPolygons.map((polygon: any) => ({ data: polygon, closed: true })),
-            clipInputs: brushStroke.map((polygon: any) => ({ data: polygon, closed: true })),
+            subjectInputs: currentPolygons.map((polygon: Point[]) => ({ data: polygon, closed: true })),
+            clipInputs: brushStroke.map((polygon: Point[]) => ({ data: polygon, closed: true })),
             subjectFillType: clipperLib.PolyFillType.NonZero,
           });
+          resultPolygons = clipperLib.polyTreeToPaths(polyTree);
         }
       } else {
         // Difference operation for subtractive mode
         if (currentPolygons.length === 0) return; // Nothing to subtract from
         
-        resultPolygons = clipperLib.clipToPaths({
+        const polyTree = clipperLib.clipToPolyTree({
           clipType: clipperLib.ClipType.Difference,
-          subjectInputs: currentPolygons.map((polygon: any) => ({ data: polygon, closed: true })),
-          clipInputs: brushStroke.map((polygon: any) => ({ data: polygon, closed: true })),
+          subjectInputs: currentPolygons.map((polygon: Point[]) => ({ data: polygon, closed: true })),
+          clipInputs: brushStroke.map((polygon: Point[]) => ({ data: polygon, closed: true })),
           subjectFillType: clipperLib.PolyFillType.NonZero,
         });
+        resultPolygons = clipperLib.polyTreeToPaths(polyTree);
       }
 
       // Clean and simplify polygons (professional quality)
@@ -274,25 +327,25 @@ export function ClipperBrushTool({
       // Handle fill mode for additive operations
       if (fillMode && operation === BrushOperation.ADDITIVE) {
         // Keep only exterior rings (remove holes)
-        resultPolygons = resultPolygons.filter((_: any, index: number) => index % 2 === 0);
+        resultPolygons = resultPolygons.filter((_: Point[], index: number) => index % 2 === 0);
       }
 
       // Update RT structure data
       updateRTStructureData(resultPolygons);
       
-      console.log('Professional polygon brush operation completed:', { 
+      console.log('Professional ClipperLib polygon operation completed:', { 
         operation, 
         inputPolygons: currentPolygons.length, 
         resultPolygons: resultPolygons.length 
       });
 
     } catch (error) {
-      console.error('Polygon operation failed:', error);
+      console.error('ClipperLib polygon operation failed:', error);
     }
   };
 
   // Update RT structure data with new polygons
-  const updateRTStructureData = (polygons: any[]) => {
+  const updateRTStructureData = (polygons: Point[][]) => {
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     
@@ -311,7 +364,7 @@ export function ClipperBrushTool({
         
         // Convert scaled polygon back to DICOM coordinates
         for (const point of polygon) {
-          const worldCoords = scaledToWorld(point.X, point.Y);
+          const worldCoords = scaledToWorld(point.x, point.y);
           points.push(worldCoords.x, worldCoords.y, currentSlicePosition);
         }
         

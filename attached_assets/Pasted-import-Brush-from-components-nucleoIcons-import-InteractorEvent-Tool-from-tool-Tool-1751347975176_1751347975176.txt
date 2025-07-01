@@ -1,0 +1,550 @@
+import { Brush } from "~/components/nucleoIcons"
+import { InteractorEvent, Tool } from "../tool/Tool"
+import { ContourSequenceEntity } from "../../entities/common"
+import { selectedEntities } from "../../entities"
+import { mouseState } from "../../mouse"
+import { sceneState } from "../../scene"
+import { SlicingMode } from "@kitware/vtk.js/Rendering/Core/ImageMapper/Constants"
+import { ToolMode } from "../state"
+import { Contour } from "../../entities/common/Contour"
+import { ClipperLib } from "~/components/viewer/utils"
+import {
+  ClipType,
+  EndType,
+  JoinType,
+  Path,
+  Paths,
+  PointInPolygonResult,
+  PolyFillType,
+} from "js-angusj-clipper/web"
+import { drawStatsState } from "../../editor"
+import { NumberProperty } from "../../common/properties"
+import { Point } from "~/components/viewer/utils/types"
+import { SCALING_FACTOR } from "~/components/viewer/utils/constants"
+import clamp from "lodash/clamp"
+import Konva from "konva"
+import { settingsState } from "../../settings"
+
+export enum BrushOperation {
+  ADDITIVE,
+  SUBTRACTIVE,
+}
+
+const brushSizeProperty = new NumberProperty({
+  label: "Brush Size",
+  value: 30,
+  min: 1,
+  max: 100,
+  step: 2,
+  helpText: "Ctrl+scroll wheel to adjust brush size dynamically",
+})
+
+const brushToolProperties = {
+  brushSize: brushSizeProperty,
+}
+
+export class BrushTool extends Tool<
+  ContourSequenceEntity,
+  typeof brushToolProperties
+> {
+  private _operationLocked: boolean = false
+  private _fill: boolean = true
+  public operation: BrushOperation = BrushOperation.ADDITIVE
+  private _lastPosition: Point | undefined
+  private _startBrushSize: number | undefined
+  public startWorldPosition: Point | undefined
+
+  constructor() {
+    super({
+      name: "Brush",
+      icon: Brush,
+      cursor: "none",
+      mode: ToolMode.EDIT,
+      properties: brushToolProperties,
+    })
+  }
+
+  public onAttach(target: ContourSequenceEntity): () => void {
+    const boundLocked = this._locked.bind(this)
+
+    this.disabled = target.locked
+
+    target.on("locked", boundLocked)
+
+    return () => {
+      target.off("locked", boundLocked)
+    }
+  }
+
+  private _locked(locked: boolean): void {
+    this.disabled = locked
+  }
+
+  public get scaledBrushSize(): number {
+    const activeViewportId = mouseState.activeViewportId
+    const viewport = sceneState.viewports.get(activeViewportId)
+
+    if (!viewport) return 0
+
+    const scale = viewport.renderer.getActiveCamera().getParallelScale() / 100
+
+    return (this.properties.brushSize.value / scale) * 3
+  }
+
+  public get brushPoints(): Point[] {
+    const circlePoints: Point[] = []
+
+    const steps = 32
+
+    const position = this.startWorldPosition || mouseState.worldPosition
+
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2
+      circlePoints.push({
+        x: Math.cos(angle) * (this.properties.brushSize.value / 2),
+        y: Math.sin(angle) * (this.properties.brushSize.value / 2),
+      })
+    }
+
+    for (let i = 0; i < circlePoints.length; i++) {
+      circlePoints[i].x += position.x
+      circlePoints[i].y += position.y
+    }
+
+    circlePoints.push(circlePoints[0])
+
+    return circlePoints
+  }
+
+  public onKeyDown(event: InteractorEvent): void {
+    if (this._operationLocked) return
+
+    if (event.key === "Shift") {
+      this._updateBrushOperation(event)
+    }
+
+    if (event.key === "Control" || event.key === "Meta") {
+      this._fill = false
+    }
+  }
+
+  public onKeyUp(event: InteractorEvent): void {
+    if (event.key === "Shift") {
+      this._updateBrushOperation(event)
+    }
+
+    if (event.key === "Control" || event.key === "Meta") {
+      this._fill = true
+    }
+  }
+
+  public onLeftButtonPress(event: InteractorEvent): void {
+    super.onLeftButtonPress(event)
+    this._updateBrushOperation(event)
+    this._operationLocked = true
+    this.onMouseMove(event)
+  }
+
+  public onLeftButtonRelease(event: InteractorEvent): void {
+    super.onLeftButtonRelease(event)
+    this._operationLocked = false
+    this._updateBrushOperation(event)
+
+    if (!this.target || this.disabled || !this.active || !this._currentContour)
+      return
+
+    this._lastPosition = undefined
+
+    this._currentContour.commit()
+
+    this.target.modified()
+  }
+
+  public onMouseWheel(event: InteractorEvent): void {
+    const { spinY, controlKey } = event
+
+    if (
+      this.disabled ||
+      !this.active ||
+      !this.target ||
+      this.target.locked ||
+      !controlKey ||
+      !spinY
+    )
+      return
+
+    if (spinY > 0) {
+      this.properties.brushSize.decrement()
+    } else {
+      this.properties.brushSize.increment()
+    }
+  }
+
+  private _handleScaleBrush(event: InteractorEvent): void {
+    if (!this.active || !this.target || this.disabled) return
+
+    const { view } = sceneState
+    const { movementPosition } = mouseState
+
+    const canvas = view?.getCanvas()
+
+    if (this.rightPressed && !event.controlKey) {
+      if (canvas) {
+        canvas.requestPointerLock()
+      }
+
+      if (!this._startBrushSize || !this.startWorldPosition) {
+        this._startBrushSize = this.properties.brushSize.value
+        this.startWorldPosition = mouseState.worldPosition
+      }
+
+      const activeViewportId = mouseState.activeViewportId
+      const viewport = sceneState.viewports.get(activeViewportId)
+
+      if (!viewport) return
+
+      const vpScale = viewport.renderer.getActiveCamera().getParallelScale()
+
+      const delta = (movementPosition.x + -movementPosition.y) * (vpScale / 700)
+
+      const newScale = Number(
+        (this.properties.brushSize.value + delta).toFixed(2),
+      )
+      const scale = clamp(
+        newScale,
+        this.properties.brushSize.min,
+        this.properties.brushSize.max,
+      )
+
+      this.properties.brushSize.set(scale)
+    } else {
+      this._startBrushSize = undefined
+      this.startWorldPosition = undefined
+      document.exitPointerLock()
+    }
+  }
+
+  public onMouseMove(e: InteractorEvent): void {
+    drawStatsState.startDraw()
+
+    this._handleScaleBrush(e)
+
+    if (!ClipperLib) return
+
+    if (!this._operationLocked) {
+      this._updateBrushOperation(e)
+    }
+
+    if (
+      this.disabled ||
+      !this.active ||
+      !this.target ||
+      !this.leftPressed ||
+      this.target.locked
+    ) {
+      return
+    }
+
+    const imageSeries = selectedEntities.imageSeries
+    const { activeViewportId } = mouseState
+    const viewport = sceneState.viewports.get(activeViewportId)
+
+    if (!imageSeries || !viewport || activeViewportId !== 1) return
+
+    const slice = imageSeries.getSlicePosition(viewport.id)
+
+    if (slice === undefined) return
+
+    const offsetPath = ClipperLib.offsetToPolyTree({
+      delta: Math.round((this.properties.brushSize.value / 2) * SCALING_FACTOR),
+      offsetInputs: [
+        {
+          joinType: JoinType.Round,
+          endType: EndType.OpenRound,
+          data: multiplyPolygons(
+            [
+              [
+                this._lastPosition || mouseState.worldPosition,
+                mouseState.worldPosition,
+              ],
+            ],
+            SCALING_FACTOR,
+          ),
+        },
+      ],
+    })
+
+    if (!offsetPath) return
+
+    const buffer = ClipperLib.polyTreeToPaths(offsetPath)
+
+    this._lastPosition = mouseState.worldPosition
+
+    let contour = this.target.getContourAtSlice(viewport.slicingMode, slice)
+
+    if (!contour) {
+      contour = new Contour(this.target, viewport.slicingMode, [], slice)
+      this.target.addContour(viewport.slicingMode, contour)
+      contour.stage([buffer])
+      return
+    }
+
+    if (contour.numberOfPoints === 0) {
+      if (this.operation === BrushOperation.SUBTRACTIVE) {
+        return
+      } else {
+        contour.stage([buffer])
+        return
+      }
+    }
+
+    const polygons = contour.getCurrent()
+
+    const clipType =
+      this.operation === BrushOperation.ADDITIVE
+        ? ClipType.Union
+        : ClipType.Difference
+
+    const result = ClipperLib.clipToPolyTree({
+      clipType,
+      subjectInputs: polygons.map((polygon) => ({
+        data: polygon,
+        closed: true,
+      })),
+      clipInputs: [{ data: buffer }],
+      subjectFillType: PolyFillType.NonZero,
+    })
+
+    let paths: Paths = []
+
+    if (this._fill && this.operation === BrushOperation.ADDITIVE) {
+      let next = result.getFirst()
+
+      while (next) {
+        if (next.isHole) {
+          next = next.getNext()
+          continue
+        }
+
+        paths.push(next.contour as Path)
+        next = next.getNext()
+      }
+    } else {
+      paths = ClipperLib.polyTreeToPaths(result)
+    }
+
+    paths = ClipperLib.cleanPolygons(paths, 2)
+    paths = ClipperLib.simplifyPolygons(paths, PolyFillType.NonZero)
+
+    contour.stage([paths])
+
+    drawStatsState.endDraw()
+  }
+
+  private _updateBrushOperation(event: InteractorEvent): void {
+    if (this._operationLocked) return
+
+    const inside = this._isInside()
+
+    if (!this._currentContour) {
+      this.operation = BrushOperation.ADDITIVE
+      return
+    }
+
+    if (this._currentContour.numberOfPoints === 0) {
+      this.operation = BrushOperation.ADDITIVE
+      return
+    }
+
+    const { shiftKey } = event
+
+    if (shiftKey) {
+      if (inside) {
+        this.operation = BrushOperation.SUBTRACTIVE
+      } else {
+        this.operation = BrushOperation.ADDITIVE
+      }
+    } else {
+      if (inside) {
+        this.operation = BrushOperation.ADDITIVE
+      } else {
+        this.operation = BrushOperation.SUBTRACTIVE
+      }
+    }
+  }
+
+  private _isInside(): boolean {
+    if (!ClipperLib) {
+      return false
+    }
+
+    const viewport = sceneState.viewports.get(mouseState.activeViewportId)
+    if (!this._currentContour || !viewport) return false
+
+    const point = { x: 0, y: 0 }
+
+    switch (viewport.slicingMode) {
+      case SlicingMode.I:
+        point.x = Math.round(mouseState.worldPosition.y * SCALING_FACTOR)
+        point.y = Math.round(mouseState.worldPosition.z * SCALING_FACTOR)
+        break
+      case SlicingMode.J:
+        point.x = Math.round(mouseState.worldPosition.x * SCALING_FACTOR)
+        point.y = Math.round(mouseState.worldPosition.z * SCALING_FACTOR)
+        break
+      case SlicingMode.K:
+        point.x = Math.round(mouseState.worldPosition.x * SCALING_FACTOR)
+        point.y = Math.round(mouseState.worldPosition.y * SCALING_FACTOR)
+        break
+      default:
+        return false
+    }
+
+    const current = this._currentContour.getCurrent()
+
+    if (!current[0].length) {
+      return true
+    }
+    const insideCount = current.reduce(
+      (_, polygon) =>
+        polygon.reduce((acc, ring) => {
+          switch (ClipperLib!.pointInPolygon(point, ring)) {
+            case PointInPolygonResult.Inside:
+              return acc + 1
+            case PointInPolygonResult.Outside:
+              return acc
+            case PointInPolygonResult.OnBoundary:
+              return acc
+            default:
+              return acc
+          }
+        }, 0),
+      0,
+    )
+
+    return insideCount % 2 === 1
+  }
+
+  private get _currentContour(): Contour | undefined {
+    const imageSeries = selectedEntities.imageSeries
+    const { activeViewportId } = mouseState
+
+    const viewport = sceneState.viewports.get(activeViewportId)
+
+    if (!imageSeries || !viewport || !this.target) return
+
+    const slice = imageSeries.getSlicePosition(viewport.id)
+
+    if (slice === undefined) return
+
+    return this.target.getContourAtSlice(viewport.slicingMode, slice)
+  }
+
+  public renderPass(layer: Konva.Layer): void {
+    const { screenPosition, activeViewportId } = mouseState
+
+    if (activeViewportId !== 1) {
+      return
+    }
+
+    let [x, y] = [0, 0]
+
+    const view = sceneState.view
+    const viewport = sceneState.viewports.get(1)
+
+    if (!viewport || !view) return
+
+    const screenPoint = this.startWorldPosition
+      ? view.worldToDisplay(
+          this.startWorldPosition.x,
+          this.startWorldPosition.y,
+          0,
+          viewport.renderer,
+        )
+      : [screenPosition.x, screenPosition.y]
+
+    x = screenPoint[0]
+    y = sceneState.clientHeight - screenPoint[1]
+
+    const isAdditive = this.operation === BrushOperation.ADDITIVE
+
+    const signSize = clamp(this.scaledBrushSize / 6, 2, 10)
+
+    const brushPoints = this.brushPoints.map((point) => {
+      const screenPoint = view.worldToDisplay(
+        point.x,
+        point.y,
+        0,
+        viewport.renderer,
+      )
+      return [screenPoint[0], sceneState.clientHeight - screenPoint[1]]
+    })
+
+    const group = new Konva.Group({
+      listening: false,
+    })
+
+    const stroke = isAdditive
+      ? `rgba(0,255,0, ${settingsState.tools.settings.editing.settings.brush.settings.stroke.settings.opacity.value})`
+      : `rgba(255,0,0,${settingsState.tools.settings.editing.settings.brush.settings.stroke.settings.opacity.value})`
+
+    const fill = isAdditive
+      ? `rgba(0,255,0, ${settingsState.tools.settings.editing.settings.brush.settings.fill.settings.opacity.value})`
+      : `rgba(255,0,0,${settingsState.tools.settings.editing.settings.brush.settings.fill.settings.opacity.value})`
+
+    const path = new Konva.Path({
+      listening: false,
+      x,
+      y,
+      data: isAdditive
+        ? `M-${signSize},0 L${signSize},0 M0,-${signSize} L0,${signSize}`
+        : `M-${signSize},0 L${signSize},0`,
+      stroke,
+      fillEnabled:
+        settingsState.tools.settings.editing.settings.brush.settings.fill
+          .settings.enabled.value,
+      fill,
+      strokeWidth:
+        settingsState.tools.settings.editing.settings.brush.settings.stroke
+          .settings.width.value,
+    })
+
+    const line = new Konva.Line({
+      listening: false,
+      points: brushPoints.flat(),
+      stroke,
+      strokeWidth:
+        settingsState.tools.settings.editing.settings.brush.settings.stroke
+          .settings.width.value,
+      dashEnabled:
+        settingsState.tools.settings.editing.settings.brush.settings.dash
+          .settings.enabled.value,
+      dash: [
+        settingsState.tools.settings.editing.settings.brush.settings.dash
+          .settings.length.value,
+        settingsState.tools.settings.editing.settings.brush.settings.dash
+          .settings.gap.value,
+      ],
+      lineCap: "round",
+      lineJoin: "round",
+      tension: 0.1,
+    })
+
+    group.add(path)
+    group.add(line)
+
+    layer.add(group)
+  }
+}
+
+function multiplyPolygons(
+  polygon: Point[][],
+  scalingFactor: number,
+): Point[][] {
+  return polygon.map((points) =>
+    points.map((point) => ({
+      x: Math.round(point.x * scalingFactor),
+      y: Math.round(point.y * scalingFactor),
+    })),
+  )
+}

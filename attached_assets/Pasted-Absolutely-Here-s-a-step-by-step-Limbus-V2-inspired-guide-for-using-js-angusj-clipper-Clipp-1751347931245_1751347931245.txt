@@ -1,0 +1,170 @@
+Absolutely! Here’s a step-by-step, **Limbus V2-inspired** guide for using `js-angusj-clipper` (ClipperLib) for professional medical contour editing, including code snippets and best practices for each requirement.
+
+---
+
+## 1. **ClipperLib Setup and Data Format**
+
+### **Install**
+```bash
+npm install js-angusj-clipper
+```
+
+### **Import**
+```typescript
+import { ClipperLib, ClipType, JoinType, EndType, PolyFillType, PointInPolygonResult } from "js-angusj-clipper/web";
+```
+
+### **Coordinate Format**
+- ClipperLib expects **integer coordinates** (use 1000x scaling for DICOM).
+- Each polygon is an array of `{ x: number, y: number }` points.
+- For multi-polygons: `Point[][]` (array of rings).
+
+---
+
+## 2. **Offsetting for Brush Strokes**
+
+**Goal:** Create a rounded brush stroke (circle or path) for the brush tool.
+
+```typescript
+const SCALING_FACTOR = 1000; // For DICOM precision
+
+function makeBrushCircle(center: { x: number, y: number }, radius: number, steps = 32): { x: number, y: number }[] {
+  const points = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    points.push({
+      x: Math.round(center.x + Math.cos(angle) * radius),
+      y: Math.round(center.y + Math.sin(angle) * radius),
+    });
+  }
+  points.push(points[0]); // Close the ring
+  return points;
+}
+
+// Example usage:
+const brushPolygon = [makeBrushCircle({ x: 10000, y: 10000 }, 1500)]; // 15mm radius at 1000x scale
+```
+
+---
+
+## 3. **Boolean Operations (Union, Difference, Intersection)**
+
+**ClipperLib expects:**
+- `subjectInputs`: array of `{ data: Point[], closed: true }`
+- `clipInputs`: array of `{ data: Point[], closed: true }`
+- `clipType`: `ClipType.Union`, `ClipType.Difference`, `ClipType.Intersection`
+- `subjectFillType`: `PolyFillType.NonZero` (for medical contours)
+
+**Example:**
+```typescript
+const resultPolyTree = ClipperLib.clipToPolyTree({
+  clipType: ClipType.Union, // or Difference, Intersection
+  subjectInputs: polygons.map(ring => ({ data: ring, closed: true })),
+  clipInputs: brushPolygon.map(ring => ({ data: ring, closed: true })),
+  subjectFillType: PolyFillType.NonZero,
+});
+
+// Convert PolyTree to array of polygons
+const resultPolygons: Point[][] = ClipperLib.polyTreeToPaths(resultPolyTree);
+```
+
+---
+
+## 4. **Point-in-Polygon Detection**
+
+**For intelligent add/subtract mode:**
+```typescript
+function isPointInPolygon(point: { x: number, y: number }, polygon: { x: number, y: number }[]): boolean {
+  return ClipperLib.pointInPolygon(point, polygon) === PointInPolygonResult.Inside;
+}
+```
+
+---
+
+## 5. **Polygon Cleaning and Simplification**
+
+**Clean (remove spikes, fix self-intersections):**
+```typescript
+const cleaned: Point[][] = ClipperLib.cleanPolygons(resultPolygons, 2); // 2 = tolerance in scaled units
+```
+
+**Simplify (reduce complexity, preserve shape):**
+```typescript
+const simplified: Point[][] = ClipperLib.simplifyPolygons(cleaned, PolyFillType.NonZero);
+```
+
+---
+
+## 6. **DICOM Coordinate Compliance**
+
+- **Always scale patient coordinates by 1000** before passing to ClipperLib.
+- **After operations, divide by 1000** to convert back to mm for DICOM export.
+
+---
+
+## 7. **Full Example: Additive Brush Stroke**
+
+```typescript
+// 1. Prepare subject (existing contour polygons) and brush (current stroke)
+const subjectPolygons: Point[][] = ...; // Existing polygons, scaled
+const brushPolygon: Point[][] = [makeBrushCircle(currentPos, brushRadius)];
+
+// 2. Boolean operation (Union for additive)
+const polyTree = ClipperLib.clipToPolyTree({
+  clipType: ClipType.Union,
+  subjectInputs: subjectPolygons.map(ring => ({ data: ring, closed: true })),
+  clipInputs: brushPolygon.map(ring => ({ data: ring, closed: true })),
+  subjectFillType: PolyFillType.NonZero,
+});
+
+// 3. Convert result to polygons
+let resultPolygons: Point[][] = ClipperLib.polyTreeToPaths(polyTree);
+
+// 4. Clean and simplify
+resultPolygons = ClipperLib.cleanPolygons(resultPolygons, 2);
+resultPolygons = ClipperLib.simplifyPolygons(resultPolygons, PolyFillType.NonZero);
+
+// 5. Use resultPolygons as the new contour for this slice
+```
+
+---
+
+## 8. **Common Pitfalls**
+
+- **Always use integer coordinates** (scale by 1000).
+- **Polygons must be closed** (first point = last point).
+- **ClipperLib expects arrays of rings** (not GeoJSON, not flat arrays).
+- **Use correct fill type** (`PolyFillType.NonZero` for medical).
+- **Check for empty results** after boolean ops.
+
+---
+
+## 9. **API Reference**
+
+- `clipToPolyTree({ ... })`: Main boolean op
+- `polyTreeToPaths(polyTree)`: Convert result to polygons
+- `cleanPolygons(polys, tolerance)`: Clean up polygons
+- `simplifyPolygons(polys, fillType)`: Simplify polygons
+- `offsetToPolyTree({ delta, offsetInputs })`: Offset polygons (for brush stroke paths)
+- `pointInPolygon(point, ring)`: Point-in-polygon test
+
+---
+
+## 10. **Debugging Tips**
+
+- **Log all polygons** before/after each operation.
+- **Visualize** polygons with SVG or Canvas for troubleshooting.
+- **Check for NaN or undefined** in coordinates.
+- **If nothing is drawn, check scaling and closure of polygons.**
+
+---
+
+## 11. **References**
+
+- [js-angusj-clipper API Docs](https://github.com/AngusJohnson/clipper-lib)
+- [Limbus V2 BrushTool Example](see earlier code in this chat)
+
+---
+
+**If you provide your current code, I can help you adapt it line-by-line to the correct ClipperLib API.**  
+Let me know if you want a full working React/TypeScript brush tool example using this approach!

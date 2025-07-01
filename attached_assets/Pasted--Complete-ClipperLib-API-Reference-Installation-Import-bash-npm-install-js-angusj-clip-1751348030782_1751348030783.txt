@@ -1,0 +1,419 @@
+# Complete ClipperLib API Reference
+
+## **Installation & Import**
+```bash
+npm install js-angusj-clipper
+```
+
+```typescript
+import { 
+  ClipperLib, 
+  ClipType, 
+  JoinType, 
+  EndType, 
+  PolyFillType, 
+  PointInPolygonResult,
+  Path,
+  Paths,
+  PolyTree
+} from "js-angusj-clipper/web";
+```
+
+## **Core Data Types**
+
+```typescript
+// Point structure
+interface Point {
+  x: number;
+  y: number;
+}
+
+// Path = array of points (single ring)
+type Path = Point[];
+
+// Paths = array of paths (multiple rings)
+type Paths = Path[];
+
+// PolyTree = hierarchical polygon structure
+interface PolyTree {
+  getFirst(): PolyNode | null;
+  // ... other methods
+}
+
+interface PolyNode {
+  contour: Path;
+  isHole: boolean;
+  getNext(): PolyNode | null;
+  getChild(): PolyNode | null;
+}
+```
+
+## **Constants & Enums**
+
+```typescript
+// Boolean operation types
+enum ClipType {
+  Intersection = 0,
+  Union = 1,
+  Difference = 2,
+  Xor = 3
+}
+
+// Join types for offset operations
+enum JoinType {
+  Square = 0,
+  Round = 1,
+  Miter = 2
+}
+
+// End types for offset operations
+enum EndType {
+  ClosedPolygon = 0,
+  ClosedLine = 1,
+  OpenButt = 2,
+  OpenSquare = 3,
+  OpenRound = 4
+}
+
+// Fill rule types
+enum PolyFillType {
+  EvenOdd = 0,
+  NonZero = 1,
+  Positive = 2,
+  Negative = 3
+}
+
+// Point-in-polygon result
+enum PointInPolygonResult {
+  Inside = 1,
+  Outside = 0,
+  OnBoundary = -1
+}
+```
+
+## **Main API Functions**
+
+### **1. Boolean Operations**
+```typescript
+// Main boolean operation function
+ClipperLib.clipToPolyTree({
+  clipType: ClipType.Union | ClipType.Difference | ClipType.Intersection,
+  subjectInputs: Array<{ data: Path, closed: boolean }>,
+  clipInputs: Array<{ data: Path, closed: boolean }>,
+  subjectFillType: PolyFillType.NonZero,
+  clipFillType?: PolyFillType.NonZero
+}): PolyTree
+
+// Alternative: direct to paths
+ClipperLib.clipToPaths({
+  clipType: ClipType.Union | ClipType.Difference | ClipType.Intersection,
+  subjectInputs: Array<{ data: Path, closed: boolean }>,
+  clipInputs: Array<{ data: Path, closed: boolean }>,
+  subjectFillType: PolyFillType.NonZero,
+  clipFillType?: PolyFillType.NonZero
+}): Paths
+```
+
+### **2. Offset Operations**
+```typescript
+// Create offset (expanded/shrunk) polygons
+ClipperLib.offsetToPolyTree({
+  delta: number, // Positive = expand, Negative = shrink
+  offsetInputs: Array<{
+    data: Path,
+    joinType: JoinType.Round | JoinType.Square | JoinType.Miter,
+    endType: EndType.OpenRound | EndType.ClosedPolygon
+  }>
+}): PolyTree
+
+// Alternative: direct to paths
+ClipperLib.offsetToPaths({
+  delta: number,
+  offsetInputs: Array<{
+    data: Path,
+    joinType: JoinType.Round | JoinType.Square | JoinType.Miter,
+    endType: EndType.OpenRound | EndType.ClosedPolygon
+  }>
+}): Paths
+```
+
+### **3. Polygon Utilities**
+```typescript
+// Convert PolyTree to Paths
+ClipperLib.polyTreeToPaths(polyTree: PolyTree): Paths
+
+// Clean polygons (remove spikes, fix self-intersections)
+ClipperLib.cleanPolygons(
+  paths: Paths, 
+  tolerance: number // Distance tolerance in coordinate units
+): Paths
+
+// Simplify polygons (reduce complexity while preserving shape)
+ClipperLib.simplifyPolygons(
+  paths: Paths, 
+  fillType: PolyFillType.NonZero | PolyFillType.EvenOdd
+): Paths
+
+// Point-in-polygon test
+ClipperLib.pointInPolygon(
+  point: Point, 
+  path: Path
+): PointInPolygonResult.Inside | PointInPolygonResult.Outside | PointInPolygonResult.OnBoundary
+```
+
+## **Complete Working Examples**
+
+### **1. Additive Brush Stroke (Union)**
+```typescript
+const SCALING_FACTOR = 1000;
+
+// Create brush circle
+function makeBrushCircle(center: Point, radius: number, steps = 32): Path {
+  const points: Point[] = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    points.push({
+      x: Math.round(center.x + Math.cos(angle) * radius),
+      y: Math.round(center.y + Math.sin(angle) * radius),
+    });
+  }
+  points.push(points[0]); // Close the ring
+  return points;
+}
+
+// Add brush stroke to existing contour
+function addBrushStroke(existingPolygons: Paths, brushCenter: Point, brushRadius: number): Paths {
+  // Scale coordinates
+  const scaledCenter = {
+    x: Math.round(brushCenter.x * SCALING_FACTOR),
+    y: Math.round(brushCenter.y * SCALING_FACTOR)
+  };
+  const scaledRadius = Math.round(brushRadius * SCALING_FACTOR);
+  
+  // Create brush polygon
+  const brushPolygon = [makeBrushCircle(scaledCenter, scaledRadius)];
+  
+  // Scale existing polygons
+  const scaledExisting = existingPolygons.map(ring => 
+    ring.map(point => ({
+      x: Math.round(point.x * SCALING_FACTOR),
+      y: Math.round(point.y * SCALING_FACTOR)
+    }))
+  );
+  
+  // Boolean union operation
+  const result = ClipperLib.clipToPolyTree({
+    clipType: ClipType.Union,
+    subjectInputs: scaledExisting.map(ring => ({ data: ring, closed: true })),
+    clipInputs: brushPolygon.map(ring => ({ data: ring, closed: true })),
+    subjectFillType: PolyFillType.NonZero,
+  });
+  
+  // Convert result to paths
+  let resultPaths = ClipperLib.polyTreeToPaths(result);
+  
+  // Clean and simplify
+  resultPaths = ClipperLib.cleanPolygons(resultPaths, 2);
+  resultPaths = ClipperLib.simplifyPolygons(resultPaths, PolyFillType.NonZero);
+  
+  // Scale back to original coordinates
+  return resultPaths.map(ring => 
+    ring.map(point => ({
+      x: point.x / SCALING_FACTOR,
+      y: point.y / SCALING_FACTOR
+    }))
+  );
+}
+```
+
+### **2. Subtractive Brush Stroke (Difference)**
+```typescript
+function subtractBrushStroke(existingPolygons: Paths, brushCenter: Point, brushRadius: number): Paths {
+  // Same setup as additive, but use ClipType.Difference
+  const scaledCenter = {
+    x: Math.round(brushCenter.x * SCALING_FACTOR),
+    y: Math.round(brushCenter.y * SCALING_FACTOR)
+  };
+  const scaledRadius = Math.round(brushRadius * SCALING_FACTOR);
+  
+  const brushPolygon = [makeBrushCircle(scaledCenter, scaledRadius)];
+  
+  const scaledExisting = existingPolygons.map(ring => 
+    ring.map(point => ({
+      x: Math.round(point.x * SCALING_FACTOR),
+      y: Math.round(point.y * SCALING_FACTOR)
+    }))
+  );
+  
+  // Boolean difference operation
+  const result = ClipperLib.clipToPolyTree({
+    clipType: ClipType.Difference, // Key difference here
+    subjectInputs: scaledExisting.map(ring => ({ data: ring, closed: true })),
+    clipInputs: brushPolygon.map(ring => ({ data: ring, closed: true })),
+    subjectFillType: PolyFillType.NonZero,
+  });
+  
+  let resultPaths = ClipperLib.polyTreeToPaths(result);
+  resultPaths = ClipperLib.cleanPolygons(resultPaths, 2);
+  resultPaths = ClipperLib.simplifyPolygons(resultPaths, PolyFillType.NonZero);
+  
+  return resultPaths.map(ring => 
+    ring.map(point => ({
+      x: point.x / SCALING_FACTOR,
+      y: point.y / SCALING_FACTOR
+    }))
+  );
+}
+```
+
+### **3. Point-in-Polygon Detection**
+```typescript
+function isPointInPolygon(point: Point, polygons: Paths): boolean {
+  // Scale point and polygons
+  const scaledPoint = {
+    x: Math.round(point.x * SCALING_FACTOR),
+    y: Math.round(point.y * SCALING_FACTOR)
+  };
+  
+  const scaledPolygons = polygons.map(ring => 
+    ring.map(p => ({
+      x: Math.round(p.x * SCALING_FACTOR),
+      y: Math.round(p.y * SCALING_FACTOR)
+    }))
+  );
+  
+  // Check each polygon ring
+  let insideCount = 0;
+  for (const ring of scaledPolygons) {
+    const result = ClipperLib.pointInPolygon(scaledPoint, ring);
+    if (result === PointInPolygonResult.Inside) {
+      insideCount++;
+    }
+  }
+  
+  // Odd number of insides = point is inside (NonZero rule)
+  return insideCount % 2 === 1;
+}
+```
+
+### **4. Brush Stroke Path Creation**
+```typescript
+function createBrushStrokePath(startPoint: Point, endPoint: Point, brushRadius: number): Paths {
+  // Create a line between start and end points
+  const line: Path = [
+    { x: Math.round(startPoint.x * SCALING_FACTOR), y: Math.round(startPoint.y * SCALING_FACTOR) },
+    { x: Math.round(endPoint.x * SCALING_FACTOR), y: Math.round(endPoint.y * SCALING_FACTOR) }
+  ];
+  
+  const scaledRadius = Math.round(brushRadius * SCALING_FACTOR);
+  
+  // Offset the line to create a brush stroke
+  const result = ClipperLib.offsetToPolyTree({
+    delta: scaledRadius,
+    offsetInputs: [{
+      data: line,
+      joinType: JoinType.Round,
+      endType: EndType.OpenRound
+    }]
+  });
+  
+  let resultPaths = ClipperLib.polyTreeToPaths(result);
+  resultPaths = ClipperLib.cleanPolygons(resultPaths, 2);
+  
+  return resultPaths.map(ring => 
+    ring.map(point => ({
+      x: point.x / SCALING_FACTOR,
+      y: point.y / SCALING_FACTOR
+    }))
+  );
+}
+```
+
+### **5. Polygon Intersection**
+```typescript
+function intersectPolygons(polygons1: Paths, polygons2: Paths): Paths {
+  const scaled1 = polygons1.map(ring => 
+    ring.map(point => ({
+      x: Math.round(point.x * SCALING_FACTOR),
+      y: Math.round(point.y * SCALING_FACTOR)
+    }))
+  );
+  
+  const scaled2 = polygons2.map(ring => 
+    ring.map(point => ({
+      x: Math.round(point.x * SCALING_FACTOR),
+      y: Math.round(point.y * SCALING_FACTOR)
+    }))
+  );
+  
+  const result = ClipperLib.clipToPolyTree({
+    clipType: ClipType.Intersection,
+    subjectInputs: scaled1.map(ring => ({ data: ring, closed: true })),
+    clipInputs: scaled2.map(ring => ({ data: ring, closed: true })),
+    subjectFillType: PolyFillType.NonZero,
+  });
+  
+  let resultPaths = ClipperLib.polyTreeToPaths(result);
+  resultPaths = ClipperLib.cleanPolygons(resultPaths, 2);
+  resultPaths = ClipperLib.simplifyPolygons(resultPaths, PolyFillType.NonZero);
+  
+  return resultPaths.map(ring => 
+    ring.map(point => ({
+      x: point.x / SCALING_FACTOR,
+      y: point.y / SCALING_FACTOR
+    }))
+  );
+}
+```
+
+## **Error Handling & Validation**
+```typescript
+function validatePolygon(polygon: Path): boolean {
+  if (polygon.length < 3) return false;
+  
+  // Check if polygon is closed
+  const first = polygon[0];
+  const last = polygon[polygon.length - 1];
+  const distance = Math.sqrt(
+    Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
+  );
+  
+  return distance < 1; // 1 pixel tolerance
+}
+
+function safeClipperOperation(operation: () => PolyTree): Paths | null {
+  try {
+    const result = operation();
+    const paths = ClipperLib.polyTreeToPaths(result);
+    
+    // Validate result
+    if (paths.length === 0) return null;
+    
+    return paths;
+  } catch (error) {
+    console.error('ClipperLib operation failed:', error);
+    return null;
+  }
+}
+```
+
+## **Performance Tips**
+```typescript
+// Pre-scale all coordinates once
+const SCALED_POLYGONS = new Map<string, Paths>();
+
+function getScaledPolygons(polygons: Paths, key: string): Paths {
+  if (!SCALED_POLYGONS.has(key)) {
+    const scaled = polygons.map(ring => 
+      ring.map(point => ({
+        x: Math.round(point.x * SCALING_FACTOR),
+        y: Math.round(point.y * SCALING_FACTOR)
+      }))
+    );
+    SCALED_POLYGONS.set(key, scaled);
+  }
+  return SCALED_POLYGONS.get(key)!;
+}
+```
+
+This complete API reference should give you everything needed to implement professional polygon-based contour editing with ClipperLib!

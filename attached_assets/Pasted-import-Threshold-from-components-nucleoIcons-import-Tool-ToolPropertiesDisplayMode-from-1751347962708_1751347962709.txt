@@ -1,0 +1,1111 @@
+import { Threshold } from "~/components/nucleoIcons"
+import { Tool, ToolPropertiesDisplayMode } from "../tool/Tool"
+import {
+  ContourSequenceEntity,
+  Entity,
+  ImageSeriesEntity,
+  createContourSequenceWorker,
+} from "../../entities/common"
+import { ToolMode, toolsState } from "../state"
+import { selectedEntities } from "../../entities"
+import {
+  ControlType,
+  SelectProperty,
+  EntityProperty,
+  ActionProperty,
+  Properties,
+  HistogramRangeProperty,
+  HistogramPreset,
+} from "../../common/properties"
+import { debounce } from "lodash"
+import { SlicingMode } from "@kitware/vtk.js/Rendering/Core/ImageMapper/Constants"
+import { Contour } from "../../entities/common/Contour"
+import { Box, BoxAnnotation } from "../../annotations/common"
+import { annotationsState } from "../../annotations"
+import { Result, match } from "~/components/viewer/utils/sugar"
+import { Bounds, TypedArray } from "@kitware/vtk.js/types"
+import { ModuleThread, Thread } from "threads"
+import { ContourSequenceWorker } from "../../entities/contourSequenceWorker"
+import { SCALING_FACTOR } from "~/components/viewer/utils/constants"
+import smoothPolygon from "~/components/viewer/utils/geometry/smoothPolygon"
+import simplifyPolygon from "~/components/viewer/utils/geometry/simplifyPolygon"
+import { ClipperLib } from "~/components/viewer/utils"
+import { ClipType, Paths, PolyFillType, PolyTree } from "js-angusj-clipper/web"
+import { Point } from "~/components/viewer/utils/types"
+import { DialogActionType, DialogVariant, dialogState } from "../../dialog"
+import { Layer } from "konva/lib/Layer"
+import { ViewportState, sceneState } from "../../scene"
+import { getViewportScreenArea } from "~/components/viewer/hooks"
+import Konva from "konva"
+import { theme } from "~/theme"
+import { spawn, Worker } from "threads"
+import {
+  HistogramMod,
+  HistogramResult,
+} from "~/components/viewer/store/tools/workers/buildHistogram"
+import { Modality } from "~/components/viewer/utils/dicom/types"
+
+type IComputeHistogram = ReturnType<
+  NonNullable<ImageSeriesEntity["imageData"]>["computeHistogram"]
+>
+
+const CT_PRESETS: HistogramPreset[] = [
+  {
+    label: "Bone",
+    high: 1900,
+    low: 250,
+  },
+  {
+    label: "Muscle",
+    high: 100,
+    low: -29,
+  },
+  {
+    label: "Air",
+    high: -1000,
+    // reasonable value that's way lower than the expected lowest value
+    low: -100000,
+  },
+  {
+    label: "Artifact",
+    // reasonable value that's way higher than the expected highest value
+    high: 100000,
+    low: 2100,
+  },
+]
+
+// swap out with NumberRangeProperty to test different behaviour
+const thresholdProperty = new HistogramRangeProperty({
+  label: "Threshold",
+  value: [Infinity, Infinity],
+  min: 0,
+  max: 255,
+  step: 1,
+  data: [],
+  range: [0, 255],
+  presets: [],
+})
+
+export enum ThresholdClipMode {
+  NONE = "None",
+  BBOX = "Box",
+  STRUCTURE = "Structure",
+}
+
+const clippingModeProperty = new SelectProperty({
+  label: "Constraints",
+  value: ThresholdClipMode.NONE,
+  controlType: ControlType.BUTTON_GROUP,
+  options: [
+    ThresholdClipMode.NONE,
+    ThresholdClipMode.BBOX,
+    ThresholdClipMode.STRUCTURE,
+  ],
+})
+
+const structureProperty = new EntityProperty<ContourSequenceEntity>({
+  label: "Structure",
+  value: null,
+  hidden: true,
+  filter: (entity: Entity<Properties>): boolean =>
+    entity instanceof ContourSequenceEntity,
+})
+
+const applyActionProperty = new ActionProperty({
+  label: "Apply",
+  onClick: (): void => {
+    toolsState.tools.editing.threshold.applyThreshold()
+  },
+})
+
+const thresholdProperties = {
+  threshold: thresholdProperty,
+  clippingMode: clippingModeProperty,
+  structure: structureProperty,
+  apply: applyActionProperty,
+}
+
+export class ThresholdTool extends Tool<
+  ContourSequenceEntity,
+  typeof thresholdProperties
+> {
+  public contourSequence: ContourSequenceEntity | null = null
+  private _annotationId: string | null = null
+  private _worker: ModuleThread<ContourSequenceWorker> | null = null
+
+  constructor() {
+    super({
+      name: "Threshold",
+      icon: Threshold,
+      cursor: "default",
+      mode: ToolMode.EDIT,
+      properties: thresholdProperties,
+      propertiesDisplayMode: ToolPropertiesDisplayMode.POP_OUT,
+    })
+  }
+
+  public onAttach(target: ContourSequenceEntity): () => void {
+    this.contourSequence = new ContourSequenceEntity({
+      parentId: target.parentId,
+      name: "Threshold Contours",
+      color: target.properties.color.value,
+      roiNumber: target.properties.roiNumber.value,
+    })
+
+    this.disabled = target.locked
+
+    target.on("modified", this._update.bind(this))
+    target.on("locked", this._update.bind(this))
+
+    const { imageSeries } = selectedEntities
+
+    if (imageSeries) {
+      imageSeries.on("modified", this._update.bind(this))
+
+      if (imageSeries.imageData) {
+        const range = imageSeries.imageData
+          .getPointData()
+          .getScalars()
+          .getRange()
+
+        const thisModalityIsCT = imageSeries.modality === Modality.CT
+
+        if (this.properties.threshold.value[0] === Infinity) {
+          if (thisModalityIsCT) {
+            this.properties.threshold.setMin(Math.min(-2048, range[0]))
+            this.properties.threshold.setMax(Math.max(4096, range[1]))
+            this.properties.threshold.set([100, Math.max(4096, range[1])])
+          } else {
+            this.properties.threshold.setMin(range[0])
+            this.properties.threshold.setMax(range[1])
+            this.properties.threshold.set([100, range[1]])
+          }
+        }
+
+        if (thisModalityIsCT) {
+          this.properties.threshold.setPresets(CT_PRESETS)
+        } else {
+          this.properties.threshold.setPresets([])
+        }
+
+        this._updateHistogramData().then((histogram) => {
+          if (histogram) {
+            const { histogram: data, range } = histogram
+
+            if (data && range) {
+              this.properties.threshold.setData(data)
+              this.properties.threshold.setRange(range)
+            }
+          }
+        })
+      }
+    }
+
+    this.properties.clippingMode.on("modified", this._update.bind(this))
+    this.properties.clippingMode.on(
+      "modified",
+      this._thresholdDebounced.bind(this),
+    )
+    this.properties.threshold.on(
+      "modified",
+      this._thresholdDebounced.bind(this),
+    )
+    this.properties.structure.on(
+      "modified",
+      this._thresholdDebounced.bind(this),
+    )
+
+    this._update()
+    this._initWorker()
+
+    return () => {
+      target.off("modified", this._update.bind(this))
+      target.off("locked", this._update.bind(this))
+
+      if (imageSeries) {
+        imageSeries.off("modified", this._update.bind(this))
+      }
+
+      this.properties.clippingMode.off("modified", this._update.bind(this))
+      this.properties.clippingMode.off(
+        "modified",
+        this._thresholdDebounced.bind(this),
+      )
+      this.properties.threshold.off(
+        "modified",
+        this._thresholdDebounced.bind(this),
+      )
+      this.properties.structure.off(
+        "modified",
+        this._thresholdDebounced.bind(this),
+      )
+
+      this.onDisable()
+
+      if (this._worker) {
+        Thread.terminate(this._worker)
+        this._worker = null
+      }
+    }
+  }
+
+  public async applyThreshold(): Promise<void> {
+    if (!this.contourSequence || !this.target) {
+      return
+    }
+
+    const contours = this.contourSequence.contours.get(SlicingMode.K)
+
+    if (!contours) {
+      return
+    }
+
+    const timestamp = Date.now()
+
+    const targetContours =
+      this.target.getContoursForSlicingMode(SlicingMode.K) ?? []
+
+    let overwrite = false
+
+    if (this.target.numberOfPoints > 0) {
+      const { action } = await dialogState.open({
+        title: "Existing Contours",
+        description:
+          "The target structure already has contours. Do you want to replace them or merge with the new contours?",
+        variant: DialogVariant.WARNING,
+        inputs: {},
+        actions: [
+          { label: "Cancel", type: DialogActionType.CANCEL },
+          { label: "Merge", type: DialogActionType.CUSTOM },
+          { label: "Replace", type: DialogActionType.CONFIRM },
+        ],
+      })
+
+      if (action.type === DialogActionType.CANCEL) {
+        return
+      }
+
+      overwrite = action.type === DialogActionType.CONFIRM
+    }
+
+    contours.forEach((contour) => {
+      const matched = targetContours.find(
+        (c) => c.getPosition() === contour.getPosition(),
+      )
+
+      if (matched) {
+        if (overwrite) {
+          matched.stage([...contour.getCurrent()], {
+            skipEvent: true,
+          })
+        } else {
+          matched.stage([...contour.getCurrent(), ...matched.getCurrent()], {
+            skipEvent: true,
+          })
+        }
+
+        matched.commit({ timestamp }, { skipEvent: true })
+      } else {
+        if (!this.target) {
+          return
+        }
+        const newContour = new Contour(
+          this.target,
+          SlicingMode.K,
+          [],
+          contour.getPosition(),
+        )
+
+        this.target.addContour(SlicingMode.K, newContour)
+        newContour.stage([...contour.getCurrent()], { skipEvent: true })
+        newContour.commit({ timestamp }, { skipEvent: true })
+      }
+    })
+
+    this.target.reconstructSlices()
+    this.target.modified()
+
+    this.contourSequence = new ContourSequenceEntity({
+      name: "Threshold Contours",
+      color: this.target.properties.color.value,
+      roiNumber: this.target.properties.roiNumber.value,
+    })
+
+    toolsState.setActiveTool(null)
+  }
+
+  private async _updateHistogramData(): Promise<HistogramResult | null> {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) return null
+
+    const { buildHistogram } = await spawn<HistogramMod>(
+      new Worker(
+        new URL(
+          "../workers/buildHistogram.ts",
+          import.meta.url,
+        ) as unknown as string,
+      ),
+    )
+
+    const imagePointData = imageSeries.imageData
+      ?.getPointData()
+      .getScalars()
+      .getData()
+
+    if (imagePointData) {
+      const m = this._getHistogramMetadata(imageSeries)
+
+      if (m) {
+        const histogram = await buildHistogram(
+          imagePointData,
+          512,
+          m.minimum,
+          m.maximum,
+        )
+        return histogram
+      }
+
+      return null
+    }
+
+    return null
+  }
+
+  private _getHistogramMetadata = (
+    imageSeries: ImageSeriesEntity | undefined,
+  ): IComputeHistogram | undefined => {
+    if (!imageSeries) {
+      return undefined
+    }
+    const bounds = imageSeries?.imageData?.getBounds()
+    if (!bounds) {
+      return undefined
+    }
+    return imageSeries?.imageData?.computeHistogram(bounds)
+  }
+
+  private get _activeSlice(): number | undefined {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) return
+
+    return imageSeries.getSlice(1)
+  }
+
+  private async _threshold(slice?: number): Promise<void> {
+    if (!this.target || !this.active || this.disabled || !this._worker) {
+      return
+    }
+
+    slice ??= this._activeSlice
+
+    if (slice === undefined || !this.contourSequence) {
+      return
+    }
+
+    const contour = await this._thresholdSliceContours(slice)
+
+    if (contour) {
+      this.contourSequence.setContours(SlicingMode.K, [contour])
+    } else {
+      this.contourSequence.setContours(SlicingMode.K, [])
+    }
+
+    if (!this._activeSlice) {
+      return
+    }
+
+    this._thresholdInactiveSlicesDebounced(this._activeSlice)
+  }
+
+  private _thresholdDebounced = debounce(this._threshold, 5, { maxWait: 25 })
+
+  public async _thresholdInactiveSlices(activeSlice: number): Promise<void> {
+    if (
+      !this.target ||
+      !this.active ||
+      this.disabled ||
+      !this._worker ||
+      !this.contourSequence
+    ) {
+      return
+    }
+
+    const slices: number[] = []
+    const range = this._thresholdSliceRange
+
+    const { dimensions, origin, spacing } = this._imageInfo
+
+    for (let i = 0; i < dimensions[2]; i++) {
+      const iPos = i * spacing[2] + origin[2]
+
+      if (this._isBoxClip || this._isStructureClip) {
+        if (iPos < range.min || iPos > range.max) {
+          continue
+        }
+      }
+
+      if (i === activeSlice) {
+        continue
+      }
+
+      slices.push(i)
+    }
+
+    if (!slices.length) {
+      return
+    }
+
+    const ops = slices.map((slice) => () => this._thresholdSliceContours(slice))
+    const results = await Promise.all(ops.map((op) => op()))
+    const contours = results.filter((c) => c !== undefined) as Contour[]
+
+    this.contourSequence.addContours(SlicingMode.K, contours)
+    this.contourSequence.reconstructSlices()
+  }
+
+  private _thresholdInactiveSlicesDebounced = debounce(
+    this._thresholdInactiveSlices,
+    500,
+    {
+      maxWait: 5000,
+    },
+  )
+
+  private async _thresholdSliceContours(
+    slice: number,
+  ): Promise<Contour | undefined> {
+    if (
+      !this.target ||
+      !this.active ||
+      this.disabled ||
+      !this.contourSequence ||
+      !this._worker
+    ) {
+      return
+    }
+
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) {
+      return
+    }
+
+    const slicePosition = imageSeries.getSlicePosition(1, slice)
+
+    if (slicePosition === undefined) {
+      return
+    }
+
+    const { origin, dimensions, spacing } = this._imageInfo
+
+    const sliceData = this._sliceImageData(slice)
+    const contour = this._createContourForSlice(slice)
+
+    if (!contour || !sliceData) {
+      return
+    }
+
+    const [lower, upper] = this.properties.threshold.get()
+
+    const [x1, y1, _z1, x2, y2, _z2] = this._boxAnnotationBounds
+    const range = this._thresholdSliceRange
+
+    if (
+      (this._isBoxClip || this._isStructureClip) &&
+      (slicePosition < range.min || slicePosition > range.max)
+    ) {
+      return
+    }
+
+    const contours = await this._worker.thresholdContours(
+      sliceData,
+      lower,
+      upper,
+      dimensions[0],
+      dimensions[1],
+      this._isBoxClip ? [x1, y1, x2, y2] : undefined,
+    )
+
+    const polygons = contours.map((polygon) =>
+      polygon.map((point) => ({
+        x: Math.round((point.x * spacing[0] + origin[0]) * SCALING_FACTOR),
+        y: Math.round((point.y * spacing[1] + origin[1]) * SCALING_FACTOR),
+      })),
+    )
+
+    if (!polygons.length) {
+      return contour
+    }
+
+    let processed = this._postProcessPolygons(polygons)
+
+    if (!processed.flat().length) {
+      return contour
+    }
+
+    if (this._isStructureClip) {
+      const clippedPaths = this._structureClipPaths(processed, slicePosition)
+
+      if (clippedPaths) {
+        processed = clippedPaths
+      }
+    } else {
+      const clipResult = Result.wrap(() =>
+        ClipperLib!.clipToPolyTree({
+          clipType: ClipType.Xor,
+          subjectInputs: [{ data: [], closed: true }],
+          clipInputs: [{ data: processed }],
+          subjectFillType: PolyFillType.EvenOdd,
+        }),
+      )
+
+      const pathsResult = match(clipResult, {
+        ok(polyTree) {
+          return Result.ok<Paths, Error>(ClipperLib!.polyTreeToPaths(polyTree))
+        },
+        err() {
+          console.log(clipResult)
+          return Result.err<Paths, Error>(new Error("Failed to clip structure"))
+        },
+      })
+
+      if (pathsResult.isErr()) {
+        console.error(pathsResult.unwrapErr())
+      } else {
+        const paths = pathsResult.unwrap()
+
+        if (paths.length) {
+          processed = paths
+        }
+      }
+    }
+
+    contour.setCurrent([processed])
+    return contour
+  }
+
+  private _structureClipPaths(
+    polygons: Point[][],
+    slicePosition: number,
+  ): Paths | undefined {
+    if (!this.clippingStructure) {
+      return
+    }
+
+    const clipContour = this.clippingStructure.getContourAtSlice(
+      SlicingMode.K,
+      slicePosition,
+    )
+
+    if (!clipContour || clipContour.numberOfPolygons === 0) {
+      return []
+    }
+
+    const subject = clipContour
+      .getCurrent()
+      .map((polygon) => polygon.map((ring) => ({ data: ring, closed: true })))
+      .flat()
+
+    const clipResult = Result.wrap(() =>
+      ClipperLib!.clipToPolyTree({
+        clipType: ClipType.Intersection,
+        subjectInputs: subject,
+        clipInputs: [{ data: polygons }],
+        subjectFillType: PolyFillType.EvenOdd,
+      }),
+    )
+
+    const pathsResult = match(clipResult, {
+      ok(polyTree) {
+        return Result.ok<Paths, Error>(ClipperLib!.polyTreeToPaths(polyTree))
+      },
+      err() {
+        return Result.err<Paths, Error>(new Error("Failed to clip structure"))
+      },
+    })
+
+    if (pathsResult.isErr()) {
+      console.error(pathsResult.unwrapErr())
+    } else {
+      return pathsResult.unwrap()
+    }
+  }
+
+  private _postProcessPolygons(polygons: Point[][]): Point[][] {
+    return polygons.map((polygon) =>
+      simplifyPolygon(smoothPolygon(polygon, 1), 20),
+    )
+  }
+
+  private _createContourForSlice(slice: number): Contour | undefined {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries || !this.contourSequence) return
+
+    const slicePosition = imageSeries.getSlicePosition(1, slice)
+
+    if (slicePosition === undefined) return
+
+    const contour = new Contour(
+      this.contourSequence,
+      SlicingMode.K,
+      [],
+      slicePosition,
+    )
+
+    return contour
+  }
+
+  private _sliceImageData(slice: number): number[] | TypedArray | undefined {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) return
+
+    const { dimensions } = this._imageInfo
+
+    const imageData = imageSeries.getData()
+
+    if (!imageData) return
+
+    const sliceData = imageData.slice(
+      slice * dimensions[0] * dimensions[1],
+      (slice + 1) * dimensions[0] * dimensions[1],
+    )
+
+    return sliceData
+  }
+
+  private get _isBoxClip(): boolean {
+    return this.properties.clippingMode.value === ThresholdClipMode.BBOX
+  }
+
+  private get _isStructureClip(): boolean {
+    return (
+      this.properties.clippingMode.value === ThresholdClipMode.STRUCTURE &&
+      this.clippingStructure !== null
+    )
+  }
+
+  /**
+   * Returns the range of slices that should be thresholded based on the current clipping mode.
+   */
+  private get _thresholdSliceRange(): { min: number; max: number } {
+    const range: { min: number; max: number } = {
+      min: 0,
+      max: this._imageInfo.dimensions[2] - 1,
+    }
+
+    match(this.properties.clippingMode.value, {
+      [ThresholdClipMode.BBOX]: () => {
+        range.min = this._boxAnnotationBounds[2]
+        range.max = this._boxAnnotationBounds[5]
+      },
+      [ThresholdClipMode.STRUCTURE]: () => {
+        if (!this.clippingStructure) return
+
+        const contours = this.clippingStructure.contours.get(SlicingMode.K)
+
+        if (contours) {
+          const slicePositions = contours.map((c) => c.getPosition())
+
+          range.min = Math.min(...slicePositions)
+          range.max = Math.max(...slicePositions)
+        }
+      },
+      _: () => range,
+    })
+
+    return range
+  }
+
+  private async _initWorker(): Promise<void> {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries || !this.contourSequence || this._worker) return
+
+    this._worker = await createContourSequenceWorker()
+  }
+
+  public onEnable(): void {
+    if (this.properties.clippingMode.value === ThresholdClipMode.BBOX) {
+      this._enableBoxAnnotation()
+    }
+  }
+
+  public onActivate(): void {
+    this._threshold()
+  }
+
+  public onDisable(): void {
+    if (this._annotationId) {
+      const annotation = annotationsState.find(
+        (a) => a.id === this._annotationId,
+      )
+
+      if (annotation) {
+        annotation.visible = false
+        annotation.deselect()
+      }
+    }
+  }
+
+  private get _imageInfo(): {
+    origin: [number, number, number]
+    dimensions: [number, number, number]
+    spacing: [number, number, number]
+  } {
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) {
+      return {
+        origin: [0, 0, 0],
+        dimensions: [0, 0, 0],
+        spacing: [0, 0, 0],
+      }
+    }
+
+    const imageData = imageSeries.imageData
+
+    if (!imageData) {
+      return {
+        origin: [0, 0, 0],
+        dimensions: [0, 0, 0],
+        spacing: [0, 0, 0],
+      }
+    }
+
+    const origin = imageData.getOrigin()
+    const dimensions = imageData.getDimensions()
+    const spacing = imageData.getSpacing()
+
+    return { origin, dimensions, spacing }
+  }
+
+  private get _boxAnnotationBounds(): Bounds {
+    const annotation = annotationsState.find<BoxAnnotation>(
+      (a) => a.id === this._annotationId,
+    )
+
+    const { origin, spacing, dimensions } = this._imageInfo
+
+    if (!annotation) {
+      return [0, 0, 0, dimensions[0], dimensions[1], dimensions[2]]
+    }
+
+    const value = annotation.value
+
+    const [x1, y1, z1] = value[0]
+    const [x2, y2] = value[2]
+    const z2 = value[4][2]
+
+    const minX = Math.min(x1, x2)
+    const minY = Math.min(y1, y2)
+    const maxX = Math.max(x1, x2)
+    const maxY = Math.max(y1, y2)
+    const minZ = Math.min(z1, z2)
+    const maxZ = Math.max(z1, z2)
+
+    const min: [number, number, number] = [
+      (minX - origin[0]) / spacing[0],
+      (minY - origin[1]) / spacing[1],
+      minZ,
+    ]
+
+    const max: [number, number, number] = [
+      (maxX - origin[0]) / spacing[0],
+      (maxY - origin[1]) / spacing[1],
+      maxZ,
+    ]
+
+    return [...min, ...max]
+  }
+
+  private _update(): void {
+    if (!this.target) {
+      return
+    }
+
+    if (this.target.locked) {
+      this.disabled = true
+      return
+    }
+
+    if (!this.active) return
+
+    match(this.properties.clippingMode.value, {
+      [ThresholdClipMode.BBOX]: () => {
+        this._enableBoxAnnotation()
+        this.properties.structure.hidden = true
+      },
+      [ThresholdClipMode.STRUCTURE]: () => {
+        this._disableBoxAnnotation()
+        this.properties.structure.hidden = false
+      },
+      _: () => {
+        this._disableBoxAnnotation()
+        this.properties.structure.hidden = true
+      },
+    })
+  }
+
+  private _enableBoxAnnotation(): void {
+    if (this._annotationId) {
+      const annotation = annotationsState.find(
+        (a) => a.id === this._annotationId,
+      )
+
+      if (annotation) {
+        annotation.visible = true
+        annotation.on("modified", this._thresholdDebounced.bind(this))
+      }
+
+      return
+    }
+
+    const { imageSeries } = selectedEntities
+
+    if (!imageSeries) {
+      return
+    }
+
+    const imageData = imageSeries.imageData
+    const slicePosition = imageSeries.getSlicePosition(1)
+
+    if (!imageData || slicePosition === undefined) {
+      return
+    }
+
+    const dimensions = imageData.getDimensions()
+
+    const width = dimensions[0] / 3
+    const height = dimensions[1] / 3
+    const depth = dimensions[2] / 3
+
+    const box = [
+      [0, 0, slicePosition + depth],
+      [width, 0, slicePosition + depth],
+      [width, height, slicePosition + depth],
+      [0, height, slicePosition + depth],
+      [0, 0, slicePosition - depth],
+      [width, 0, slicePosition - depth],
+      [width, height, slicePosition - depth],
+      [0, height, slicePosition - depth],
+    ]
+
+    box.forEach((point) => {
+      point[0] -= width / 2
+      point[1] -= height / 2
+    })
+
+    const annotation = new BoxAnnotation({
+      position: [0, 0, slicePosition],
+      value: box as Box,
+    })
+
+    annotation.on("modified", this._thresholdDebounced.bind(this))
+
+    annotationsState.add(annotation)
+
+    this._annotationId = annotation.id
+  }
+
+  private _disableBoxAnnotation(): void {
+    if (this._annotationId) {
+      const annotation = annotationsState.find(
+        (a) => a.id === this._annotationId,
+      )
+
+      if (annotation) {
+        annotation.visible = false
+        annotation.deselect()
+        annotation.off("modified", this._thresholdDebounced.bind(this))
+      }
+    }
+  }
+
+  public get clippingMode(): ThresholdClipMode {
+    return this.properties.clippingMode.value
+  }
+
+  public get clippingStructure(): ContourSequenceEntity | null {
+    return this.properties.structure.value
+  }
+
+  public renderPass(layer: Layer): void {
+    const contourSequence = this.contourSequence
+
+    const { imageSeries } = selectedEntities
+
+    if (!contourSequence || !imageSeries) return
+
+    for (const viewport of sceneState.viewports.values()) {
+      this._renderStructureClip(layer, viewport)
+
+      const slicePosition = imageSeries.getSlicePosition(viewport.id)
+
+      if (slicePosition === undefined) continue
+
+      const contour = contourSequence.getContourAtSlice(
+        viewport.slicingMode,
+        slicePosition,
+      )
+
+      if (!contour) continue
+
+      const group = contour.toKonvaPathsGroup(
+        viewport.id,
+        contourSequence.properties.color.value,
+      )
+
+      if (!group) continue
+
+      layer.add(group)
+    }
+  }
+
+  private _renderStructureClip(layer: Layer, viewport: ViewportState): void {
+    const { imageSeries } = selectedEntities
+
+    if (
+      this.clippingMode !== ThresholdClipMode.STRUCTURE ||
+      !this.clippingStructure ||
+      !imageSeries
+    )
+      return
+
+    if (!viewport) return
+
+    const screenArea = getViewportScreenArea(
+      viewport.id,
+      sceneState.clientWidth,
+      sceneState.clientHeight,
+    )
+
+    if (!screenArea) return
+
+    const { width, height, x, y } = screenArea
+
+    const rectanglePoints = [
+      { x: x, y: y },
+      { x: x + width, y: y },
+      { x: x + width, y: y + height },
+      { x: x, y: y + height },
+    ]
+
+    const rectanglePath = rectanglePoints.reduce(
+      (acc, point) => `${acc} ${point.x},${point.y}`,
+      "M",
+    )
+
+    const path = new Konva.Path({
+      data: rectanglePath,
+      fill: "#000000",
+      opacity: 0.4,
+      listening: false,
+      hitGraphEnabled: false,
+    })
+
+    const slicePosition = imageSeries.getSlicePosition(viewport.id)
+
+    if (slicePosition === undefined) return undefined
+
+    const data = this.clippingStructure.getContourAtSlice(
+      viewport.slicingMode,
+      slicePosition,
+    )
+
+    if (!data || data.numberOfPolygons === 0) {
+      layer.add(path)
+      return
+    }
+
+    const displayPoints = data.toDisplayPoints(viewport.id)
+
+    if (!displayPoints.length) {
+      layer.add(path)
+      return
+    }
+
+    const points = displayPoints.map((polygon) =>
+      polygon.map((ring) =>
+        ring.map((point) => ({ x: point[0], y: point[1] })),
+      ),
+    )
+
+    let polyTree: PolyTree | undefined
+
+    try {
+      polyTree = ClipperLib!.clipToPolyTree({
+        clipType: ClipType.Difference,
+        subjectInputs: [{ data: rectanglePoints, closed: true }],
+        clipInputs: points
+          .map((polygon) => polygon.map((ring) => ({ data: ring })))
+          .flat(),
+        subjectFillType: PolyFillType.EvenOdd,
+      })
+    } catch (error) {
+      //
+    }
+
+    if (!polyTree) {
+      layer.add(path)
+      return
+    }
+
+    const paths = ClipperLib!.polyTreeToPaths(polyTree)
+
+    const polygonsPaths = paths.map((points) =>
+      points.reduce((acc, point) => {
+        const p1 = point.x
+        const p2 = point.y
+        if (acc === undefined) return `M${p1},${p2} `
+
+        acc = `${acc} L${p1},${p2} `
+
+        if (point === points[points.length - 1]) {
+          acc = `${acc} Z`
+        }
+
+        return acc
+      }, undefined as string | undefined),
+    )
+
+    path.setAttr(
+      "data",
+      polygonsPaths.reduce((acc, path) => `${acc} ${path}`, ""),
+    )
+
+    layer.add(path)
+
+    const contour = this.clippingStructure.getContourAtSlice(
+      viewport.slicingMode,
+      slicePosition,
+    )
+
+    if (!contour) return
+
+    const group = contour.toKonvaPathsGroup(
+      viewport.id,
+      this.clippingStructure.properties.color.value,
+    )
+
+    if (!group) return
+
+    group.clip(screenArea)
+
+    group.children?.forEach((child) => {
+      child.setAttrs({
+        stroke: theme.colors.status.warning,
+        fillEnabled: false,
+        dashEnabled: true,
+        dash: [10, 5],
+        strokeWidth: 3,
+        opacity: 1,
+      })
+    })
+
+    layer.add(group)
+  }
+}
