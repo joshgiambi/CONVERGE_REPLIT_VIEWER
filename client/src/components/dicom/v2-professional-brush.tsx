@@ -248,6 +248,9 @@ export function V2ProfessionalBrush({
     return combinedPoints;
   };
 
+  // Track current drawing stroke
+  const [currentStrokePoints, setCurrentStrokePoints] = useState<Point[]>([]);
+
   // Simple brush drawing like a normal drawing application
   const performBrushStroke = (canvasPoint: Point) => {
     if (!selectedStructure || !rtStructures) return;
@@ -255,9 +258,13 @@ export function V2ProfessionalBrush({
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
     if (!worldPoint) return;
 
+    // Add to current stroke
+    const newStrokePoints = [...currentStrokePoints, worldPoint];
+    setCurrentStrokePoints(newStrokePoints);
+
     // Create a simple brush circle at the current position
     const brushRadius = getWorldBrushSize() / 2;
-    const brushCircle = createCirclePolygon(worldPoint, brushRadius, 16);
+    const brushCircle = createCirclePolygon(worldPoint, brushRadius, 8);
     
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
@@ -274,13 +281,11 @@ export function V2ProfessionalBrush({
       
       if (newPoints.length >= 9) {
         if (existingContour) {
-          // Append new points to existing contour (simple drawing)
-          const existingPoints = existingContour.points;
-          const combinedPoints = [...existingPoints, ...newPoints];
-          existingContour.points = combinedPoints;
-          existingContour.numberOfPoints = combinedPoints.length / 3;
+          // Simply append the new brush stroke points
+          existingContour.points.push(...newPoints);
+          existingContour.numberOfPoints = existingContour.points.length / 3;
         } else {
-          // Create new contour
+          // Create new contour with the stroke points
           structure.contours.push({
             slicePosition: currentSlicePosition,
             points: newPoints,
@@ -289,7 +294,7 @@ export function V2ProfessionalBrush({
         }
       }
     } else {
-      // For subtractive, just remove the whole contour for now
+      // For subtractive, remove the contour for now
       structure.contours = structure.contours.filter((contour: any) => 
         Math.abs(contour.slicePosition - currentSlicePosition) > tolerance
       );
@@ -317,9 +322,11 @@ export function V2ProfessionalBrush({
     
     setIsDrawing(true);
     setOperationLocked(true);
-    setCurrentStroke([{ x, y }]);
     setLastPosition({ x, y });
     updateBrushOperation(x, y);
+    
+    // Start drawing immediately at mouse down position
+    performBrushStroke({ x, y });
   };
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -343,9 +350,8 @@ export function V2ProfessionalBrush({
     }
     
     if (isDrawing) {
-      const newStroke = [...currentStroke, { x, y }];
-      setCurrentStroke(newStroke);
-      performContinuousBrushOperation(newStroke);
+      // Draw brush stroke at current position - like a normal drawing app
+      performBrushStroke({ x, y });
     }
     
     setLastPosition({ x, y });
@@ -363,6 +369,8 @@ export function V2ProfessionalBrush({
     if (isDrawing) {
       setIsDrawing(false);
       setOperationLocked(false);
+      // Clear stroke points for next drawing
+      setCurrentStrokePoints([]);
     }
     
     setCurrentStroke([]);
