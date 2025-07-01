@@ -178,19 +178,54 @@ export function SimpleProfessionalBrush({
     return createCirclePolygon(center, worldRadius, 32);
   };
 
-  // Perform continuous brush operation during mouse movement (like Limbus V2)
-  const performContinuousBrushOperation = (strokePoints: Point[]) => {
-    if (!selectedStructure || !rtStructures || strokePoints.length < 1) return;
+  // Create buffered stroke path from line segment (simulating ClipperLib.offsetToPolyTree)
+  const createBufferedStrokePath = (startWorld: Point, endWorld: Point): Point[] => {
+    const brushRadius = getWorldBrushSize() / 2;
+    
+    // Calculate line direction and perpendicular
+    const dx = endWorld.x - startWorld.x;
+    const dy = endWorld.y - startWorld.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length < 0.001) {
+      // For stationary points, return a circle
+      return createCirclePolygon(endWorld, brushRadius, 32);
+    }
+    
+    // Normalized perpendicular vector
+    const perpX = (-dy / length) * brushRadius;
+    const perpY = (dx / length) * brushRadius;
+    
+    // Create the four corners of the buffered rectangle
+    const p1 = { x: startWorld.x + perpX, y: startWorld.y + perpY };
+    const p2 = { x: startWorld.x - perpX, y: startWorld.y - perpY };
+    const p3 = { x: endWorld.x - perpX, y: endWorld.y - perpY };
+    const p4 = { x: endWorld.x + perpX, y: endWorld.y + perpY };
+    
+    // Add circular end caps
+    const startCap = createCirclePolygon(startWorld, brushRadius, 16);
+    const endCap = createCirclePolygon(endWorld, brushRadius, 16);
+    
+    // Combine into a complete stroke path
+    return [...startCap, p1, p4, ...endCap, p3, p2];
+  };
 
-    // Get the last point to create a brush circle there
-    const lastCanvasPoint = strokePoints[strokePoints.length - 1];
+  // Perform continuous brush operation during mouse movement (exactly like Limbus V2)
+  const performContinuousBrushOperation = (strokePoints: Point[]) => {
+    if (!selectedStructure || !rtStructures || strokePoints.length < 2) return;
+
+    // Get last two points to create stroke segment (like Limbus V2)
+    const currentCanvasPoint = strokePoints[strokePoints.length - 1];
+    const lastCanvasPoint = strokePoints[strokePoints.length - 2];
+    
+    const currentWorldPoint = canvasToWorld(currentCanvasPoint.x, currentCanvasPoint.y);
     const lastWorldPoint = canvasToWorld(lastCanvasPoint.x, lastCanvasPoint.y);
     
-    if (!lastWorldPoint) return;
+    if (!currentWorldPoint || !lastWorldPoint) return;
 
-    // Create brush circle at current position
-    const brushCircle = createBrushCircle(lastWorldPoint);
-    if (brushCircle.length === 0) return;
+    // Create buffered stroke path between last two points
+    const strokePath = createBufferedStrokePath(lastWorldPoint, currentWorldPoint);
+    if (strokePath.length === 0) return;
 
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
@@ -203,23 +238,24 @@ export function SimpleProfessionalBrush({
     );
 
     if (operation === BrushOperation.ADDITIVE) {
-      const brushPoints = polygonToDicomPoints(brushCircle, currentSlicePosition);
+      const strokePoints = polygonToDicomPoints(strokePath, currentSlicePosition);
       
-      if (brushPoints.length >= 9) {
+      if (strokePoints.length >= 9) {
         if (existingContour) {
-          // Add to existing contour
-          existingContour.points.push(...brushPoints);
+          // Merge with existing contour (simplified union)
+          existingContour.points.push(...strokePoints);
           existingContour.numberOfPoints = existingContour.points.length / 3;
         } else {
           // Create new contour
           structure.contours.push({
             slicePosition: currentSlicePosition,
-            points: brushPoints,
-            numberOfPoints: brushPoints.length / 3
+            points: strokePoints,
+            numberOfPoints: strokePoints.length / 3
           });
         }
       }
     }
+    // Note: subtractive operation would require proper ClipperLib boolean operations
 
     onContourUpdate(updatedRTStructures);
   };
@@ -267,21 +303,22 @@ export function SimpleProfessionalBrush({
     if (mousePosition) {
       const isAdditive = operation === BrushOperation.ADDITIVE;
       const brushColor = isAdditive ? '#00ff00' : '#ff0000'; // Green/Red medical standard
-      const opacity = isResizing ? 0.8 : 0.6;
+      const fillColor = isAdditive ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.3)';
 
-      // Draw brush circle outline
+      // Draw brush circle with opaque fill
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = fillColor;
       ctx.strokeStyle = brushColor;
-      ctx.globalAlpha = opacity;
       ctx.lineWidth = 2;
       ctx.setLineDash([]);
       
       ctx.beginPath();
       ctx.arc(mousePosition.x, mousePosition.y, brushSize / 2, 0, 2 * Math.PI);
-      ctx.stroke();
+      ctx.fill(); // Fill the circle completely
+      ctx.stroke(); // Draw the outline
 
       // Professional medical cursor indicators
-      ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 2;
       ctx.strokeStyle = brushColor;
       
       const crossSize = Math.min(brushSize / 6, 10);
@@ -304,8 +341,10 @@ export function SimpleProfessionalBrush({
 
       // Resize indicator
       if (isResizing) {
-        ctx.globalAlpha = 0.4;
-        ctx.setLineDash([3, 3]);
+        ctx.globalAlpha = 0.7;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(mousePosition.x, mousePosition.y, brushSize / 2 + 8, 0, 2 * Math.PI);
         ctx.stroke();
@@ -378,9 +417,19 @@ export function SimpleProfessionalBrush({
       const newStroke = [...currentStroke, { x, y }];
       setCurrentStroke(newStroke);
       
-      // Perform continuous brush operation on mouse move (like Limbus V2)
+      // Perform brush operation only if mouse moved significantly
       if (newStroke.length >= 2) {
-        performContinuousBrushOperation(newStroke);
+        const lastPoint = newStroke[newStroke.length - 2];
+        const currentPoint = newStroke[newStroke.length - 1];
+        const distance = Math.sqrt(
+          Math.pow(currentPoint.x - lastPoint.x, 2) + 
+          Math.pow(currentPoint.y - lastPoint.y, 2)
+        );
+        
+        // Only perform operation if mouse moved at least 2 pixels
+        if (distance >= 2) {
+          performContinuousBrushOperation(newStroke);
+        }
       }
       
       setLastPosition({ x, y });
