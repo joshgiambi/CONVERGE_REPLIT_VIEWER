@@ -53,11 +53,11 @@ export class StructureSetEntityV2 {
     
     if (removed) {
       // Clean up cache entries for this structure
-      for (const [key, _] of this.contourCache) {
+      Array.from(this.contourCache.keys()).forEach(key => {
         if (key.startsWith(`${structureId}-`)) {
           this.contourCache.delete(key);
         }
-      }
+      });
       this.updateModifiedTime();
     }
     
@@ -125,14 +125,14 @@ export class StructureSetEntityV2 {
 
     const contours: ContourV2[] = [];
     
-    for (const [slicePosition, contourData] of structure.contours) {
+    Array.from(structure.contours.entries()).forEach(([slicePosition, contourData]) => {
       const contour = ContourV2.fromSerializable(contourData);
       contours.push(contour);
       
       // Cache the contour
       const cacheKey = contour.getId();
       this.contourCache.set(cacheKey, contour);
-    }
+    });
 
     return contours;
   }
@@ -193,11 +193,11 @@ export class StructureSetEntityV2 {
     structure.contours.clear();
     
     // Clean up cache
-    for (const [key, _] of this.contourCache) {
+    Array.from(this.contourCache.keys()).forEach(key => {
       if (key.startsWith(`${structureId}-`)) {
         this.contourCache.delete(key);
       }
-    }
+    });
     
     this.updateModifiedTime();
     structure.metadata.modifiedTime = Date.now();
@@ -253,12 +253,12 @@ export class StructureSetEntityV2 {
 
   // Commit all pending changes
   commitAll(): void {
-    for (const contour of this.contourCache.values()) {
+    Array.from(this.contourCache.values()).forEach(contour => {
       if (contour.needsUpdate) {
         contour.commit();
         this.updateContour(contour);
       }
-    }
+    });
     
     this.metadata.commitTime = Date.now();
   }
@@ -266,11 +266,11 @@ export class StructureSetEntityV2 {
   // Get uncommitted changes count
   getUncommittedChangesCount(): number {
     let count = 0;
-    for (const contour of this.contourCache.values()) {
+    Array.from(this.contourCache.values()).forEach(contour => {
       if (contour.needsUpdate) {
         count++;
       }
-    }
+    });
     return count;
   }
 
