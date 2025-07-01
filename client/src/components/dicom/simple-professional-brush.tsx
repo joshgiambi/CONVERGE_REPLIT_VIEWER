@@ -1,20 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { pointInPolygon, createCirclePolygon, polygonToDicomPoints, dicomPointsToPolygon, Point } from '@/lib/polygon-utils';
 
-// Import ClipperLib API correctly based on documentation
-import { 
-  ClipType, 
-  JoinType, 
-  EndType, 
-  PolyFillType, 
-  PointInPolygonResult,
-  Path,
-  Paths,
-  ClipperLibWrapper,
-  loadNativeClipperLibInstanceAsync,
-  NativeClipperLibRequestedFormat
-} from 'js-angusj-clipper/web';
-
-// Medical imaging scaling factor for precision (matches Limbus V2)
+// Medical imaging scaling factor for precision
 const SCALING_FACTOR = 1000;
 
 export enum BrushOperation {
@@ -22,12 +9,7 @@ export enum BrushOperation {
   SUBTRACTIVE = 'SUBTRACTIVE',
 }
 
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface ProfessionalClipperBrushProps {
+interface SimpleProfessionalBrushProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   isActive: boolean;
   brushSize: number;
@@ -43,7 +25,7 @@ interface ProfessionalClipperBrushProps {
   imageMetadata: any;
 }
 
-export function ProfessionalClipperBrush({
+export function SimpleProfessionalBrush({
   canvasRef,
   isActive,
   brushSize,
@@ -57,7 +39,7 @@ export function ProfessionalClipperBrush({
   panY,
   currentImage,
   imageMetadata
-}: ProfessionalClipperBrushProps) {
+}: SimpleProfessionalBrushProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [operation, setOperation] = useState<BrushOperation>(BrushOperation.ADDITIVE);
@@ -67,47 +49,8 @@ export function ProfessionalClipperBrush({
   const [lastPosition, setLastPosition] = useState<Point | null>(null);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [ctrlPressed, setCtrlPressed] = useState(false);
-  const [fillMode, setFillMode] = useState(true);
-  const [clipperLib, setClipperLib] = useState<ClipperLibWrapper | null>(null);
 
-  // Initialize ClipperLib with async loading (required pattern)
-  useEffect(() => {
-    let mounted = true;
-    
-    const initClipperLib = async () => {
-      try {
-        const lib = await loadNativeClipperLibInstanceAsync(NativeClipperLibRequestedFormat.WasmWithAsmJsFallback);
-        if (mounted) {
-          setClipperLib(lib);
-          console.log('Professional ClipperLib loaded successfully');
-        }
-      } catch (error) {
-        console.error('Failed to load ClipperLib:', error);
-      }
-    };
-
-    initClipperLib();
-    
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Create brush circle (32-point professional standard)
-  const makeBrushCircle = (center: Point, radius: number, steps = 32): Point[] => {
-    const points: Point[] = [];
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      points.push({
-        x: Math.round(center.x + Math.cos(angle) * radius),
-        y: Math.round(center.y + Math.sin(angle) * radius),
-      });
-    }
-    points.push(points[0]); // Close the ring
-    return points;
-  };
-
-  // Convert world coordinates to scaled integer coordinates (Limbus V2 approach)
+  // Convert world coordinates to scaled integer coordinates
   const worldToScaled = (worldX: number, worldY: number): Point => ({
     x: Math.round(worldX * SCALING_FACTOR),
     y: Math.round(worldY * SCALING_FACTOR),
@@ -118,23 +61,6 @@ export function ProfessionalClipperBrush({
     x: scaledX / SCALING_FACTOR,
     y: scaledY / SCALING_FACTOR,
   });
-
-  // Generate 32-point circle for brush outline (professional medical standard)
-  const getBrushPoints = (centerX: number, centerY: number): Point[] => {
-    const points: Point[] = [];
-    const steps = 32; // Professional medical imaging standard
-    const radius = brushSize / 2;
-
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      points.push({
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
-      });
-    }
-    
-    return points;
-  };
 
   // Convert canvas coordinates to DICOM world coordinates
   const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
@@ -171,7 +97,7 @@ export function ProfessionalClipperBrush({
     return null;
   };
 
-  // Get current contour as scaled polygon paths (Limbus V2 format)
+  // Get current contour as polygons
   const getCurrentContourPolygons = (): Point[][] => {
     if (!selectedStructure || !rtStructures) return [];
 
@@ -183,21 +109,9 @@ export function ProfessionalClipperBrush({
 
     for (const contour of structure.contours) {
       if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance && contour.numberOfPoints > 0) {
-        const path: Point[] = [];
-        
-        // Convert DICOM contour points to scaled polygon
-        for (let i = 0; i < contour.points.length; i += 3) {
-          const worldX = contour.points[i];
-          const worldY = contour.points[i + 1];
-          path.push(worldToScaled(worldX, worldY));
-        }
-        
-        if (path.length > 2) {
-          // Ensure polygon is closed
-          if (path[0].x !== path[path.length - 1].x || path[0].y !== path[path.length - 1].y) {
-            path.push(path[0]);
-          }
-          polygons.push(path);
+        const polygon = dicomPointsToPolygon(contour.points);
+        if (polygon.length > 2) {
+          polygons.push(polygon);
         }
       }
     }
@@ -205,31 +119,21 @@ export function ProfessionalClipperBrush({
     return polygons;
   };
 
-  // Professional point-in-polygon test using ClipperLib
+  // Professional point-in-polygon test
   const isInsideContour = (canvasX: number, canvasY: number): boolean => {
-    if (!clipperLib) return false;
-    
     const worldCoords = canvasToWorld(canvasX, canvasY);
     if (!worldCoords) return false;
 
     const polygons = getCurrentContourPolygons();
     if (polygons.length === 0) return false;
 
-    const testPoint = worldToScaled(worldCoords.x, worldCoords.y);
-    
     let insideCount = 0;
     for (const polygon of polygons) {
-      try {
-        const result = clipperLib.pointInPolygon(testPoint, polygon);
-        if (result === PointInPolygonResult.Inside) {
-          insideCount++;
-        }
-      } catch (error) {
-        console.warn('Point-in-polygon test failed:', error);
+      if (pointInPolygon(worldCoords, polygon)) {
+        insideCount++;
       }
     }
 
-    // Use odd/even rule for complex polygons
     return insideCount % 2 === 1;
   };
 
@@ -247,126 +151,35 @@ export function ProfessionalClipperBrush({
     const inside = isInsideContour(canvasX, canvasY);
     
     if (shiftPressed) {
-      // Shift inverts behavior (Limbus V2 standard)
+      // Shift inverts behavior
       setOperation(inside ? BrushOperation.SUBTRACTIVE : BrushOperation.ADDITIVE);
     } else {
-      // Default behavior: inside = add (fill holes), outside = subtract
+      // Default: inside = add, outside = subtract
       setOperation(inside ? BrushOperation.ADDITIVE : BrushOperation.SUBTRACTIVE);
     }
   };
 
-  // Create brush stroke polygon using professional ClipperLib approach
-  const createBrushStroke = (strokePoints: Point[]): Point[][] => {
-    if (!clipperLib || strokePoints.length < 2) return [];
+  // Create brush stroke as circle polygon
+  const createBrushStroke = (strokePoints: Point[]): Point[] => {
+    if (strokePoints.length === 0) return [];
 
-    try {
-      // Convert stroke to world coordinates and scale
-      const worldStroke: Point[] = [];
-      for (const point of strokePoints) {
-        const worldCoords = canvasToWorld(point.x, point.y);
-        if (worldCoords) {
-          worldStroke.push(worldToScaled(worldCoords.x, worldCoords.y));
-        }
-      }
+    // Get center point of stroke
+    const centerCanvas = strokePoints[Math.floor(strokePoints.length / 2)];
+    const centerWorld = canvasToWorld(centerCanvas.x, centerCanvas.y);
+    if (!centerWorld) return [];
 
-      if (worldStroke.length < 2) return [];
-
-      // Create brush circle at each stroke point and union them
-      const brushRadius = Math.round((brushSize / 2) * SCALING_FACTOR);
-      const brushPolygons: Point[][] = [];
-
-      // For performance, sample stroke points
-      const step = Math.max(1, Math.floor(worldStroke.length / 10));
-      for (let i = 0; i < worldStroke.length; i += step) {
-        const brushCircle = makeBrushCircle(worldStroke[i], brushRadius);
-        brushPolygons.push(brushCircle);
-      }
-
-      // Union all brush circles into one stroke polygon
-      if (brushPolygons.length === 1) {
-        return brushPolygons;
-      }
-
-      // Union multiple brush circles using correct API
-      const polyTree = clipperLib.clipToPolyTree({
-        clipType: ClipType.Union,
-        subjectInputs: brushPolygons.slice(0, -1).map((ring: Point[]) => ({ data: ring, closed: true })),
-        clipInputs: brushPolygons.slice(-1).map((ring: Point[]) => ({ data: ring, closed: true })),
-        subjectFillType: PolyFillType.NonZero,
-      });
-
-      return clipperLib.polyTreeToPaths(polyTree);
-
-    } catch (error) {
-      console.error('Brush stroke creation failed:', error);
-      return [];
-    }
+    // Create brush circle in world coordinates
+    const brushRadius = brushSize / 2;
+    return createCirclePolygon(centerWorld, brushRadius);
   };
 
-  // Apply boolean operations to update contours (Limbus V2 approach)
-  const updateRTStructureWithPolygons = () => {
-    if (!clipperLib || !selectedStructure || !rtStructures || currentStroke.length < 2) return;
+  // Simple brush operation - add or remove points
+  const updateRTStructureWithSimpleBrush = () => {
+    if (!selectedStructure || !rtStructures || currentStroke.length < 2) return;
 
     const brushStroke = createBrushStroke(currentStroke);
     if (brushStroke.length === 0) return;
 
-    const currentPolygons = getCurrentContourPolygons();
-    
-    try {
-      let resultPolygons: Point[][];
-
-      if (operation === BrushOperation.ADDITIVE) {
-        // Union operation for additive mode
-        if (currentPolygons.length === 0) {
-          resultPolygons = brushStroke;
-        } else {
-          const polyTree = clipperLib.clipToPolyTree({
-            clipType: ClipType.Union,
-            subjectInputs: currentPolygons.map((polygon: Point[]) => ({ data: polygon, closed: true })),
-            clipInputs: brushStroke.map((polygon: Point[]) => ({ data: polygon, closed: true })),
-            subjectFillType: PolyFillType.NonZero,
-          });
-          resultPolygons = clipperLib.polyTreeToPaths(polyTree);
-        }
-      } else {
-        // Difference operation for subtractive mode
-        if (currentPolygons.length === 0) return; // Nothing to subtract from
-        
-        const polyTree = clipperLib.clipToPolyTree({
-          clipType: ClipType.Difference,
-          subjectInputs: currentPolygons.map((polygon: Point[]) => ({ data: polygon, closed: true })),
-          clipInputs: brushStroke.map((polygon: Point[]) => ({ data: polygon, closed: true })),
-          subjectFillType: PolyFillType.NonZero,
-        });
-        resultPolygons = clipperLib.polyTreeToPaths(polyTree);
-      }
-
-      // Clean and simplify polygons (professional quality)
-      resultPolygons = clipperLib.cleanPolygons(resultPolygons, 2);
-      resultPolygons = clipperLib.simplifyPolygons(resultPolygons, PolyFillType.NonZero);
-
-      // Handle fill mode for additive operations
-      if (fillMode && operation === BrushOperation.ADDITIVE) {
-        // Keep only exterior rings (remove holes)
-        resultPolygons = resultPolygons.filter((_: Point[], index: number) => index % 2 === 0);
-      }
-
-      // Update RT structure data
-      updateRTStructureData(resultPolygons);
-      
-      console.log('Professional ClipperLib polygon operation completed:', { 
-        operation, 
-        inputPolygons: currentPolygons.length, 
-        resultPolygons: resultPolygons.length 
-      });
-
-    } catch (error) {
-      console.error('ClipperLib polygon operation failed:', error);
-    }
-  };
-
-  // Update RT structure data with new polygons
-  const updateRTStructureData = (polygons: Point[][]) => {
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     
@@ -378,31 +191,30 @@ export function ProfessionalClipperBrush({
       Math.abs(contour.slicePosition - currentSlicePosition) > tolerance
     );
 
-    // Add new contours from polygons
-    for (const polygon of polygons) {
-      if (polygon.length > 2) {
-        const points: number[] = [];
-        
-        // Convert scaled polygon back to DICOM coordinates
-        for (const point of polygon) {
-          const worldCoords = scaledToWorld(point.x, point.y);
-          points.push(worldCoords.x, worldCoords.y, currentSlicePosition);
-        }
-        
-        if (points.length >= 9) { // At least 3 points
-          structure.contours.push({
-            slicePosition: currentSlicePosition,
-            points: points,
-            numberOfPoints: points.length / 3
-          });
-        }
+    if (operation === BrushOperation.ADDITIVE) {
+      // Add new brush stroke contour
+      const points = polygonToDicomPoints(brushStroke, currentSlicePosition);
+      
+      if (points.length >= 9) { // At least 3 points
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: points,
+          numberOfPoints: points.length / 3
+        });
       }
     }
+    // For subtractive, we just remove existing contours (simplified approach)
 
     onContourUpdate(updatedRTStructures);
+    
+    console.log('Simple professional brush operation completed:', { 
+      operation, 
+      strokeLength: currentStroke.length,
+      brushStrokePoints: brushStroke.length 
+    });
   };
 
-  // Create cursor overlay canvas
+  // Professional cursor rendering
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -427,7 +239,7 @@ export function ProfessionalClipperBrush({
     };
   }, [isActive, selectedStructure]);
 
-  // Professional cursor rendering with medical imaging standards
+  // Render cursor overlay
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -445,20 +257,14 @@ export function ProfessionalClipperBrush({
       const brushColor = isAdditive ? '#00ff00' : '#ff0000'; // Green/Red medical standard
       const opacity = isResizing ? 0.8 : 0.6;
 
-      // Draw 32-point brush circle outline (medical standard)
-      const brushPoints = getBrushPoints(mousePosition.x, mousePosition.y);
-      
+      // Draw brush circle outline
       ctx.strokeStyle = brushColor;
       ctx.globalAlpha = opacity;
       ctx.lineWidth = 2;
       ctx.setLineDash([]);
       
       ctx.beginPath();
-      ctx.moveTo(brushPoints[0].x, brushPoints[0].y);
-      for (let i = 1; i < brushPoints.length; i++) {
-        ctx.lineTo(brushPoints[i].x, brushPoints[i].y);
-      }
-      ctx.closePath();
+      ctx.arc(mousePosition.x, mousePosition.y, brushSize / 2, 0, 2 * Math.PI);
       ctx.stroke();
 
       // Professional medical cursor indicators
@@ -469,7 +275,7 @@ export function ProfessionalClipperBrush({
       const crossSize = Math.min(brushSize / 6, 10);
       
       if (isAdditive) {
-        // Full crosshair for additive (Limbus V2 standard)
+        // Full crosshair for additive
         ctx.beginPath();
         ctx.moveTo(mousePosition.x - crossSize, mousePosition.y);
         ctx.lineTo(mousePosition.x + crossSize, mousePosition.y);
@@ -477,14 +283,14 @@ export function ProfessionalClipperBrush({
         ctx.lineTo(mousePosition.x, mousePosition.y + crossSize);
         ctx.stroke();
       } else {
-        // Horizontal line for subtractive (Limbus V2 standard)
+        // Horizontal line for subtractive
         ctx.beginPath();
         ctx.moveTo(mousePosition.x - crossSize, mousePosition.y);
         ctx.lineTo(mousePosition.x + crossSize, mousePosition.y);
         ctx.stroke();
       }
 
-      // Resize indicator during pointer lock
+      // Resize indicator
       if (isResizing) {
         ctx.globalAlpha = 0.4;
         ctx.setLineDash([3, 3]);
@@ -498,9 +304,9 @@ export function ProfessionalClipperBrush({
     }
   }, [isActive, mousePosition, operation, brushSize, isResizing]);
 
-  // Mouse event handlers with professional medical standards
+  // Mouse event handlers
   const handleMouseDown = (e: MouseEvent) => {
-    if (!isActive || !selectedStructure || !clipperLib) return;
+    if (!isActive || !selectedStructure) return;
     
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -509,24 +315,20 @@ export function ProfessionalClipperBrush({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    if (e.button === 2) { // Right click - professional brush sizing
+    if (e.button === 2) { // Right click - resizing
       setIsResizing(true);
       setLastPosition({ x, y });
-      
-      // Request pointer lock for smooth professional experience
       canvasRef.current?.requestPointerLock();
-      
-      console.log('Professional ClipperLib brush resizing started');
       return;
     }
     
-    if (e.button === 0) { // Left click - polygon drawing
+    if (e.button === 0) { // Left click - drawing
       setIsDrawing(true);
       setOperationLocked(true);
       updateBrushOperation(x, y);
       setCurrentStroke([{ x, y }]);
       setLastPosition({ x, y });
-      console.log('Professional ClipperLib brush drawing started:', { operation });
+      console.log('Simple professional brush drawing started:', { operation });
     }
   };
 
@@ -547,10 +349,9 @@ export function ProfessionalClipperBrush({
       e.preventDefault();
       e.stopImmediatePropagation();
       
-      // Professional smooth resizing with movement deltas
       const deltaX = e.movementX || 0;
       const deltaY = e.movementY || 0;
-      const delta = (deltaX - deltaY) * 0.4; // Professional sensitivity
+      const delta = (deltaX - deltaY) * 0.4;
       
       const newSize = Math.max(1, Math.min(100, brushSize + delta));
       onBrushSizeChange(newSize);
@@ -576,17 +377,15 @@ export function ProfessionalClipperBrush({
       setIsResizing(false);
       setLastPosition(null);
       document.exitPointerLock();
-      console.log('Professional ClipperLib brush resize complete');
       return;
     }
     
-    if (isDrawing && rtStructures && clipperLib) {
-      console.log('Professional ClipperLib brush stroke completing:', { operation, strokeLength: currentStroke.length });
+    if (isDrawing && rtStructures) {
       setIsDrawing(false);
       setOperationLocked(false);
       
       if (currentStroke.length > 1) {
-        updateRTStructureWithPolygons();
+        updateRTStructureWithSimpleBrush();
       }
       
       setCurrentStroke([]);
@@ -604,7 +403,6 @@ export function ProfessionalClipperBrush({
     }
     if (e.key === 'Control' || e.key === 'Meta') {
       setCtrlPressed(true);
-      setFillMode(false); // Disable fill mode with Ctrl (Limbus V2 standard)
     }
   };
 
@@ -614,12 +412,11 @@ export function ProfessionalClipperBrush({
     }
     if (e.key === 'Control' || e.key === 'Meta') {
       setCtrlPressed(false);
-      setFillMode(true);
     }
   };
 
   const handleWheel = (e: WheelEvent) => {
-    if (!ctrlPressed) return; // Ctrl+Wheel for brush sizing (Limbus V2 standard)
+    if (!ctrlPressed) return;
     
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -631,7 +428,7 @@ export function ProfessionalClipperBrush({
 
   // Event listener setup
   useEffect(() => {
-    if (!isActive || !canvasRef.current || !clipperLib) return;
+    if (!isActive || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     
@@ -642,7 +439,7 @@ export function ProfessionalClipperBrush({
     canvas.addEventListener('contextmenu', handleContextMenu, { capture: true });
     canvas.addEventListener('wheel', handleWheel, { capture: true });
     
-    console.log('Professional ClipperLib polygon brush tool activated');
+    console.log('Simple professional brush tool activated');
     
     return () => {
       canvas.removeEventListener('mousedown', handleMouseDown, { capture: true });
@@ -651,9 +448,9 @@ export function ProfessionalClipperBrush({
       canvas.removeEventListener('mouseleave', handleMouseUp, { capture: true });
       canvas.removeEventListener('contextmenu', handleContextMenu, { capture: true });
       canvas.removeEventListener('wheel', handleWheel, { capture: true });
-      console.log('Professional ClipperLib polygon brush tool deactivated');
+      console.log('Simple professional brush tool deactivated');
     };
-  }, [isActive, isDrawing, isResizing, operation, selectedStructure, currentStroke, brushSize, shiftPressed, ctrlPressed, clipperLib]);
+  }, [isActive, isDrawing, isResizing, operation, selectedStructure, currentStroke, brushSize, shiftPressed, ctrlPressed]);
 
   // Keyboard event setup
   useEffect(() => {
