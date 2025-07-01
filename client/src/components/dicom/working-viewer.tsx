@@ -76,7 +76,7 @@ export function WorkingViewer({
     }
   };
   const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
-  const [isPreloading, setIsPreloading] = useState(isPreloading);
+  const [isPreloading, setIsPreloading] = useState(false);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
