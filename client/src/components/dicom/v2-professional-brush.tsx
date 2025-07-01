@@ -248,22 +248,17 @@ export function V2ProfessionalBrush({
     return combinedPoints;
   };
 
-  // Perform V2 professional brush operation with medical precision
-  const performContinuousBrushOperation = (strokePoints: Point[]) => {
-    if (!selectedStructure || !rtStructures || strokePoints.length < 2) return;
+  // Simple brush drawing like a normal drawing application
+  const performBrushStroke = (canvasPoint: Point) => {
+    if (!selectedStructure || !rtStructures) return;
 
-    const currentCanvasPoint = strokePoints[strokePoints.length - 1];
-    const lastCanvasPoint = strokePoints[strokePoints.length - 2];
+    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
+    if (!worldPoint) return;
+
+    // Create a simple brush circle at the current position
+    const brushRadius = getWorldBrushSize() / 2;
+    const brushCircle = createCirclePolygon(worldPoint, brushRadius, 16);
     
-    const currentWorldPoint = canvasToWorld(currentCanvasPoint.x, currentCanvasPoint.y);
-    const lastWorldPoint = canvasToWorld(lastCanvasPoint.x, lastCanvasPoint.y);
-    
-    if (!currentWorldPoint || !lastWorldPoint) return;
-
-    // Create professional stroke path with medical precision
-    const strokePath = createBrushStrokePath(lastWorldPoint, currentWorldPoint);
-    if (strokePath.length === 0) return;
-
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     
@@ -275,24 +270,26 @@ export function V2ProfessionalBrush({
     );
 
     if (operation === BrushOperation.ADDITIVE) {
-      const strokePoints = polygonToDicomPoints(strokePath, currentSlicePosition);
+      const newPoints = polygonToDicomPoints(brushCircle, currentSlicePosition);
       
-      if (strokePoints.length >= 9) {
+      if (newPoints.length >= 9) {
         if (existingContour) {
-          // In V2, this would use ClipperLib union operation
-          existingContour.points = strokePoints;
-          existingContour.numberOfPoints = strokePoints.length / 3;
+          // Append new points to existing contour (simple drawing)
+          const existingPoints = existingContour.points;
+          const combinedPoints = [...existingPoints, ...newPoints];
+          existingContour.points = combinedPoints;
+          existingContour.numberOfPoints = combinedPoints.length / 3;
         } else {
-          // Create new medical-grade contour
+          // Create new contour
           structure.contours.push({
             slicePosition: currentSlicePosition,
-            points: strokePoints,
-            numberOfPoints: strokePoints.length / 3
+            points: newPoints,
+            numberOfPoints: newPoints.length / 3
           });
         }
       }
     } else {
-      // V2 subtractive operation - would use ClipperLib difference in full implementation
+      // For subtractive, just remove the whole contour for now
       structure.contours = structure.contours.filter((contour: any) => 
         Math.abs(contour.slicePosition - currentSlicePosition) > tolerance
       );
