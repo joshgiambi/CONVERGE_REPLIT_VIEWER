@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ClipperLib, ClipType, JoinType, EndType, PolyFillType } from "js-angusj-clipper/web";
 import clamp from "lodash/clamp";
@@ -67,7 +66,7 @@ export function SimpleBrushTool({
     if (!isActive || !canvasRef.current) return;
 
     const mainCanvas = canvasRef.current;
-    
+
     if (!cursorCanvasRef.current) {
       const cursorCanvas = document.createElement('canvas');
       cursorCanvas.className = 'brush-cursor';
@@ -79,13 +78,13 @@ export function SimpleBrushTool({
       mainCanvas.parentElement?.appendChild(cursorCanvas);
       cursorCanvasRef.current = cursorCanvas;
     }
-    
+
     const cursorCanvas = cursorCanvasRef.current;
-    
+
     // Get the computed styles to avoid flashing issues
     const computedStyle = window.getComputedStyle(mainCanvas);
     const rect = mainCanvas.getBoundingClientRect();
-    
+
     // Set canvas dimensions to match main canvas exactly
     cursorCanvas.width = mainCanvas.width;
     cursorCanvas.height = mainCanvas.height;
@@ -105,12 +104,12 @@ export function SimpleBrushTool({
   // Update cursor canvas positioning when zoom/pan changes
   useEffect(() => {
     if (!cursorCanvasRef.current || !canvasRef.current || !isActive) return;
-    
+
     const mainCanvas = canvasRef.current;
     const cursorCanvas = cursorCanvasRef.current;
     const computedStyle = window.getComputedStyle(mainCanvas);
     const rect = mainCanvas.getBoundingClientRect();
-    
+
     // Update positioning to match main canvas
     cursorCanvas.style.width = computedStyle.width;
     cursorCanvas.style.height = computedStyle.height;
@@ -155,12 +154,12 @@ export function SimpleBrushTool({
         // Build transformation matrix
         const rowCosines = imageOrientation.slice(0, 3);
         const colCosines = imageOrientation.slice(3, 6);
-        
+
         // Apply DICOM transformation
         const worldX = imagePosition[0] + 
                        (pixelX * rowCosines[0] * pixelSpacing[0]) + 
                        (pixelY * colCosines[0] * pixelSpacing[1]);
-        
+
         const worldY = imagePosition[1] + 
                        (pixelX * rowCosines[1] * pixelSpacing[0]) + 
                        (pixelY * colCosines[1] * pixelSpacing[1]);
@@ -189,7 +188,7 @@ export function SimpleBrushTool({
       console.warn('ClipperLib not available, using fallback');
       return existingPoints;
     }
-    
+
     try {
       // Convert existing points to ClipperLib format
       const existingPolygons: Point[][] = [];
@@ -203,7 +202,7 @@ export function SimpleBrushTool({
         }
         existingPolygons.push(polygon);
       }
-      
+
       // Convert brush points to ClipperLib format
       const brushPolygons: Point[][] = [];
       if (brushPoints.length > 0) {
@@ -216,7 +215,7 @@ export function SimpleBrushTool({
         }
         brushPolygons.push(polygon);
       }
-      
+
       // If no existing polygons and additive operation, just return brush polygon
       if (existingPolygons.length === 0 && operation === BrushOperation.ADDITIVE) {
         const resultPoints: number[] = [];
@@ -225,12 +224,12 @@ export function SimpleBrushTool({
         }
         return resultPoints;
       }
-      
+
       // If no existing polygons and subtractive operation, return empty
       if (existingPolygons.length === 0 && operation === BrushOperation.SUBTRACTIVE) {
         return [];
       }
-      
+
       // Perform boolean operation
       const clipType = operation === BrushOperation.ADDITIVE ? ClipType.Union : ClipType.Difference;
       const result = ClipperLib.clipToPolyTree({
@@ -239,11 +238,11 @@ export function SimpleBrushTool({
         clipInputs: brushPolygons.map(polygon => ({ data: polygon, closed: true })),
         subjectFillType: PolyFillType.NonZero,
       });
-      
+
       // Convert result back to DICOM format
       const resultPaths = ClipperLib.polyTreeToPaths(result);
       const resultPoints: number[] = [];
-      
+
       for (const path of resultPaths) {
         for (const point of path) {
           resultPoints.push(
@@ -253,7 +252,7 @@ export function SimpleBrushTool({
           );
         }
       }
-      
+
       return resultPoints;
     } catch (error) {
       console.error('ClipperLib operation failed:', error);
@@ -321,7 +320,7 @@ export function SimpleBrushTool({
   const createBrushPolygon = useCallback((centerPoint: Point, radius: number): Point[] => {
     const points: Point[] = [];
     const numPoints = 32;
-    
+
     for (let i = 0; i < numPoints; i++) {
       const angle = (i / numPoints) * 2 * Math.PI;
       points.push({
@@ -329,7 +328,7 @@ export function SimpleBrushTool({
         y: centerPoint.y + Math.sin(angle) * radius
       });
     }
-    
+
     return points;
   }, []);
 
@@ -394,7 +393,7 @@ export function SimpleBrushTool({
     if (operationLocked) return; // Don't change operation during stroke
 
     const inside = isInsideContour(worldPoint);
-    
+
     if (shiftPressed) {
       setOperation(inside ? BrushOperation.SUBTRACTIVE : BrushOperation.ADDITIVE);
     } else {
@@ -434,7 +433,7 @@ export function SimpleBrushTool({
     try {
       const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
       const structure = getStructure(updatedRTStructures, selectedStructure);
-      
+
       if (!structure) return;
 
       // Initialize contour sequence if needed
@@ -457,7 +456,7 @@ export function SimpleBrushTool({
           brushPolygon = brushPolygon.concat(strokeSegment);
         }
       }
-      
+
       if (existingContour) {
         // Apply professional polygon operation
         const resultPoints = performPolygonOperation(existingContour.contourData, brushPolygon);
@@ -469,7 +468,7 @@ export function SimpleBrushTool({
         for (const point of brushPolygon) {
           contourData.push(point.x, point.y, currentSlicePosition);
         }
-        
+
         structure.contourSequence.push({
           slicePosition: currentSlicePosition,
           contourData: contourData,
@@ -489,7 +488,7 @@ export function SimpleBrushTool({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Shift') setShiftPressed(true);
       if (event.key === 'Control' || event.key === 'Meta') setCtrlPressed(true);
-      
+
       // Brush size adjustment
       if (ctrlPressed && (event.key === '=' || event.key === '+')) {
         event.preventDefault();
@@ -531,13 +530,13 @@ export function SimpleBrushTool({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     };
-    
+
     setMousePosition(canvasPos);
-    
+
     const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
     if (worldPos) {
       updateBrushOperation(worldPos);
-      
+
       if (isDrawing && lastWorldPosition) {
         // Add point to stroke
         setStrokePoints(prev => [...prev, worldPos]);
@@ -548,16 +547,16 @@ export function SimpleBrushTool({
 
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (event.button !== 0) return; // Only left mouse button
-    
+
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     const rect = canvas.getBoundingClientRect();
     const canvasPos = {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     };
-    
+
     const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
     if (worldPos) {
       setIsDrawing(true);
@@ -572,7 +571,7 @@ export function SimpleBrushTool({
       // Apply complete stroke
       applyBrushStroke(strokePoints);
     }
-    
+
     setIsDrawing(false);
     setOperationLocked(false);
     setLastWorldPosition(null);
@@ -582,13 +581,13 @@ export function SimpleBrushTool({
   // Wheel event handler for brush size adjustment
   const handleWheel = useCallback((event: WheelEvent) => {
     if (!isActive || !ctrlPressed) return;
-    
+
     event.preventDefault();
     event.stopPropagation();
-    
+
     const delta = event.deltaY > 0 ? -2 : 2;
     const newSize = clamp(currentBrushSize + delta, 1, 100);
-    
+
     setCurrentBrushSize(newSize);
     if (onBrushSizeChange) {
       onBrushSizeChange(newSize);
@@ -616,7 +615,7 @@ export function SimpleBrushTool({
     };
   }, [isActive, handleMouseMove, handleMouseDown, handleMouseUp, handleWheel]);
 
-  // Professional brush cursor rendering with proper scaling
+  // Render brush cursor on separate canvas (eliminates flashing)
   useEffect(() => {
     if (!cursorCanvasRef.current || !mousePosition || !isActive) return;
 
@@ -625,78 +624,51 @@ export function SimpleBrushTool({
 
     // Clear previous cursor
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
-    
-    const centerX = mousePosition.x;
-    const centerY = mousePosition.y;
-    
-    // Calculate brush radius in canvas pixels - this is the key fix
-    // The brush size should be scaled by zoom to maintain consistent world size
-    const brushRadiusInCanvas = (currentBrushSize * zoom) / 2;
-    
+
+    // Draw brush cursor as solid circle
     ctx.save();
-    
-    // Professional operation color coding
-    const operationColor = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-    const locked = operationLocked && isDrawing;
-    
-    // Professional brush circle with proper scaling
-    ctx.strokeStyle = operationColor;
-    ctx.lineWidth = locked ? 4 : 2;
-    ctx.setLineDash(locked ? [] : [3, 3]);
-    ctx.globalAlpha = locked ? 1.0 : 0.8;
-    
-    // Main brush circle - properly scaled
+
+    // Outer circle (brush outline)
+    ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.8;
+
     ctx.beginPath();
-    ctx.arc(centerX, centerY, Math.max(2, brushRadiusInCanvas), 0, 2 * Math.PI);
+    ctx.arc(mousePosition.x, mousePosition.y, currentBrushSize / 2, 0, 2 * Math.PI);
     ctx.stroke();
-    
-    // Inner precision indicator
-    ctx.setLineDash([]);
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.6;
+
+    // Inner semi-transparent fill to show brush area
+    ctx.fillStyle = operation === BrushOperation.ADDITIVE ? '#00ff0020' : '#ff000020';
+    ctx.fill();
+
+    // Draw operation indicator (crosshair)
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+
+    const size = 6;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, Math.max(1, brushRadiusInCanvas * 0.1), 0, 2 * Math.PI);
-    ctx.stroke();
-    
-    // Professional operation indicator
-    ctx.setLineDash([]);
-    ctx.lineWidth = 3;
-    ctx.globalAlpha = 1.0;
-    ctx.strokeStyle = operationColor;
-    
-    const signSize = Math.min(brushRadiusInCanvas / 3, 12);
-    
     if (operation === BrushOperation.ADDITIVE) {
-      // Plus sign for additive
-      ctx.beginPath();
-      ctx.moveTo(centerX - signSize, centerY);
-      ctx.lineTo(centerX + signSize, centerY);
-      ctx.moveTo(centerX, centerY - signSize);
-      ctx.lineTo(centerX, centerY + signSize);
-      ctx.stroke();
+      // Draw cross for additive
+      ctx.moveTo(mousePosition.x - size, mousePosition.y);
+      ctx.lineTo(mousePosition.x + size, mousePosition.y);
+      ctx.moveTo(mousePosition.x, mousePosition.y - size);
+      ctx.lineTo(mousePosition.x, mousePosition.y + size);
     } else {
-      // Minus sign for subtractive
-      ctx.beginPath();
-      ctx.moveTo(centerX - signSize, centerY);
-      ctx.lineTo(centerX + signSize, centerY);
-      ctx.stroke();
+      // Draw horizontal line for subtractive
+      ctx.moveTo(mousePosition.x - size, mousePosition.y);
+      ctx.lineTo(mousePosition.x + size, mousePosition.y);
     }
-    
-    // Professional HUD display
-    ctx.fillStyle = operationColor;
-    ctx.font = 'bold 12px monospace';
-    ctx.fillText(`${Math.round(currentBrushSize)}px`, 10, 20);
-    
-    const modeText = operation === BrushOperation.ADDITIVE ? 'ADD' : 'SUB';
-    ctx.fillText(modeText, 10, 40);
-    
-    if (locked) {
-      ctx.fillStyle = '#ffff00';
-      ctx.fillText('LOCKED', 10, 60);
-    }
-    
+    ctx.stroke();
+
+    // Center dot for precise positioning
+    ctx.fillStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+    ctx.beginPath();
+    ctx.arc(mousePosition.x, mousePosition.y, 1, 0, 2 * Math.PI);
+    ctx.fill();
+
     ctx.restore();
-  }, [mousePosition, currentBrushSize, operation, isActive, operationLocked, isDrawing, zoom]);
+  }, [mousePosition, currentBrushSize, operation, isActive]);
 
   return null; // This component renders directly to the canvas
 }
