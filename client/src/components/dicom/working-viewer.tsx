@@ -881,7 +881,7 @@ export function WorkingViewer({
                   console.log('Contour updated:', updatedStructures);
                 }
               }}
-
+              onBrushSizeChange={onBrushSizeChange}
               zoom={zoom}
               panX={panX}
               panY={panY}
