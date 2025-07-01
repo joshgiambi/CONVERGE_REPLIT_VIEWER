@@ -49,6 +49,7 @@ export function SimpleProfessionalBrush({
   const [lastPosition, setLastPosition] = useState<Point | null>(null);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [ctrlPressed, setCtrlPressed] = useState(false);
+  const [animationFrame, setAnimationFrame] = useState(0);
 
   // Convert world coordinates to scaled integer coordinates
   const worldToScaled = (worldX: number, worldY: number): Point => ({
@@ -287,7 +288,20 @@ export function SimpleProfessionalBrush({
     };
   }, [isActive, selectedStructure]);
 
-  // Render cursor overlay
+  // Animation loop for gradient borders
+  useEffect(() => {
+    if (!isActive) return;
+
+    const animate = () => {
+      setAnimationFrame(prev => (prev + 1) % 360);
+      requestAnimationFrame(animate);
+    };
+
+    const animationId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationId);
+  }, [isActive]);
+
+  // Render cursor overlay with animated gradient borders
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -302,20 +316,47 @@ export function SimpleProfessionalBrush({
 
     if (mousePosition) {
       const isAdditive = operation === BrushOperation.ADDITIVE;
-      const brushColor = isAdditive ? '#00ff00' : '#ff0000'; // Green/Red medical standard
+      const brushColor = isAdditive ? '#00ff00' : '#ff0000';
       const fillColor = isAdditive ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.3)';
+
+      // Create animated gradient border
+      const radius = brushSize / 2;
+      const centerX = mousePosition.x;
+      const centerY = mousePosition.y;
+      
+      // Create rotating gradient
+      const gradient = ctx.createConicGradient((animationFrame * Math.PI) / 180, centerX, centerY);
+      
+      if (isAdditive) {
+        // Green-Yellow rotating gradient for additive
+        gradient.addColorStop(0, '#00ff00');    // Green
+        gradient.addColorStop(0.25, '#80ff00'); // Green-Yellow
+        gradient.addColorStop(0.5, '#ffff00');  // Yellow
+        gradient.addColorStop(0.75, '#80ff00'); // Yellow-Green
+        gradient.addColorStop(1, '#00ff00');    // Green
+      } else {
+        // Purple-Red rotating gradient for subtractive
+        gradient.addColorStop(0, '#ff0000');    // Red
+        gradient.addColorStop(0.25, '#ff0080'); // Red-Purple
+        gradient.addColorStop(0.5, '#8000ff');  // Purple
+        gradient.addColorStop(0.75, '#ff0080'); // Purple-Red
+        gradient.addColorStop(1, '#ff0000');    // Red
+      }
 
       // Draw brush circle with opaque fill
       ctx.globalAlpha = 1.0;
       ctx.fillStyle = fillColor;
-      ctx.strokeStyle = brushColor;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([]);
-      
       ctx.beginPath();
-      ctx.arc(mousePosition.x, mousePosition.y, brushSize / 2, 0, 2 * Math.PI);
-      ctx.fill(); // Fill the circle completely
-      ctx.stroke(); // Draw the outline
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Draw animated gradient border
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.stroke();
 
       // Professional medical cursor indicators
       ctx.lineWidth = 2;
@@ -326,34 +367,35 @@ export function SimpleProfessionalBrush({
       if (isAdditive) {
         // Full crosshair for additive
         ctx.beginPath();
-        ctx.moveTo(mousePosition.x - crossSize, mousePosition.y);
-        ctx.lineTo(mousePosition.x + crossSize, mousePosition.y);
-        ctx.moveTo(mousePosition.x, mousePosition.y - crossSize);
-        ctx.lineTo(mousePosition.x, mousePosition.y + crossSize);
+        ctx.moveTo(centerX - crossSize, centerY);
+        ctx.lineTo(centerX + crossSize, centerY);
+        ctx.moveTo(centerX, centerY - crossSize);
+        ctx.lineTo(centerX, centerY + crossSize);
         ctx.stroke();
       } else {
         // Horizontal line for subtractive
         ctx.beginPath();
-        ctx.moveTo(mousePosition.x - crossSize, mousePosition.y);
-        ctx.lineTo(mousePosition.x + crossSize, mousePosition.y);
+        ctx.moveTo(centerX - crossSize, centerY);
+        ctx.lineTo(centerX + crossSize, centerY);
         ctx.stroke();
       }
 
-      // Resize indicator
+      // Resize indicator with pulsing effect
       if (isResizing) {
-        ctx.globalAlpha = 0.7;
-        ctx.setLineDash([4, 4]);
+        const pulse = Math.sin(animationFrame * 0.1) * 0.3 + 0.7;
+        ctx.globalAlpha = pulse;
+        ctx.setLineDash([6, 6]);
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(mousePosition.x, mousePosition.y, brushSize / 2 + 8, 0, 2 * Math.PI);
+        ctx.arc(centerX, centerY, radius + 12, 0, 2 * Math.PI);
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
       ctx.globalAlpha = 1.0;
     }
-  }, [isActive, mousePosition, operation, brushSize, isResizing]);
+  }, [isActive, mousePosition, operation, brushSize, isResizing, animationFrame]);
 
   // Mouse event handlers
   const handleMouseDown = (e: MouseEvent) => {
