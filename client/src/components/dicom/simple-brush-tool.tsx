@@ -1,4 +1,5 @@
 
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 
 interface Point {
@@ -37,10 +38,9 @@ export function SimpleBrushTool({
 }: SimpleBrushProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
-  const [strokePoints, setStrokePoints] = useState<Point[]>([]);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // ✅ FIXED: Proper coordinate transformation with useCallback
+  // Convert canvas coordinates to world coordinates
   const canvasToWorld = useCallback((canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !imageMetadata || !canvasRef.current) return null;
 
@@ -60,7 +60,7 @@ export function SimpleBrushTool({
       const pixelX = (canvasX - imageX) / totalScale;
       const pixelY = (canvasY - imageY) / totalScale;
 
-      // ✅ PROPER DICOM TRANSFORMATION
+      // DICOM coordinate transformation
       if (imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
         const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
         const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
@@ -80,7 +80,7 @@ export function SimpleBrushTool({
         return { x: worldX, y: worldY };
       }
 
-      // Fallback for simple coordinate transformation
+      // Fallback coordinate transformation
       if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
         const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
         const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
@@ -98,66 +98,94 @@ export function SimpleBrushTool({
     }
   }, [currentImage, imageMetadata, zoom, panX, panY]);
 
-  // ✅ FIXED: Proper brush stroke handling
+  // Create a circle of points for brush painting
+  const createBrushCircle = useCallback((center: Point, radius: number): Point[] => {
+    const points: Point[] = [];
+    const numPoints = Math.max(16, Math.floor(radius / 2)); // More points for larger brushes
+    
+    for (let i = 0; i < numPoints; i++) {
+      const angle = (i / numPoints) * Math.PI * 2;
+      points.push({
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius
+      });
+    }
+    
+    // Close the circle
+    if (points.length > 0) {
+      points.push(points[0]);
+    }
+    
+    return points;
+  }, []);
+
+  // Add brush stroke that creates filled circles
   const addBrushStroke = useCallback((canvasPoint: Point) => {
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
     if (!worldPoint || !selectedStructure || !rtStructures) return;
 
     try {
-      setStrokePoints(prev => {
-        const updatedPoints = [...prev, worldPoint];
-        
-        // Create DICOM contour points
-        const contourPoints: number[] = [];
-        for (const point of updatedPoints) {
-          contourPoints.push(point.x, point.y, currentSlicePosition);
-        }
+      // Convert brush size from pixels to world coordinates
+      const worldBrushRadius = brushSize / 20; // Adjust scaling factor as needed
+      
+      // Create circle points in world coordinates
+      const circlePoints = createBrushCircle(worldPoint, worldBrushRadius);
+      
+      // Convert to DICOM contour format [x,y,z,x,y,z,...]
+      const newContourPoints: number[] = [];
+      for (const point of circlePoints) {
+        newContourPoints.push(point.x, point.y, currentSlicePosition);
+      }
 
-        // Update RT structures
-        const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
-        
-        let structure;
-        if (updatedRTStructures.structures) {
-          structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-        } else if (updatedRTStructures.roiContourSequence) {
-          structure = updatedRTStructures.roiContourSequence.find((s: any) => s.roiNumber === selectedStructure);
-        } else {
-          structure = updatedRTStructures.find((s: any) => s.roiNumber === selectedStructure);
-        }
-        
-        if (!structure) return prev;
+      // Update RT structures
+      const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+      
+      let structure;
+      if (updatedRTStructures.structures) {
+        structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+      } else if (updatedRTStructures.roiContourSequence) {
+        structure = updatedRTStructures.roiContourSequence.find((s: any) => s.roiNumber === selectedStructure);
+      } else {
+        structure = updatedRTStructures.find((s: any) => s.roiNumber === selectedStructure);
+      }
+      
+      if (!structure) return;
 
-        // Initialize contours array if it doesn't exist
-        if (!structure.contours) {
-          structure.contours = [];
-        }
+      // Initialize contours array if it doesn't exist
+      if (!structure.contours) {
+        structure.contours = [];
+      }
 
-        // Find existing contour for this slice
-        const tolerance = 2.0;
-        let existingContour = structure.contours.find((contour: any) => 
-          Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
-        );
+      // Find existing contour for this slice
+      const tolerance = 2.0;
+      let existingContour = structure.contours.find((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
+      );
 
-        if (existingContour) {
-          existingContour.points = contourPoints;
-          existingContour.numberOfPoints = contourPoints.length / 3;
-        } else {
-          structure.contours.push({
-            slicePosition: currentSlicePosition,
-            points: contourPoints,
-            numberOfPoints: contourPoints.length / 3
-          });
-        }
+      if (existingContour) {
+        // ADD to existing contour by creating a new separate contour
+        // This simulates brush painting by adding filled circles
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: newContourPoints,
+          numberOfPoints: newContourPoints.length / 3
+        });
+      } else {
+        // Create new contour for this slice
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: newContourPoints,
+          numberOfPoints: newContourPoints.length / 3
+        });
+      }
 
-        onContourUpdate(updatedRTStructures);
-        return updatedPoints;
-      });
+      onContourUpdate(updatedRTStructures);
     } catch (error) {
       console.error('Error adding brush stroke:', error);
     }
-  }, [canvasToWorld, selectedStructure, rtStructures, currentSlicePosition, onContourUpdate]);
+  }, [canvasToWorld, selectedStructure, rtStructures, currentSlicePosition, onContourUpdate, brushSize, createBrushCircle]);
 
-  // ✅ FIXED: Proper event handlers with useCallback
+  // Mouse event handlers
   const handleMouseDown = useCallback((e: MouseEvent) => {
     if (!isActive || !selectedStructure || e.button !== 0) return;
     if (!canvasRef.current) return;
@@ -178,7 +206,6 @@ export function SimpleBrushTool({
       }
       
       setIsDrawing(true);
-      setStrokePoints([]);
       addBrushStroke(canvasPoint);
     } catch (error) {
       console.error('Error in mouse down handler:', error);
@@ -199,6 +226,7 @@ export function SimpleBrushTool({
       setMousePosition(canvasPoint);
       
       if (isDrawing) {
+        // Paint continuously while dragging
         addBrushStroke(canvasPoint);
       }
     } catch (error) {
@@ -208,12 +236,10 @@ export function SimpleBrushTool({
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
     if (!isActive || e.button !== 0) return;
-    
     setIsDrawing(false);
-    setStrokePoints([]);
   }, [isActive]);
 
-  // ✅ FIXED: Proper event listener setup with all dependencies
+  // Set up event listeners
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -233,7 +259,7 @@ export function SimpleBrushTool({
     };
   }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp]);
 
-  // ✅ FIXED: Stable cursor canvas setup
+  // Create and manage cursor overlay
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -263,9 +289,9 @@ export function SimpleBrushTool({
     };
   }, [isActive]);
 
-  // ✅ FIXED: Efficient cursor rendering
+  // Render brush cursor circle
   useEffect(() => {
-    if (!cursorCanvasRef.current || !mousePosition) return;
+    if (!cursorCanvasRef.current || !mousePosition || !isActive) return;
 
     const ctx = cursorCanvasRef.current.getContext('2d');
     if (!ctx) return;
@@ -278,55 +304,37 @@ export function SimpleBrushTool({
     
     ctx.save();
     
-    const operationColor = '#00ff00';
-    
-    // Draw outer circle
-    ctx.strokeStyle = operationColor;
+    // Brush circle outline
+    ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = isDrawing ? 3 : 2;
-    ctx.setLineDash([]);
-    ctx.globalAlpha = isDrawing ? 1.0 : 0.7;
+    ctx.globalAlpha = isDrawing ? 1.0 : 0.8;
     
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
     ctx.stroke();
     
-    // Draw inner guide circle
+    // Fill area when drawing
+    if (isDrawing) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+      ctx.fill();
+    }
+    
+    // Center crosshair
+    ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.8;
     
+    const crossSize = 4;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius / 2, 0, 2 * Math.PI);
-    ctx.stroke();
-    
-    // Draw center crosshair
-    ctx.setLineDash([]);
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 1.0;
-    
-    const crosshairSize = 8;
-    ctx.beginPath();
-    ctx.moveTo(centerX - crosshairSize, centerY);
-    ctx.lineTo(centerX + crosshairSize, centerY);
-    ctx.moveTo(centerX, centerY - crosshairSize);
-    ctx.lineTo(centerX, centerY + crosshairSize);
-    ctx.stroke();
-    
-    // Draw operation indicator
-    const indicatorSize = 6;
-    const indicatorX = centerX + radius * 0.7;
-    const indicatorY = centerY - radius * 0.7;
-    
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(indicatorX - indicatorSize/2, indicatorY);
-    ctx.lineTo(indicatorX + indicatorSize/2, indicatorY);
-    ctx.moveTo(indicatorX, indicatorY - indicatorSize/2);
-    ctx.lineTo(indicatorX, indicatorY + indicatorSize/2);
+    ctx.moveTo(centerX - crossSize, centerY);
+    ctx.lineTo(centerX + crossSize, centerY);
+    ctx.moveTo(centerX, centerY - crossSize);
+    ctx.lineTo(centerX, centerY + crossSize);
     ctx.stroke();
     
     ctx.restore();
-  }, [mousePosition, brushSize, isDrawing]);
+  }, [mousePosition, brushSize, isDrawing, isActive]);
 
   return null;
 }
+
