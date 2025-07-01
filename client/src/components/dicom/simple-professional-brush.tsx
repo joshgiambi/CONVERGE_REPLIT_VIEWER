@@ -160,12 +160,11 @@ export function SimpleProfessionalBrush({
     }
   };
 
-  // Get scaled brush size (following Limbus V2 approach)
-  const getScaledBrushSize = (): number => {
-    // Limbus V2 approach: scale = viewport.renderer.getActiveCamera().getParallelScale() / 100
-    // We simulate this with zoom level scaling
-    const scale = zoom / 10; // Convert zoom to scale factor
-    return (brushSize / scale) * 3; // Match Limbus V2 formula
+  // Get world brush size in DICOM coordinates (simple approach)
+  const getWorldBrushSize = (): number => {
+    // Much simpler approach - just use a reasonable world size
+    // brushSize is typically 10-50, we want world size to be small (a few mm)
+    return brushSize / 10; // This gives us sizes from 1-5 mm, which is reasonable for medical contours
   };
 
   // Get display brush size for cursor (in canvas pixels)
@@ -176,13 +175,13 @@ export function SimpleProfessionalBrush({
 
   // Create simple brush circle (following Limbus V2 pattern)
   const createBrushCircle = (center: Point): Point[] => {
-    const worldRadius = getScaledBrushSize() / 2;
+    const worldRadius = getWorldBrushSize() / 2;
     return createCirclePolygon(center, worldRadius, 32);
   };
 
   // Create proper brush stroke path (simulating ClipperLib.offsetToPolyTree)
   const createBrushStrokePath = (startWorld: Point, endWorld: Point): Point[] => {
-    const brushRadius = getScaledBrushSize() / 2;
+    const brushRadius = getWorldBrushSize() / 2;
     
     // For very small movements, just create a circle
     const dx = endWorld.x - startWorld.x;
