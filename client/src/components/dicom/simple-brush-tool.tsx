@@ -91,7 +91,9 @@ export function SimpleBrushTool({
   // Add a brush "stamp" at the current position with continuous movement
   const addBrushStroke = (canvasPoint: Point) => {
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
+    console.log('Brush stroke:', { canvasPoint, worldPoint });
     if (!worldPoint || !selectedStructure || !rtStructures) {
+      console.log('Cannot add stroke - missing data:', { worldPoint: !!worldPoint, selectedStructure, rtStructures: !!rtStructures });
       return;
     }
 
@@ -292,6 +294,7 @@ export function SimpleBrushTool({
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp); // Stop drawing when leaving canvas
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Disable right-click menu
     
     // Set cursor
     canvas.style.cursor = 'none';
@@ -301,6 +304,7 @@ export function SimpleBrushTool({
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
+      canvas.removeEventListener('contextmenu', (e) => e.preventDefault());
       canvas.style.cursor = 'default';
     };
   }, [isActive, selectedStructure, brushSize, isDrawing]);
