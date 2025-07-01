@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { SimpleBrushTool } from './simple-brush-tool';
+import { UnifiedBrushTool } from './unified-brush-tool';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -861,9 +861,9 @@ export function WorkingViewer({
             }}
           />
           
-          {/* SimpleBrushTool overlay */}
+          {/* UnifiedBrushTool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <SimpleBrushTool
+            <UnifiedBrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
@@ -881,6 +881,7 @@ export function WorkingViewer({
                   console.log('Contour updated:', updatedStructures);
                 }
               }}
+              onBrushSizeChange={onBrushSizeChange || ((size) => console.log('Brush size changed:', size))}
               zoom={zoom}
               panX={panX}
               panY={panY}
