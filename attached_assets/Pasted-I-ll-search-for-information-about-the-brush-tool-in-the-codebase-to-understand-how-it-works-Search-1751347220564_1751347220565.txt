@@ -1,0 +1,145 @@
+I'll search for information about the brush tool in the codebase to understand how it works.
+
+Search files...
+Let me search for more specific information about how the brush tool operates and its visual feedback.
+
+Search files...
+Now let me look at the visual rendering and settings to get a complete picture of how the brush tool works.
+
+Read file: frontend/components/viewer/store/tools/editing/BrushTool.ts
+Read file: frontend/components/viewer/store/tools/editing/BrushTool.ts
+Read file: frontend/components/viewer/store/tools/editing/BrushTool.ts
+Based on my analysis of the brush tool code, here's exactly how the brush tool works in the Limbus V2 Converge medical imaging viewer:
+
+## 🖌️ Brush Tool - Complete Technical Breakdown
+
+### **Core Functionality**
+The brush tool is a **contour editing tool** that allows users to draw and modify medical contours (segmentation masks) on DICOM images using a circular brush interface.
+
+### **Brush Operations**
+The tool has two main operations:
+- **ADDITIVE** (Green): Adds brush strokes to existing contours
+- **SUBTRACTIVE** (Red): Removes brush strokes from existing contours
+
+### **How It Works Step-by-Step**
+
+#### **1. Brush Size & Visual Feedback**
+```typescript
+// Default brush size: 30 pixels (range: 1-100)
+const brushSizeProperty = new NumberProperty({
+  label: "Brush Size",
+  value: 30,
+  min: 1,
+  max: 100,
+  step: 2,
+  helpText: "Ctrl+scroll wheel to adjust brush size dynamically",
+})
+```
+
+**Visual Elements:**
+- **Circular brush outline** - Shows the brush area (32-point circle)
+- **Crosshair cursor** - Indicates brush center position
+- **Color coding**: 
+  - 🟢 **Green** = Additive mode
+  - 🔴 **Red** = Subtractive mode
+
+#### **2. Brush Size Adjustment**
+**Three ways to change brush size:**
+1. **Ctrl + Mouse Wheel**: Dynamic size adjustment
+2. **Right-click + Drag**: Gesture-based scaling (with pointer lock)
+3. **Settings panel**: Manual value input
+
+#### **3. Operation Logic**
+The tool intelligently determines whether to add or subtract based on:
+
+**Automatic Detection:**
+- If cursor is **inside** existing contour → **Additive** (fills holes)
+- If cursor is **outside** existing contour → **Subtractive** (removes areas)
+
+**Manual Override:**
+- **Hold Shift**: Inverts the automatic behavior
+- **Inside + Shift** → Subtractive
+- **Outside + Shift** → Additive
+
+#### **4. Drawing Algorithm**
+When you drag the brush, it creates a **continuous stroke** by:
+
+1. **Creating brush path**: Connects current position to last position
+2. **Offsetting path**: Creates a rounded brush stroke using ClipperLib
+3. **Boolean operations**: 
+   - **Union** (additive): Combines brush stroke with existing contour
+   - **Difference** (subtractive): Removes brush stroke from existing contour
+4. **Polygon processing**: Cleans and simplifies the resulting geometry
+
+#### **5. Technical Implementation**
+
+**Brush Stroke Creation:**
+```typescript
+// Creates a rounded brush stroke between two points
+const offsetPath = ClipperLib.offsetToPolyTree({
+  delta: Math.round((this.properties.brushSize.value / 2) * SCALING_FACTOR),
+  offsetInputs: [{
+    joinType: JoinType.Round,
+    endType: EndType.OpenRound,
+    data: multiplyPolygons([[lastPosition, currentPosition]], SCALING_FACTOR),
+  }],
+})
+```
+
+**Boolean Operations:**
+```typescript
+const clipType = this.operation === BrushOperation.ADDITIVE 
+  ? ClipType.Union 
+  : ClipType.Difference
+
+const result = ClipperLib.clipToPolyTree({
+  clipType,
+  subjectInputs: polygons.map((polygon) => ({ data: polygon, closed: true })),
+  clipInputs: [{ data: buffer }],
+  subjectFillType: PolyFillType.NonZero,
+})
+```
+
+#### **6. Visual Rendering**
+The tool renders real-time visual feedback using Konva.js:
+
+**Brush Outline:**
+- **32-point circle** showing brush area
+- **Color-coded** (green/red) based on operation
+- **Scales** with zoom level for consistent visual size
+
+**Cursor Indicator:**
+- **Crosshair** for additive mode (full cross)
+- **Horizontal line** for subtractive mode
+- **Positioned** at brush center
+
+#### **7. Key Controls**
+
+**Mouse Interactions:**
+- **Left-click + Drag**: Draw brush strokes
+- **Right-click + Drag**: Adjust brush size
+- **Ctrl + Mouse Wheel**: Fine-tune brush size
+
+**Keyboard Modifiers:**
+- **Shift**: Invert automatic add/subtract behavior
+- **Ctrl/Cmd**: Disable fill mode (outline only)
+
+**Special Features:**
+- **Fill mode**: Automatically fills holes in additive mode
+- **Operation locking**: Prevents mode changes during active drawing
+- **Real-time updates**: Immediate visual feedback during drawing
+
+#### **8. Medical Imaging Integration**
+- **Slice-aware**: Works on current DICOM slice
+- **Multi-planar**: Supports axial, sagittal, and coronal views
+- **Contour management**: Integrates with medical contour entities
+- **Performance optimized**: Uses efficient polygon clipping algorithms
+
+### **Use Cases**
+1. **Manual segmentation**: Drawing organ boundaries
+2. **Contour refinement**: Fine-tuning AI-generated contours
+3. **Hole filling**: Adding missing areas in contours
+4. **Artifact removal**: Cleaning up segmentation errors
+5. **Region editing**: Modifying specific anatomical areas
+
+The brush tool provides a **professional-grade contour editing experience** with intelligent operation detection, real-time visual feedback, and precise control over medical segmentation workflows.
