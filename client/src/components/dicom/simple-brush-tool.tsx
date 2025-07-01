@@ -81,7 +81,10 @@ export function SimpleBrushTool({
     return null;
   };
 
-  // Create a simple brush stroke that builds a polygon
+  // Track accumulated brush strokes for the current drawing session
+  const currentBrushPolygon = useRef<Point[]>([]);
+
+  // Add a brush "stamp" at the current position (like real paint brush)
   const addBrushStroke = (canvasPoint: Point) => {
     console.log('addBrushStroke called:', canvasPoint);
     
@@ -91,39 +94,31 @@ export function SimpleBrushTool({
       return;
     }
 
-    // Add to current stroke
-    strokePoints.current.push(worldPoint);
-    console.log('Current stroke has', strokePoints.current.length, 'points');
-
-    // Create polygon contour from stroke points (like a real paint brush)
-    const contourPoints: number[] = [];
+    // Create a circle at this point (brush stamp)
+    const radius = 3.0; // Brush radius in world coordinates
+    const numCirclePoints = 12;
+    const brushStamp: Point[] = [];
     
-    if (strokePoints.current.length >= 3) {
-      // Create a polygon that follows the brush stroke path
-      strokePoints.current.forEach(point => {
-        contourPoints.push(point.x, point.y, currentSlicePosition);
-      });
-      
-      // Close the polygon by adding the first point at the end
-      if (strokePoints.current.length > 0) {
-        const firstPoint = strokePoints.current[0];
-        contourPoints.push(firstPoint.x, firstPoint.y, currentSlicePosition);
-      }
-    } else {
-      // For the first few points, create a small circle
-      const radius = 2.0;
-      const numCirclePoints = 8;
-      const centerPoint = strokePoints.current[strokePoints.current.length - 1];
-      
-      for (let i = 0; i < numCirclePoints; i++) {
-        const angle = (i / numCirclePoints) * 2 * Math.PI;
-        const x = centerPoint.x + Math.cos(angle) * radius;
-        const y = centerPoint.y + Math.sin(angle) * radius;
-        contourPoints.push(x, y, currentSlicePosition);
-      }
+    for (let i = 0; i < numCirclePoints; i++) {
+      const angle = (i / numCirclePoints) * 2 * Math.PI;
+      const x = worldPoint.x + Math.cos(angle) * radius;
+      const y = worldPoint.y + Math.sin(angle) * radius;
+      brushStamp.push({ x, y });
     }
 
-    console.log('Created polygon with', contourPoints.length / 3, 'points');
+    // Add this brush stamp to the current polygon
+    // This simulates how a real paint brush works - each movement creates a new "blob" of paint
+    currentBrushPolygon.current = currentBrushPolygon.current.concat(brushStamp);
+    
+    console.log('Current brush polygon has', currentBrushPolygon.current.length, 'points');
+
+    // Convert to DICOM contour format
+    const contourPoints: number[] = [];
+    currentBrushPolygon.current.forEach(point => {
+      contourPoints.push(point.x, point.y, currentSlicePosition);
+    });
+
+    console.log('Created contour with', contourPoints.length / 3, 'points');
 
     // Update the RT structure
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
@@ -140,7 +135,7 @@ export function SimpleBrushTool({
     );
 
     if (existingContour) {
-      // Replace existing contour with growing polygon
+      // Replace existing contour with accumulated brush strokes
       existingContour.points = contourPoints;
       existingContour.numberOfPoints = contourPoints.length / 3;
       console.log('Updated existing contour');
@@ -174,6 +169,7 @@ export function SimpleBrushTool({
     console.log('Starting brush stroke at:', canvasPoint);
     setIsDrawing(true);
     strokePoints.current = []; // Start new stroke
+    currentBrushPolygon.current = []; // Clear accumulated brush stamps
     addBrushStroke(canvasPoint);
   };
 
@@ -200,6 +196,7 @@ export function SimpleBrushTool({
     console.log('Ending brush stroke');
     setIsDrawing(false);
     strokePoints.current = []; // Clear stroke
+    // Keep currentBrushPolygon for the finished contour
   };
 
   // Set up event listeners
