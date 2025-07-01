@@ -861,8 +861,8 @@ export function WorkingViewer({
             }}
           />
           
-          {/* Simple Professional Brush Tool overlay */}
-          {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
+          {/* V2 Professional Brush Tool overlay - temporarily disabled until fully implemented */}
+          {false && brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
             <V2ProfessionalBrush
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}

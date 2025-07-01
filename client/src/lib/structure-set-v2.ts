@@ -307,7 +307,7 @@ export class StructureSetEntityV2 {
   validate(): boolean {
     try {
       // Check all cached contours
-      for (const contour of this.contourCache.values()) {
+      for (const contour of Array.from(this.contourCache.values())) {
         if (!contour.validate()) {
           console.error(`Invalid contour found: ${contour.getId()}`);
           return false;
@@ -315,7 +315,7 @@ export class StructureSetEntityV2 {
       }
 
       // Check structure data consistency
-      for (const [structureId, structure] of this.structures) {
+      for (const [structureId, structure] of Array.from(this.structures.entries())) {
         if (!structure.id || !structure.name) {
           console.error(`Invalid structure data: ${structureId}`);
           return false;
@@ -333,7 +333,7 @@ export class StructureSetEntityV2 {
   toSerializable() {
     const structures: Record<string, StructureData> = {};
     
-    for (const [id, structure] of this.structures) {
+    for (const [id, structure] of Array.from(this.structures.entries())) {
       structures[id] = {
         ...structure,
         contours: new Map(structure.contours) // Ensure proper serialization
