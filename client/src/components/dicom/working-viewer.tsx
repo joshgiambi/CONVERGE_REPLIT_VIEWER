@@ -861,9 +861,9 @@ export function WorkingViewer({
             }}
           />
           
-          {/* V2 Professional Brush Tool overlay */}
+          {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <V2ProfessionalBrush
+            <SimpleBrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
@@ -881,7 +881,7 @@ export function WorkingViewer({
                   console.log('Contour updated:', updatedStructures);
                 }
               }}
-              onBrushSizeChange={onBrushSizeChange || ((size) => console.log('Brush size changed:', size))}
+
               zoom={zoom}
               panX={panX}
               panY={panY}

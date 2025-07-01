@@ -177,13 +177,13 @@ export function SimpleBrushTool({
     };
   }, [isActive, selectedStructure, brushSize, isDrawing]);
 
-  // Draw cursor
+  // Professional cursor rendering following UI/UX documentation
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
     const mainCanvas = canvasRef.current;
     
-    // Create cursor overlay
+    // Create professional cursor overlay
     let cursorCanvas = mainCanvas.parentElement?.querySelector('.brush-cursor') as HTMLCanvasElement;
     if (!cursorCanvas) {
       cursorCanvas = document.createElement('canvas');
@@ -207,27 +207,62 @@ export function SimpleBrushTool({
     ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
 
     if (mousePosition) {
-      const radius = Math.max(4, Math.min(50, brushSize / 2));
       const centerX = mousePosition.x;
       const centerY = mousePosition.y;
+      const radius = brushSize / 2;
       
-      // Draw brush circle
-      ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.8;
+      ctx.save();
+      
+      // Set operation color following medical imaging standards
+      const operationColor = '#00ff00'; // Green for additive (default)
+      
+      // Draw outer circle - main brush indicator
+      ctx.strokeStyle = operationColor;
+      ctx.lineWidth = isDrawing ? 3 : 2; // Thicker when drawing
+      ctx.setLineDash([]);
+      ctx.globalAlpha = isDrawing ? 1.0 : 0.7;
       
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
       ctx.stroke();
-
-      // Draw center crosshair
-      const crossSize = 4;
+      
+      // Draw inner guide circle (50% of brush size)
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]); // Dashed line
+      ctx.globalAlpha = 0.5;
+      
       ctx.beginPath();
-      ctx.moveTo(centerX - crossSize, centerY);
-      ctx.lineTo(centerX + crossSize, centerY);
-      ctx.moveTo(centerX, centerY - crossSize);
-      ctx.lineTo(centerX, centerY + crossSize);
+      ctx.arc(centerX, centerY, radius / 2, 0, 2 * Math.PI);
       ctx.stroke();
+      
+      // Draw center crosshair for precision
+      ctx.setLineDash([]);
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 1.0;
+      
+      const crosshairSize = 8;
+      ctx.beginPath();
+      ctx.moveTo(centerX - crosshairSize, centerY);
+      ctx.lineTo(centerX + crosshairSize, centerY);
+      ctx.moveTo(centerX, centerY - crosshairSize);
+      ctx.lineTo(centerX, centerY + crosshairSize);
+      ctx.stroke();
+      
+      // Draw operation indicator (plus sign for additive)
+      const indicatorSize = 6;
+      const indicatorX = centerX + radius * 0.7;
+      const indicatorY = centerY - radius * 0.7;
+      
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      // Plus sign for additive
+      ctx.moveTo(indicatorX - indicatorSize/2, indicatorY);
+      ctx.lineTo(indicatorX + indicatorSize/2, indicatorY);
+      ctx.moveTo(indicatorX, indicatorY - indicatorSize/2);
+      ctx.lineTo(indicatorX, indicatorY + indicatorSize/2);
+      ctx.stroke();
+      
+      ctx.restore();
     }
 
     return () => {
