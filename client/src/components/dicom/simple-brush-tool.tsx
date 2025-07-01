@@ -428,13 +428,25 @@ export function SimpleBrushTool({
 
   // Apply brush stroke to RT structure data
   const applyBrushStroke = useCallback((worldPoints: Point[]) => {
-    if (worldPoints.length === 0 || !selectedStructure || !rtStructures) return;
+    console.log('applyBrushStroke called with:', {
+      pointsCount: worldPoints.length,
+      selectedStructure,
+      hasRTStructures: !!rtStructures
+    });
+
+    if (worldPoints.length === 0 || !selectedStructure || !rtStructures) {
+      console.log('Early return due to missing data');
+      return;
+    }
 
     try {
       const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
       const structure = getStructure(updatedRTStructures, selectedStructure);
 
-      if (!structure) return;
+      if (!structure) {
+        console.log('No structure found for selected structure:', selectedStructure);
+        return;
+      }
 
       // Initialize contour sequence if needed
       if (!structure.contourSequence) {
@@ -522,6 +534,8 @@ export function SimpleBrushTool({
 
   // Mouse event handlers with proper useCallback
   const handleMouseMove = useCallback((event: MouseEvent) => {
+    if (!isActive) return;
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -543,10 +557,13 @@ export function SimpleBrushTool({
         setLastWorldPosition(worldPos);
       }
     }
-  }, [canvasToWorld, updateBrushOperation, isDrawing, lastWorldPosition]);
+  }, [canvasToWorld, updateBrushOperation, isDrawing, lastWorldPosition, isActive]);
 
   const handleMouseDown = useCallback((event: MouseEvent) => {
-    if (event.button !== 0) return; // Only left mouse button
+    if (!isActive || event.button !== 0) return; // Only left mouse button when active
+
+    event.preventDefault();
+    event.stopPropagation();
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -559,15 +576,19 @@ export function SimpleBrushTool({
 
     const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
     if (worldPos) {
+      console.log('Starting brush stroke at:', worldPos);
       setIsDrawing(true);
       setOperationLocked(true);
       setLastWorldPosition(worldPos);
       setStrokePoints([worldPos]);
     }
-  }, [canvasToWorld]);
+  }, [canvasToWorld, isActive]);
 
   const handleMouseUp = useCallback(() => {
+    if (!isActive) return;
+
     if (isDrawing && strokePoints.length > 0) {
+      console.log('Applying brush stroke with', strokePoints.length, 'points');
       // Apply complete stroke
       applyBrushStroke(strokePoints);
     }
@@ -576,7 +597,7 @@ export function SimpleBrushTool({
     setOperationLocked(false);
     setLastWorldPosition(null);
     setStrokePoints([]);
-  }, [isDrawing, strokePoints, applyBrushStroke]);
+  }, [isDrawing, strokePoints, applyBrushStroke, isActive]);
 
   // Wheel event handler for brush size adjustment
   const handleWheel = useCallback((event: WheelEvent) => {
@@ -625,28 +646,29 @@ export function SimpleBrushTool({
     // Clear previous cursor
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
 
-    // Draw brush cursor as solid circle
+    // Draw brush cursor as proper circle
     ctx.save();
 
-    // Outer circle (brush outline)
+    // Main brush circle outline
     ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
     ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.8;
+    ctx.setLineDash([]); // Solid line, not dashed
+    ctx.globalAlpha = 1;
 
     ctx.beginPath();
     ctx.arc(mousePosition.x, mousePosition.y, currentBrushSize / 2, 0, 2 * Math.PI);
     ctx.stroke();
 
     // Inner semi-transparent fill to show brush area
-    ctx.fillStyle = operation === BrushOperation.ADDITIVE ? '#00ff0020' : '#ff000020';
+    ctx.fillStyle = operation === BrushOperation.ADDITIVE ? '#00ff0015' : '#ff000015';
     ctx.fill();
 
-    // Draw operation indicator (crosshair)
+    // Draw operation indicator (crosshair) - smaller and centered
     ctx.globalAlpha = 1;
     ctx.lineWidth = 2;
     ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
 
-    const size = 6;
+    const size = 8;
     ctx.beginPath();
     if (operation === BrushOperation.ADDITIVE) {
       // Draw cross for additive
@@ -664,7 +686,7 @@ export function SimpleBrushTool({
     // Center dot for precise positioning
     ctx.fillStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
     ctx.beginPath();
-    ctx.arc(mousePosition.x, mousePosition.y, 1, 0, 2 * Math.PI);
+    ctx.arc(mousePosition.x, mousePosition.y, 2, 0, 2 * Math.PI);
     ctx.fill();
 
     ctx.restore();
