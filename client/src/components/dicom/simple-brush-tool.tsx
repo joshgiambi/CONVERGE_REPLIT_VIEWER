@@ -126,20 +126,34 @@ export function SimpleBrushTool({
   };
 
   const handleMouseDown = (e: MouseEvent) => {
-    if (!isActive || !selectedStructure) return;
+    console.log('Mouse down event:', {
+      isActive,
+      selectedStructure,
+      button: e.button,
+      clientX: e.clientX,
+      clientY: e.clientY
+    });
+
+    if (!isActive || !selectedStructure) {
+      console.log('Brush tool: Ignoring mouse down - not active or no structure selected');
+      return;
+    }
 
     e.preventDefault();
     e.stopPropagation();
 
     const canvasPoint = getCanvasCoordinates(e);
+    console.log('Canvas point:', canvasPoint);
 
     if (e.button === 2) { // Right click for brush resizing
+      console.log('Starting brush resize');
       setIsResizing(true);
       setLastMouseY(e.clientY);
       return;
     }
 
     if (e.button === 0) { // Left click for drawing
+      console.log('Starting drawing stroke');
       setIsDrawing(true);
       currentStroke.current = []; // Start fresh stroke
       lastMousePos.current = canvasPoint;
@@ -207,16 +221,28 @@ export function SimpleBrushTool({
   // Set up event listeners
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isActive) return;
+    
+    console.log('Brush tool effect running:', {
+      hasCanvas: !!canvas,
+      isActive,
+      selectedStructure,
+      currentSlicePosition
+    });
+
+    if (!canvas || !isActive) {
+      console.log('Brush tool: Not setting up listeners - missing canvas or not active');
+      return;
+    }
 
     console.log('Setting up brush tool event listeners');
 
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('contextmenu', handleContextMenu);
+    canvas.addEventListener('mousedown', handleMouseDown, { passive: false });
+    canvas.addEventListener('mousemove', handleMouseMove, { passive: false });
+    canvas.addEventListener('mouseup', handleMouseUp, { passive: false });
+    canvas.addEventListener('contextmenu', handleContextMenu, { passive: false });
 
     return () => {
+      console.log('Cleaning up brush tool event listeners');
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
