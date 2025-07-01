@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { V2ProfessionalBrush } from './v2-professional-brush';
+import { SimpleBrushTool } from './simple-brush-tool';
 
 interface WorkingViewerProps {
   seriesId: number;
