@@ -81,22 +81,23 @@ export function SimpleBrushTool({
     return null;
   };
 
-  // Track accumulated brush strokes for the current drawing session
+  // Track brush settings and state
+  const [currentBrushSize, setCurrentBrushSize] = useState(brushSize);
   const currentBrushPolygon = useRef<Point[]>([]);
+  const existingContourPoints = useRef<Point[]>([]);
+  const isRightMouseDown = useRef(false);
+  const lastMousePos = useRef<Point | null>(null);
 
-  // Add a brush "stamp" at the current position (like real paint brush)
+  // Add a brush "stamp" at the current position with continuous movement
   const addBrushStroke = (canvasPoint: Point) => {
-    console.log('addBrushStroke called:', canvasPoint);
-    
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
     if (!worldPoint || !selectedStructure || !rtStructures) {
-      console.log('Cannot add stroke - missing requirements');
       return;
     }
 
-    // Create a circle at this point (brush stamp)
-    const radius = 3.0; // Brush radius in world coordinates
-    const numCirclePoints = 12;
+    // Create brush stamp with current size
+    const radius = currentBrushSize * 0.5; // Convert brush size to radius
+    const numCirclePoints = 16;
     const brushStamp: Point[] = [];
     
     for (let i = 0; i < numCirclePoints; i++) {
@@ -106,28 +107,49 @@ export function SimpleBrushTool({
       brushStamp.push({ x, y });
     }
 
-    // Add this brush stamp to the current polygon
-    // This simulates how a real paint brush works - each movement creates a new "blob" of paint
-    currentBrushPolygon.current = currentBrushPolygon.current.concat(brushStamp);
+    // For continuous movement, add interpolated stamps between last and current position
+    if (lastMousePos.current && isDrawing) {
+      const lastWorldPoint = canvasToWorld(lastMousePos.current.x, lastMousePos.current.y);
+      if (lastWorldPoint) {
+        const dx = worldPoint.x - lastWorldPoint.x;
+        const dy = worldPoint.y - lastWorldPoint.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const steps = Math.max(1, Math.floor(distance / (radius * 0.3))); // Overlap stamps for smoothness
+        
+        for (let step = 0; step <= steps; step++) {
+          const t = step / steps;
+          const interpX = lastWorldPoint.x + dx * t;
+          const interpY = lastWorldPoint.y + dy * t;
+          
+          for (let i = 0; i < numCirclePoints; i++) {
+            const angle = (i / numCirclePoints) * 2 * Math.PI;
+            const x = interpX + Math.cos(angle) * radius;
+            const y = interpY + Math.sin(angle) * radius;
+            currentBrushPolygon.current.push({ x, y });
+          }
+        }
+      }
+    } else {
+      // First stamp
+      currentBrushPolygon.current = currentBrushPolygon.current.concat(brushStamp);
+    }
     
-    console.log('Current brush polygon has', currentBrushPolygon.current.length, 'points');
+    lastMousePos.current = canvasPoint;
 
+    // Combine with existing contour (ADD mode, don't replace)
+    const allPoints = [...existingContourPoints.current, ...currentBrushPolygon.current];
+    
     // Convert to DICOM contour format
     const contourPoints: number[] = [];
-    currentBrushPolygon.current.forEach(point => {
+    allPoints.forEach(point => {
       contourPoints.push(point.x, point.y, currentSlicePosition);
     });
-
-    console.log('Created contour with', contourPoints.length / 3, 'points');
 
     // Update the RT structure
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     
-    if (!structure) {
-      console.log('Structure not found:', selectedStructure);
-      return;
-    }
+    if (!structure) return;
 
     const tolerance = 2.0;
     let existingContour = structure.contours.find((contour: any) => 
@@ -135,18 +157,14 @@ export function SimpleBrushTool({
     );
 
     if (existingContour) {
-      // Replace existing contour with accumulated brush strokes
       existingContour.points = contourPoints;
       existingContour.numberOfPoints = contourPoints.length / 3;
-      console.log('Updated existing contour');
     } else {
-      // Create new contour
       structure.contours.push({
         slicePosition: currentSlicePosition,
         points: contourPoints,
         numberOfPoints: contourPoints.length / 3
       });
-      console.log('Created new contour');
     }
 
     onContourUpdate(updatedRTStructures);
@@ -155,7 +173,19 @@ export function SimpleBrushTool({
   // Mouse event handlers
   const handleMouseDown = (e: MouseEvent) => {
     console.log('Mouse down event:', { isActive, selectedStructure, button: e.button });
-    if (!isActive || !selectedStructure || e.button !== 0) return;
+    if (!isActive || !selectedStructure) return;
+    
+    if (e.button === 2) { // Right click - brush resizing
+      isRightMouseDown.current = true;
+      lastMousePos.current = {
+        x: e.clientX,
+        y: e.clientY
+      };
+      e.preventDefault();
+      return;
+    }
+    
+    if (e.button !== 0) return; // Only left click for drawing
     
     e.preventDefault();
     e.stopPropagation();
@@ -170,11 +200,52 @@ export function SimpleBrushTool({
     setIsDrawing(true);
     strokePoints.current = []; // Start new stroke
     currentBrushPolygon.current = []; // Clear accumulated brush stamps
+    lastMousePos.current = null; // Reset for continuous drawing
+    
+    // Store existing contour points so we can ADD to them, not replace
+    const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
+    if (structure) {
+      const tolerance = 2.0;
+      const existingContour = structure.contours.find((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
+      );
+      
+      if (existingContour && existingContour.points) {
+        // Convert existing DICOM points to our Point format
+        existingContourPoints.current = [];
+        for (let i = 0; i < existingContour.points.length; i += 3) {
+          existingContourPoints.current.push({
+            x: existingContour.points[i],
+            y: existingContour.points[i + 1]
+          });
+        }
+        console.log('Loaded', existingContourPoints.current.length, 'existing contour points');
+      } else {
+        existingContourPoints.current = [];
+        console.log('No existing contour found');
+      }
+    }
+    
     addBrushStroke(canvasPoint);
   };
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!isActive || !canvasRef.current) return;
+    
+    // Handle right-click brush resizing
+    if (isRightMouseDown.current && lastMousePos.current) {
+      const deltaY = lastMousePos.current.y - e.clientY; // Up = positive, Down = negative
+      const sizeChange = deltaY * 0.5; // Sensitivity factor
+      const newSize = Math.max(1, Math.min(50, currentBrushSize + sizeChange));
+      setCurrentBrushSize(newSize);
+      console.log('Brush size changed to:', newSize);
+      
+      lastMousePos.current = {
+        x: e.clientX,
+        y: e.clientY
+      };
+      return;
+    }
     
     const rect = canvasRef.current.getBoundingClientRect();
     const canvasPoint = {
