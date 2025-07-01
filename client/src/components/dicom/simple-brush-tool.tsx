@@ -138,8 +138,9 @@ export function SimpleBrushTool({
     
     lastMousePos.current = canvasPoint;
 
-    // Combine with existing contour (ADD mode, don't replace)
-    const allPoints = [...existingContourPoints.current, ...currentBrushPolygon.current];
+    // For now, only use the current brush stroke (complete slice isolation)
+    // This prevents contamination from other slices
+    const allPoints = [...currentBrushPolygon.current];
     
     // Convert to DICOM contour format
     const contourPoints: number[] = [];
@@ -204,30 +205,13 @@ export function SimpleBrushTool({
     currentBrushPolygon.current = []; // Clear accumulated brush stamps
     lastMousePos.current = null; // Reset for continuous drawing
     
-    // Store existing contour points for ONLY this exact slice - strict slice isolation
-    const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
-    if (structure) {
-      // Use stricter tolerance to ensure we only get contours for this exact slice
-      const tolerance = 0.1; // Much stricter - almost exact match
-      const existingContour = structure.contours.find((contour: any) => 
-        Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
-      );
-      
-      if (existingContour && existingContour.points) {
-        // Convert existing DICOM points to our Point format
-        existingContourPoints.current = [];
-        for (let i = 0; i < existingContour.points.length; i += 3) {
-          existingContourPoints.current.push({
-            x: existingContour.points[i],
-            y: existingContour.points[i + 1]
-          });
-        }
-        console.log(`Loaded ${existingContourPoints.current.length} existing contour points for slice ${currentSlicePosition}`);
-      } else {
-        existingContourPoints.current = [];
-        console.log(`No existing contour found for slice ${currentSlicePosition} - starting fresh`);
-      }
-    }
+    // COMPLETELY ISOLATE this slice - start fresh every time for now
+    // This prevents any cross-slice contamination
+    existingContourPoints.current = [];
+    console.log(`Starting completely fresh for slice ${currentSlicePosition} - no existing contours loaded`);
+    
+    // TODO: Later we can add proper slice-specific contour loading, but for now
+    // we ensure complete isolation to fix the propagation bug
     
     addBrushStroke(canvasPoint);
   };
