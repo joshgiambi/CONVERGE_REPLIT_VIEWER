@@ -209,8 +209,9 @@ export function UnifiedBrushTool({
   const handleMouseDown = (e: MouseEvent) => {
     if (!isActive || !selectedStructure) return;
     
+    // CRITICAL: Stop all event propagation to prevent WorkingViewer interference
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -218,8 +219,9 @@ export function UnifiedBrushTool({
     
     if (e.button === 2) { // Right click - start resizing
       setIsResizing(true);
-      setLastPoint({ x: e.clientX, y: e.clientY });
-      console.log('Brush tool starting resize mode');
+      // FIXED: Use canvas-relative coordinates to keep brush centered
+      setLastPoint({ x, y });
+      console.log('Brush tool starting resize mode at canvas pos:', { x, y });
       return;
     }
     
@@ -227,7 +229,7 @@ export function UnifiedBrushTool({
       setIsDrawing(true);
       brushModeRef.current = brushMode; // Lock brush mode for this stroke
       setCurrentStroke([{ x, y }]);
-      console.log('Brush tool mouse down:', { x, y, brushMode });
+      console.log('Brush tool drawing started at:', { x, y, brushMode });
     }
   };
 
@@ -240,30 +242,35 @@ export function UnifiedBrushTool({
     
     if (isResizing && lastPoint) {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       
-      const deltaY = lastPoint.y - e.clientY;
+      // FIXED: Calculate resize based on canvas-relative Y movement, keeping brush centered
+      const deltaY = lastPoint.y - y;
       const newSize = Math.max(1, Math.min(50, brushSize + deltaY * 0.5));
       onBrushSizeChange(newSize);
-      setLastPoint({ x: e.clientX, y: e.clientY });
-      console.log('Brush tool resizing:', { newSize });
+      // FIXED: Update lastPoint with canvas coordinates, not client coordinates
+      setLastPoint({ x, y });
+      console.log('Brush tool resizing:', { newSize, deltaY });
       return;
     }
     
     if (isDrawing) {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       
       setCurrentStroke(prev => {
         const newStroke = [...prev, { x, y }];
-        console.log('Brush tool drawing:', { x, y, strokeLength: newStroke.length });
+        console.log('Brush tool drawing stroke point:', { x, y, strokeLength: newStroke.length });
         return newStroke;
       });
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: MouseEvent) => {
     if (!isActive || !selectedStructure) return;
+    
+    e.preventDefault();
+    e.stopImmediatePropagation();
     
     if (isResizing) {
       setIsResizing(false);
@@ -273,7 +280,7 @@ export function UnifiedBrushTool({
     }
     
     if (isDrawing && rtStructures) {
-      console.log('Brush tool mouse up, stroke length:', currentStroke.length);
+      console.log('Brush tool completing stroke, length:', currentStroke.length);
       setIsDrawing(false);
       
       // Convert stroke to contour points and update RT structures
@@ -381,18 +388,22 @@ export function UnifiedBrushTool({
 
     const canvas = canvasRef.current;
     
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('mouseleave', handleMouseUp);
-    canvas.addEventListener('contextmenu', handleContextMenu);
+    // Use capture phase to intercept events before WorkingViewer gets them
+    canvas.addEventListener('mousedown', handleMouseDown, { capture: true });
+    canvas.addEventListener('mousemove', handleMouseMove, { capture: true });
+    canvas.addEventListener('mouseup', handleMouseUp, { capture: true });
+    canvas.addEventListener('mouseleave', handleMouseUp, { capture: true });
+    canvas.addEventListener('contextmenu', handleContextMenu, { capture: true });
+    
+    console.log('Brush tool event listeners registered with capture=true');
     
     return () => {
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('mouseleave', handleMouseUp);
-      canvas.removeEventListener('contextmenu', handleContextMenu);
+      canvas.removeEventListener('mousedown', handleMouseDown, { capture: true });
+      canvas.removeEventListener('mousemove', handleMouseMove, { capture: true });
+      canvas.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      canvas.removeEventListener('mouseleave', handleMouseUp, { capture: true });
+      canvas.removeEventListener('contextmenu', handleContextMenu, { capture: true });
+      console.log('Brush tool event listeners removed');
     };
   }, [isActive, isDrawing, isResizing, brushMode, selectedStructure, currentStroke, brushSize]);
 
