@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SimpleBrushTool } from './simple-brush-tool';
+import { OHIFBrushTool } from './ohif-brush-tool';
+import { BrushOperation } from '@shared/schema';
 
 interface WorkingViewerProps {
   seriesId: number;
