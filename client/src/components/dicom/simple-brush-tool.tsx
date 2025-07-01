@@ -29,7 +29,7 @@ export function SimpleBrushTool({
   currentImage,
   imageMetadata
 }: SimpleBrushToolProps) {
-  console.log('Brush active?', isActive);
+  console.log('SimpleBrushTool render:', { isActive, selectedStructure, brushSize });
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushMode, setBrushMode] = useState<'add' | 'delete'>('add');
   const [currentStroke, setCurrentStroke] = useState<{x: number, y: number}[]>([]);
