@@ -161,3 +161,87 @@ export type PacsConnection = typeof pacsConnections.$inferSelect;
 export type NetworkQuery = typeof networkQueries.$inferSelect;
 export type InsertPacsConnection = z.infer<typeof insertPacsConnectionSchema>;
 export type InsertNetworkQuery = z.infer<typeof insertNetworkQuerySchema>;
+
+// V2 Professional Contour System - Medical Grade Types
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface DisplayPoint {
+  x: number;
+  y: number;
+}
+
+// Polygon structures for medical-grade precision
+export type PolygonRing = Point[];
+export type Polygon = PolygonRing[];
+export type MultiPolygon = Polygon[];
+export type StructurePolygons = Map<number, MultiPolygon>;
+
+// Professional contour data structure
+export interface ContourData {
+  id: string;
+  slicePosition: number;
+  slicingMode: SlicingMode;
+  polygons: MultiPolygon;
+  metadata: {
+    sourceTime: number;
+    modifiedTime: number;
+    commitTime: number;
+  };
+}
+
+// Structure data with complete medical integration
+export interface StructureData {
+  id: string;
+  name: string;
+  roiNumber: number;
+  roiType: string;
+  color: [number, number, number];
+  contours: Map<number, ContourData>;
+  metadata: {
+    sourceTime: number;
+    modifiedTime: number;
+    commitTime: number;
+  };
+}
+
+// Medical slicing modes
+export enum SlicingMode {
+  I = 'I', // Sagittal
+  J = 'J', // Coronal  
+  K = 'K'  // Axial
+}
+
+// Brush operation types
+export enum BrushOperation {
+  ADDITIVE = 'ADDITIVE',
+  SUBTRACTIVE = 'SUBTRACTIVE'
+}
+
+// Commit status tracking
+export enum CommitStatus {
+  SOURCE = 'SOURCE',
+  COMMITTED = 'COMMITTED',
+  STAGED = 'STAGED'
+}
+
+// Professional DICOM metadata structure
+export interface DICOMImageMetadata {
+  imagePositionPatient: [number, number, number];
+  imageOrientationPatient: [number, number, number, number, number, number];
+  pixelSpacing: [number, number];
+  rows: number;
+  columns: number;
+  sliceThickness: number;
+  sliceLocation: number;
+  sopInstanceUID: string;
+  sopClassUID: string;
+}
