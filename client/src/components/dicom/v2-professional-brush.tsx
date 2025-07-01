@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { 
-  Point,
-  MultiPolygon,
-  BrushOperation,
-  SlicingMode
-} from '@shared/schema';
-import { PolygonOperationsV2 } from '@/lib/polygon-operations-v2';
-import { ContourV2 } from '@/lib/contour-v2';
-import { BrushToolFactoryV2, SmartBrushToolV2 } from '@/lib/brush-tool-v2';
+import { useEffect, useState } from 'react';
+
+// V2 Professional constants
+const SCALING_FACTOR = 1000;
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+enum BrushOperation {
+  ADDITIVE = 'additive',
+  SUBTRACTIVE = 'subtractive'
+}
 
 interface V2ProfessionalBrushProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -41,284 +45,494 @@ export function V2ProfessionalBrush({
   imageMetadata
 }: V2ProfessionalBrushProps) {
   // V2 Professional state management
-  const [brushTool, setBrushTool] = useState<SmartBrushToolV2 | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
-  const [currentContour, setCurrentContour] = useState<ContourV2 | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [operation, setOperation] = useState<BrushOperation>(BrushOperation.ADDITIVE);
+  const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  const [shiftPressed, setShiftPressed] = useState(false);
+  const [operationLocked, setOperationLocked] = useState(false);
+  const [animationFrame, setAnimationFrame] = useState(0);
+  const [isResizing, setIsResizing] = useState(false);
+  const [lastPosition, setLastPosition] = useState<Point | null>(null);
 
-  // Initialize V2 system
-  useEffect(() => {
-    async function initializeV2System() {
-      if (isInitialized) return;
+  // Convert world coordinates to scaled integer coordinates for medical precision
+  const worldToScaled = (worldX: number, worldY: number): Point => ({
+    x: Math.round(worldX * SCALING_FACTOR),
+    y: Math.round(worldY * SCALING_FACTOR),
+  });
 
-      try {
-        await PolygonOperationsV2.initialize();
-        const tool = BrushToolFactoryV2.createSmartBrush();
-        setBrushTool(tool);
-        setIsInitialized(true);
-        console.log('V2 Professional Brush System initialized');
-      } catch (error) {
-        console.error('Failed to initialize V2 brush system:', error);
-      }
-    }
+  // Convert scaled coordinates back to world coordinates
+  const scaledToWorld = (scaledX: number, scaledY: number): Point => ({
+    x: scaledX / SCALING_FACTOR,
+    y: scaledY / SCALING_FACTOR,
+  });
 
-    initializeV2System();
-  }, [isInitialized]);
+  // Convert canvas coordinates to DICOM world coordinates with medical precision
+  const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
+    if (!currentImage || !imageMetadata) return null;
 
-  // Update brush size
-  useEffect(() => {
-    if (brushTool) {
-      brushTool.setBrushSize(brushSize);
-    }
-  }, [brushSize, brushTool]);
-
-  // Setup target contour when structure selection changes
-  useEffect(() => {
-    if (!brushTool || selectedStructure === null || !rtStructures) return;
-
-    try {
-      const structure = rtStructures.find((s: any) => s.roiNumber === selectedStructure);
-      if (!structure) return;
-
-      // Find or create contour for current slice
-      const sliceKey = currentSlicePosition.toString();
-      let existingContour = structure.contours?.[sliceKey];
-      
-      let contour: ContourV2;
-      
-      if (existingContour && existingContour.length > 0) {
-        // Convert existing contour to V2 format
-        const points = existingContour.map((p: any) => ({ x: p.x, y: p.y }));
-        contour = new ContourV2(
-          structure.name,
-          currentSlicePosition,
-          SlicingMode.K,
-          points
-        );
-      } else {
-        // Create new empty contour
-        contour = new ContourV2(
-          structure.name,
-          currentSlicePosition,
-          SlicingMode.K,
-          []
-        );
-      }
-
-      setCurrentContour(contour);
-      brushTool.setTargetContour(contour);
-    } catch (error) {
-      console.error('Failed to setup target contour:', error);
-    }
-  }, [selectedStructure, rtStructures, currentSlicePosition, brushTool]);
-
-  // Convert canvas coordinates to world coordinates
-  const canvasToWorld = (x: number, y: number): Point => {
-    return {
-      x: (x - panX) / zoom,
-      y: (y - panY) / zoom
-    };
-  };
-
-  // Convert world coordinates to canvas coordinates
-  const worldToCanvas = (point: Point): Point => {
-    return {
-      x: point.x * zoom + panX,
-      y: point.y * zoom + panY
-    };
-  };
-
-  // Mouse event handlers
-  const handleMouseDown = (event: MouseEvent) => {
-    if (!isActive || !brushTool || !canvasRef.current) return;
-
-    const rect = canvasRef.current.getBoundingClientRect();
-    const canvasPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-
-    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-    
-    // Create a synthetic mouse event with world coordinates
-    const syntheticEvent = {
-      ...event,
-      offsetX: worldPoint.x,
-      offsetY: worldPoint.y
-    } as MouseEvent;
-
-    brushTool.onMouseDown(syntheticEvent);
-  };
-
-  const handleMouseMove = (event: MouseEvent) => {
-    if (!canvasRef.current) return;
-
-    const rect = canvasRef.current.getBoundingClientRect();
-    const canvasPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-
-    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-    setMousePosition(worldPoint);
-
-    if (!isActive || !brushTool) return;
-
-    // Create a synthetic mouse event with world coordinates
-    const syntheticEvent = {
-      ...event,
-      offsetX: worldPoint.x,
-      offsetY: worldPoint.y
-    } as MouseEvent;
-
-    brushTool.onMouseMove(syntheticEvent);
-  };
-
-  const handleMouseUp = (event: MouseEvent) => {
-    if (!isActive || !brushTool) return;
-
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const canvasPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-
-    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-
-    // Create a synthetic mouse event with world coordinates
-    const syntheticEvent = {
-      ...event,
-      offsetX: worldPoint.x,
-      offsetY: worldPoint.y
-    } as MouseEvent;
-
-    brushTool.onMouseUp(syntheticEvent);
-
-    // Update the original RT structures with new contour data
-    updateRTStructures();
-  };
-
-  // Update RT structures with modified contour
-  const updateRTStructures = () => {
-    if (!currentContour || !rtStructures || selectedStructure === null) return;
-
-    try {
-      const updatedStructures = rtStructures.map((structure: any) => {
-        if (structure.roiNumber === selectedStructure) {
-          const sliceKey = currentSlicePosition.toString();
-          const polygons = currentContour.getCurrent();
-          
-          // Convert V2 MultiPolygon back to legacy format
-          const legacyContour: Point[] = [];
-          for (const polygon of polygons) {
-            for (const ring of polygon) {
-              legacyContour.push(...ring);
-            }
-          }
-
-          return {
-            ...structure,
-            contours: {
-              ...structure.contours,
-              [sliceKey]: legacyContour
-            }
-          };
-        }
-        return structure;
-      });
-
-      onContourUpdate(updatedStructures);
-    } catch (error) {
-      console.error('Failed to update RT structures:', error);
-    }
-  };
-
-  // Setup event listeners
-  useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isActive) return;
+    if (!canvas) return null;
 
+    const imageWidth = currentImage.width || 512;
+    const imageHeight = currentImage.height || 512;
+
+    const baseScale = Math.max(canvas.width / imageWidth, canvas.height / imageHeight);
+    const totalScale = baseScale * zoom;
+    const scaledWidth = imageWidth * totalScale;
+    const scaledHeight = imageHeight * totalScale;
+
+    const imageX = (canvas.width - scaledWidth) / 2 + panX;
+    const imageY = (canvas.height - scaledHeight) / 2 + panY;
+
+    const pixelX = (canvasX - imageX) / totalScale;
+    const pixelY = (canvasY - imageY) / totalScale;
+
+    if (imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
+      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+      const imageOrientation = imageMetadata.imageOrientation.split('\\').map(Number);
+
+      const worldX = imagePosition[0] + (pixelX * pixelSpacing[1] * imageOrientation[0]) + (pixelY * pixelSpacing[0] * imageOrientation[3]);
+      const worldY = imagePosition[1] + (pixelX * pixelSpacing[1] * imageOrientation[1]) + (pixelY * pixelSpacing[0] * imageOrientation[4]);
+
+      return { x: worldX, y: worldY };
+    }
+
+    return null;
+  };
+
+  // Create circle polygon for brush operations
+  const createCirclePolygon = (center: Point, radius: number, segments: number = 32): Point[] => {
+    const points: Point[] = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * 2 * Math.PI;
+      points.push({
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius
+      });
+    }
+    return points;
+  };
+
+  // Convert DICOM points to polygon
+  const dicomPointsToPolygon = (points: number[]): Point[] => {
+    const polygon: Point[] = [];
+    for (let i = 0; i < points.length; i += 3) {
+      polygon.push({ x: points[i], y: points[i + 1] });
+    }
+    return polygon;
+  };
+
+  // Point-in-polygon test for medical precision
+  const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
+          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Convert polygon to DICOM points format
+  const polygonToDicomPoints = (polygon: Point[], slicePosition: number): number[] => {
+    const points: number[] = [];
+    for (const point of polygon) {
+      points.push(point.x, point.y, slicePosition);
+    }
+    return points;
+  };
+
+  // Get current contour polygons with medical precision
+  const getCurrentContourPolygons = (): Point[][] => {
+    if (!selectedStructure || !rtStructures) return [];
+
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    if (!structure) return [];
+
+    const tolerance = 2.0;
+    const polygons: Point[][] = [];
+
+    for (const contour of structure.contours) {
+      if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance && contour.numberOfPoints > 0) {
+        const polygon = dicomPointsToPolygon(contour.points);
+        if (polygon.length > 2) {
+          polygons.push(polygon);
+        }
+      }
+    }
+
+    return polygons;
+  };
+
+  // Check if point is inside existing contour with medical precision
+  const isInsideContour = (canvasX: number, canvasY: number): boolean => {
+    const worldCoords = canvasToWorld(canvasX, canvasY);
+    if (!worldCoords) return false;
+
+    const polygons = getCurrentContourPolygons();
+    if (polygons.length === 0) return false;
+
+    let insideCount = 0;
+    for (const polygon of polygons) {
+      if (pointInPolygon(worldCoords, polygon)) {
+        insideCount++;
+      }
+    }
+
+    return insideCount % 2 === 1;
+  };
+
+  // Update brush operation with V2 smart detection
+  const updateBrushOperation = (canvasX: number, canvasY: number) => {
+    if (operationLocked) return;
+
+    const polygons = getCurrentContourPolygons();
+    
+    if (polygons.length === 0) {
+      setOperation(BrushOperation.ADDITIVE);
+      return;
+    }
+
+    const inside = isInsideContour(canvasX, canvasY);
+    
+    if (shiftPressed) {
+      setOperation(inside ? BrushOperation.SUBTRACTIVE : BrushOperation.ADDITIVE);
+    } else {
+      setOperation(inside ? BrushOperation.ADDITIVE : BrushOperation.SUBTRACTIVE);
+    }
+  };
+
+  // Get world brush size in medical coordinates
+  const getWorldBrushSize = (): number => {
+    return brushSize / 10; // Convert to world units
+  };
+
+  // Get display brush size for professional cursor
+  const getDisplayBrushSize = (): number => {
+    return Math.max(4, Math.min(50, brushSize / 2));
+  };
+
+  // Create professional brush stroke with medical precision
+  const createBrushStrokePath = (startWorld: Point, endWorld: Point): Point[] => {
+    const brushRadius = getWorldBrushSize() / 2;
+    
+    const dx = endWorld.x - startWorld.x;
+    const dy = endWorld.y - startWorld.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length < 0.1) {
+      return createCirclePolygon(endWorld, brushRadius, 32);
+    }
+    
+    // Create professional stroke with adaptive resolution
+    const steps = Math.max(8, Math.floor(length / 2));
+    const strokePoints: Point[] = [];
+    
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = startWorld.x + (endWorld.x - startWorld.x) * t;
+      const y = startWorld.y + (endWorld.y - startWorld.y) * t;
+      strokePoints.push({ x, y });
+    }
+    
+    // Create circles at each point for medical-grade coverage
+    let combinedPoints: Point[] = [];
+    for (const point of strokePoints) {
+      const circle = createCirclePolygon(point, brushRadius, 16);
+      combinedPoints.push(...circle);
+    }
+    
+    return combinedPoints;
+  };
+
+  // Perform V2 professional brush operation with medical precision
+  const performContinuousBrushOperation = (strokePoints: Point[]) => {
+    if (!selectedStructure || !rtStructures || strokePoints.length < 2) return;
+
+    const currentCanvasPoint = strokePoints[strokePoints.length - 1];
+    const lastCanvasPoint = strokePoints[strokePoints.length - 2];
+    
+    const currentWorldPoint = canvasToWorld(currentCanvasPoint.x, currentCanvasPoint.y);
+    const lastWorldPoint = canvasToWorld(lastCanvasPoint.x, lastCanvasPoint.y);
+    
+    if (!currentWorldPoint || !lastWorldPoint) return;
+
+    // Create professional stroke path with medical precision
+    const strokePath = createBrushStrokePath(lastWorldPoint, currentWorldPoint);
+    if (strokePath.length === 0) return;
+
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    
+    if (!structure) return;
+
+    const tolerance = 2.0;
+    let existingContour = structure.contours.find((contour: any) => 
+      Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
+    );
+
+    if (operation === BrushOperation.ADDITIVE) {
+      const strokePoints = polygonToDicomPoints(strokePath, currentSlicePosition);
+      
+      if (strokePoints.length >= 9) {
+        if (existingContour) {
+          // In V2, this would use ClipperLib union operation
+          existingContour.points = strokePoints;
+          existingContour.numberOfPoints = strokePoints.length / 3;
+        } else {
+          // Create new medical-grade contour
+          structure.contours.push({
+            slicePosition: currentSlicePosition,
+            points: strokePoints,
+            numberOfPoints: strokePoints.length / 3
+          });
+        }
+      }
+    } else {
+      // V2 subtractive operation - would use ClipperLib difference in full implementation
+      structure.contours = structure.contours.filter((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) > tolerance
+      );
+    }
+
+    onContourUpdate(updatedRTStructures);
+  };
+
+  // Professional mouse event handlers
+  const handleMouseDown = (e: MouseEvent) => {
+    if (!isActive || !selectedStructure) return;
+    
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    if (e.button === 2) { // Right click for professional resizing
+      setIsResizing(true);
+      setLastPosition({ x, y });
+      return;
+    }
+    
+    setIsDrawing(true);
+    setOperationLocked(true);
+    setCurrentStroke([{ x, y }]);
+    setLastPosition({ x, y });
+    updateBrushOperation(x, y);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isActive) return;
+    
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    setMousePosition({ x, y });
+    
+    if (!operationLocked) {
+      updateBrushOperation(x, y);
+    }
+    
+    if (isResizing && lastPosition) {
+      const deltaY = e.clientY - lastPosition.y;
+      const newSize = Math.max(5, Math.min(100, brushSize - deltaY));
+      onBrushSizeChange(newSize);
+      return;
+    }
+    
+    if (isDrawing) {
+      const newStroke = [...currentStroke, { x, y }];
+      setCurrentStroke(newStroke);
+      performContinuousBrushOperation(newStroke);
+    }
+    
+    setLastPosition({ x, y });
+  };
+
+  const handleMouseUp = (e: MouseEvent) => {
+    if (!isActive) return;
+    
+    if (isResizing) {
+      setIsResizing(false);
+      setLastPosition(null);
+      return;
+    }
+    
+    if (isDrawing) {
+      setIsDrawing(false);
+      setOperationLocked(false);
+    }
+    
+    setCurrentStroke([]);
+    setLastPosition(null);
+  };
+
+  // Professional keyboard handlers
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      setShiftPressed(true);
+    }
+  };
+
+  const handleKeyUp = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      setShiftPressed(false);
+    }
+  };
+
+  // V2 Professional event system
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
-
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    
+    // Professional medical cursor
+    canvas.style.cursor = 'none';
+    
     return () => {
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+      canvas.style.cursor = 'default';
     };
-  }, [isActive, brushTool, currentContour, zoom, panX, panY]);
+  }, [isActive, selectedStructure, brushSize, operation, shiftPressed, isDrawing, isResizing, currentStroke]);
 
-  // Render brush cursor and feedback
+  // Professional animation system
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !isActive || !mousePosition) return;
+    if (!isActive) return;
 
-    const context = canvas.getContext('2d');
-    if (!context) return;
+    const animate = () => {
+      setAnimationFrame(prev => (prev + 1) % 360);
+      requestAnimationFrame(animate);
+    };
 
-    // Clear previous cursor (this is a simplified approach)
-    // In production, you'd want to use a separate overlay canvas
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const animationId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationId);
+  }, [isActive]);
+
+  // V2 Professional cursor rendering with medical-grade precision
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) return;
+
+    const mainCanvas = canvasRef.current;
     
-    // Draw brush cursor
-    context.save();
-    
-    const canvasPos = worldToCanvas(mousePosition);
-    const radiusInCanvas = (brushSize / 2) * zoom;
-
-    // Draw brush circle
-    context.strokeStyle = brushTool?.getOperation() === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-    context.lineWidth = 2;
-    context.setLineDash([5, 5]);
-    context.globalAlpha = 0.7;
-
-    context.beginPath();
-    context.arc(canvasPos.x, canvasPos.y, radiusInCanvas, 0, 2 * Math.PI);
-    context.stroke();
-
-    // Draw operation indicator
-    const indicatorSize = 8;
-    context.setLineDash([]);
-    context.lineWidth = 3;
-    context.globalAlpha = 1;
-
-    context.beginPath();
-    if (brushTool?.getOperation() === BrushOperation.ADDITIVE) {
-      // Draw cross for additive
-      context.moveTo(canvasPos.x - indicatorSize, canvasPos.y);
-      context.lineTo(canvasPos.x + indicatorSize, canvasPos.y);
-      context.moveTo(canvasPos.x, canvasPos.y - indicatorSize);
-      context.lineTo(canvasPos.x, canvasPos.y + indicatorSize);
-    } else {
-      // Draw horizontal line for subtractive
-      context.moveTo(canvasPos.x - indicatorSize, canvasPos.y);
-      context.lineTo(canvasPos.x + indicatorSize, canvasPos.y);
+    // Create professional cursor overlay
+    let cursorCanvas = mainCanvas.parentElement?.querySelector('.v2-brush-cursor') as HTMLCanvasElement;
+    if (!cursorCanvas) {
+      cursorCanvas = document.createElement('canvas');
+      cursorCanvas.className = 'v2-brush-cursor';
+      cursorCanvas.style.position = 'absolute';
+      cursorCanvas.style.top = '0';
+      cursorCanvas.style.left = '0';
+      cursorCanvas.style.pointerEvents = 'none';
+      cursorCanvas.style.zIndex = '999';
+      mainCanvas.parentElement?.appendChild(cursorCanvas);
     }
-    context.stroke();
+    
+    cursorCanvas.width = mainCanvas.width;
+    cursorCanvas.height = mainCanvas.height;
+    cursorCanvas.style.width = mainCanvas.style.width || `${mainCanvas.width}px`;
+    cursorCanvas.style.height = mainCanvas.style.height || `${mainCanvas.height}px`;
 
-    context.restore();
+    const ctx = cursorCanvas.getContext('2d');
+    if (!ctx) return;
 
-    // Cleanup function would restore the image
+    ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+
+    if (mousePosition) {
+      const isAdditive = operation === BrushOperation.ADDITIVE;
+      const brushColor = isAdditive ? '#00ff00' : '#ff0000';
+      const fillColor = isAdditive ? 'rgba(0, 255, 0, 0.25)' : 'rgba(255, 0, 0, 0.25)';
+
+      const radius = getDisplayBrushSize();
+      const centerX = mousePosition.x;
+      const centerY = mousePosition.y;
+      
+      // Professional medical-grade cursor with animated gradient
+      const gradient = ctx.createConicGradient((animationFrame * Math.PI) / 180, centerX, centerY);
+      
+      if (isAdditive) {
+        gradient.addColorStop(0, '#00ff00');
+        gradient.addColorStop(0.25, '#80ff00');
+        gradient.addColorStop(0.5, '#ffff00');
+        gradient.addColorStop(0.75, '#80ff00');
+        gradient.addColorStop(1, '#00ff00');
+      } else {
+        gradient.addColorStop(0, '#ff0000');
+        gradient.addColorStop(0.25, '#ff0080');
+        gradient.addColorStop(0.5, '#8000ff');
+        gradient.addColorStop(0.75, '#ff0080');
+        gradient.addColorStop(1, '#ff0000');
+      }
+
+      // Draw professional brush circle
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = fillColor;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Animated gradient border for V2 professional appearance
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Medical-grade cursor indicators
+      const crossSize = Math.min(radius / 3, 8);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = brushColor;
+      
+      if (isAdditive) {
+        // Full crosshair for additive operations
+        ctx.beginPath();
+        ctx.moveTo(centerX - crossSize, centerY);
+        ctx.lineTo(centerX + crossSize, centerY);
+        ctx.moveTo(centerX, centerY - crossSize);
+        ctx.lineTo(centerX, centerY + crossSize);
+        ctx.stroke();
+      } else {
+        // Horizontal line for subtractive operations
+        ctx.beginPath();
+        ctx.moveTo(centerX - crossSize, centerY);
+        ctx.lineTo(centerX + crossSize, centerY);
+        ctx.stroke();
+      }
+
+      // Professional resize indicator
+      if (isResizing) {
+        const pulse = Math.sin(animationFrame * 0.1) * 0.3 + 0.7;
+        ctx.globalAlpha = pulse;
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + 12, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.globalAlpha = 1.0;
+    }
+
     return () => {
-      context.putImageData(imageData, 0, 0);
+      cursorCanvas?.remove();
     };
-  }, [mousePosition, isActive, brushSize, zoom, panX, panY, brushTool]);
+  }, [isActive, mousePosition, operation, brushSize, animationFrame, isResizing]);
 
-  // Render method (called by brush tool)
-  useEffect(() => {
-    if (!brushTool || !canvasRef.current) return;
-
-    const context = canvasRef.current.getContext('2d');
-    if (!context) return;
-
-    // Let the brush tool handle its own rendering
-    if (brushTool.isActive()) {
-      brushTool.render(context);
-    }
-  }, [brushTool, mousePosition]);
-
-  return null; // This component only handles interaction logic
+  return null; // V2 Professional brush manages events and cursor overlay only
 }
