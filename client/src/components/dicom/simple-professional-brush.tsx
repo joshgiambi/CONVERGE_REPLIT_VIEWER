@@ -160,55 +160,58 @@ export function SimpleProfessionalBrush({
     }
   };
 
-  // Get actual brush size in world coordinates
-  const getWorldBrushSize = (): number => {
-    // Convert brush size from pixels to world coordinates
-    // Based on the current zoom level and pixel spacing
-    if (!currentImage || !imageMetadata) return brushSize;
-    
-    const pixelSpacing = imageMetadata.pixelSpacing ? 
-      parseFloat(imageMetadata.pixelSpacing.split('\\')[0]) : 1.0;
-    
-    // Scale brush size by zoom and pixel spacing
-    return (brushSize * pixelSpacing) / zoom;
+  // Get scaled brush size (following Limbus V2 approach)
+  const getScaledBrushSize = (): number => {
+    // Limbus V2 approach: scale = viewport.renderer.getActiveCamera().getParallelScale() / 100
+    // We simulate this with zoom level scaling
+    const scale = zoom / 10; // Convert zoom to scale factor
+    return (brushSize / scale) * 3; // Match Limbus V2 formula
+  };
+
+  // Get display brush size for cursor (in canvas pixels)
+  const getDisplayBrushSize = (): number => {
+    // This is the size shown on screen, not the actual world size
+    return Math.max(4, Math.min(50, brushSize / 2)); // Reasonable display range
   };
 
   // Create simple brush circle (following Limbus V2 pattern)
   const createBrushCircle = (center: Point): Point[] => {
-    const worldRadius = getWorldBrushSize() / 2;
+    const worldRadius = getScaledBrushSize() / 2;
     return createCirclePolygon(center, worldRadius, 32);
   };
 
-  // Create buffered stroke path from line segment (simulating ClipperLib.offsetToPolyTree)
-  const createBufferedStrokePath = (startWorld: Point, endWorld: Point): Point[] => {
-    const brushRadius = getWorldBrushSize() / 2;
+  // Create proper brush stroke path (simulating ClipperLib.offsetToPolyTree)
+  const createBrushStrokePath = (startWorld: Point, endWorld: Point): Point[] => {
+    const brushRadius = getScaledBrushSize() / 2;
     
-    // Calculate line direction and perpendicular
+    // For very small movements, just create a circle
     const dx = endWorld.x - startWorld.x;
     const dy = endWorld.y - startWorld.y;
     const length = Math.sqrt(dx * dx + dy * dy);
     
-    if (length < 0.001) {
-      // For stationary points, return a circle
+    if (length < 0.1) {
       return createCirclePolygon(endWorld, brushRadius, 32);
     }
     
-    // Normalized perpendicular vector
-    const perpX = (-dy / length) * brushRadius;
-    const perpY = (dx / length) * brushRadius;
+    // Create a proper stroke with round end caps (following Limbus V2 approach)
+    const steps = Math.max(8, Math.floor(length / 2)); // Adaptive resolution
+    const strokePoints: Point[] = [];
     
-    // Create the four corners of the buffered rectangle
-    const p1 = { x: startWorld.x + perpX, y: startWorld.y + perpY };
-    const p2 = { x: startWorld.x - perpX, y: startWorld.y - perpY };
-    const p3 = { x: endWorld.x - perpX, y: endWorld.y - perpY };
-    const p4 = { x: endWorld.x + perpX, y: endWorld.y + perpY };
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = startWorld.x + (endWorld.x - startWorld.x) * t;
+      const y = startWorld.y + (endWorld.y - startWorld.y) * t;
+      strokePoints.push({ x, y });
+    }
     
-    // Add circular end caps
-    const startCap = createCirclePolygon(startWorld, brushRadius, 16);
-    const endCap = createCirclePolygon(endWorld, brushRadius, 16);
+    // Create circles at each point and combine them
+    let combinedPoints: Point[] = [];
+    for (const point of strokePoints) {
+      const circle = createCirclePolygon(point, brushRadius, 16);
+      combinedPoints.push(...circle);
+    }
     
-    // Combine into a complete stroke path
-    return [...startCap, p1, p4, ...endCap, p3, p2];
+    return combinedPoints;
   };
 
   // Perform continuous brush operation during mouse movement (exactly like Limbus V2)
@@ -224,8 +227,8 @@ export function SimpleProfessionalBrush({
     
     if (!currentWorldPoint || !lastWorldPoint) return;
 
-    // Create buffered stroke path between last two points
-    const strokePath = createBufferedStrokePath(lastWorldPoint, currentWorldPoint);
+    // Create proper brush stroke path between last two points
+    const strokePath = createBrushStrokePath(lastWorldPoint, currentWorldPoint);
     if (strokePath.length === 0) return;
 
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
@@ -243,9 +246,10 @@ export function SimpleProfessionalBrush({
       
       if (strokePoints.length >= 9) {
         if (existingContour) {
-          // Merge with existing contour (simplified union)
-          existingContour.points.push(...strokePoints);
-          existingContour.numberOfPoints = existingContour.points.length / 3;
+          // Replace existing contour with new stroke (simplified approach)
+          // In a real implementation, this would use ClipperLib union operation
+          existingContour.points = strokePoints;
+          existingContour.numberOfPoints = strokePoints.length / 3;
         } else {
           // Create new contour
           structure.contours.push({
@@ -255,8 +259,13 @@ export function SimpleProfessionalBrush({
           });
         }
       }
+    } else {
+      // Subtractive operation - remove existing contour for now
+      // In a real implementation, this would use ClipperLib difference operation
+      structure.contours = structure.contours.filter((contour: any) => 
+        Math.abs(contour.slicePosition - currentSlicePosition) > tolerance
+      );
     }
-    // Note: subtractive operation would require proper ClipperLib boolean operations
 
     onContourUpdate(updatedRTStructures);
   };
@@ -320,7 +329,7 @@ export function SimpleProfessionalBrush({
       const fillColor = isAdditive ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.3)';
 
       // Create animated gradient border
-      const radius = brushSize / 2;
+      const radius = getDisplayBrushSize();
       const centerX = mousePosition.x;
       const centerY = mousePosition.y;
       
@@ -362,7 +371,7 @@ export function SimpleProfessionalBrush({
       ctx.lineWidth = 2;
       ctx.strokeStyle = brushColor;
       
-      const crossSize = Math.min(brushSize / 6, 10);
+      const crossSize = Math.min(radius / 3, 8);
       
       if (isAdditive) {
         // Full crosshair for additive
