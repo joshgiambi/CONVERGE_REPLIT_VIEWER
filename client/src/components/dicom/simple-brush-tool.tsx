@@ -62,7 +62,7 @@ export function SimpleBrushTool({
     setCurrentBrushSize(brushSize);
   }, [brushSize]);
 
-  // Create separate cursor canvas for better performance
+  // Create separate cursor canvas for better performance with stable sizing
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -81,10 +81,18 @@ export function SimpleBrushTool({
     }
     
     const cursorCanvas = cursorCanvasRef.current;
+    
+    // Get the computed styles to avoid flashing issues
+    const computedStyle = window.getComputedStyle(mainCanvas);
+    const rect = mainCanvas.getBoundingClientRect();
+    
+    // Set canvas dimensions to match main canvas exactly
     cursorCanvas.width = mainCanvas.width;
     cursorCanvas.height = mainCanvas.height;
-    cursorCanvas.style.width = mainCanvas.style.width || `${mainCanvas.width}px`;
-    cursorCanvas.style.height = mainCanvas.style.height || `${mainCanvas.height}px`;
+    cursorCanvas.style.width = computedStyle.width;
+    cursorCanvas.style.height = computedStyle.height;
+    cursorCanvas.style.left = `${rect.left - mainCanvas.parentElement!.getBoundingClientRect().left}px`;
+    cursorCanvas.style.top = `${rect.top - mainCanvas.parentElement!.getBoundingClientRect().top}px`;
 
     return () => {
       if (cursorCanvasRef.current) {
@@ -93,6 +101,22 @@ export function SimpleBrushTool({
       }
     };
   }, [isActive]);
+
+  // Update cursor canvas positioning when zoom/pan changes
+  useEffect(() => {
+    if (!cursorCanvasRef.current || !canvasRef.current || !isActive) return;
+    
+    const mainCanvas = canvasRef.current;
+    const cursorCanvas = cursorCanvasRef.current;
+    const computedStyle = window.getComputedStyle(mainCanvas);
+    const rect = mainCanvas.getBoundingClientRect();
+    
+    // Update positioning to match main canvas
+    cursorCanvas.style.width = computedStyle.width;
+    cursorCanvas.style.height = computedStyle.height;
+    cursorCanvas.style.left = `${rect.left - mainCanvas.parentElement!.getBoundingClientRect().left}px`;
+    cursorCanvas.style.top = `${rect.top - mainCanvas.parentElement!.getBoundingClientRect().top}px`;
+  }, [zoom, panX, panY, isActive]);
 
   // Professional DICOM coordinate transformation with medical scaling
   const canvasToWorld = useCallback((canvasX: number, canvasY: number): Point | null => {
@@ -555,7 +579,23 @@ export function SimpleBrushTool({
     setStrokePoints([]);
   }, [isDrawing, strokePoints, applyBrushStroke]);
 
-  // Mouse event handlers
+  // Wheel event handler for brush size adjustment
+  const handleWheel = useCallback((event: WheelEvent) => {
+    if (!isActive || !ctrlPressed) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const delta = event.deltaY > 0 ? -2 : 2;
+    const newSize = clamp(currentBrushSize + delta, 1, 100);
+    
+    setCurrentBrushSize(newSize);
+    if (onBrushSizeChange) {
+      onBrushSizeChange(newSize);
+    }
+  }, [isActive, ctrlPressed, currentBrushSize, onBrushSizeChange]);
+
+  // Mouse event handlers with wheel support
   useEffect(() => {
     if (!canvasRef.current || !isActive) return;
 
@@ -565,16 +605,18 @@ export function SimpleBrushTool({
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
 
     return () => {
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
+      canvas.removeEventListener('wheel', handleWheel);
     };
-  }, [isActive, handleMouseMove, handleMouseDown, handleMouseUp]);
+  }, [isActive, handleMouseMove, handleMouseDown, handleMouseUp, handleWheel]);
 
-  // Render brush cursor on separate canvas (eliminates flashing)
+  // Professional brush cursor rendering with proper scaling
   useEffect(() => {
     if (!cursorCanvasRef.current || !mousePosition || !isActive) return;
 
@@ -584,37 +626,77 @@ export function SimpleBrushTool({
     // Clear previous cursor
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
     
-    // Draw brush cursor
-    ctx.save();
-    ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]);
+    const centerX = mousePosition.x;
+    const centerY = mousePosition.y;
     
+    // Calculate brush radius in canvas pixels - this is the key fix
+    // The brush size should be scaled by zoom to maintain consistent world size
+    const brushRadiusInCanvas = (currentBrushSize * zoom) / 2;
+    
+    ctx.save();
+    
+    // Professional operation color coding
+    const operationColor = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+    const locked = operationLocked && isDrawing;
+    
+    // Professional brush circle with proper scaling
+    ctx.strokeStyle = operationColor;
+    ctx.lineWidth = locked ? 4 : 2;
+    ctx.setLineDash(locked ? [] : [3, 3]);
+    ctx.globalAlpha = locked ? 1.0 : 0.8;
+    
+    // Main brush circle - properly scaled
     ctx.beginPath();
-    ctx.arc(mousePosition.x, mousePosition.y, currentBrushSize / 2, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, Math.max(2, brushRadiusInCanvas), 0, 2 * Math.PI);
     ctx.stroke();
-
-    // Draw operation indicator
-    const size = 8;
+    
+    // Inner precision indicator
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, Math.max(1, brushRadiusInCanvas * 0.1), 0, 2 * Math.PI);
+    ctx.stroke();
+    
+    // Professional operation indicator
     ctx.setLineDash([]);
     ctx.lineWidth = 3;
-
-    ctx.beginPath();
+    ctx.globalAlpha = 1.0;
+    ctx.strokeStyle = operationColor;
+    
+    const signSize = Math.min(brushRadiusInCanvas / 3, 12);
+    
     if (operation === BrushOperation.ADDITIVE) {
-      // Draw cross for additive
-      ctx.moveTo(mousePosition.x - size, mousePosition.y);
-      ctx.lineTo(mousePosition.x + size, mousePosition.y);
-      ctx.moveTo(mousePosition.x, mousePosition.y - size);
-      ctx.lineTo(mousePosition.x, mousePosition.y + size);
+      // Plus sign for additive
+      ctx.beginPath();
+      ctx.moveTo(centerX - signSize, centerY);
+      ctx.lineTo(centerX + signSize, centerY);
+      ctx.moveTo(centerX, centerY - signSize);
+      ctx.lineTo(centerX, centerY + signSize);
+      ctx.stroke();
     } else {
-      // Draw horizontal line for subtractive
-      ctx.moveTo(mousePosition.x - size, mousePosition.y);
-      ctx.lineTo(mousePosition.x + size, mousePosition.y);
+      // Minus sign for subtractive
+      ctx.beginPath();
+      ctx.moveTo(centerX - signSize, centerY);
+      ctx.lineTo(centerX + signSize, centerY);
+      ctx.stroke();
     }
-    ctx.stroke();
-
+    
+    // Professional HUD display
+    ctx.fillStyle = operationColor;
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(`${Math.round(currentBrushSize)}px`, 10, 20);
+    
+    const modeText = operation === BrushOperation.ADDITIVE ? 'ADD' : 'SUB';
+    ctx.fillText(modeText, 10, 40);
+    
+    if (locked) {
+      ctx.fillStyle = '#ffff00';
+      ctx.fillText('LOCKED', 10, 60);
+    }
+    
     ctx.restore();
-  }, [mousePosition, currentBrushSize, operation, isActive]);
+  }, [mousePosition, currentBrushSize, operation, isActive, operationLocked, isDrawing, zoom]);
 
   return null; // This component renders directly to the canvas
 }
