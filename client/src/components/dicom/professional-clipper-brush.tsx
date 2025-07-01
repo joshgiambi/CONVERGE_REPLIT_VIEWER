@@ -1,5 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
+// Import ClipperLib API correctly based on documentation
+import { 
+  ClipType, 
+  JoinType, 
+  EndType, 
+  PolyFillType, 
+  PointInPolygonResult,
+  Path,
+  Paths,
+  ClipperLibWrapper,
+  loadNativeClipperLibInstanceAsync,
+  NativeClipperLibRequestedFormat
+} from 'js-angusj-clipper/web';
+
 // Medical imaging scaling factor for precision (matches Limbus V2)
 const SCALING_FACTOR = 1000;
 
@@ -54,22 +68,29 @@ export function ProfessionalClipperBrush({
   const [shiftPressed, setShiftPressed] = useState(false);
   const [ctrlPressed, setCtrlPressed] = useState(false);
   const [fillMode, setFillMode] = useState(true);
-  const [clipperLib, setClipperLib] = useState<any>(null);
+  const [clipperLib, setClipperLib] = useState<ClipperLibWrapper | null>(null);
 
-  // Initialize ClipperLib
+  // Initialize ClipperLib with async loading (required pattern)
   useEffect(() => {
+    let mounted = true;
+    
     const initClipperLib = async () => {
       try {
-        // Import ClipperLib dynamically
-        const { ClipperLib } = await import('js-angusj-clipper/web');
-        setClipperLib(ClipperLib);
-        console.log('Professional ClipperLib loaded successfully');
+        const lib = await loadNativeClipperLibInstanceAsync(NativeClipperLibRequestedFormat.WasmWithAsmJsFallback);
+        if (mounted) {
+          setClipperLib(lib);
+          console.log('Professional ClipperLib loaded successfully');
+        }
       } catch (error) {
         console.error('Failed to load ClipperLib:', error);
       }
     };
 
     initClipperLib();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Create brush circle (32-point professional standard)
@@ -186,8 +207,6 @@ export function ProfessionalClipperBrush({
 
   // Professional point-in-polygon test using ClipperLib
   const isInsideContour = (canvasX: number, canvasY: number): boolean => {
-    if (!clipperLib) return false;
-    
     const worldCoords = canvasToWorld(canvasX, canvasY);
     if (!worldCoords) return false;
 
@@ -199,8 +218,8 @@ export function ProfessionalClipperBrush({
     let insideCount = 0;
     for (const polygon of polygons) {
       try {
-        const result = clipperLib.pointInPolygon(testPoint, polygon);
-        if (result === clipperLib.PointInPolygonResult.Inside) {
+        const result = pointInPolygon(testPoint, polygon);
+        if (result === PointInPolygonResult.Inside) {
           insideCount++;
         }
       } catch (error) {
