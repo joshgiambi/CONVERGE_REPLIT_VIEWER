@@ -431,11 +431,16 @@ export function SimpleBrushTool({
     console.log('applyBrushStroke called with:', {
       pointsCount: worldPoints.length,
       selectedStructure,
-      hasRTStructures: !!rtStructures
+      hasRTStructures: !!rtStructures,
+      currentSlicePosition
     });
 
     if (worldPoints.length === 0 || !selectedStructure || !rtStructures) {
-      console.log('Early return due to missing data');
+      console.log('Early return due to missing data:', {
+        pointsCount: worldPoints.length,
+        selectedStructure,
+        hasRTStructures: !!rtStructures
+      });
       return;
     }
 
@@ -489,11 +494,21 @@ export function SimpleBrushTool({
         });
       }
 
+      console.log('Calling onContourUpdate with updated structures');
       onContourUpdate(updatedRTStructures);
     } catch (error) {
       console.error('Error applying brush stroke:', error);
     }
   }, [selectedStructure, rtStructures, currentSlicePosition, onContourUpdate, currentBrushSize, operation, zoom, createBrushPolygon, performPolygonOperation, createBrushStroke, getStructure, getContour]);
+
+  // Debug log when selectedStructure changes
+  useEffect(() => {
+    console.log('SimpleBrushTool: selectedStructure changed to:', selectedStructure);
+    if (selectedStructure && rtStructures) {
+      const structure = getStructure(rtStructures, selectedStructure);
+      console.log('Found structure:', structure?.structureName || structure?.roiName || 'Unknown');
+    }
+  }, [selectedStructure, rtStructures, getStructure]);
 
   // Keyboard event handlers
   useEffect(() => {
@@ -562,6 +577,18 @@ export function SimpleBrushTool({
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!isActive || event.button !== 0) return; // Only left mouse button when active
 
+    console.log('Mouse down - checking requirements:', {
+      isActive,
+      selectedStructure,
+      hasRTStructures: !!rtStructures,
+      currentSlicePosition
+    });
+
+    if (!selectedStructure) {
+      console.warn('No structure selected for editing!');
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
 
@@ -576,13 +603,13 @@ export function SimpleBrushTool({
 
     const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
     if (worldPos) {
-      console.log('Starting brush stroke at:', worldPos);
+      console.log('Starting brush stroke at:', worldPos, 'for structure:', selectedStructure);
       setIsDrawing(true);
       setOperationLocked(true);
       setLastWorldPosition(worldPos);
       setStrokePoints([worldPos]);
     }
-  }, [canvasToWorld, isActive]);
+  }, [canvasToWorld, isActive, selectedStructure, rtStructures, currentSlicePosition]);
 
   const handleMouseUp = useCallback(() => {
     if (!isActive) return;
