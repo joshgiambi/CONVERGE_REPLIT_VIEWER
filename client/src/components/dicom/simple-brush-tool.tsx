@@ -190,7 +190,7 @@ export function SimpleBrushTool({
     return null;
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: MouseEvent) => {
     if (!isActive || !selectedStructure) return;
     
     e.preventDefault();
@@ -204,9 +204,10 @@ export function SimpleBrushTool({
     const y = e.clientY - rect.top;
     
     setCurrentStroke([{ x, y }]);
+    console.log('Brush tool mouse down:', { x, y, brushMode });
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleMouseMove = (e: MouseEvent) => {
     if (!isDrawing || !isActive || !selectedStructure) return;
     
     e.preventDefault();
@@ -216,12 +217,17 @@ export function SimpleBrushTool({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    setCurrentStroke(prev => [...prev, { x, y }]);
+    setCurrentStroke(prev => {
+      const newStroke = [...prev, { x, y }];
+      console.log('Brush tool drawing:', { x, y, strokeLength: newStroke.length });
+      return newStroke;
+    });
   };
 
   const handleMouseUp = () => {
     if (!isDrawing || !selectedStructure || !rtStructures) return;
     
+    console.log('Brush tool mouse up, stroke length:', currentStroke.length);
     setIsDrawing(false);
     
     // Convert stroke to contour points and update RT structures
@@ -323,14 +329,14 @@ export function SimpleBrushTool({
 
     const canvas = canvasRef.current;
     
-    canvas.addEventListener('mousedown', handleMouseDown as any);
-    canvas.addEventListener('mousemove', handleMouseMove as any);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
     
     return () => {
-      canvas.removeEventListener('mousedown', handleMouseDown as any);
-      canvas.removeEventListener('mousemove', handleMouseMove as any);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
     };

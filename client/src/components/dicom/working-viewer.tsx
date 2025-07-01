@@ -640,11 +640,14 @@ export function WorkingViewer({
 
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
     // Check if brush tool is active - if so, skip pan functionality
     const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    
+    // Only prevent default and stop propagation if brush tool is NOT active
+    if (!isBrushActive) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     
     if (e.button === 0 && !isBrushActive) { // Left click for pan (disabled during brush mode)
       setIsDragging(true);
@@ -683,6 +686,7 @@ export function WorkingViewer({
     // Skip pan functionality if brush tool is active
     const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
     
+    // Only handle pan if brush tool is NOT active
     if (isDragging && !isBrushActive) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
