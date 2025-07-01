@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { SimpleProfessionalBrush } from './simple-professional-brush';
+import { V2ProfessionalBrush } from './v2-professional-brush';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -863,7 +863,7 @@ export function WorkingViewer({
           
           {/* Simple Professional Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <SimpleProfessionalBrush
+            <V2ProfessionalBrush
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}

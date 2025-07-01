@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { pointInPolygon, createCirclePolygon, polygonToDicomPoints, dicomPointsToPolygon, Point } from '@/lib/polygon-utils';
-
-// Medical imaging scaling factor for precision
-const SCALING_FACTOR = 1000;
-
-export enum BrushOperation {
-  ADDITIVE = 'ADDITIVE',
-  SUBTRACTIVE = 'SUBTRACTIVE',
-}
+import { 
+  Point,
+  MultiPolygon,
+  BrushOperation,
+  SlicingMode
+} from '@shared/schema';
+import { PolygonOperationsV2 } from '@/lib/polygon-operations-v2';
+import { ContourV2 } from '@/lib/contour-v2';
+import { BrushToolFactoryV2, SmartBrushToolV2 } from '@/lib/brush-tool-v2';
+import { StructureSetEntityV2 } from '@/lib/structure-set-v2';
 
 interface SimpleProfessionalBrushProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -40,14 +41,11 @@ export function SimpleProfessionalBrush({
   currentImage,
   imageMetadata
 }: SimpleProfessionalBrushProps) {
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const [operation, setOperation] = useState<BrushOperation>(BrushOperation.ADDITIVE);
-  const [operationLocked, setOperationLocked] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  // V2 Professional state management
+  const [brushTool, setBrushTool] = useState<SmartBrushToolV2 | null>(null);
+  const [structureSet, setStructureSet] = useState<StructureSetEntityV2 | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
-  const [lastPosition, setLastPosition] = useState<Point | null>(null);
-  const [shiftPressed, setShiftPressed] = useState(false);
   const [ctrlPressed, setCtrlPressed] = useState(false);
   const [animationFrame, setAnimationFrame] = useState(0);
 
