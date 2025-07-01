@@ -62,6 +62,38 @@ export function SimpleBrushTool({
     setCurrentBrushSize(brushSize);
   }, [brushSize]);
 
+  // Create separate cursor canvas for better performance
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) return;
+
+    const mainCanvas = canvasRef.current;
+    
+    if (!cursorCanvasRef.current) {
+      const cursorCanvas = document.createElement('canvas');
+      cursorCanvas.className = 'brush-cursor';
+      cursorCanvas.style.position = 'absolute';
+      cursorCanvas.style.top = '0';
+      cursorCanvas.style.left = '0';
+      cursorCanvas.style.pointerEvents = 'none';
+      cursorCanvas.style.zIndex = '1000';
+      mainCanvas.parentElement?.appendChild(cursorCanvas);
+      cursorCanvasRef.current = cursorCanvas;
+    }
+    
+    const cursorCanvas = cursorCanvasRef.current;
+    cursorCanvas.width = mainCanvas.width;
+    cursorCanvas.height = mainCanvas.height;
+    cursorCanvas.style.width = mainCanvas.style.width || `${mainCanvas.width}px`;
+    cursorCanvas.style.height = mainCanvas.style.height || `${mainCanvas.height}px`;
+
+    return () => {
+      if (cursorCanvasRef.current) {
+        cursorCanvasRef.current.remove();
+        cursorCanvasRef.current = null;
+      }
+    };
+  }, [isActive]);
+
   // Professional DICOM coordinate transformation with medical scaling
   const canvasToWorld = useCallback((canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !canvasRef.current) return null;
@@ -346,22 +378,38 @@ export function SimpleBrushTool({
     }
   }, [isInsideContour, shiftPressed, operationLocked]);
 
+  // Helper functions for data structure handling
+  const getStructure = useCallback((rtStructures: any, selectedStructure: number) => {
+    if (rtStructures.structures) {
+      return rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    } else if (rtStructures.roiContourSequence) {
+      return rtStructures.roiContourSequence.find((s: any) => s.roiNumber === selectedStructure);
+    } else if (Array.isArray(rtStructures)) {
+      return rtStructures.find((s: any) => s.roiNumber === selectedStructure);
+    }
+    return null;
+  }, []);
+
+  const getContour = useCallback((structure: any, slicePosition: number) => {
+    if (structure.contourSequence) {
+      return structure.contourSequence.find((contour: any) => 
+        contour.slicePosition === slicePosition
+      );
+    } else if (structure.contours) {
+      return structure.contours.find((contour: any) => 
+        Math.abs(contour.slicePosition - slicePosition) <= 2.0
+      );
+    }
+    return null;
+  }, []);
+
   // Apply brush stroke to RT structure data
   const applyBrushStroke = useCallback((worldPoints: Point[]) => {
     if (worldPoints.length === 0 || !selectedStructure || !rtStructures) return;
 
     try {
       const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
-      
-      // Handle different RT structure formats
-      let structure;
-      if (updatedRTStructures.structures) {
-        structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-      } else if (updatedRTStructures.roiContourSequence) {
-        structure = updatedRTStructures.roiContourSequence.find((s: any) => s.roiNumber === selectedStructure);
-      } else {
-        structure = updatedRTStructures.find((s: any) => s.roiNumber === selectedStructure);
-      }
+      const structure = getStructure(updatedRTStructures, selectedStructure);
       
       if (!structure) return;
 
@@ -371,12 +419,20 @@ export function SimpleBrushTool({
       }
 
       // Find exact slice match (DICOM standard)
-      let existingContour = structure.contourSequence.find((contour: any) => 
-        contour.slicePosition === currentSlicePosition
-      );
+      let existingContour = getContour(structure, currentSlicePosition);
 
-      // Create brush polygon
-      const brushPolygon = createBrushPolygon(worldPoints[0], currentBrushSize / zoom);
+      // Create brush stroke path from accumulated points
+      let brushPolygon: Point[] = [];
+      if (worldPoints.length === 1) {
+        // Single point - create circle
+        brushPolygon = createBrushPolygon(worldPoints[0], currentBrushSize / (2 * zoom));
+      } else {
+        // Multiple points - create stroke path
+        for (let i = 0; i < worldPoints.length - 1; i++) {
+          const strokeSegment = createBrushStroke(worldPoints[i], worldPoints[i + 1], currentBrushSize / (2 * zoom));
+          brushPolygon = brushPolygon.concat(strokeSegment);
+        }
+      }
       
       if (existingContour) {
         // Apply professional polygon operation
@@ -402,7 +458,7 @@ export function SimpleBrushTool({
     } catch (error) {
       console.error('Error applying brush stroke:', error);
     }
-  }, [selectedStructure, rtStructures, currentSlicePosition, onContourUpdate, currentBrushSize, operation, zoom, createBrushPolygon, performPolygonOperation]);
+  }, [selectedStructure, rtStructures, currentSlicePosition, onContourUpdate, currentBrushSize, operation, zoom, createBrushPolygon, performPolygonOperation, createBrushStroke, getStructure, getContour]);
 
   // Keyboard event handlers
   useEffect(() => {
@@ -441,63 +497,69 @@ export function SimpleBrushTool({
     };
   }, [isActive, ctrlPressed, currentBrushSize, onBrushSizeChange]);
 
+  // Mouse event handlers with proper useCallback
+  const handleMouseMove = useCallback((event: MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const canvasPos = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+    
+    setMousePosition(canvasPos);
+    
+    const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
+    if (worldPos) {
+      updateBrushOperation(worldPos);
+      
+      if (isDrawing && lastWorldPosition) {
+        // Add point to stroke
+        setStrokePoints(prev => [...prev, worldPos]);
+        setLastWorldPosition(worldPos);
+      }
+    }
+  }, [canvasToWorld, updateBrushOperation, isDrawing, lastWorldPosition]);
+
+  const handleMouseDown = useCallback((event: MouseEvent) => {
+    if (event.button !== 0) return; // Only left mouse button
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const canvasPos = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+    
+    const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
+    if (worldPos) {
+      setIsDrawing(true);
+      setOperationLocked(true);
+      setLastWorldPosition(worldPos);
+      setStrokePoints([worldPos]);
+    }
+  }, [canvasToWorld]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isDrawing && strokePoints.length > 0) {
+      // Apply complete stroke
+      applyBrushStroke(strokePoints);
+    }
+    
+    setIsDrawing(false);
+    setOperationLocked(false);
+    setLastWorldPosition(null);
+    setStrokePoints([]);
+  }, [isDrawing, strokePoints, applyBrushStroke]);
+
   // Mouse event handlers
   useEffect(() => {
     if (!canvasRef.current || !isActive) return;
 
     const canvas = canvasRef.current;
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const canvasPos = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
-      };
-      
-      setMousePosition(canvasPos);
-      
-      const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
-      if (worldPos) {
-        updateBrushOperation(worldPos);
-        
-        if (isDrawing && lastWorldPosition) {
-          const brushStroke = createBrushStroke(lastWorldPosition, worldPos, currentBrushSize / (2 * zoom));
-          if (brushStroke.length > 0) {
-            applyBrushStroke([worldPos]);
-          }
-          setLastWorldPosition(worldPos);
-        }
-      }
-    };
-
-    const handleMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0) return; // Only left mouse button
-      
-      const rect = canvas.getBoundingClientRect();
-      const canvasPos = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
-      };
-      
-      const worldPos = canvasToWorld(canvasPos.x, canvasPos.y);
-      if (worldPos) {
-        setIsDrawing(true);
-        setOperationLocked(true);
-        setLastWorldPosition(worldPos);
-        setStrokePoints([worldPos]);
-        
-        // Apply initial brush stroke
-        const brushPolygon = createBrushPolygon(worldPos, currentBrushSize / (2 * zoom));
-        applyBrushStroke([worldPos]);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDrawing(false);
-      setOperationLocked(false);
-      setLastWorldPosition(null);
-      setStrokePoints([]);
-    };
 
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
@@ -510,19 +572,18 @@ export function SimpleBrushTool({
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
     };
-  }, [canvasRef, isActive, canvasToWorld, updateBrushOperation, isDrawing, lastWorldPosition, currentBrushSize, zoom, createBrushPolygon, applyBrushStroke, createBrushStroke]);
+  }, [isActive, handleMouseMove, handleMouseDown, handleMouseUp]);
 
-  // Render brush cursor
+  // Render brush cursor on separate canvas (eliminates flashing)
   useEffect(() => {
-    if (!canvasRef.current || !isActive || !mousePosition) return;
+    if (!cursorCanvasRef.current || !mousePosition || !isActive) return;
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = cursorCanvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Store original canvas state
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
+    // Clear previous cursor
+    ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
+    
     // Draw brush cursor
     ctx.save();
     ctx.strokeStyle = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
@@ -553,16 +614,6 @@ export function SimpleBrushTool({
     ctx.stroke();
 
     ctx.restore();
-
-    // Clean up after a short delay
-    const cleanup = setTimeout(() => {
-      ctx.putImageData(imageData, 0, 0);
-    }, 16);
-
-    return () => {
-      clearTimeout(cleanup);
-      ctx.putImageData(imageData, 0, 0);
-    };
   }, [mousePosition, currentBrushSize, operation, isActive]);
 
   return null; // This component renders directly to the canvas
