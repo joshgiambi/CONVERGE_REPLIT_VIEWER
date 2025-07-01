@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { ClipperBrushTool } from './clipper-brush-tool';
+import { UnifiedBrushTool } from './unified-brush-tool';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -861,9 +861,9 @@ export function WorkingViewer({
             }}
           />
           
-          {/* ClipperBrushTool overlay */}
+          {/* UnifiedBrushTool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <ClipperBrushTool
+            <UnifiedBrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
