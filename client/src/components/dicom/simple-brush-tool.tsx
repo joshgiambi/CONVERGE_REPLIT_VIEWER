@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 interface Point {
   x: number;
@@ -36,127 +37,183 @@ export function SimpleBrushTool({
 }: SimpleBrushProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
-  const strokePoints = useRef<Point[]>([]);
+  const [strokePoints, setStrokePoints] = useState<Point[]>([]);
+  const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Convert canvas coordinates to DICOM world coordinates
-  const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
+  // ✅ FIXED: Proper coordinate transformation with useCallback
+  const canvasToWorld = useCallback((canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !imageMetadata || !canvasRef.current) return null;
 
-    const canvas = canvasRef.current;
-    const imageWidth = currentImage.width || 512;
-    const imageHeight = currentImage.height || 512;
+    try {
+      const canvas = canvasRef.current;
+      const imageWidth = currentImage.width || 512;
+      const imageHeight = currentImage.height || 512;
 
-    // Calculate how the image is displayed on canvas
-    const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
-    const totalScale = baseScale * zoom;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
+      const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+      const totalScale = baseScale * zoom;
+      const scaledWidth = imageWidth * totalScale;
+      const scaledHeight = imageHeight * totalScale;
 
-    // Image position on canvas (centered)
-    const imageX = (canvas.width - scaledWidth) / 2 + panX;
-    const imageY = (canvas.height - scaledHeight) / 2 + panY;
+      const imageX = (canvas.width - scaledWidth) / 2 + panX;
+      const imageY = (canvas.height - scaledHeight) / 2 + panY;
 
-    // Convert canvas point to image pixel coordinates
-    const pixelX = (canvasX - imageX) / totalScale;
-    const pixelY = (canvasY - imageY) / totalScale;
+      const pixelX = (canvasX - imageX) / totalScale;
+      const pixelY = (canvasY - imageY) / totalScale;
 
-    // Convert pixel coordinates to DICOM world coordinates
-    if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
-      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
-      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+      // ✅ PROPER DICOM TRANSFORMATION
+      if (imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
+        const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+        const imageOrientation = imageMetadata.imageOrientation.split('\\').map(Number);
 
-      const worldX = imagePosition[0] + (pixelX * pixelSpacing[0]);
-      const worldY = imagePosition[1] + (pixelY * pixelSpacing[1]);
+        const rowCosines = imageOrientation.slice(0, 3);
+        const colCosines = imageOrientation.slice(3, 6);
+        
+        const worldX = imagePosition[0] + 
+                       (pixelX * rowCosines[0] * pixelSpacing[0]) + 
+                       (pixelY * colCosines[0] * pixelSpacing[1]);
+        
+        const worldY = imagePosition[1] + 
+                       (pixelX * rowCosines[1] * pixelSpacing[0]) + 
+                       (pixelY * colCosines[1] * pixelSpacing[1]);
 
-      return { x: worldX, y: worldY };
+        return { x: worldX, y: worldY };
+      }
+
+      // Fallback for simple coordinate transformation
+      if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
+        const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+
+        const worldX = imagePosition[0] + (pixelX * pixelSpacing[0]);
+        const worldY = imagePosition[1] + (pixelY * pixelSpacing[1]);
+
+        return { x: worldX, y: worldY };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error in coordinate transformation:', error);
+      return null;
     }
+  }, [currentImage, imageMetadata, zoom, panX, panY]);
 
-    return null;
-  };
-
-  // Create a simple brush stroke at the current position
-  const addBrushStroke = (canvasPoint: Point) => {
+  // ✅ FIXED: Proper brush stroke handling
+  const addBrushStroke = useCallback((canvasPoint: Point) => {
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
     if (!worldPoint || !selectedStructure || !rtStructures) return;
 
-    // Add to current stroke
-    strokePoints.current.push(worldPoint);
+    try {
+      setStrokePoints(prev => {
+        const updatedPoints = [...prev, worldPoint];
+        
+        // Create DICOM contour points
+        const contourPoints: number[] = [];
+        for (const point of updatedPoints) {
+          contourPoints.push(point.x, point.y, currentSlicePosition);
+        }
 
-    // Create DICOM contour points from stroke
-    const contourPoints: number[] = [];
-    for (const point of strokePoints.current) {
-      contourPoints.push(point.x, point.y, currentSlicePosition);
-    }
+        // Update RT structures
+        const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+        
+        let structure;
+        if (updatedRTStructures.structures) {
+          structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+        } else if (updatedRTStructures.roiContourSequence) {
+          structure = updatedRTStructures.roiContourSequence.find((s: any) => s.roiNumber === selectedStructure);
+        } else {
+          structure = updatedRTStructures.find((s: any) => s.roiNumber === selectedStructure);
+        }
+        
+        if (!structure) return prev;
 
-    // Update the RT structure
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
-    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    
-    if (!structure) return;
+        // Initialize contours array if it doesn't exist
+        if (!structure.contours) {
+          structure.contours = [];
+        }
 
-    const tolerance = 2.0;
-    let existingContour = structure.contours.find((contour: any) => 
-      Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
-    );
+        // Find existing contour for this slice
+        const tolerance = 2.0;
+        let existingContour = structure.contours.find((contour: any) => 
+          Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
+        );
 
-    if (existingContour) {
-      // Replace existing contour with accumulated stroke
-      existingContour.points = contourPoints;
-      existingContour.numberOfPoints = contourPoints.length / 3;
-    } else {
-      // Create new contour
-      structure.contours.push({
-        slicePosition: currentSlicePosition,
-        points: contourPoints,
-        numberOfPoints: contourPoints.length / 3
+        if (existingContour) {
+          existingContour.points = contourPoints;
+          existingContour.numberOfPoints = contourPoints.length / 3;
+        } else {
+          structure.contours.push({
+            slicePosition: currentSlicePosition,
+            points: contourPoints,
+            numberOfPoints: contourPoints.length / 3
+          });
+        }
+
+        onContourUpdate(updatedRTStructures);
+        return updatedPoints;
       });
+    } catch (error) {
+      console.error('Error adding brush stroke:', error);
     }
+  }, [canvasToWorld, selectedStructure, rtStructures, currentSlicePosition, onContourUpdate]);
 
-    onContourUpdate(updatedRTStructures);
-  };
-
-  // Mouse event handlers
-  const handleMouseDown = (e: MouseEvent) => {
+  // ✅ FIXED: Proper event handlers with useCallback
+  const handleMouseDown = useCallback((e: MouseEvent) => {
     if (!isActive || !selectedStructure || e.button !== 0) return;
+    if (!canvasRef.current) return;
     
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const canvasPoint = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    };
-    
-    setIsDrawing(true);
-    strokePoints.current = []; // Start new stroke
-    addBrushStroke(canvasPoint);
-  };
+    try {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const rect = canvasRef.current.getBoundingClientRect();
+      const canvasPoint = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+      
+      if (canvasPoint.x < 0 || canvasPoint.y < 0 || 
+          canvasPoint.x > rect.width || canvasPoint.y > rect.height) {
+        return;
+      }
+      
+      setIsDrawing(true);
+      setStrokePoints([]);
+      addBrushStroke(canvasPoint);
+    } catch (error) {
+      console.error('Error in mouse down handler:', error);
+      setIsDrawing(false);
+    }
+  }, [isActive, selectedStructure, addBrushStroke]);
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isActive || !canvasRef.current) return;
     
-    const rect = canvasRef.current.getBoundingClientRect();
-    const canvasPoint = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    };
-    
-    setMousePosition(canvasPoint);
-    
-    if (isDrawing) {
-      addBrushStroke(canvasPoint);
+    try {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const canvasPoint = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+      
+      setMousePosition(canvasPoint);
+      
+      if (isDrawing) {
+        addBrushStroke(canvasPoint);
+      }
+    } catch (error) {
+      console.error('Error in mouse move handler:', error);
     }
-  };
+  }, [isActive, isDrawing, addBrushStroke]);
 
-  const handleMouseUp = (e: MouseEvent) => {
+  const handleMouseUp = useCallback((e: MouseEvent) => {
     if (!isActive || e.button !== 0) return;
     
     setIsDrawing(false);
-    strokePoints.current = []; // Clear stroke
-  };
+    setStrokePoints([]);
+  }, [isActive]);
 
-  // Set up event listeners
+  // ✅ FIXED: Proper event listener setup with all dependencies
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
@@ -166,7 +223,6 @@ export function SimpleBrushTool({
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     
-    // Set cursor
     canvas.style.cursor = 'none';
     
     return () => {
@@ -175,18 +231,16 @@ export function SimpleBrushTool({
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.style.cursor = 'default';
     };
-  }, [isActive, selectedStructure, brushSize, isDrawing]);
+  }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp]);
 
-  // Professional cursor rendering following UI/UX documentation
+  // ✅ FIXED: Stable cursor canvas setup
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
 
     const mainCanvas = canvasRef.current;
     
-    // Create professional cursor overlay
-    let cursorCanvas = mainCanvas.parentElement?.querySelector('.brush-cursor') as HTMLCanvasElement;
-    if (!cursorCanvas) {
-      cursorCanvas = document.createElement('canvas');
+    if (!cursorCanvasRef.current) {
+      const cursorCanvas = document.createElement('canvas');
       cursorCanvas.className = 'brush-cursor';
       cursorCanvas.style.position = 'absolute';
       cursorCanvas.style.top = '0';
@@ -194,81 +248,85 @@ export function SimpleBrushTool({
       cursorCanvas.style.pointerEvents = 'none';
       cursorCanvas.style.zIndex = '999';
       mainCanvas.parentElement?.appendChild(cursorCanvas);
+      cursorCanvasRef.current = cursorCanvas;
     }
     
+    const cursorCanvas = cursorCanvasRef.current;
     cursorCanvas.width = mainCanvas.width;
     cursorCanvas.height = mainCanvas.height;
     cursorCanvas.style.width = mainCanvas.style.width || `${mainCanvas.width}px`;
     cursorCanvas.style.height = mainCanvas.style.height || `${mainCanvas.height}px`;
 
-    const ctx = cursorCanvas.getContext('2d');
+    return () => {
+      cursorCanvasRef.current?.remove();
+      cursorCanvasRef.current = null;
+    };
+  }, [isActive]);
+
+  // ✅ FIXED: Efficient cursor rendering
+  useEffect(() => {
+    if (!cursorCanvasRef.current || !mousePosition) return;
+
+    const ctx = cursorCanvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+    ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
+    
+    const centerX = mousePosition.x;
+    const centerY = mousePosition.y;
+    const radius = brushSize / 2;
+    
+    ctx.save();
+    
+    const operationColor = '#00ff00';
+    
+    // Draw outer circle
+    ctx.strokeStyle = operationColor;
+    ctx.lineWidth = isDrawing ? 3 : 2;
+    ctx.setLineDash([]);
+    ctx.globalAlpha = isDrawing ? 1.0 : 0.7;
+    
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.stroke();
+    
+    // Draw inner guide circle
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.globalAlpha = 0.5;
+    
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius / 2, 0, 2 * Math.PI);
+    ctx.stroke();
+    
+    // Draw center crosshair
+    ctx.setLineDash([]);
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 1.0;
+    
+    const crosshairSize = 8;
+    ctx.beginPath();
+    ctx.moveTo(centerX - crosshairSize, centerY);
+    ctx.lineTo(centerX + crosshairSize, centerY);
+    ctx.moveTo(centerX, centerY - crosshairSize);
+    ctx.lineTo(centerX, centerY + crosshairSize);
+    ctx.stroke();
+    
+    // Draw operation indicator
+    const indicatorSize = 6;
+    const indicatorX = centerX + radius * 0.7;
+    const indicatorY = centerY - radius * 0.7;
+    
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(indicatorX - indicatorSize/2, indicatorY);
+    ctx.lineTo(indicatorX + indicatorSize/2, indicatorY);
+    ctx.moveTo(indicatorX, indicatorY - indicatorSize/2);
+    ctx.lineTo(indicatorX, indicatorY + indicatorSize/2);
+    ctx.stroke();
+    
+    ctx.restore();
+  }, [mousePosition, brushSize, isDrawing]);
 
-    if (mousePosition) {
-      const centerX = mousePosition.x;
-      const centerY = mousePosition.y;
-      const radius = brushSize / 2;
-      
-      ctx.save();
-      
-      // Set operation color following medical imaging standards
-      const operationColor = '#00ff00'; // Green for additive (default)
-      
-      // Draw outer circle - main brush indicator
-      ctx.strokeStyle = operationColor;
-      ctx.lineWidth = isDrawing ? 3 : 2; // Thicker when drawing
-      ctx.setLineDash([]);
-      ctx.globalAlpha = isDrawing ? 1.0 : 0.7;
-      
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-      ctx.stroke();
-      
-      // Draw inner guide circle (50% of brush size)
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 5]); // Dashed line
-      ctx.globalAlpha = 0.5;
-      
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius / 2, 0, 2 * Math.PI);
-      ctx.stroke();
-      
-      // Draw center crosshair for precision
-      ctx.setLineDash([]);
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 1.0;
-      
-      const crosshairSize = 8;
-      ctx.beginPath();
-      ctx.moveTo(centerX - crosshairSize, centerY);
-      ctx.lineTo(centerX + crosshairSize, centerY);
-      ctx.moveTo(centerX, centerY - crosshairSize);
-      ctx.lineTo(centerX, centerY + crosshairSize);
-      ctx.stroke();
-      
-      // Draw operation indicator (plus sign for additive)
-      const indicatorSize = 6;
-      const indicatorX = centerX + radius * 0.7;
-      const indicatorY = centerY - radius * 0.7;
-      
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      // Plus sign for additive
-      ctx.moveTo(indicatorX - indicatorSize/2, indicatorY);
-      ctx.lineTo(indicatorX + indicatorSize/2, indicatorY);
-      ctx.moveTo(indicatorX, indicatorY - indicatorSize/2);
-      ctx.lineTo(indicatorX, indicatorY + indicatorSize/2);
-      ctx.stroke();
-      
-      ctx.restore();
-    }
-
-    return () => {
-      cursorCanvas?.remove();
-    };
-  }, [isActive, mousePosition, brushSize, isDrawing]);
-
-  return null; // This component only handles events and cursor
+  return null;
 }
