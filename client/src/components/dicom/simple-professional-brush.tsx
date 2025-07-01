@@ -180,13 +180,17 @@ export function SimpleProfessionalBrush({
 
   // Perform continuous brush operation during mouse movement (like Limbus V2)
   const performContinuousBrushOperation = (strokePoints: Point[]) => {
-    if (!selectedStructure || !rtStructures || strokePoints.length < 2) return;
+    if (!selectedStructure || !rtStructures || strokePoints.length < 1) return;
 
-    // Get last two points to create incremental stroke segment
-    const lastTwoPoints = strokePoints.slice(-2);
-    const brushStroke = createContinuousBrushStroke(lastTwoPoints);
+    // Get the last point to create a brush circle there
+    const lastCanvasPoint = strokePoints[strokePoints.length - 1];
+    const lastWorldPoint = canvasToWorld(lastCanvasPoint.x, lastCanvasPoint.y);
     
-    if (brushStroke.length === 0) return;
+    if (!lastWorldPoint) return;
+
+    // Create brush circle at current position
+    const brushCircle = createBrushCircle(lastWorldPoint);
+    if (brushCircle.length === 0) return;
 
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
@@ -194,58 +198,16 @@ export function SimpleProfessionalBrush({
     if (!structure) return;
 
     const tolerance = 2.0;
-    const existingContours = structure.contours.filter((contour: any) => 
+    let existingContour = structure.contours.find((contour: any) => 
       Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
     );
 
     if (operation === BrushOperation.ADDITIVE) {
-      const brushPoints = polygonToDicomPoints(brushStroke, currentSlicePosition);
+      const brushPoints = polygonToDicomPoints(brushCircle, currentSlicePosition);
       
       if (brushPoints.length >= 9) {
-        if (existingContours.length > 0) {
-          const existingContour = existingContours[0];
-          existingContour.points.push(...brushPoints);
-          existingContour.numberOfPoints = existingContour.points.length / 3;
-        } else {
-          structure.contours.push({
-            slicePosition: currentSlicePosition,
-            points: brushPoints,
-            numberOfPoints: brushPoints.length / 3
-          });
-        }
-      }
-    }
-
-    onContourUpdate(updatedRTStructures);
-  };
-
-  // Professional brush operation using continuous strokes
-  const updateRTStructureWithContinuousBrush = () => {
-    if (!selectedStructure || !rtStructures || currentStroke.length < 2) return;
-
-    const brushStroke = createContinuousBrushStroke(currentStroke);
-    if (brushStroke.length === 0) return;
-
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
-    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    
-    if (!structure) return;
-
-    const tolerance = 2.0;
-    
-    // Get existing contours on current slice
-    const existingContours = structure.contours.filter((contour: any) => 
-      Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
-    );
-
-    if (operation === BrushOperation.ADDITIVE) {
-      // Convert brush stroke to DICOM points
-      const brushPoints = polygonToDicomPoints(brushStroke, currentSlicePosition);
-      
-      if (brushPoints.length >= 9) {
-        if (existingContours.length > 0) {
-          // Merge with existing contour (simplified union)
-          const existingContour = existingContours[0];
+        if (existingContour) {
+          // Add to existing contour
           existingContour.points.push(...brushPoints);
           existingContour.numberOfPoints = existingContour.points.length / 3;
         } else {
@@ -257,52 +219,12 @@ export function SimpleProfessionalBrush({
           });
         }
       }
-    } else {
-      // Subtractive operation - remove points near brush stroke
-      for (const contour of existingContours) {
-        const filteredPoints: number[] = [];
-        
-        for (let i = 0; i < contour.points.length; i += 3) {
-          const pointX = contour.points[i];
-          const pointY = contour.points[i + 1];
-          const pointZ = contour.points[i + 2];
-          
-          let shouldKeepPoint = true;
-          
-          // Check if this point is within brush stroke area
-          for (const brushPoint of brushStroke) {
-            const distance = Math.sqrt(
-              Math.pow(brushPoint.x - pointX, 2) + 
-              Math.pow(brushPoint.y - pointY, 2)
-            );
-            
-            if (distance <= brushSize / 2) {
-              shouldKeepPoint = false;
-              break;
-            }
-          }
-          
-          if (shouldKeepPoint) {
-            filteredPoints.push(pointX, pointY, pointZ);
-          }
-        }
-        
-        contour.points = filteredPoints;
-        contour.numberOfPoints = filteredPoints.length / 3;
-      }
-      
-      // Remove empty contours
-      structure.contours = structure.contours.filter((c: any) => c.numberOfPoints > 0);
     }
 
     onContourUpdate(updatedRTStructures);
-    
-    console.log('Continuous brush operation completed:', { 
-      operation, 
-      strokeLength: currentStroke.length,
-      brushStrokePoints: brushStroke.length 
-    });
   };
+
+
 
   // Professional cursor rendering
   useEffect(() => {
