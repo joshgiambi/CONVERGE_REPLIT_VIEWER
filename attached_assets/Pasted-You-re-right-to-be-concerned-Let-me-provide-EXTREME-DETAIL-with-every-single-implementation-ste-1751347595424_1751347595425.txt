@@ -1,0 +1,1015 @@
+You're right to be concerned. Let me provide **EXTREME DETAIL** with every single implementation step, data structure, and code snippet needed for a complete implementation.
+
+## �� EXTREME DETAIL IMPLEMENTATION GUIDE - RT Structure Set to Polygon Conversion
+
+### **1. COMPLETE DICOM PARSING IMPLEMENTATION**
+
+#### **1.1 DICOM File Structure Understanding**
+```typescript
+// DICOM RT Structure Set contains these REQUIRED sequences:
+interface DICOMRTSS {
+  // Structure Set ROI Sequence (3006,0020) - Structure metadata
+  structureSetROISequence: {
+    items: Array<{
+      ROINumber: number;           // Unique ROI identifier
+      ROIName: string;             // Structure name (e.g., "Lung_R")
+      referencedFrameOfReferenceUID: string;
+      roiGenerationAlgorithm: string;
+    }>
+  };
+  
+  // ROI Contour Sequence (3006,0039) - Actual contour data
+  roiContourSequence: {
+    items: Array<{
+      referencedROINumber: number;  // Links to StructureSetROISequence
+      roiDisplayColor: [number, number, number]; // RGB values
+      contourSequence: {
+        items: Array<{
+          contourGeometricType: string;     // Usually "CLOSED_PLANAR"
+          numberOfContourPoints: number;    // Number of points in contour
+          contourData: string;              // "x1\y1\z1\x2\y2\z2\..."
+          contourImageSequence: Array<{
+            referencedSOPClassUID: string;
+            referencedSOPInstanceUID: string; // Links to DICOM image
+          }>
+        }>
+      }
+    }>
+  };
+  
+  // RT ROI Observations Sequence (3006,0080) - Structure types
+  rtROIObservationsSequence: {
+    items: Array<{
+      observationNumber: number;
+      referencedROINumber: number;
+      rtROIInterpretedType: string; // "ORGAN", "EXTERNAL", etc.
+    }>
+  };
+}
+```
+
+#### **1.2 DICOM Parser Implementation**
+```typescript
+// dicomParser.ts
+import { DataSet, parseDicom } from "dicom-parser";
+
+export class DICOMParser {
+  private dataSet: DataSet;
+  
+  constructor(dicomBuffer: ArrayBuffer) {
+    const uint8Array = new Uint8Array(dicomBuffer);
+    this.dataSet = parseDicom(uint8Array);
+  }
+  
+  // Extract string value from DICOM tag
+  private getString(tag: string): string | undefined {
+    const element = this.dataSet.elements[tag];
+    if (!element) return undefined;
+    
+    // Handle different VR (Value Representation) types
+    if (element.vr === 'SQ') {
+      // Sequence - handled separately
+      return undefined;
+    }
+    
+    return this.dataSet.string(tag);
+  }
+  
+  // Extract integer value from DICOM tag
+  private getInt(tag: string): number | undefined {
+    const element = this.dataSet.elements[tag];
+    if (!element) return undefined;
+    
+    return this.dataSet.intString(tag);
+  }
+  
+  // Extract float array from DICOM tag
+  private getFloatArray(tag: string): number[] | undefined {
+    const element = this.dataSet.elements[tag];
+    if (!element) return undefined;
+    
+    const stringValue = this.dataSet.string(tag);
+    if (!stringValue) return undefined;
+    
+    // DICOM uses backslash separation for multi-value fields
+    return stringValue.split('\\').map(val => parseFloat(val));
+  }
+  
+  // Parse sequence items
+  private parseSequence(tag: string): any[] {
+    const element = this.dataSet.elements[tag];
+    if (!element || !element.items) return [];
+    
+    return element.items.map(item => {
+      const sequenceDataSet = item.dataSet;
+      if (!sequenceDataSet) return {};
+      
+      // Extract all elements from sequence item
+      const result: any = {};
+      for (const [tag, element] of Object.entries(sequenceDataSet.elements)) {
+        if (element.vr === 'SQ') {
+          result[tag] = this.parseSequence(tag);
+        } else if (element.vr === 'DS' || element.vr === 'FL') {
+          result[tag] = this.getFloatArray(tag);
+        } else if (element.vr === 'IS' || element.vr === 'SL') {
+          result[tag] = this.getInt(tag);
+        } else {
+          result[tag] = this.getString(tag);
+        }
+      }
+      return result;
+    });
+  }
+  
+  // Parse Structure Set ROI Sequence
+  parseStructureSetROISequence(): Array<{
+    roiNumber: number;
+    roiName: string;
+    referencedFrameOfReferenceUID: string;
+    roiGenerationAlgorithm: string;
+  }> {
+    const sequence = this.parseSequence('30060020'); // StructureSetROISequence
+    
+    return sequence.map(item => ({
+      roiNumber: item['30060022'] || -1, // ROINumber
+      roiName: item['30060026'] || '',   // ROIName
+      referencedFrameOfReferenceUID: item['30060024'] || '', // ReferencedFrameOfReferenceUID
+      roiGenerationAlgorithm: item['30060036'] || 'MANUAL', // ROIGenerationAlgorithm
+    }));
+  }
+  
+  // Parse ROI Contour Sequence
+  parseROIContourSequence(): Array<{
+    referencedROINumber: number;
+    roiDisplayColor: [number, number, number];
+    contourSequence: Array<{
+      contourGeometricType: string;
+      numberOfContourPoints: number;
+      contourData: [number, number, number][];
+      contourImageSequence: Array<{
+        referencedSOPClassUID: string;
+        referencedSOPInstanceUID: string;
+      }>;
+    }>;
+  }> {
+    const sequence = this.parseSequence('30060039'); // ROIContourSequence
+    
+    return sequence.map(item => {
+      // Parse ROI Display Color
+      const colorString = item['3006002A']; // ROIDisplayColor
+      let roiDisplayColor: [number, number, number] = [255, 255, 255]; // Default white
+      
+      if (colorString) {
+        const colors = colorString.split('\\').map(c => parseInt(c));
+        if (colors.length >= 3) {
+          roiDisplayColor = [colors[0], colors[1], colors[2]];
+        }
+      }
+      
+      // Parse Contour Sequence
+      const contourSequence = this.parseContourSequence(item['30060040']); // ContourSequence
+      
+      return {
+        referencedROINumber: item['30060084'] || -1, // ReferencedROINumber
+        roiDisplayColor,
+        contourSequence,
+      };
+    });
+  }
+  
+  // Parse individual Contour Sequence
+  private parseContourSequence(contourItems: any[]): Array<{
+    contourGeometricType: string;
+    numberOfContourPoints: number;
+    contourData: [number, number, number][];
+    contourImageSequence: Array<{
+      referencedSOPClassUID: string;
+      referencedSOPInstanceUID: string;
+    }>;
+  }> {
+    if (!contourItems || !Array.isArray(contourItems)) return [];
+    
+    return contourItems.map(item => {
+      // Parse Contour Data - CRITICAL STEP
+      const contourDataString = item['30060050']; // ContourData
+      let contourData: [number, number, number][] = [];
+      
+      if (contourDataString) {
+        const points = contourDataString.split('\\');
+        contourData = [];
+        
+        // DICOM contour data is stored as x1\y1\z1\x2\y2\z2\...
+        for (let i = 0; i < points.length; i += 3) {
+          if (i + 2 < points.length) {
+            contourData.push([
+              parseFloat(points[i]),     // X coordinate
+              parseFloat(points[i + 1]), // Y coordinate
+              parseFloat(points[i + 2]), // Z coordinate
+            ]);
+          }
+        }
+      }
+      
+      // Parse Contour Image Sequence
+      const imageSequence = this.parseImageSequence(item['30060016']); // ContourImageSequence
+      
+      return {
+        contourGeometricType: item['30060042'] || 'CLOSED_PLANAR', // ContourGeometricType
+        numberOfContourPoints: item['30060046'] || contourData.length, // NumberOfContourPoints
+        contourData,
+        contourImageSequence: imageSequence,
+      };
+    });
+  }
+  
+  // Parse Contour Image Sequence
+  private parseImageSequence(imageItems: any[]): Array<{
+    referencedSOPClassUID: string;
+    referencedSOPInstanceUID: string;
+  }> {
+    if (!imageItems || !Array.isArray(imageItems)) return [];
+    
+    return imageItems.map(item => ({
+      referencedSOPClassUID: item['00081150'] || '', // ReferencedSOPClassUID
+      referencedSOPInstanceUID: item['00081155'] || '', // ReferencedSOPInstanceUID
+    }));
+  }
+  
+  // Parse RT ROI Observations Sequence
+  parseRTROIObservationsSequence(): Array<{
+    observationNumber: number;
+    referencedROINumber: number;
+    rtROIInterpretedType: string;
+  }> {
+    const sequence = this.parseSequence('30060080'); // RTROIObservationsSequence
+    
+    return sequence.map(item => ({
+      observationNumber: item['30060082'] || -1, // ObservationNumber
+      referencedROINumber: item['30060084'] || -1, // ReferencedROINumber
+      rtROIInterpretedType: item['300600A4'] || 'ORGAN', // RTROIInterpretedType
+    }));
+  }
+}
+```
+
+### **2. COMPLETE COORDINATE TRANSFORMATION SYSTEM**
+
+#### **2.1 Coordinate System Definitions**
+```typescript
+// coordinateSystems.ts
+export interface PatientCoordinate {
+  x: number; // mm in patient coordinate system
+  y: number; // mm in patient coordinate system  
+  z: number; // mm in patient coordinate system
+}
+
+export interface PixelCoordinate {
+  x: number; // pixel index in image
+  y: number; // pixel index in image
+  z: number; // slice index
+}
+
+export interface WorldCoordinate {
+  x: number; // mm in world coordinate system
+  y: number; // mm in world coordinate system
+  z: number; // mm in world coordinate system
+}
+
+export interface DisplayCoordinate {
+  x: number; // screen pixel
+  y: number; // screen pixel
+}
+
+// DICOM Image metadata required for coordinate transformation
+export interface DICOMImageMetadata {
+  imagePositionPatient: [number, number, number]; // mm
+  imageOrientationPatient: [number, number, number, number, number, number]; // direction cosines
+  pixelSpacing: [number, number]; // mm/pixel
+  rows: number;
+  columns: number;
+  sliceThickness: number; // mm
+  sliceLocation: number; // mm
+}
+```
+
+#### **2.2 Complete Coordinate Transformation Implementation**
+```typescript
+// coordinateTransforms.ts
+import { PatientCoordinate, PixelCoordinate, WorldCoordinate, DisplayCoordinate, DICOMImageMetadata } from './coordinateSystems';
+
+export class CoordinateTransformer {
+  private static readonly SCALING_FACTOR = 1000; // For integer precision
+  
+  // Convert patient coordinates to pixel coordinates
+  static patientToPixel(
+    patientCoord: PatientCoordinate,
+    imageMetadata: DICOMImageMetadata
+  ): PixelCoordinate {
+    // Extract DICOM metadata
+    const { imagePositionPatient, imageOrientationPatient, pixelSpacing } = imageMetadata;
+    
+    // Create transformation matrix from image orientation
+    const rowCosine = [
+      imageOrientationPatient[0],
+      imageOrientationPatient[1], 
+      imageOrientationPatient[2]
+    ];
+    const colCosine = [
+      imageOrientationPatient[3],
+      imageOrientationPatient[4],
+      imageOrientationPatient[5]
+    ];
+    
+    // Calculate normal vector (cross product of row and column cosines)
+    const normal = this.crossProduct(rowCosine, colCosine);
+    
+    // Calculate vector from image position to patient point
+    const vector = [
+      patientCoord.x - imagePositionPatient[0],
+      patientCoord.y - imagePositionPatient[1],
+      patientCoord.z - imagePositionPatient[2]
+    ];
+    
+    // Project vector onto row and column directions
+    const rowProjection = this.dotProduct(vector, rowCosine);
+    const colProjection = this.dotProduct(vector, colCosine);
+    
+    // Convert to pixel coordinates
+    const pixelX = rowProjection / pixelSpacing[0];
+    const pixelY = colProjection / pixelSpacing[1];
+    
+    // Calculate slice position
+    const sliceZ = this.dotProduct(vector, normal) / imageMetadata.sliceThickness;
+    
+    return {
+      x: pixelX,
+      y: pixelY,
+      z: sliceZ
+    };
+  }
+  
+  // Convert pixel coordinates to patient coordinates
+  static pixelToPatient(
+    pixelCoord: PixelCoordinate,
+    imageMetadata: DICOMImageMetadata
+  ): PatientCoordinate {
+    const { imagePositionPatient, imageOrientationPatient, pixelSpacing } = imageMetadata;
+    
+    // Create transformation matrix
+    const rowCosine = [
+      imageOrientationPatient[0],
+      imageOrientationPatient[1], 
+      imageOrientationPatient[2]
+    ];
+    const colCosine = [
+      imageOrientationPatient[3],
+      imageOrientationPatient[4],
+      imageOrientationPatient[5]
+    ];
+    
+    // Calculate normal vector
+    const normal = this.crossProduct(rowCosine, colCosine);
+    
+    // Calculate patient position
+    const rowOffset = rowCosine.map(c => c * pixelCoord.x * pixelSpacing[0]);
+    const colOffset = colCosine.map(c => c * pixelCoord.y * pixelSpacing[1]);
+    const sliceOffset = normal.map(c => c * pixelCoord.z * imageMetadata.sliceThickness);
+    
+    return {
+      x: imagePositionPatient[0] + rowOffset[0] + colOffset[0] + sliceOffset[0],
+      y: imagePositionPatient[1] + rowOffset[1] + colOffset[1] + sliceOffset[1],
+      z: imagePositionPatient[2] + rowOffset[2] + colOffset[2] + sliceOffset[2]
+    };
+  }
+  
+  // Convert world coordinates to scaled integer coordinates (for polygon operations)
+  static worldToScaled(worldCoord: WorldCoordinate): { x: number; y: number } {
+    return {
+      x: Math.round(worldCoord.x * this.SCALING_FACTOR),
+      y: Math.round(worldCoord.y * this.SCALING_FACTOR)
+    };
+  }
+  
+  // Convert scaled integer coordinates back to world coordinates
+  static scaledToWorld(scaledCoord: { x: number; y: number }): WorldCoordinate {
+    return {
+      x: scaledCoord.x / this.SCALING_FACTOR,
+      y: scaledCoord.y / this.SCALING_FACTOR,
+      z: 0 // Z coordinate handled separately
+    };
+  }
+  
+  // Convert world coordinates to display coordinates (for rendering)
+  static worldToDisplay(
+    worldCoord: WorldCoordinate,
+    viewport: {
+      camera: { position: [number, number, number]; viewUp: [number, number, number] };
+      renderer: { getSize: () => [number, number] };
+    }
+  ): DisplayCoordinate {
+    // This is a simplified version - in practice you'd use VTK.js or similar
+    // for proper 3D to 2D projection
+    
+    const [width, height] = viewport.renderer.getSize();
+    
+    // Simple orthographic projection (you'll need to implement proper projection)
+    const x = (worldCoord.x + 1) * width / 2;
+    const y = height - (worldCoord.y + 1) * height / 2; // Flip Y axis
+    
+    return { x, y };
+  }
+  
+  // Utility functions
+  private static crossProduct(a: number[], b: number[]): number[] {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  }
+  
+  private static dotProduct(a: number[], b: number[]): number {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+}
+```
+
+### **3. COMPLETE POLYGON DATA STRUCTURE IMPLEMENTATION**
+
+#### **3.1 Polygon Data Structures**
+```typescript
+// polygonTypes.ts
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+// Polygon ring (exterior or hole)
+export type PolygonRing = Point[];
+
+// Single polygon (exterior + holes)
+export type Polygon = PolygonRing[];
+
+// Multiple polygons per slice
+export type MultiPolygon = Polygon[];
+
+// All polygons for a structure across all slices
+export type StructurePolygons = Map<number, MultiPolygon>;
+
+// Complete structure data
+export interface StructureData {
+  id: string;
+  name: string;
+  roiNumber: number;
+  roiType: string;
+  color: [number, number, number];
+  polygons: StructurePolygons;
+  metadata: {
+    sourceTime: number;
+    modifiedTime: number;
+    commitTime: number;
+  };
+}
+```
+
+#### **3.2 Contour Class Implementation**
+```typescript
+// Contour.ts
+import { Point, Polygon, MultiPolygon } from './polygonTypes';
+import { CoordinateTransformer } from './coordinateTransforms';
+
+export class Contour {
+  private id: string;
+  private slicePosition: number;
+  private slicingMode: 'I' | 'J' | 'K'; // Axial, Sagittal, Coronal
+  private polygons: MultiPolygon;
+  private needsUpdate: boolean = true;
+  
+  constructor(
+    structureId: string,
+    slicePosition: number,
+    slicingMode: 'I' | 'J' | 'K',
+    patientCoordinates: [number, number, number][],
+    imageMetadata?: DICOMImageMetadata
+  ) {
+    this.id = `${structureId}-${slicePosition}`;
+    this.slicePosition = slicePosition;
+    this.slicingMode = slicingMode;
+    
+    // Convert patient coordinates to polygons
+    this.polygons = this.convertPatientCoordinatesToPolygons(
+      patientCoordinates,
+      imageMetadata
+    );
+  }
+  
+  private convertPatientCoordinatesToPolygons(
+    patientCoords: [number, number, number][],
+    imageMetadata?: DICOMImageMetadata
+  ): MultiPolygon {
+    if (!patientCoords || patientCoords.length === 0) {
+      return [];
+    }
+    
+    // Group coordinates by contour (DICOM may have multiple contours per slice)
+    const contours: [number, number, number][][] = this.groupCoordinatesByContour(patientCoords);
+    
+    const multiPolygon: MultiPolygon = [];
+    
+    for (const contour of contours) {
+      // Convert to appropriate coordinate system based on slicing mode
+      const points: Point[] = this.convertToSliceCoordinates(contour, imageMetadata);
+      
+      // Create polygon ring (exterior)
+      const polygon: Polygon = [points];
+      
+      // Check if polygon is valid (at least 3 points, closed)
+      if (this.isValidPolygon(points)) {
+        multiPolygon.push(polygon);
+      }
+    }
+    
+    return multiPolygon;
+  }
+  
+  private groupCoordinatesByContour(
+    coordinates: [number, number, number][]
+  ): [number, number, number][][] {
+    // DICOM contour data may contain multiple contours per slice
+    // This is a simplified grouping - you may need more sophisticated logic
+    
+    const contours: [number, number, number][][] = [];
+    let currentContour: [number, number, number][] = [];
+    
+    for (const coord of coordinates) {
+      currentContour.push(coord);
+      
+      // Check if contour is closed (first and last points are the same)
+      if (currentContour.length > 3) {
+        const first = currentContour[0];
+        const last = currentContour[currentContour.length - 1];
+        
+        const distance = Math.sqrt(
+          Math.pow(first[0] - last[0], 2) +
+          Math.pow(first[1] - last[1], 2) +
+          Math.pow(first[2] - last[2], 2)
+        );
+        
+        if (distance < 0.1) { // 0.1mm tolerance
+          contours.push([...currentContour]);
+          currentContour = [];
+        }
+      }
+    }
+    
+    // Add any remaining contour
+    if (currentContour.length > 0) {
+      contours.push(currentContour);
+    }
+    
+    return contours;
+  }
+  
+  private convertToSliceCoordinates(
+    contour: [number, number, number][],
+    imageMetadata?: DICOMImageMetadata
+  ): Point[] {
+    const points: Point[] = [];
+    
+    for (const [x, y, z] of contour) {
+      let point: Point;
+      
+      switch (this.slicingMode) {
+        case 'K': // Axial slice (XY plane)
+          point = { x, y };
+          break;
+        case 'J': // Sagittal slice (XZ plane)
+          point = { x, z };
+          break;
+        case 'I': // Coronal slice (YZ plane)
+          point = { y, z };
+          break;
+        default:
+          point = { x, y };
+      }
+      
+      // Scale for integer precision
+      point = CoordinateTransformer.worldToScaled(point);
+      points.push(point);
+    }
+    
+    return points;
+  }
+  
+  private isValidPolygon(points: Point[]): boolean {
+    if (points.length < 3) return false;
+    
+    // Check if polygon is closed (first and last points are the same)
+    const first = points[0];
+    const last = points[points.length - 1];
+    
+    const distance = Math.sqrt(
+      Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
+    );
+    
+    return distance < 1; // 1 pixel tolerance
+  }
+  
+  // Get current polygon data
+  getCurrent(): MultiPolygon {
+    return this.polygons;
+  }
+  
+  // Get number of polygons
+  get numberOfPolygons(): number {
+    return this.polygons.reduce((acc, polygon) => acc + polygon.length, 0);
+  }
+  
+  // Get number of points
+  get numberOfPoints(): number {
+    return this.polygons.reduce((acc, polygon) => 
+      acc + polygon.reduce((sum, ring) => sum + ring.length, 0), 0
+    );
+  }
+  
+  // Get slice position
+  getPosition(): number {
+    return this.slicePosition;
+  }
+  
+  // Add polygon
+  addPolygon(points: Point[]): void {
+    if (this.isValidPolygon(points)) {
+      this.polygons.push([points]);
+      this.needsUpdate = true;
+    }
+  }
+  
+  // Remove polygon
+  removePolygon(index: number): void {
+    if (index >= 0 && index < this.polygons.length) {
+      this.polygons.splice(index, 1);
+      this.needsUpdate = true;
+    }
+  }
+  
+  // Get centroid
+  getCentroid(): Point {
+    if (this.polygons.length === 0) return { x: 0, y: 0 };
+    
+    let totalX = 0;
+    let totalY = 0;
+    let totalPoints = 0;
+    
+    for (const polygon of this.polygons) {
+      for (const ring of polygon) {
+        for (const point of ring) {
+          totalX += point.x;
+          totalY += point.y;
+          totalPoints++;
+        }
+      }
+    }
+    
+    return {
+      x: totalX / totalPoints,
+      y: totalY / totalPoints
+    };
+  }
+  
+  // Get bounding box
+  getBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+    if (this.polygons.length === 0) {
+      return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+    }
+    
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    
+    for (const polygon of this.polygons) {
+      for (const ring of polygon) {
+        for (const point of ring) {
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+        }
+      }
+    }
+    
+    return { minX, minY, maxX, maxY };
+  }
+  
+  // Convert to SVG paths for rendering
+  toSVGPaths(): string[] {
+    const paths: string[] = [];
+    
+    for (const polygon of this.polygons) {
+      for (const ring of polygon) {
+        if (ring.length < 3) continue;
+        
+        let path = `M${ring[0].x},${ring[0].y}`;
+        
+        for (let i = 1; i < ring.length; i++) {
+          path += ` L${ring[i].x},${ring[i].y}`;
+        }
+        
+        path += ' Z'; // Close path
+        paths.push(path);
+      }
+    }
+    
+    return paths;
+  }
+  
+  // Clone contour
+  clone(): Contour {
+    const cloned = new Contour(
+      this.id.split('-')[0], // Extract structure ID
+      this.slicePosition,
+      this.slicingMode,
+      [] // Empty coordinates since we'll copy polygons directly
+    );
+    
+    // Deep copy polygons
+    cloned.polygons = JSON.parse(JSON.stringify(this.polygons));
+    
+    return cloned;
+  }
+}
+```
+
+### **4. COMPLETE STRUCTURE SET ENTITY IMPLEMENTATION**
+
+#### **4.1 Structure Set Entity Class**
+```typescript
+// StructureSetEntity.ts
+import { DICOMParser } from './dicomParser';
+import { Contour } from './Contour';
+import { StructureData, StructurePolygons } from './polygonTypes';
+import { CoordinateTransformer } from './coordinateTransforms';
+
+export class StructureSetEntity {
+  private id: string;
+  private structures: Map<string, StructureData>;
+  private metadata: {
+    sourceTime: number;
+    modifiedTime: number;
+    commitTime: number;
+  };
+  
+  constructor(id: string) {
+    this.id = id;
+    this.structures = new Map();
+    this.metadata = {
+      sourceTime: 0,
+      modifiedTime: 0,
+      commitTime: 0
+    };
+  }
+  
+  // Load structure set from DICOM file
+  async loadFromDICOM(dicomBuffer: ArrayBuffer): Promise<void> {
+    const parser = new DICOMParser(dicomBuffer);
+    
+    // Parse all sequences
+    const structureSetROIs = parser.parseStructureSetROISequence();
+    const roiContours = parser.parseROIContourSequence();
+    const roiObservations = parser.parseRTROIObservationsSequence();
+    
+    // Create lookup maps
+    const roiContourMap = new Map(
+      roiContours.map(roi => [roi.referencedROINumber, roi])
+    );
+    
+    const roiObservationMap = new Map(
+      roiObservations.map(obs => [obs.referencedROINumber, obs])
+    );
+    
+    // Process each structure
+    for (const roi of structureSetROIs) {
+      const roiContour = roiContourMap.get(roi.roiNumber);
+      const roiObservation = roiObservationMap.get(roi.roiNumber);
+      
+      if (!roiContour) {
+        console.warn(`No contour data found for ROI ${roi.roiNumber}`);
+        continue;
+      }
+      
+      // Create structure data
+      const structureData: StructureData = {
+        id: `${this.id}-${roi.roiName}`,
+        name: roi.roiName,
+        roiNumber: roi.roiNumber,
+        roiType: roiObservation?.rtROIInterpretedType || 'ORGAN',
+        color: roiContour.roiDisplayColor,
+        polygons: new Map(),
+        metadata: {
+          sourceTime: this.metadata.sourceTime,
+          modifiedTime: this.metadata.modifiedTime,
+          commitTime: this.metadata.commitTime
+        }
+      };
+      
+      // Process contours for this structure
+      for (const contour of roiContour.contourSequence) {
+        if (!contour.contourData || contour.contourData.length === 0) {
+          continue;
+        }
+        
+        // Extract slice position from contour data
+        const slicePosition = this.extractSlicePosition(contour.contourData);
+        
+        // Create contour object
+        const contourObj = new Contour(
+          structureData.id,
+          slicePosition,
+          'K', // Default to axial slicing
+          contour.contourData
+        );
+        
+        // Add to structure polygons
+        if (!structureData.polygons.has(slicePosition)) {
+          structureData.polygons.set(slicePosition, []);
+        }
+        
+        const slicePolygons = structureData.polygons.get(slicePosition)!;
+        slicePolygons.push(...contourObj.getCurrent());
+      }
+      
+      // Add structure to collection
+      this.structures.set(structureData.id, structureData);
+    }
+    
+    this.metadata.modifiedTime = Date.now();
+  }
+  
+  private extractSlicePosition(contourData: [number, number, number][]): number {
+    // Extract Z coordinate from contour data
+    // For axial slices, use the Z coordinate
+    if (contourData.length > 0) {
+      return contourData[0][2]; // Z coordinate
+    }
+    return 0;
+  }
+  
+  // Get structure by ID
+  getStructure(structureId: string): StructureData | undefined {
+    return this.structures.get(structureId);
+  }
+  
+  // Get all structures
+  getAllStructures(): StructureData[] {
+    return Array.from(this.structures.values());
+  }
+  
+  // Get contour for specific structure and slice
+  getContourAtSlice(
+    structureId: string,
+    slicePosition: number,
+    slicingMode: 'I' | 'J' | 'K' = 'K'
+  ): Contour | undefined {
+    const structure = this.structures.get(structureId);
+    if (!structure) return undefined;
+    
+    // Find closest slice position
+    const slicePositions = Array.from(structure.polygons.keys());
+    const closestSlice = this.findClosestSlice(slicePositions, slicePosition);
+    
+    if (closestSlice === undefined) return undefined;
+    
+    const polygons = structure.polygons.get(closestSlice);
+    if (!polygons) return undefined;
+    
+    return new Contour(
+      structureId,
+      closestSlice,
+      slicingMode,
+      [], // Empty coordinates since we have polygons
+    );
+  }
+  
+  private findClosestSlice(slicePositions: number[], targetPosition: number): number | undefined {
+    if (slicePositions.length === 0) return undefined;
+    
+    let closest = slicePositions[0];
+    let minDistance = Math.abs(closest - targetPosition);
+    
+    for (const position of slicePositions) {
+      const distance = Math.abs(position - targetPosition);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closest = position;
+      }
+    }
+    
+    // Return closest if within tolerance (1mm)
+    return minDistance <= 1.0 ? closest : undefined;
+  }
+  
+  // Add new structure
+  addStructure(structureData: StructureData): void {
+    this.structures.set(structureData.id, structureData);
+    this.metadata.modifiedTime = Date.now();
+  }
+  
+  // Remove structure
+  removeStructure(structureId: string): boolean {
+    const removed = this.structures.delete(structureId);
+    if (removed) {
+      this.metadata.modifiedTime = Date.now();
+    }
+    return removed;
+  }
+  
+  // Get metadata
+  getMetadata() {
+    return { ...this.metadata };
+  }
+  
+  // Set metadata
+  setMetadata(metadata: Partial<typeof this.metadata>): void {
+    this.metadata = { ...this.metadata, ...metadata };
+  }
+}
+```
+
+### **5. COMPLETE BINARY MASK PROCESSING IMPLEMENTATION**
+
+#### **5.1 Binary Mask Generation**
+```typescript
+// binaryMaskProcessor.ts
+import { Point, Polygon, MultiPolygon } from './polygonTypes';
+
+export class BinaryMaskProcessor {
+  // Convert polygons to binary mask
+  static polygonsToBinaryMask(
+    polygons: MultiPolygon,
+    width: number,
+    height: number
+  ): Uint8Array {
+    const mask = new Uint8Array(width * height);
+    
+    // Fill mask with zeros
+    mask.fill(0);
+    
+    for (const polygon of polygons) {
+      for (const ring of polygon) {
+        this.fillPolygon(mask, ring, width, height);
+      }
+    }
+    
+    return mask;
+  }
+  
+  // Fill polygon using scan-line algorithm
+  private static fillPolygon(
+    mask: Uint8Array,
+    ring: Point[],
+    width: number,
+    height: number
+  ): void {
+    if (ring.length < 3) return;
+    
+    // Find bounding box
+    let minY = Infinity;
+    let maxY = -Infinity;
+    
+    for (const point of ring) {
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+    
+    minY = Math.max(0, Math.floor(minY));
+    maxY = Math.min(height - 1, Math.ceil(maxY));
+    
+    // Scan line algorithm
+    for (let y = minY; y <= maxY; y++) {
+      const intersections = this.findIntersections(ring, y);
+      
+      // Sort intersections by x coordinate
+      intersections.sort((a, b) => a - b);
+      
+      // Fill between pairs of intersections
+      for (let i = 0; i < intersections.length; i += 2) {
+        if (i + 1 < intersections.length) {
+          const startX = Math.max(0, Math.floor(intersections[i]));
+          const endX = Math.min(width - 1, Math.ceil(intersections[i + 1]));
+          
+          for (let x = startX; x <= endX; x++) {
+            mask[y * width + x] = 1;
+          }
+        }
+      }
+    }
+  }
+  
+  /

@@ -1,0 +1,308 @@
+I'll search for code related to converting RT structure sets into polygons in the codebase.
+
+Search files...
+Let me search for more specific information about DICOM RT structure set parsing and polygon conversion.
+
+Search files...
+Now let me look at the specific code for converting RT structure sets to polygons in the frontend.
+
+Read file: frontend/components/viewer/store/entities/common/StructureSetEntity.ts
+Read file: frontend/components/viewer/store/entities/common/Contour.ts
+Read file: packages/dicom-ts/lib/contourSequence.ts
+Read file: packages/dicom-ts/lib/contour.ts
+Now let me look at the Rust code that handles the conversion from RT structure sets to polygons.
+
+Read file: packages/rtss-wasm/src/process.rs
+Based on my comprehensive analysis of the codebase, here's exactly how **RT structure sets are converted into polygons** in the Limbus V2 Converge system:
+
+## 🏥 RT Structure Set to Polygon Conversion - Complete Technical Breakdown
+
+### **Overview**
+The system converts DICOM RT Structure Sets (RTSS) into polygon representations through a multi-stage process involving **DICOM parsing**, **coordinate transformation**, and **polygon generation**.
+
+### **1. DICOM RT Structure Set Structure**
+
+**DICOM RTSS contains:**
+- **StructureSetROISequence** (3006,0020): Structure metadata (names, numbers)
+- **ROIContourSequence** (3006,0039): Contour data and colors
+- **RTROIObservationsSequence** (3006,0080): Structure types and observations
+- **ContourSequence** (3006,0040): Individual contour data per slice
+
+### **2. Frontend DICOM Parsing Process**
+
+#### **Step 1: Load DICOM File**
+```typescript
+// StructureSetEntity.ts - Lines 775-800
+const dicomObject = await fetchAndParseDicomFile(
+  `/api/proxy/orthanc/instances/${instanceId}/file`,
+  { headers: orthancAuthHeader }
+)
+```
+
+#### **Step 2: Extract Structure Metadata**
+```typescript
+// StructureSetEntity.ts - Lines 820-830
+const structureSetROISequences = dicomObject.structureSetROISequence?.items || []
+const roiContourSequences = dicomObject.roiContourSequence?.items || []
+const roiObservations = dicomObject.rtROIObservationsSequence?.items || []
+```
+
+#### **Step 3: Parse Contour Data**
+```typescript
+// StructureSetEntity.ts - Lines 860-870
+roiContour?.contourSequence?.items.map((contour) => {
+  const { contourData } = contour
+  if (contourData) {
+    const contour = new Contour(
+      contourSequenceEntity,
+      SlicingMode.K,
+      contourData,  // Raw DICOM contour points
+    )
+    contourSequenceEntity.addContour(SlicingMode.K, contour)
+  }
+})
+```
+
+### **3. DICOM Contour Data Parsing**
+
+#### **Raw DICOM Data Format**
+```typescript
+// contour.ts - Lines 30-50
+get contourData(): [number, number, number][] | undefined {
+  const contourData = this.item.dataSet.string(Tags.CONTOUR_DATA)
+  if (contourData === undefined) return undefined
+  
+  const points = contourData.split("\\")  // DICOM backslash-separated format
+  const result: [number, number, number][] = []
+  
+  for (let i = 0; i < points.length; i += 3) {
+    result.push([
+      parseFloat(points[i]),      // X coordinate
+      parseFloat(points[i + 1]),  // Y coordinate  
+      parseFloat(points[i + 2]),  // Z coordinate
+    ])
+  }
+  return result
+}
+```
+
+**DICOM Contour Data Format:**
+- **Backslash-separated** string: `"x1\y1\z1\x2\y2\z2\..."`
+- **Patient coordinates** in millimeters
+- **Closed planar** contours (first point = last point)
+
+### **4. Coordinate Transformation to Polygons**
+
+#### **Step 1: Scale and Round Coordinates**
+```typescript
+// Contour.ts - Lines 30-40
+constructor(sequence: ContourSequenceEntity, slicingMode: SlicingMode, points: Vector3[], position?: number) {
+  const p = points.map((p) => ({
+    x: Math.round(p[0] * SCALING_FACTOR),  // Scale for precision
+    y: Math.round(p[1] * SCALING_FACTOR),
+  }))
+  
+  super([[p]])  // Store as polygon array
+}
+```
+
+#### **Step 2: Polygon Structure**
+```typescript
+// Contour stores data as: Point[][][] (multi-polygon format)
+// - Outer array: Multiple polygons per slice
+// - Middle array: Multiple rings per polygon (exterior + holes)
+// - Inner array: Points in each ring
+```
+
+### **5. Rust-Based Advanced Processing**
+
+#### **Binary Mask Generation**
+```rust
+// process.rs - Lines 100-140
+pub fn structure_to_binary_mask(
+    polys: &Vec<Vec<f32>>,  // Input polygon data
+    size: &Vec<i32>,        // Image dimensions
+    origin: &Vec<f32>,      // DICOM origin
+    spacing: &Vec<f32>,     // Pixel spacing
+) -> StructureBinaryMask {
+    
+    for contour in polys {
+        let (mut polygon, z_index): (Vec<_>, Vec<_>) = contour
+            .chunks(3)
+            .map(|chunk| {
+                // Convert patient coordinates to pixel coordinates
+                let x = (chunk[0] - origin[0]) / spacing[0];
+                let y = (chunk[1] - origin[1]) / spacing[1];
+                let z = (chunk[2] - origin[2]) / spacing[2];
+                (Point::new(x as i32, y as i32), z)
+            })
+            .unzip();
+            
+        // Draw polygon to binary mask
+        draw_polygon_mut(&mut mask, &polygon, Luma([1u8]));
+    }
+}
+```
+
+#### **Contour Extraction from Binary Masks**
+```rust
+// process.rs - Lines 280-340
+pub fn binary_mask_axis_contours(
+    binary_mask: &StructureBinaryMask,
+    axis: usize,
+    spacing: &Vec<f32>,
+    origin: &Vec<f32>,
+) -> Result<Vec<(usize, Vec<Vec<[f64; 3]>>)>, Box<dyn Error>> {
+    
+    // Use marching squares algorithm to extract contours
+    let builder = ContourBuilder::new(width as u32, height as u32, false);
+    let contours_slice = builder.contours(&data, &[0.5])?;
+    
+    // Convert back to world coordinates
+    let contours_slice: Vec<Vec<[f64; 3]>> = contours_slice
+        .iter()
+        .map(|c| {
+            c.geometry()
+                .iter()
+                .map(|p| {
+                    let polygon = p
+                        .exterior()
+                        .points()
+                        .into_iter()
+                        .map(|point| {
+                            let x = (point.x() + bounds[0]) * spacing[0] + origin[0];
+                            let y = (point.y() + bounds[1]) * spacing[1] + origin[1];
+                            [x, y, item_index as f64 + start_index as f64]
+                        })
+                        .collect::<Vec<_>>();
+                    polygon
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+}
+```
+
+### **6. Polygon Operations and Manipulation**
+
+#### **Boolean Operations**
+```typescript
+// BrushTool.ts - Lines 280-300
+const clipType = this.operation === BrushOperation.ADDITIVE 
+  ? ClipType.Union 
+  : ClipType.Difference
+
+const result = ClipperLib.clipToPolyTree({
+  clipType,
+  subjectInputs: polygons.map((polygon) => ({
+    data: polygon,
+    closed: true,
+  })),
+  clipInputs: [{ data: buffer }],
+  subjectFillType: PolyFillType.NonZero,
+})
+```
+
+#### **Polygon Simplification**
+```typescript
+// BrushTool.ts - Lines 320-325
+paths = ClipperLib.cleanPolygons(paths, 2)
+paths = ClipperLib.simplifyPolygons(paths, PolyFillType.NonZero)
+```
+
+### **7. Coordinate Systems and Transformations**
+
+#### **Coordinate System Flow:**
+1. **DICOM Patient Coordinates** (mm) → Raw contour data
+2. **Scaled Integer Coordinates** → Internal polygon storage
+3. **World Coordinates** → VTK.js coordinate system
+4. **Display Coordinates** → Screen pixels for rendering
+
+#### **Scaling Factor:**
+```typescript
+// constants.ts
+export const SCALING_FACTOR = 1000  // For precision in integer operations
+```
+
+### **8. Multi-Slice Contour Management**
+
+#### **Slice-Based Organization:**
+```typescript
+// StructureSetEntity.ts - Lines 860-870
+// Each contour is associated with a specific slice position
+const contour = new Contour(
+  contourSequenceEntity,
+  SlicingMode.K,  // Axial, Sagittal, or Coronal
+  contourData,
+  slicePosition   // Z-coordinate of the slice
+)
+```
+
+#### **Contour Retrieval:**
+```typescript
+// ContourSequenceEntity.ts
+getContourAtSlice(slicingMode: SlicingMode, slicePosition: number): Contour | undefined {
+  return this.contours.get(slicingMode)?.find(
+    contour => Math.abs(contour.getPosition() - slicePosition) < 0.01
+  )
+}
+```
+
+### **9. Rendering and Display**
+
+#### **SVG Path Generation:**
+```typescript
+// Contour.ts - Lines 94-150
+public toSVGPaths(viewportId: number): string[] {
+  const multiPolygon = this.getCurrent()
+  
+  const polygons = multiPolygon.map((rings) => {
+    // Convert world coordinates to display coordinates
+    const scaledPoints = rings.map((points) =>
+      points.reduce((acc, point) => {
+        const p1 = (point.x / SCALING_FACTOR - bounds[1][0]) * scaleX + min[0]
+        const p2 = clientHeight - ((point.y / SCALING_FACTOR - bounds[1][1]) * scaleY + min[1])
+        
+        if (acc === undefined) return `M${p1},${p2} `
+        acc = `${acc} L${p1},${p2} `
+        if (point === points[points.length - 1]) acc = `${acc} Z`
+        return acc
+      }, undefined as string | undefined)
+    )
+    return scaledPoints
+  })
+  
+  return polygons.map((polygon) => 
+    polygon.reduce((acc, path) => `${acc} ${path}`, "")
+  )
+}
+```
+
+### **10. Key Technical Features**
+
+#### **Precision Handling:**
+- **Integer scaling** for precise polygon operations
+- **Floating-point** for coordinate transformations
+- **Rounding** to prevent floating-point errors
+
+#### **Performance Optimizations:**
+- **Binary mask generation** for efficient contour extraction
+- **Polygon simplification** to reduce complexity
+- **Caching** of transformed coordinates
+
+#### **Medical Standards Compliance:**
+- **DICOM coordinate system** preservation
+- **Patient coordinate** transformations
+- **Multi-planar** support (axial, sagittal, coronal)
+
+### **Summary**
+
+The RT structure set to polygon conversion process involves:
+
+1. **DICOM parsing** → Extract raw contour data
+2. **Coordinate transformation** → Patient coordinates to pixel coordinates  
+3. **Polygon generation** → Convert point arrays to polygon structures
+4. **Binary mask processing** → Advanced contour extraction and manipulation
+5. **Rendering preparation** → Convert to display coordinates for visualization
+
+This creates a **complete medical imaging workflow** that maintains **DICOM compliance** while providing **high-performance polygon operations** for medical contour editing and visualization.
