@@ -95,8 +95,8 @@ export function SimpleBrushTool({
       return;
     }
 
-    // Create brush stamp with current size
-    const radius = currentBrushSize * 0.5; // Convert brush size to radius
+    // Create brush stamp with zoom-independent world coordinate size
+    const radius = currentBrushSize * 0.5; // Base radius in world coordinates (zoom-independent)
     const numCirclePoints = 16;
     const brushStamp: Point[] = [];
     
@@ -202,10 +202,11 @@ export function SimpleBrushTool({
     currentBrushPolygon.current = []; // Clear accumulated brush stamps
     lastMousePos.current = null; // Reset for continuous drawing
     
-    // Store existing contour points so we can ADD to them, not replace
+    // Store existing contour points for ONLY this exact slice - strict slice isolation
     const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
     if (structure) {
-      const tolerance = 2.0;
+      // Use stricter tolerance to ensure we only get contours for this exact slice
+      const tolerance = 0.1; // Much stricter - almost exact match
       const existingContour = structure.contours.find((contour: any) => 
         Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
       );
@@ -219,10 +220,10 @@ export function SimpleBrushTool({
             y: existingContour.points[i + 1]
           });
         }
-        console.log('Loaded', existingContourPoints.current.length, 'existing contour points');
+        console.log(`Loaded ${existingContourPoints.current.length} existing contour points for slice ${currentSlicePosition}`);
       } else {
         existingContourPoints.current = [];
-        console.log('No existing contour found');
+        console.log(`No existing contour found for slice ${currentSlicePosition} - starting fresh`);
       }
     }
     
@@ -262,11 +263,21 @@ export function SimpleBrushTool({
   };
 
   const handleMouseUp = (e: MouseEvent) => {
-    if (!isActive || e.button !== 0) return;
+    if (!isActive) return;
+    
+    if (e.button === 2) { // Right mouse up - stop resizing
+      isRightMouseDown.current = false;
+      lastMousePos.current = null;
+      console.log('Stopped brush resizing');
+      return;
+    }
+    
+    if (e.button !== 0) return; // Only handle left mouse up for drawing
     
     console.log('Ending brush stroke');
     setIsDrawing(false);
     strokePoints.current = []; // Clear stroke
+    lastMousePos.current = null; // Reset for next stroke
     // Keep currentBrushPolygon for the finished contour
   };
 
@@ -352,10 +363,10 @@ export function SimpleBrushTool({
     // Clear canvas
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
 
-    // Draw simple green circle
+    // Draw simple circle with current brush size
     const centerX = mousePosition.x;
     const centerY = mousePosition.y;
-    const radius = Math.max(4, Math.min(50, brushSize / 2));
+    const radius = Math.max(4, Math.min(50, currentBrushSize / 2));
     
     ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = 2;
@@ -370,7 +381,7 @@ export function SimpleBrushTool({
     ctx.beginPath();
     ctx.arc(centerX, centerY, 2, 0, 2 * Math.PI);
     ctx.fill();
-  }, [mousePosition, brushSize, isDrawing, isActive]);
+  }, [mousePosition, currentBrushSize, isDrawing, isActive]);
 
   return null; // This component only handles events and cursor
 }
