@@ -3,9 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { SimpleBrushTool } from './simple-brush-tool';
-import { OHIFBrushTool } from './ohif-brush-tool';
-import { BrushOperation } from '@shared/schema';
+import { OHIFEnhancedBrush } from './ohif-enhanced-brush';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -863,9 +861,9 @@ export function WorkingViewer({
             }}
           />
 
-          {/* Simple Brush Tool overlay */}
+          {/* OHIF Enhanced Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <SimpleBrushTool
+            <OHIFEnhancedBrush
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
@@ -883,11 +881,9 @@ export function WorkingViewer({
                   console.log('Contour updated:', updatedStructures);
                 }
               }}
-              onBrushSizeChange={onBrushSizeChange}
               zoom={zoom}
               panX={panX}
               panY={panY}
-              currentImage={images.length > 0 ? images[currentIndex] : null}
               imageMetadata={imageMetadata}
             />
           )}

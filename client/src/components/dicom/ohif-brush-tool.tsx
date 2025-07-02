@@ -11,7 +11,7 @@ interface OHIFBrushToolProps {
   isActive: boolean;
   brushSize: number;
   operation?: BrushOperation;
-  selectedStructure?: RTStructure | null;
+  selectedStructure?: any;
   onContourUpdate?: (updatedStructure: RTStructure) => void;
   onBrushSizeChange?: (size: number) => void;
   currentSlicePosition: number;
@@ -50,7 +50,7 @@ export const OHIFBrushTool: React.FC<OHIFBrushToolProps> = ({
     });
 
     brushTool.initialize(canvasRef.current);
-    brushTool.setTargetStructure(selectedStructure);
+    brushTool.setTargetStructure(selectedStructure || null);
 
     // Set up stroke completion callback
     brushTool.setOnStrokeComplete((stroke: BrushStroke) => {
@@ -76,7 +76,7 @@ export const OHIFBrushTool: React.FC<OHIFBrushToolProps> = ({
     if (brushToolRef.current) {
       brushToolRef.current.setBrushSize(brushSize);
       brushToolRef.current.setOperation(operation);
-      brushToolRef.current.setTargetStructure(selectedStructure);
+      brushToolRef.current.setTargetStructure(selectedStructure || null);
     }
   }, [brushSize, operation, selectedStructure]);
 
