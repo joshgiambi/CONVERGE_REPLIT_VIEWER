@@ -249,7 +249,7 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     } else {
       // Subtract from existing contours (simplified - in full implementation would use proper clipping)
       // For now, remove intersecting contours
-      structure.contours[currentSlicePosition] = currentContours.filter(contour => 
+      structure.contours[currentSlicePosition] = currentContours.filter((contour: Point[]) => 
         !polygonsIntersect(contour, strokePolygon)
       );
     }
