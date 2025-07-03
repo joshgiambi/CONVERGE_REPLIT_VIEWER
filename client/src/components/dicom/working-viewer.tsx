@@ -530,8 +530,10 @@ export function WorkingViewer({
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
 
       structure.contours.forEach((contour: any) => {
-        // Check if this contour is on the current slice
-        if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+        // Debug: Log what contours are being considered for drawing
+        const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
+        if (positionDiff <= tolerance) {
+          console.log(`✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`);
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
         }
       });

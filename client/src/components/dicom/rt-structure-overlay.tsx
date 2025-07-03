@@ -163,19 +163,31 @@ function renderRTStructures(
     return ctZMin + normalizedRtZ * ctRange; // Map to CT range
   };
   
-  // Debug: Log transformation details (only once per render)
-  if (rtZPositions.length > 0) {
-    console.log(`RT→CT Coordinate Transformation:
-      RT Range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm
-      CT Range: ${ctZMin.toFixed(1)} to ${ctZMax.toFixed(1)}mm
-      Current CT slice: ${currentSlicePosition.toFixed(1)}mm
-      Sample RT→CT mappings:
-        RT ${rtZMin.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMin).toFixed(1)}mm
-        RT 0.0mm → CT ${transformRTtoCtZ(0).toFixed(1)}mm
-        RT ${rtZMax.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMax).toFixed(1)}mm`);
-  }
+  // Debug: Log transformation details every time to track the issue
+  console.log(`🔄 RT→CT Coordinate Transformation:
+    RT Range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm
+    CT Range: ${ctZMin.toFixed(1)} to ${ctZMax.toFixed(1)}mm
+    Current CT slice: ${currentSlicePosition.toFixed(1)}mm
+    Sample RT→CT mappings:
+      RT ${rtZMin.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMin).toFixed(1)}mm
+      RT 0.0mm → CT ${transformRTtoCtZ(0).toFixed(1)}mm
+      RT ${rtZMax.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMax).toFixed(1)}mm`);
   
   const tolerance = 2.0; // mm tolerance for slice matching
+  
+  // Debug: Check what contours are actually being drawn
+  let contoursDrawn = 0;
+  rtStructures.structures.forEach(structure => {
+    structure.contours.forEach(contour => {
+      const transformedZ = transformRTtoCtZ(contour.slicePosition);
+      if (Math.abs(transformedZ - currentSlicePosition) <= tolerance) {
+        contoursDrawn++;
+        console.log(`✓ Drawing ${structure.structureName} contour: RT ${contour.slicePosition.toFixed(1)}mm → CT ${transformedZ.toFixed(1)}mm`);
+      }
+    });
+  });
+  
+  console.log(`📊 Drawing ${contoursDrawn} contours on current slice`);
   
   rtStructures.structures.forEach(structure => {
     // Set color for this structure
