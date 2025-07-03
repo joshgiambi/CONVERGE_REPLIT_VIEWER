@@ -467,8 +467,8 @@ export function WorkingViewer({
     ctx.save();
 
     // Apply global contour settings
-    const lineWidth = contourSettings?.width || 2;
-    const fillOpacity = (contourSettings?.opacity || 80) / 100;
+    const lineWidth = contourSettings?.width || 3;
+    const fillOpacity = (contourSettings?.opacity || 30) / 100;
 
     // Set line width (scaled for zoom)
     ctx.lineWidth = lineWidth / zoom;

@@ -134,7 +134,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.restore();
   }, [brushSizePixels, operation]);
 
-  // Paint pixels matching medical contour style (filled + 3px outline)
+  // Paint pixels matching medical contour style (filled with 3px border)
   const paintPixels = useCallback((canvasPoint: Point) => {
     if (!maskCanvasRef.current) return;
     
@@ -149,32 +149,32 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     if (operation === BrushOperation.ADDITIVE) {
       ctx.globalCompositeOperation = 'source-over';
       
-      // Draw filled circle first
+      // Draw filled circle
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
       ctx.beginPath();
       ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
       ctx.fill();
       
-      // Add 3px outline for medical contour appearance
+      // Draw 3px border around the filled area
       ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+      ctx.arc(canvasPoint.x, canvasPoint.y, radius + 1.5, 0, 2 * Math.PI); // Offset for border
       ctx.stroke();
       
     } else {
-      // Erase pixels
+      // Erase pixels (including border area)
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
       ctx.beginPath();
-      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+      ctx.arc(canvasPoint.x, canvasPoint.y, radius + 3, 0, 2 * Math.PI); // Include border in erase
       ctx.fill();
     }
     
     ctx.restore();
   }, [brushSizePixels, operation, structureColor]);
 
-  // Paint continuous line matching medical contour style (3px outline + fill)
+  // Paint continuous line matching medical contour style (filled with 3px border)
   const paintLine = useCallback((from: Point, to: Point) => {
     if (!maskCanvasRef.current) return;
     
@@ -189,17 +189,19 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     if (operation === BrushOperation.ADDITIVE) {
       ctx.globalCompositeOperation = 'source-over';
       
-      // Draw filled area first
-      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
+      // Draw filled stroke
+      ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+      
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
       ctx.stroke();
       
       // Add filled circles at endpoints for smooth connection
+      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
       ctx.beginPath();
       ctx.arc(from.x, from.y, lineWidth / 2, 0, 2 * Math.PI);
       ctx.fill();
@@ -208,22 +210,33 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       ctx.arc(to.x, to.y, lineWidth / 2, 0, 2 * Math.PI);
       ctx.fill();
       
-      // Now draw 3px outline for medical contour appearance
+      // Draw 3px border around the stroke
       ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
-      ctx.lineWidth = 3;
-      ctx.globalCompositeOperation = 'source-over';
+      ctx.lineWidth = lineWidth + 6; // 3px on each side
+      ctx.globalCompositeOperation = 'destination-over'; // Draw border behind
       
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
       ctx.stroke();
+      
+      // Border circles at endpoints
+      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      ctx.beginPath();
+      ctx.arc(from.x, from.y, (lineWidth + 6) / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, (lineWidth + 6) / 2, 0, 2 * Math.PI);
+      ctx.fill();
       
     } else {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0, 0, 0, 1.0)';
       ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
       
-      ctx.lineWidth = lineWidth;
+      // Erase with slightly larger area to include border
+      ctx.lineWidth = lineWidth + 6;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
@@ -233,11 +246,11 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       ctx.stroke();
       
       ctx.beginPath();
-      ctx.arc(from.x, from.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.arc(from.x, from.y, (lineWidth + 6) / 2, 0, 2 * Math.PI);
       ctx.fill();
       
       ctx.beginPath();
-      ctx.arc(to.x, to.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.arc(to.x, to.y, (lineWidth + 6) / 2, 0, 2 * Math.PI);
       ctx.fill();
     }
     
@@ -369,7 +382,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     maskCanvas.style.left = '0';
     maskCanvas.style.pointerEvents = 'none';
     maskCanvas.style.zIndex = '5';
-    maskCanvas.style.opacity = '0.15'; // Match medical imaging standard: 15% opacity
+    maskCanvas.style.opacity = '0.3'; // Match medical imaging standard: 30% opacity
     
     // Create preview canvas for cursor
     const previewCanvas = document.createElement('canvas');
