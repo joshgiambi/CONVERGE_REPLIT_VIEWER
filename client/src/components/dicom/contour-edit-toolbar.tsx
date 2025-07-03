@@ -257,7 +257,7 @@ export function ContourEditToolbar({
     if (!showSettings) return null;
 
     return (
-      <div className="absolute left-full top-0 ml-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-80 shadow-2xl">
+      <div className="absolute left-full bottom-0 ml-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-80 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-white capitalize">{showSettings} Settings</h4>
           <Button
@@ -270,95 +270,95 @@ export function ContourEditToolbar({
           </Button>
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-3">
+        {showSettings === 'grow' ? (
+          <div className="space-y-3 w-full">
             <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
-              <Slider
-                value={brushThickness}
-                onValueChange={(value) => {
-                  setBrushThickness(value);
-                  // Update tool state with new brush size
-                  if (onToolChange && activeTool === 'brush') {
-                    onToolChange({
-                      tool: 'brush',
-                      brushSize: value[0],
-                      isActive: true
-                    });
-                  }
-                }}
-                max={20}
-                min={1}
-                step={1}
-                className="w-full"
+              <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (mm)</Label>
+              <Input
+                type="number"
+                placeholder="Enter distance in mm"
+                value={growDistance}
+                onChange={(e) => setGrowDistance(e.target.value)}
+                className="w-full h-8 bg-gray-800/70 border-gray-600 text-white text-sm"
+                min="0"
+                step="0.1"
               />
-              <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+              <div className="text-xs text-gray-500 mt-2">
+                Expands the selected contour radially by the specified distance in millimeters on the current slice.
+              </div>
             </div>
             
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-gray-300">3D Mode</Label>
-              <Switch
-                checked={is3D}
-                onCheckedChange={setIs3D}
-                className="data-[state=checked]:bg-blue-500"
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-gray-300">Smart Brush</Label>
-              <Switch
-                checked={smartBrush}
-                onCheckedChange={setSmartBrush}
-                className="data-[state=checked]:bg-green-500"
-              />
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGrowContour}
+              className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
+              disabled={!growDistance || !currentSlicePosition}
+            >
+              <ArrowUpFromLine className="w-4 h-4 mr-2" />
+              Run Grow
+            </Button>
           </div>
-          
-          <div className="space-y-3">
-            {showSettings === 'grow' && (
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (mm)</Label>
-                  <Input
-                    type="number"
-                    placeholder="Enter distance in mm"
-                    value={growDistance}
-                    onChange={(e) => setGrowDistance(e.target.value)}
-                    className="w-full h-8 bg-gray-800/70 border-gray-600 text-white text-sm"
-                    min="0"
-                    step="0.1"
-                  />
-                  <div className="text-xs text-gray-500 mt-2">
-                    Expands the selected contour radially by the specified distance in millimeters on the current slice.
-                  </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
+                <Slider
+                  value={brushThickness}
+                  onValueChange={(value) => {
+                    setBrushThickness(value);
+                    // Update tool state with new brush size
+                    if (onToolChange && activeTool === 'brush') {
+                      onToolChange({
+                        tool: 'brush',
+                        brushSize: value[0],
+                        isActive: true
+                      });
+                    }
+                  }}
+                  max={20}
+                  min={1}
+                  step={1}
+                  className="w-full"
+                />
+                <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">3D Mode</Label>
+                <Switch
+                  checked={is3D}
+                  onCheckedChange={setIs3D}
+                  className="data-[state=checked]:bg-blue-500"
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Smart Brush</Label>
+                <Switch
+                  checked={smartBrush}
+                  onCheckedChange={setSmartBrush}
+                  className="data-[state=checked]:bg-green-500"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              {showSettings && (
+                <div className="text-xs text-gray-500">
+                  {showSettings} tool settings will be implemented here
                 </div>
-                
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleGrowContour}
-                  className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
-                  disabled={!growDistance || !currentSlicePosition}
-                >
-                  <ArrowUpFromLine className="w-4 h-4 mr-2" />
-                  Run Grow
-                </Button>
-              </div>
-            )}
-            
-            {showSettings !== 'grow' && showSettings && (
-              <div className="text-xs text-gray-500">
-                {showSettings} tool settings will be implemented here
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
+    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50">
       <div 
         className="relative bg-black/80 backdrop-blur-sm border-2 rounded-lg p-3 shadow-2xl w-auto"
         style={{ borderColor: `${structureColorRgb}60` }}
