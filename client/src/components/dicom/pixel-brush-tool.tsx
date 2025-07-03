@@ -233,6 +233,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   const convertBrushToContour = useCallback(() => {
     if (!maskCanvasRef.current || !selectedStructure || !rtStructures || !imageMetadata) return;
 
+    console.log('🎨 STARTING BRUSH TO CONTOUR CONVERSION');
+    
     const canvas = maskCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -756,9 +758,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
 
   const handleMouseUp = useCallback((event?: MouseEvent) => {
-    console.log('Mouse up event triggered', { isDrawing, selectedStructure });
+    console.log('🖱️ MOUSE UP EVENT TRIGGERED - Brush Tool', { isDrawing, selectedStructure });
     
-    if (!isDrawing) return;
+    if (!isDrawing) {
+      console.log('❌ Not drawing, skipping conversion');
+      return;
+    }
 
     setIsDrawing(false);
     setLastPosition(null);
@@ -779,11 +784,29 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize, convertBrushToContour]);
 
-  // Hide mask canvas when not on the painting slice
+  // Hide mask canvas when not on the painting slice - AND CLEAR IT TO PREVENT CROSS-SLICE BLEEDING
   useEffect(() => {
     if (maskCanvasRef.current) {
       const isOnPaintingSlice = paintingSlice === null || paintingSlice === currentSlicePosition;
-      maskCanvasRef.current.style.visibility = isOnPaintingSlice ? 'visible' : 'hidden';
+      
+      console.log('🎭 SLICE CHANGE DEBUG:', {
+        currentSlice: currentSlicePosition,
+        paintingSlice: paintingSlice,
+        isOnPaintingSlice: isOnPaintingSlice,
+        action: isOnPaintingSlice ? 'SHOW' : 'HIDE_AND_CLEAR'
+      });
+      
+      if (isOnPaintingSlice) {
+        maskCanvasRef.current.style.visibility = 'visible';
+      } else {
+        maskCanvasRef.current.style.visibility = 'hidden';
+        // CRITICAL: Clear the mask canvas when switching slices to prevent bleeding
+        const ctx = maskCanvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
+          console.log('🧹 CLEARED mask canvas on slice change');
+        }
+      }
     }
   }, [currentSlicePosition, paintingSlice]);
 
