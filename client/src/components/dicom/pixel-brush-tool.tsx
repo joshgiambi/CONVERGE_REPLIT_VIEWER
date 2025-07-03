@@ -310,17 +310,41 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // SIMPLE: Just use mouse coordinates directly as world coordinates
+  // EXACT INVERSE of RT structure overlay coordinate transformation
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
+    if (!canvasRef.current) return [0, 0, 0];
+    
+    const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Try the most basic approach: use canvas coordinates directly
-    const worldX = point.x - 250; // Center around 0
-    const worldY = point.y - 250; // Center around 0
+    // Use EXACT same constants as RT overlay
+    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+    const pixelSpacing: [number, number] = [1.171875, 1.171875];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
+    
+    // Account for zoom and pan
+    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
+    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
+    
+    // Step 1: Convert canvas to rotated pixel indices (inverse of lines 178-179)
+    const rotatedJ = (adjustedX / canvas.width) * dicomImageWidth;
+    const rotatedI = (adjustedY / canvas.height) * dicomImageHeight;
+    
+    // Step 2: Undo the rotation (inverse of lines 174-175)
+    const i = dicomImageWidth - rotatedJ; // rotatedJ = imageWidth - i -> i = imageWidth - rotatedJ  
+    const j = rotatedI; // rotatedI = j -> j = rotatedI
+    
+    // Step 3: Convert pixel indices to world coordinates (inverse of lines 170-171)
+    const worldX = imagePositionPatient[0] + j * pixelSpacing[0]; // j = (worldX - originX) / pixelSpacing[0]
+    const worldY = imagePositionPatient[1] + i * pixelSpacing[1]; // i = (worldY - originY) / pixelSpacing[1]
     const worldZ = sliceLocation;
     
-    console.log('🎯 DIRECT COORDINATES:', {
+    console.log('🎯 PROPER INVERSE COORDINATES:', {
       canvas: point,
+      adjusted: { x: adjustedX, y: adjustedY },
+      rotated: { i: rotatedI, j: rotatedJ },
+      pixel: { i, j },
       world: { x: worldX, y: worldY, z: worldZ }
     });
     
