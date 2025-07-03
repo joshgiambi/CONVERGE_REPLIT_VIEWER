@@ -13,7 +13,8 @@ import {
   X,
   Trash2,
   Layers,
-  RotateCcw
+  RotateCcw,
+  ArrowUpFromLine
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -61,6 +62,12 @@ export function ContourEditToolbar({
 
   // Notify parent when brush tool is activated
   const handleToolActivation = (toolId: string) => {
+    if (toolId === 'grow') {
+      // For grow button, just toggle the settings panel directly
+      setShowSettings(showSettings === 'grow' ? null : 'grow');
+      return;
+    }
+    
     const isActive = activeTool === toolId;
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
@@ -243,7 +250,7 @@ export function ContourEditToolbar({
     { id: 'brush', icon: Brush, label: 'Brush' },
     { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
-    { id: 'operations', icon: Settings, label: 'Operations' }
+    { id: 'grow', icon: ArrowUpFromLine, label: 'Grow' }
   ];
 
   const renderSettingsPanel = () => {
@@ -308,122 +315,38 @@ export function ContourEditToolbar({
           </div>
           
           <div className="space-y-3">
-            {showSettings === 'operations' && (
-              <>
-                <div className="space-y-2">
-                  <Label className="text-xs text-gray-300">Structure Navigation</Label>
-                  
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs text-gray-300">Auto-Zoom</Label>
-                    <Switch
-                      checked={autoZoomEnabled}
-                      onCheckedChange={setAutoZoomEnabled}
-                      className="data-[state=checked]:bg-blue-500"
-                    />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs text-gray-300">Auto-Localize</Label>
-                    <Switch
-                      checked={autoLocalizeEnabled}
-                      onCheckedChange={setAutoLocalizeEnabled}
-                      className="data-[state=checked]:bg-green-500"
-                    />
-                  </div>
-                  
-                  {autoZoomEnabled && (
-                    <div>
-                      <Label className="text-xs text-gray-300 mb-2 block">Zoom Fill Factor</Label>
-                      <Slider
-                        value={zoomFillFactor}
-                        onValueChange={setZoomFillFactor}
-                        max={80}
-                        min={20}
-                        step={5}
-                        className="w-full"
-                      />
-                      <div className="text-xs text-gray-400 mt-1">{zoomFillFactor[0]}% of screen</div>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs text-gray-300">Delete Operations</Label>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDeleteCurrentSlice}
-                    className="w-full h-8 bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
-                    disabled={!currentSlicePosition}
-                  >
-                    <Trash2 className="w-3 h-3 mr-2" />
-                    Delete Current Slice
-                  </Button>
-                  
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="Slice #"
-                      value={targetSliceNumber}
-                      onChange={(e) => setTargetSliceNumber(e.target.value)}
-                      className="flex-1 h-8 bg-gray-800/70 border-gray-600 text-white text-xs"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDeleteNthSlice}
-                      className="h-8 bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
-                      disabled={!targetSliceNumber}
-                    >
-                      <Layers className="w-3 h-3 mr-1" />
-                      Delete
-                    </Button>
-                  </div>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleClearAllSlices}
-                    className="w-full h-8 bg-red-900/30 hover:bg-red-900/40 border-red-500/60 text-red-300 hover:text-red-200"
-                  >
-                    <RotateCcw className="w-3 h-3 mr-2" />
-                    Clear All Slices
-                  </Button>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs text-gray-300">Grow Contour</Label>
-                  
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="Distance (mm)"
-                      value={growDistance}
-                      onChange={(e) => setGrowDistance(e.target.value)}
-                      className="flex-1 h-8 bg-gray-800/70 border-gray-600 text-white text-xs"
-                      min="0"
-                      step="0.1"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleGrowContour}
-                      className="h-8 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
-                      disabled={!growDistance || !currentSlicePosition}
-                    >
-                      Run
-                    </Button>
-                  </div>
-                  
-                  <div className="text-xs text-gray-500">
+            {showSettings === 'grow' && (
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (mm)</Label>
+                  <Input
+                    type="number"
+                    placeholder="Enter distance in mm"
+                    value={growDistance}
+                    onChange={(e) => setGrowDistance(e.target.value)}
+                    className="w-full h-8 bg-gray-800/70 border-gray-600 text-white text-sm"
+                    min="0"
+                    step="0.1"
+                  />
+                  <div className="text-xs text-gray-500 mt-2">
                     Expands the selected contour radially by the specified distance in millimeters on the current slice.
                   </div>
                 </div>
-              </>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGrowContour}
+                  className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
+                  disabled={!growDistance || !currentSlicePosition}
+                >
+                  <ArrowUpFromLine className="w-4 h-4 mr-2" />
+                  Run Grow
+                </Button>
+              </div>
             )}
             
-            {showSettings !== 'operations' && (
+            {showSettings !== 'grow' && showSettings && (
               <div className="text-xs text-gray-500">
                 {showSettings} tool settings will be implemented here
               </div>
@@ -479,7 +402,7 @@ export function ContourEditToolbar({
         <div className="flex items-center justify-center space-x-2">
           {mainTools.map((tool) => {
             const IconComponent = tool.icon;
-            const isActive = activeTool === tool.id;
+            const isActive = activeTool === tool.id || (tool.id === 'grow' && showSettings === 'grow');
             const hasSettings = showSettings === tool.id;
             return (
               <div key={tool.id} className="relative flex items-center">
