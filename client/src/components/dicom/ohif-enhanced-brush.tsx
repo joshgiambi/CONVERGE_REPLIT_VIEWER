@@ -1,5 +1,5 @@
 // OHIF-Enhanced Brush Tool - Professional medical segmentation
-// Following OHIF patterns for smooth brush operations
+// Following OHIF patterns for smooth brush operations with improved functionality
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Point, BrushOperation } from '@shared/schema';
@@ -16,6 +16,10 @@ interface OHIFEnhancedBrushProps {
   panX: number;
   panY: number;
   imageMetadata?: any;
+  smoothingEnabled?: boolean;
+  interpolationDensity?: number;
+  enableSmartMode?: boolean;
+  onBrushModeChange?: (mode: BrushOperation) => void;
 }
 
 export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
@@ -29,13 +33,88 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
   zoom,
   panX,
   panY,
-  imageMetadata
+  imageMetadata,
+  smoothingEnabled = true,
+  interpolationDensity = 0.25,
+  enableSmartMode = true,
+  onBrushModeChange
 }) => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [operation, setOperation] = useState<BrushOperation>(BrushOperation.ADDITIVE);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
+  const [operationLocked, setOperationLocked] = useState(false);
+  const [strokeId, setStrokeId] = useState<string | null>(null);
   const strokePointsRef = useRef<Point[]>([]);
   const lastPositionRef = useRef<Point | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const brushHistoryRef = useRef<Array<{id: string, points: Point[], operation: BrushOperation}>>([]);
+  
+  // Performance tracking
+  const lastRenderTime = useRef<number>(0);
+  const renderThrottleMs = 16; // 60fps
+
+  // Convert millimeters to world space coordinates
+  const mmToWorldSpace = useCallback((mm: number): number => {
+    if (!imageMetadata?.pixelSpacing) return mm;
+    return mm / Math.min(imageMetadata.pixelSpacing[0], imageMetadata.pixelSpacing[1]);
+  }, [imageMetadata]);
+
+  // Distance from point to line segment
+  const distanceToLineSegment = (point: Point, lineStart: Point, lineEnd: Point): number => {
+    const A = point.x - lineStart.x;
+    const B = point.y - lineStart.y;
+    const C = lineEnd.x - lineStart.x;
+    const D = lineEnd.y - lineStart.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    
+    if (lenSq === 0) return Math.sqrt(A * A + B * B);
+    
+    let param = dot / lenSq;
+    
+    if (param < 0) {
+      return Math.sqrt(A * A + B * B);
+    } else if (param > 1) {
+      const dx = point.x - lineEnd.x;
+      const dy = point.y - lineEnd.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    } else {
+      const projX = lineStart.x + param * C;
+      const projY = lineStart.y + param * D;
+      const dx = point.x - projX;
+      const dy = point.y - projY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+  };
+
+  // Point in polygon test with improved precision
+  const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
+          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Enhanced brush-contour intersection detection
+  const brushIntersectsContour = useCallback((center: Point, radius: number, contour: Point[]): boolean => {
+    // Check if brush circle intersects with polygon edges
+    for (let i = 0; i < contour.length; i++) {
+      const p1 = contour[i];
+      const p2 = contour[(i + 1) % contour.length];
+      
+      if (distanceToLineSegment(center, p1, p2) <= radius) {
+        return true;
+      }
+    }
+    
+    // Check if center is inside polygon
+    return pointInPolygon(center, contour);
+  }, []);
 
   // Convert canvas coordinates to world coordinates
   const canvasToWorld = useCallback((canvasX: number, canvasY: number) => {
@@ -55,10 +134,10 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     return { x: worldX, y: worldY };
   }, [imageMetadata, zoom, panX, panY]);
 
-  // Smart brush mode detection - OHIF style
+  // Enhanced Smart brush mode detection - Following OHIF standards
   const detectBrushMode = useCallback((worldPoint: Point): BrushOperation => {
-    if (!selectedStructure || !rtStructures?.structures) {
-      return BrushOperation.ADDITIVE;
+    if (!enableSmartMode || !selectedStructure || !rtStructures?.structures) {
+      return operation;
     }
 
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
@@ -66,28 +145,19 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
       return BrushOperation.ADDITIVE;
     }
 
-    // Check if point intersects with existing contours
+    // Enhanced contour intersection detection with brush radius consideration
     const contours = structure.contours[currentSlicePosition];
+    const brushRadiusInWorld = mmToWorldSpace(brushSize / 2);
+    
     for (const contour of contours) {
-      if (pointInPolygon(worldPoint, contour)) {
-        return BrushOperation.SUBTRACTIVE;
+      // Check if brush circle intersects with contour polygon
+      if (brushIntersectsContour(worldPoint, brushRadiusInWorld, contour)) {
+        return BrushOperation.ADDITIVE; // Green cursor - touching contour
       }
     }
 
-    return BrushOperation.ADDITIVE;
-  }, [selectedStructure, rtStructures, currentSlicePosition]);
-
-  // Point in polygon test
-  const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
-          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  };
+    return BrushOperation.SUBTRACTIVE; // Red cursor - not touching contour
+  }, [enableSmartMode, selectedStructure, rtStructures, currentSlicePosition, brushSize, operation]);
 
   // Mouse event handlers - OHIF style
   const handleMouseDown = useCallback((event: MouseEvent) => {
