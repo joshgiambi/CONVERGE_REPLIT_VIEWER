@@ -707,6 +707,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Mouse event handlers
   const handleMouseDown = useCallback((event: MouseEvent) => {
+    console.log('🚨 MOUSE DOWN FIRED!', { isActive, selectedStructure, button: event.button });
     if (!isActive || !selectedStructure || event.button !== 0) return;
 
     event.preventDefault();
@@ -744,6 +745,11 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!isActive) return;
+    
+    // Basic debug - only log when drawing
+    if (isDrawing) {
+      console.log('🖱️ MOUSE MOVE while drawing');
+    }
 
     const rect = canvasRef.current!.getBoundingClientRect();
     const canvasPoint = {
