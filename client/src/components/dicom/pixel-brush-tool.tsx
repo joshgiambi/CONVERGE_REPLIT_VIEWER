@@ -46,8 +46,26 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
-  // Structure color for painting
-  const structureColor = selectedStructure?.color || [255, 0, 0];
+  // Get the actual structure object from rtStructures using the selectedStructure ID
+  const selectedStructureData = useMemo(() => {
+    if (!selectedStructure || !rtStructures?.structures) return null;
+    return rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+  }, [selectedStructure, rtStructures]);
+  
+  // Structure color for painting (use the selected structure's color)
+  const structureColor = selectedStructureData?.color || [255, 0, 0];
+  
+  // Debug logging for structure color
+  useEffect(() => {
+    if (selectedStructureData) {
+      console.log('Brush tool selected structure:', {
+        roiNumber: selectedStructureData.roiNumber,
+        structureName: selectedStructureData.structureName,
+        color: selectedStructureData.color,
+        structureColor: structureColor
+      });
+    }
+  }, [selectedStructureData, structureColor]);
 
   // Get pixel spacing in mm from image metadata
   const pixelSpacingMm = useMemo(() => {
@@ -125,7 +143,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.save();
     
     // Use proper structure color from selected structure
-    const color = selectedStructure?.color || [255, 0, 0];
+    const color = structureColor;
     
     if (operation === BrushOperation.ADDITIVE) {
       // Paint with exact structure color
@@ -144,21 +162,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     
     ctx.restore();
 
-    // Show the painted result on main canvas
-    if (canvasRef.current) {
-      const mainCtx = canvasRef.current.getContext('2d');
-      if (mainCtx) {
-        // Clear previous overlay and redraw
-        const imageData = mainCtx.getImageData(0, 0, mainCtx.canvas.width, mainCtx.canvas.height);
-        mainCtx.putImageData(imageData, 0, 0);
-        
-        // Overlay the mask canvas with structure opacity
-        mainCtx.save();
-        mainCtx.globalAlpha = 0.6;
-        mainCtx.drawImage(maskCanvasRef.current, 0, 0);
-        mainCtx.restore();
-      }
-    }
+    // Don't modify the main canvas directly - let the mask canvas handle the overlay
+    // The mask canvas will be composited later
   }, [brushSizePixels, operation, selectedStructure]);
 
   // Paint continuous line using rectangle for smooth strokes instead of overlapping circles
@@ -168,7 +173,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const ctx = maskCanvasRef.current.getContext('2d');
     if (!ctx) return;
     
-    const color = selectedStructure?.color || [255, 0, 0];
+    const color = structureColor;
     const lineWidth = brushSizePixels;
     
     ctx.save();
@@ -203,17 +208,6 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.fill();
     
     ctx.restore();
-    
-    // Update main canvas
-    if (canvasRef.current) {
-      const mainCtx = canvasRef.current.getContext('2d');
-      if (mainCtx) {
-        mainCtx.save();
-        mainCtx.globalAlpha = 0.6;
-        mainCtx.drawImage(maskCanvasRef.current, 0, 0);
-        mainCtx.restore();
-      }
-    }
   }, [brushSizePixels, operation, selectedStructure]);
 
   // Mouse event handlers
@@ -284,16 +278,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     // For now, we'll just update the display
     ctx.putImageData(imageData, 0, 0);
     
-    // Update main canvas
-    if (canvasRef.current) {
-      const mainCtx = canvasRef.current.getContext('2d');
-      if (mainCtx) {
-        mainCtx.save();
-        mainCtx.globalAlpha = 0.6;
-        mainCtx.drawImage(canvas, 0, 0);
-        mainCtx.restore();
-      }
-    }
+    // The mask canvas will be automatically visible as an overlay
   }, []);
 
   const handleMouseUp = useCallback((event?: MouseEvent) => {
@@ -360,6 +345,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     maskCanvas.style.left = '0';
     maskCanvas.style.pointerEvents = 'none';
     maskCanvas.style.zIndex = '5';
+    maskCanvas.style.opacity = '0.6'; // Make it semi-transparent so we can see the underlying image
     
     // Create preview canvas for cursor
     const previewCanvas = document.createElement('canvas');
@@ -444,15 +430,15 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
             left: mousePosition.x + 15,
             top: mousePosition.y - 45,
             zIndex: 20,
-            borderColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000'
+            borderColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000'
           }}
         >
           <div className="flex items-center gap-2">
             <div 
               className="w-3 h-3 rounded-full border-2"
               style={{
-                backgroundColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000',
-                borderColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000'
+                backgroundColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000',
+                borderColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000'
               }}
             />
             <span>
