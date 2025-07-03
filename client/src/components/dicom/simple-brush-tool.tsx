@@ -39,7 +39,7 @@ export function SimpleBrushTool({
   const strokePoints = useRef<Point[]>([]);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // FIXED coordinate transformation with proper slice isolation
+  // FIXED coordinate transformation - simplified and accurate
   const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !imageMetadata || !canvasRef.current) {
       return null;
@@ -49,26 +49,58 @@ export function SimpleBrushTool({
     const imageWidth = currentImage.width || 512;
     const imageHeight = currentImage.height || 512;
 
-    // Calculate image display parameters
-    const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
-    const totalScale = baseScale * zoom;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
+    // Get the actual canvas display size (CSS size)
+    const rect = canvas.getBoundingClientRect();
+    const displayWidth = rect.width;
+    const displayHeight = rect.height;
 
-    // Center the image on canvas
-    const imageX = (canvas.width - scaledWidth) / 2 + panX;
-    const imageY = (canvas.height - scaledHeight) / 2 + panY;
+    // Calculate how the image is scaled to fit in the display
+    const scaleX = displayWidth / canvas.width;
+    const scaleY = displayHeight / canvas.height;
 
-    // Convert canvas coordinates to image pixel coordinates
-    const pixelX = (canvasX - imageX) / totalScale;
-    const pixelY = (canvasY - imageY) / totalScale;
+    // Convert canvas coordinates to display coordinates
+    const displayX = canvasX * scaleX;
+    const displayY = canvasY * scaleY;
 
-    // Strict bounds check to prevent artifacts
-    if (pixelX < 0 || pixelX >= imageWidth || pixelY < 0 || pixelY >= imageHeight) {
-      return null;
+    // Calculate image scaling and positioning within display
+    const imageAspect = imageWidth / imageHeight;
+    const displayAspect = displayWidth / displayHeight;
+
+    let scaledImageWidth, scaledImageHeight;
+    let imageOffsetX, imageOffsetY;
+
+    if (imageAspect > displayAspect) {
+      // Image is wider - fit to width
+      scaledImageWidth = displayWidth;
+      scaledImageHeight = displayWidth / imageAspect;
+      imageOffsetX = 0;
+      imageOffsetY = (displayHeight - scaledImageHeight) / 2;
+    } else {
+      // Image is taller - fit to height
+      scaledImageWidth = displayHeight * imageAspect;
+      scaledImageHeight = displayHeight;
+      imageOffsetX = (displayWidth - scaledImageWidth) / 2;
+      imageOffsetY = 0;
     }
 
-    // Convert to DICOM world coordinates with validation
+    // Apply zoom and pan
+    const zoomedWidth = scaledImageWidth * zoom;
+    const zoomedHeight = scaledImageHeight * zoom;
+    const zoomedOffsetX = imageOffsetX + panX + (scaledImageWidth - zoomedWidth) / 2;
+    const zoomedOffsetY = imageOffsetY + panY + (scaledImageHeight - zoomedHeight) / 2;
+
+    // Convert display coordinates to image pixel coordinates
+    const relativeX = displayX - zoomedOffsetX;
+    const relativeY = displayY - zoomedOffsetY;
+
+    if (relativeX < 0 || relativeX >= zoomedWidth || relativeY < 0 || relativeY >= zoomedHeight) {
+      return null; // Outside image bounds
+    }
+
+    const pixelX = (relativeX / zoomedWidth) * imageWidth;
+    const pixelY = (relativeY / zoomedHeight) * imageHeight;
+
+    // Convert to DICOM world coordinates
     if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
       const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
       const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
@@ -76,31 +108,24 @@ export function SimpleBrushTool({
         imageMetadata.imageOrientation.split('\\').map(Number) : 
         [1, 0, 0, 0, 1, 0];
 
-      // Validate we have proper numeric values
-      if (imagePosition.length < 2 || pixelSpacing.length < 2) {
-        console.warn('Invalid DICOM metadata for coordinate transformation');
-        return null;
+      if (imagePosition.length >= 3 && pixelSpacing.length >= 2 && imageOrientation.length >= 6) {
+        // Standard DICOM coordinate transformation
+        const worldX = imagePosition[0] + 
+          (pixelX * pixelSpacing[0] * imageOrientation[0]) + 
+          (pixelY * pixelSpacing[1] * imageOrientation[3]);
+
+        const worldY = imagePosition[1] + 
+          (pixelX * pixelSpacing[0] * imageOrientation[1]) + 
+          (pixelY * pixelSpacing[1] * imageOrientation[4]);
+
+        if (!isNaN(worldX) && !isNaN(worldY)) {
+          return { x: worldX, y: worldY };
+        }
       }
-
-      // Proper DICOM coordinate transformation
-      const worldX = imagePosition[0] + 
-        (pixelX * pixelSpacing[0] * imageOrientation[0]) + 
-        (pixelY * pixelSpacing[1] * imageOrientation[3]);
-
-      const worldY = imagePosition[1] + 
-        (pixelX * pixelSpacing[0] * imageOrientation[1]) + 
-        (pixelY * pixelSpacing[1] * imageOrientation[4]);
-
-      // Validate output coordinates
-      if (isNaN(worldX) || isNaN(worldY)) {
-        console.warn('Invalid world coordinates calculated');
-        return null;
-      }
-
-      return { x: worldX, y: worldY };
     }
 
-    return null;
+    // Fallback to pixel coordinates if DICOM transformation fails
+    return { x: pixelX, y: pixelY };
   };
 
   const [currentBrushSize, setCurrentBrushSize] = useState(brushSize);
@@ -311,8 +336,35 @@ export function SimpleBrushTool({
 
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
 
-    // Scale brush cursor with zoom level - this makes it show actual brush size in world coordinates
-    const radius = (currentBrushSize / 2) * zoom;
+    // Calculate proper cursor size based on current brush size and zoom
+    // The cursor should reflect the actual size of the brush in image space
+    const canvas = canvasRef.current;
+    if (!canvas || !currentImage) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const displayWidth = rect.width;
+    const displayHeight = rect.height;
+    const imageWidth = currentImage.width || 512;
+    const imageHeight = currentImage.height || 512;
+
+    // Calculate the scale factor from image pixels to display pixels
+    const imageAspect = imageWidth / imageHeight;
+    const displayAspect = displayWidth / displayHeight;
+
+    let scaledImageWidth, scaledImageHeight;
+    if (imageAspect > displayAspect) {
+      scaledImageWidth = displayWidth;
+      scaledImageHeight = displayWidth / imageAspect;
+    } else {
+      scaledImageWidth = displayHeight * imageAspect;
+      scaledImageHeight = displayHeight;
+    }
+
+    // Scale factor from image pixels to display pixels with zoom
+    const pixelToDisplayScale = (scaledImageWidth * zoom) / imageWidth;
+    
+    // Convert brush size (in image pixels) to display pixels
+    const radius = (currentBrushSize / 2) * pixelToDisplayScale;
 
     ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = 2;
@@ -327,7 +379,7 @@ export function SimpleBrushTool({
     ctx.beginPath();
     ctx.arc(mousePosition.x, mousePosition.y, 2, 0, 2 * Math.PI);
     ctx.fill();
-  }, [mousePosition, currentBrushSize, isDrawing, isActive, zoom]);
+  }, [mousePosition, currentBrushSize, isDrawing, isActive, zoom, currentImage]);
 
   // Update brush size
   useEffect(() => {
