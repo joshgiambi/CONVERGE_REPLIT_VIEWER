@@ -242,7 +242,17 @@ export function ContourEditToolbar({
               <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
               <Slider
                 value={brushThickness}
-                onValueChange={setBrushThickness}
+                onValueChange={(value) => {
+                  setBrushThickness(value);
+                  // Update tool state with new brush size
+                  if (onToolChange && activeTool === 'brush') {
+                    onToolChange({
+                      tool: 'brush',
+                      brushSize: value[0],
+                      isActive: true
+                    });
+                  }
+                }}
                 max={20}
                 min={1}
                 step={1}
