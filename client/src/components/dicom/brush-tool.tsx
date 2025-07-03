@@ -13,7 +13,13 @@ interface BrushToolProps {
   rtStructures: any;
   currentSlicePosition: number;
   onContourUpdate: (updatedStructures: any) => void;
+  zoom: number;
+  panX: number;
+  panY: number;
   imageMetadata: any;
+  smoothingEnabled: boolean;
+  enableSmartMode: boolean;
+  onBrushModeChange: (mode: any) => void;
 }
 
 export const BrushTool: React.FC<BrushToolProps> = ({
@@ -24,7 +30,13 @@ export const BrushTool: React.FC<BrushToolProps> = ({
   rtStructures,
   currentSlicePosition,
   onContourUpdate,
-  imageMetadata
+  zoom,
+  panX,
+  panY,
+  imageMetadata,
+  smoothingEnabled,
+  enableSmartMode,
+  onBrushModeChange
 }) => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
