@@ -310,44 +310,53 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // Simplified coordinate transformation - just use mouse position directly
+  // Use existing RT structure coordinates as reference - just copy their approach
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
-    const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Simple approach: convert canvas click to world coordinates
-    // Account for zoom and pan but keep it simple
-    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
-    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
+    // Get an existing contour point from the selected structure to see what coordinates look like
+    if (rtStructures && selectedStructure) {
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
+      if (structure && structure.contours && structure.contours.length > 0) {
+        const existingContour = structure.contours.find((c: any) => 
+          Math.abs(c.slicePosition - sliceLocation) < 0.1
+        );
+        
+        if (existingContour && existingContour.points.length >= 3) {
+          // Use existing contour coordinates as reference
+          const refX = existingContour.points[0];
+          const refY = existingContour.points[1];
+          const refZ = existingContour.points[2];
+          
+          // Create new point near the reference point but offset by click position
+          const offsetX = (point.x - 256) * 0.5; // Simple offset based on canvas position
+          const offsetY = (point.y - 256) * 0.5;
+          
+          const worldX = refX + offsetX;
+          const worldY = refY + offsetY;
+          const worldZ = refZ;
+          
+          console.log('🎯 REFERENCE-BASED COORDINATES:', {
+            canvas: point,
+            reference: { x: refX, y: refY, z: refZ },
+            offset: { x: offsetX, y: offsetY },
+            world: { x: worldX, y: worldY, z: worldZ }
+          });
+          
+          return [worldX, worldY, worldZ];
+        }
+      }
+    }
     
-    // Use HN-ATLAS constants
-    const imagePositionPatient = [-300, -300, 35];
-    const pixelSpacing = [1.171875, 1.171875];
-    
-    // Simple linear mapping from canvas to world coordinates
-    const normalizedX = adjustedX / canvas.width; // 0 to 1
-    const normalizedY = adjustedY / canvas.height; // 0 to 1
-    
-    // Map to DICOM coordinate space (512x512 image)
-    const dicomX = normalizedX * 512;
-    const dicomY = normalizedY * 512;
-    
-    // Convert to world coordinates
-    const worldX = imagePositionPatient[0] + dicomX * pixelSpacing[0];
-    const worldY = imagePositionPatient[1] + dicomY * pixelSpacing[1];
+    // Fallback: use center of image with simple offset
+    const worldX = -200 + (point.x - 256) * 0.5;
+    const worldY = -200 + (point.y - 256) * 0.5;
     const worldZ = sliceLocation;
     
-    console.log('🎯 SIMPLE COORDINATE TRANSFORM:', {
-      canvas: point,
-      normalized: { x: normalizedX, y: normalizedY },
-      dicom: { x: dicomX, y: dicomY },
-      world: { x: worldX, y: worldY, z: worldZ }
-    });
-    
     return [worldX, worldY, worldZ];
-  }, []);
+  }, [rtStructures, selectedStructure]);
 
   // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
