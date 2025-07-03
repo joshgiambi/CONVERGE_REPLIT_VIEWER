@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { PixelBrushTool } from './pixel-brush-tool-fixed';
+import { BrushTool } from './brush-tool';
 import { BrushOperation } from '@shared/schema';
 
 interface WorkingViewerProps {
@@ -844,7 +844,7 @@ export function WorkingViewer({
 
           {/* Pixel Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <PixelBrushTool
+            <BrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}

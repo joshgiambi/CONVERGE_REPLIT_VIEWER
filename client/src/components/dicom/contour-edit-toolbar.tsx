@@ -54,6 +54,7 @@ export function ContourEditToolbar({
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
   const [targetSliceNumber, setTargetSliceNumber] = useState('');
+  const [growDistance, setGrowDistance] = useState('');
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
@@ -175,6 +176,32 @@ export function ContourEditToolbar({
     }
     
     toast({ title: `Cleared all contours for ${selectedStructure.structureName}` });
+  };
+
+  // Grow contour function
+  const handleGrowContour = () => {
+    if (!selectedStructure || !growDistance || !currentSlicePosition) return;
+    
+    const distance = parseFloat(growDistance);
+    if (isNaN(distance) || distance <= 0) {
+      toast({ title: "Please enter a valid positive distance in mm", variant: "destructive" });
+      return;
+    }
+    
+    console.log(`Growing contour for structure ${selectedStructure.roiNumber} by ${distance}mm at slice ${currentSlicePosition}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'grow_contour',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: currentSlicePosition,
+        distance: distance // in millimeters
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Growing contour by ${distance}mm on current slice` });
+    setGrowDistance('');
   };
 
   if (!isVisible || !selectedStructure) return null;
@@ -363,6 +390,35 @@ export function ContourEditToolbar({
                     <RotateCcw className="w-3 h-3 mr-2" />
                     Clear All Slices
                   </Button>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label className="text-xs text-gray-300">Grow Contour</Label>
+                  
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="Distance (mm)"
+                      value={growDistance}
+                      onChange={(e) => setGrowDistance(e.target.value)}
+                      className="flex-1 h-8 bg-gray-800/70 border-gray-600 text-white text-xs"
+                      min="0"
+                      step="0.1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGrowContour}
+                      className="h-8 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
+                      disabled={!growDistance || !currentSlicePosition}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  
+                  <div className="text-xs text-gray-500">
+                    Expands the selected contour radially by the specified distance in millimeters on the current slice.
+                  </div>
                 </div>
               </>
             )}

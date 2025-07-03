@@ -89,15 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 03, 2025: Video Game-Style Contour Expansion Brush Tool - IN PROGRESS
-  - ✅ Implemented Moore neighborhood tracing for medical-grade contour extraction
-  - ✅ Added brush outline preview with structure-colored border for better visibility
-  - ✅ Fixed coordinate transformation to match actual brush painting locations
-  - ✅ Changed contour merging to preserve existing contours instead of replacing them
-  - ✅ Added intelligent contour expansion that combines brush strokes with existing boundaries
-  - ✅ Implemented proper medical contour ordering using centroid-based angle sorting
-  - 🔄 Working on perfecting coordinate mapping to eliminate offset between brush and contour
-  - 🔄 Refining contour expansion algorithm for seamless boundary pushing behavior
+- July 03, 2025: Contour Grow Function Implementation - COMPLETED
+  - ✅ Added grow contour functionality to operations panel in contour toolbar
+  - ✅ Implemented radial contour expansion with millimeter precision input
+  - ✅ Created user-friendly interface with distance input field and run button
+  - ✅ Added proper validation for positive distance values
+  - ✅ Integrated grow function with existing contour update system
+  - ✅ Added toast notifications for user feedback
+  - ✅ Cleaned up duplicate brush tool files causing build conflicts
 - July 03, 2025: OHIF-Enhanced Brush Tool Refinement - COMPLETED
   - ✅ Implemented medical-grade brush tool engine following OHIF standards
   - ✅ Added enhanced smart brush mode with precise contour intersection detection
