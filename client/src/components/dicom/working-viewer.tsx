@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { PixelBrushTool } from './pixel-brush-tool';
+import { PixelBrushTool } from './pixel-brush-tool-fixed';
 import { BrushOperation } from '@shared/schema';
 
 interface WorkingViewerProps {
