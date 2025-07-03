@@ -423,6 +423,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 selectedForEdit={selectedForEdit}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
+                onSlicePositionChange={setCurrentSlicePosition}
                 contourSettings={contourSettings}
                 autoZoomLevel={autoZoomLevel}
                 autoLocalizeTarget={autoLocalizeTarget}

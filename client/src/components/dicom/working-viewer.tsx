@@ -28,6 +28,7 @@ interface WorkingViewerProps {
   contourSettings?: { width: number; opacity: number };
   autoZoomLevel?: number;
   autoLocalizeTarget?: { x: number; y: number; z: number };
+  onSlicePositionChange?: (slicePosition: number) => void;
 }
 
 export function WorkingViewer({ 
@@ -497,7 +498,26 @@ export function WorkingViewer({
 
     // Get current slice position
     const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
-    const tolerance = 0.1; // mm tolerance for slice matching - strict to prevent cross-slice contamination
+    const tolerance = 2.0; // mm tolerance for slice matching - increased to ensure we find matches at isocenter
+
+    // Debug: Log all available slice positions in RT structures
+    if (rtStructures.structures && rtStructures.structures.length > 0) {
+      const allSlicePositions = new Set<number>();
+      rtStructures.structures.forEach((structure: any) => {
+        if (structure.contours) {
+          structure.contours.forEach((contour: any) => {
+            allSlicePositions.add(contour.slicePosition);
+          });
+        }
+      });
+      const sortedSlices = Array.from(allSlicePositions).sort((a, b) => a - b);
+      console.log(`Current slice position: ${currentSlicePosition}, Available contour slice positions:`, sortedSlices);
+      console.log(`Tolerance: ${tolerance}, Closest match:`, sortedSlices.find(pos => Math.abs(pos - currentSlicePosition) <= tolerance));
+      
+      // Check if we have contours at z=0 (isocenter)
+      const hasIsocenter = sortedSlices.some(pos => Math.abs(pos - 0) <= tolerance);
+      console.log(`Has contours at isocenter (z=0): ${hasIsocenter}`);
+    }
 
     // Save context state
     ctx.save();
@@ -673,6 +693,16 @@ export function WorkingViewer({
       setCurrentIndex(currentIndex + 1);
     }
   };
+
+  // Notify parent when slice position changes
+  useEffect(() => {
+    if (images.length > 0 && images[currentIndex] && onSlicePositionChange) {
+      const slicePosition = images[currentIndex].parsedSliceLocation ?? 
+                           images[currentIndex].parsedZPosition ?? 
+                           currentIndex;
+      onSlicePositionChange(slicePosition);
+    }
+  }, [currentIndex, images, onSlicePositionChange]);
 
 
 
