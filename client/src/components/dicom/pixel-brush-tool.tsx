@@ -310,46 +310,53 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // EXACT INVERSE of RT structure overlay coordinate transformation
+  // USE ACTUAL RT STRUCTURE COORDINATE RANGES - examine what coordinates they use
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
-    if (!canvasRef.current) return [0, 0, 0];
-    
-    const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Use EXACT same constants as RT overlay
-    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
-    const pixelSpacing: [number, number] = [1.171875, 1.171875];
-    const dicomImageWidth = 512;
-    const dicomImageHeight = 512;
+    // Look at actual RT structure coordinates to see what range they use
+    if (rtStructures && selectedStructure) {
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
+      if (structure && structure.contours && structure.contours.length > 0) {
+        
+        // Find all coordinates used by this structure
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        structure.contours.forEach((contour: any) => {
+          for (let i = 0; i < contour.points.length; i += 3) {
+            const x = contour.points[i];
+            const y = contour.points[i + 1];
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
+        });
+        
+        // Map canvas click to the coordinate range used by existing structures
+        if (!canvasRef.current) return [0, 0, 0];
+        const canvas = canvasRef.current;
+        
+        const normalizedX = point.x / canvas.width; // 0 to 1
+        const normalizedY = point.y / canvas.height; // 0 to 1
+        
+        const worldX = minX + normalizedX * (maxX - minX);
+        const worldY = minY + normalizedY * (maxY - minY);
+        const worldZ = sliceLocation;
+        
+        console.log('🎯 COORDINATE RANGE MAPPING:', {
+          canvas: point,
+          normalized: { x: normalizedX, y: normalizedY },
+          range: { minX, maxX, minY, maxY },
+          world: { x: worldX, y: worldY, z: worldZ }
+        });
+        
+        return [worldX, worldY, worldZ];
+      }
+    }
     
-    // Account for zoom and pan
-    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
-    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
-    
-    // Step 1: Convert canvas to rotated pixel indices (inverse of lines 178-179)
-    const rotatedJ = (adjustedX / canvas.width) * dicomImageWidth;
-    const rotatedI = (adjustedY / canvas.height) * dicomImageHeight;
-    
-    // Step 2: Undo the rotation (inverse of lines 174-175)
-    const i = dicomImageWidth - rotatedJ; // rotatedJ = imageWidth - i -> i = imageWidth - rotatedJ  
-    const j = rotatedI; // rotatedI = j -> j = rotatedI
-    
-    // Step 3: Convert pixel indices to world coordinates (inverse of lines 170-171)
-    const worldX = imagePositionPatient[0] + j * pixelSpacing[0]; // j = (worldX - originX) / pixelSpacing[0]
-    const worldY = imagePositionPatient[1] + i * pixelSpacing[1]; // i = (worldY - originY) / pixelSpacing[1]
-    const worldZ = sliceLocation;
-    
-    console.log('🎯 PROPER INVERSE COORDINATES:', {
-      canvas: point,
-      adjusted: { x: adjustedX, y: adjustedY },
-      rotated: { i: rotatedI, j: rotatedJ },
-      pixel: { i, j },
-      world: { x: worldX, y: worldY, z: worldZ }
-    });
-    
-    return [worldX, worldY, worldZ];
-  }, []);
+    // Fallback coordinates
+    return [0, 0, sliceLocation];
+  }, [rtStructures, selectedStructure]);
 
   // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
