@@ -50,7 +50,7 @@ export function ContourEditToolbar({
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
-  const [brushThickness, setBrushThickness] = useState([3]);
+  const [brushThickness, setBrushThickness] = useState([9]); // ~1cm at 1.171875mm pixel spacing
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
   const [targetSliceNumber, setTargetSliceNumber] = useState('');

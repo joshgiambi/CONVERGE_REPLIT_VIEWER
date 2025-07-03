@@ -906,7 +906,7 @@ export function WorkingViewer({
             )}
             {rtStructures && showStructures && (
               <div className="mt-1 text-green-400">
-                RT Structures: {rtStructures.structures.length} ROIs
+                RT Structures: {rtStructures?.structures?.length || 0} ROIs
               </div>
             )}
           </div>
