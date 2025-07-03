@@ -310,44 +310,39 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // EXACT INVERSE of RT structure overlay worldToCanvas function
+  // Simplified coordinate transformation - just use mouse position directly
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
     const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Step 1: Account for zoom and pan transformations (reverse RT overlay transform)
+    // Simple approach: convert canvas click to world coordinates
+    // Account for zoom and pan but keep it simple
     const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
     const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
     
-    // Step 2: Use EXACT same constants as RT overlay (lines 197-200)
-    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
-    const pixelSpacing: [number, number] = [1.171875, 1.171875];
-    const dicomImageWidth = 512;
-    const dicomImageHeight = 512;
+    // Use HN-ATLAS constants
+    const imagePositionPatient = [-300, -300, 35];
+    const pixelSpacing = [1.171875, 1.171875];
     
-    // Step 3: EXACT INVERSE of worldToCanvas function (rt-structure-overlay.tsx:155-182)
+    // Simple linear mapping from canvas to world coordinates
+    const normalizedX = adjustedX / canvas.width; // 0 to 1
+    const normalizedY = adjustedY / canvas.height; // 0 to 1
     
-    // Reverse Step 3: Convert canvas coordinates to rotated pixel indices
-    const rotatedJ = (adjustedX / canvas.width) * dicomImageWidth;
-    const rotatedI = (adjustedY / canvas.height) * dicomImageHeight;
+    // Map to DICOM coordinate space (512x512 image)
+    const dicomX = normalizedX * 512;
+    const dicomY = normalizedY * 512;
     
-    // Reverse Step 2: Undo counter-rotation (reverse lines 174-175)
-    const j = rotatedI;  // rotatedI = j
-    const i = dicomImageWidth - rotatedJ;  // rotatedJ = imageWidth - i
-    
-    // Reverse Step 1: Convert DICOM pixel indices to world coordinates (reverse lines 170-171)
-    const worldX = imagePositionPatient[0] + j * pixelSpacing[0];  // j = (worldX - originX) / pixelSpacing[0]
-    const worldY = imagePositionPatient[1] + i * pixelSpacing[1];  // i = (worldY - originY) / pixelSpacing[1]
+    // Convert to world coordinates
+    const worldX = imagePositionPatient[0] + dicomX * pixelSpacing[0];
+    const worldY = imagePositionPatient[1] + dicomY * pixelSpacing[1];
     const worldZ = sliceLocation;
     
-    // Debug coordinate transformation
-    console.log('🎯 COORDINATE TRANSFORM DEBUG:', {
+    console.log('🎯 SIMPLE COORDINATE TRANSFORM:', {
       canvas: point,
-      adjusted: { x: adjustedX, y: adjustedY },
-      rotated: { i: rotatedI, j: rotatedJ },
-      dicom: { i, j },
+      normalized: { x: normalizedX, y: normalizedY },
+      dicom: { x: dicomX, y: dicomY },
       world: { x: worldX, y: worldY, z: worldZ }
     });
     
@@ -396,35 +391,19 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       console.log('Created new contour - no existing contour found for this slice');
       console.log('New contour points (first 5):', newContour.points.slice(0, 15)); // 5 points x 3 coords each
     } else {
-      console.log('Found existing contour with', existingContour.points.length / 3, 'points');
-      console.log('Existing contour points (first 5):', existingContour.points.slice(0, 15));
-      
-      // Existing contour exists - check if brush touches it or should be separate  
-      if (operation === BrushOperation.ADDITIVE) {
-        // Convert existing points to array of [x,y,z] tuples
-        const existingPoints: number[][] = [];
-        for (let i = 0; i < existingContour.points.length; i += 3) {
-          existingPoints.push([existingContour.points[i], existingContour.points[i + 1], existingContour.points[i + 2]]);
-        }
-        
-        console.log('Existing points range - X:', Math.min(...existingPoints.map(p => p[0])).toFixed(1), 'to', Math.max(...existingPoints.map(p => p[0])).toFixed(1));
-        console.log('Existing points range - Y:', Math.min(...existingPoints.map(p => p[1])).toFixed(1), 'to', Math.max(...existingPoints.map(p => p[1])).toFixed(1));
-        
-        // Smart merge: combine brush points with existing contour
-        const expandedPoints = expandContourWithBrush(existingPoints, worldPoints);
-        existingContour.points = expandedPoints.flat();
-        
-        console.log('Expanded existing contour:', {
-          structureId,
-          slicePosition,
-          originalPoints: existingPoints.length,
-          brushPoints: worldPoints.length,
-          finalPoints: expandedPoints.length
-        });
-        console.log('Final contour points (first 5):', existingContour.points.slice(0, 15));
-      } else {
-        console.log('Subtraction mode - reducing contour');
-      }
+      // TEMPORARILY: Always create new separate contour to test coordinate positioning
+      console.log('TEMP: Creating separate contour instead of merging to test coordinates');
+      const newContour = {
+        slicePosition: slicePosition,
+        points: worldPoints.flat()
+      };
+      structure.contours.push(newContour);
+      console.log('Created NEW separate contour for testing:', {
+        structureId,
+        slicePosition,
+        brushPoints: worldPoints.length,
+        firstFewPoints: newContour.points.slice(0, 9) // 3 points x 3 coords each
+      });
     }
     
     console.log('=== RT STRUCTURE UPDATE COMPLETE ===');
