@@ -331,8 +331,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
           const refZ = existingContour.points[2];
           
           // Create new point near the reference point but offset by click position
-          const offsetX = (point.x - 256) * 0.5; // Simple offset based on canvas position
-          const offsetY = (point.y - 256) * 0.5;
+          // FLIP the coordinates since they're appearing on opposite side
+          const offsetX = (256 - point.x) * 0.5; // Flip X axis
+          const offsetY = (256 - point.y) * 0.5; // Flip Y axis
           
           const worldX = refX + offsetX;
           const worldY = refY + offsetY;
@@ -350,9 +351,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       }
     }
     
-    // Fallback: use center of image with simple offset
-    const worldX = -200 + (point.x - 256) * 0.5;
-    const worldY = -200 + (point.y - 256) * 0.5;
+    // Fallback: use center of image with simple offset (flipped coordinates)
+    const worldX = -200 + (256 - point.x) * 0.5; // Flip X
+    const worldY = -200 + (256 - point.y) * 0.5; // Flip Y
     const worldZ = sliceLocation;
     
     return [worldX, worldY, worldZ];
