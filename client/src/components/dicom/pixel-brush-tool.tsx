@@ -310,53 +310,41 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // USE ACTUAL RT STRUCTURE COORDINATE RANGES - examine what coordinates they use
+  // PROPER DICOM coordinate transformation - inverse of corrected RT overlay
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
+    if (!canvasRef.current) return [0, 0, 0];
+    
+    const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Look at actual RT structure coordinates to see what range they use
-    if (rtStructures && selectedStructure) {
-      const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
-      if (structure && structure.contours && structure.contours.length > 0) {
-        
-        // Find all coordinates used by this structure
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        structure.contours.forEach((contour: any) => {
-          for (let i = 0; i < contour.points.length; i += 3) {
-            const x = contour.points[i];
-            const y = contour.points[i + 1];
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-          }
-        });
-        
-        // Map canvas click to the coordinate range used by existing structures
-        if (!canvasRef.current) return [0, 0, 0];
-        const canvas = canvasRef.current;
-        
-        const normalizedX = point.x / canvas.width; // 0 to 1
-        const normalizedY = point.y / canvas.height; // 0 to 1
-        
-        const worldX = minX + normalizedX * (maxX - minX);
-        const worldY = minY + normalizedY * (maxY - minY);
-        const worldZ = sliceLocation;
-        
-        console.log('🎯 COORDINATE RANGE MAPPING:', {
-          canvas: point,
-          normalized: { x: normalizedX, y: normalizedY },
-          range: { minX, maxX, minY, maxY },
-          world: { x: worldX, y: worldY, z: worldZ }
-        });
-        
-        return [worldX, worldY, worldZ];
-      }
-    }
+    // Use same constants as RT overlay
+    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+    const pixelSpacing: [number, number] = [1.171875, 1.171875];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
     
-    // Fallback coordinates
-    return [0, 0, sliceLocation];
-  }, [rtStructures, selectedStructure]);
+    // Account for zoom and pan
+    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
+    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
+    
+    // Convert canvas coordinates to pixel coordinates (inverse of RT overlay)
+    const pixelX = (adjustedX / canvas.width) * dicomImageWidth;
+    const pixelY = (adjustedY / canvas.height) * dicomImageHeight;
+    
+    // Convert pixel coordinates to world coordinates (inverse of RT overlay)
+    const worldX = imagePositionPatient[0] + pixelX * pixelSpacing[0];
+    const worldY = imagePositionPatient[1] + pixelY * pixelSpacing[1];
+    const worldZ = sliceLocation;
+    
+    console.log('🎯 PROPER DICOM COORDINATES:', {
+      canvas: point,
+      adjusted: { x: adjustedX, y: adjustedY },
+      pixel: { x: pixelX, y: pixelY },
+      world: { x: worldX, y: worldY, z: worldZ }
+    });
+    
+    return [worldX, worldY, worldZ];
+  }, []);
 
   // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {

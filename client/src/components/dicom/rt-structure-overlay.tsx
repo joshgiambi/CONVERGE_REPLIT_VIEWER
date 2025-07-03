@@ -162,21 +162,16 @@ function worldToCanvas(
   imageWidth: number,
   imageHeight: number
 ): [number, number] {
-  const [rowSpacing, colSpacing] = pixelSpacing;
   const [originX, originY] = origin;
 
-  // Step 1: Convert world (mm) to DICOM pixel indices (row i, col j)
-  // For standard DICOM: pixelSpacing[0] = rowSpacing, pixelSpacing[1] = colSpacing
-  const j = (worldX - originX) / pixelSpacing[0]; // column index - worldX maps to col
-  const i = (worldY - originY) / pixelSpacing[1]; // row index - worldY maps to row
+  // PROPER DICOM coordinate transformation without arbitrary rotations
+  // Convert Patient Coordinate System (world mm) to Image Coordinate System (pixels)
+  const pixelX = (worldX - originX) / pixelSpacing[0];
+  const pixelY = (worldY - originY) / pixelSpacing[1];
 
-  // Step 2: Apply counter-rotation to fix sideways orientation
-  const rotatedJ = imageWidth - i; // Rotate 90 degrees counter-clockwise
-  const rotatedI = j; // Swap coordinates
-
-  // Step 3: Convert rotated pixel indices to canvas coordinates
-  const canvasX = (rotatedJ / imageWidth) * canvasWidth;
-  const canvasY = (rotatedI / imageHeight) * canvasHeight;
+  // Convert pixel coordinates to canvas coordinates
+  const canvasX = (pixelX / imageWidth) * canvasWidth;
+  const canvasY = (pixelY / imageHeight) * canvasHeight;
 
   return [canvasX, canvasY];
 }
