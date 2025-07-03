@@ -298,11 +298,7 @@ export function ContourEditToolbar({
               <ArrowUpFromLine className="w-4 h-4 mr-2" />
               Run Grow
             </Button>
-            
-            {/* Debug info */}
-            <div className="text-xs text-gray-500 mt-1">
-              Distance: {growDistance || 'not set'} | Slice: {currentSlicePosition !== undefined ? currentSlicePosition : 'not set'}
-            </div>
+
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">

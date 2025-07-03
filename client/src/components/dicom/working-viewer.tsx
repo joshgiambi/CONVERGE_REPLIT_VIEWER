@@ -501,24 +501,7 @@ export function WorkingViewer({
     const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
     const tolerance = 2.0; // mm tolerance for slice matching - increased to ensure we find matches at isocenter
 
-    // Debug: Log all available slice positions in RT structures
-    if (rtStructures.structures && rtStructures.structures.length > 0) {
-      const allSlicePositions = new Set<number>();
-      rtStructures.structures.forEach((structure: any) => {
-        if (structure.contours) {
-          structure.contours.forEach((contour: any) => {
-            allSlicePositions.add(contour.slicePosition);
-          });
-        }
-      });
-      const sortedSlices = Array.from(allSlicePositions).sort((a, b) => a - b);
-      console.log(`Current slice position: ${currentSlicePosition}, Available contour slice positions:`, sortedSlices);
-      console.log(`Tolerance: ${tolerance}, Closest match:`, sortedSlices.find(pos => Math.abs(pos - currentSlicePosition) <= tolerance));
-      
-      // Check if we have contours at z=0 (isocenter)
-      const hasIsocenter = sortedSlices.some(pos => Math.abs(pos - 0) <= tolerance);
-      console.log(`Has contours at isocenter (z=0): ${hasIsocenter}`);
-    }
+    // Clean up: Debug logs removed since slice position matching is now working
 
     // Save context state
     ctx.save();
