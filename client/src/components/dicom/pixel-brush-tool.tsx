@@ -831,18 +831,22 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const canvasContainer = mainCanvas.parentElement;
     if (!canvasContainer) return;
     
-    // Create mask canvas for painting
+    // Create mask canvas for painting - MUST sync with main canvas transformations
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = mainCanvas.width;
     maskCanvas.height = mainCanvas.height;
     maskCanvas.style.position = 'absolute';
     maskCanvas.style.top = '0';
     maskCanvas.style.left = '0';
-    maskCanvas.style.pointerEvents = 'none';
+    maskCanvas.style.pointerEvents = 'auto'; // CRITICAL: Enable pointer events for mouse interactions
     maskCanvas.style.zIndex = '5';
     maskCanvas.style.opacity = '0.3'; // Match medical imaging standard: 30% opacity
     
-    // Create preview canvas for cursor
+    // CRITICAL: Apply the same CSS transforms as the main canvas to maintain alignment
+    maskCanvas.style.transform = mainCanvas.style.transform;
+    maskCanvas.style.transformOrigin = mainCanvas.style.transformOrigin;
+    
+    // Create preview canvas for cursor - MUST sync with main canvas transformations
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = mainCanvas.width;
     previewCanvas.height = mainCanvas.height;
@@ -852,8 +856,18 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     previewCanvas.style.pointerEvents = 'none';
     previewCanvas.style.zIndex = '10';
     
+    // CRITICAL: Apply the same CSS transforms as the main canvas to maintain alignment
+    previewCanvas.style.transform = mainCanvas.style.transform;
+    previewCanvas.style.transformOrigin = mainCanvas.style.transformOrigin;
+    
     canvasContainer.appendChild(maskCanvas);
     canvasContainer.appendChild(previewCanvas);
+    
+    // Attach mouse event listeners to the mask canvas for proper interaction
+    maskCanvas.addEventListener('mousedown', handleMouseDown);
+    maskCanvas.addEventListener('mousemove', handleMouseMove);
+    maskCanvas.addEventListener('mouseup', handleMouseUp);
+    maskCanvas.addEventListener('mouseleave', handleMouseUp);
     
     maskCanvasRef.current = maskCanvas;
     previewCanvasRef.current = previewCanvas;
@@ -886,6 +900,26 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       canvas.removeEventListener('mouseleave', handleMouseUp);
     };
   }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp]);
+
+  // CRITICAL: Update overlay canvas transformations when zoom/pan changes
+  useEffect(() => {
+    if (!isActive || !canvasRef.current || !maskCanvasRef.current || !previewCanvasRef.current) return;
+
+    const mainCanvas = canvasRef.current;
+    const maskCanvas = maskCanvasRef.current;
+    const previewCanvas = previewCanvasRef.current;
+
+    console.log('🔄 SYNCING CANVAS TRANSFORMATIONS - Zoom/Pan Update');
+    console.log('Main canvas transform:', mainCanvas.style.transform);
+    
+    // Sync transformations to maintain alignment during zoom/pan
+    maskCanvas.style.transform = mainCanvas.style.transform;
+    maskCanvas.style.transformOrigin = mainCanvas.style.transformOrigin;
+    
+    previewCanvas.style.transform = mainCanvas.style.transform;
+    previewCanvas.style.transformOrigin = mainCanvas.style.transformOrigin;
+    
+  }, [isActive, zoom, panX, panY]);
 
   // Keyboard shortcuts for operation switching
   useEffect(() => {
