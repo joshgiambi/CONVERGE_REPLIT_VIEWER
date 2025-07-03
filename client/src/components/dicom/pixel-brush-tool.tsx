@@ -451,6 +451,10 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     let existingContour = structure.contours.find((c: any) => 
       Math.abs(c.slicePosition - slicePosition) < 2.0
     );
+    
+    console.log('Looking for existing contour on slice:', slicePosition);
+    console.log('Available contours on slices:', structure.contours.map(c => c.slicePosition));
+    console.log('Found existing contour:', existingContour ? 'YES' : 'NO');
 
     if (!existingContour) {
       // No existing contour - create new one
@@ -497,11 +501,13 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Expand existing contour by intelligently adding brush points
   const expandContourWithBrush = useCallback((existingPoints: number[][], brushPoints: number[][]): number[][] => {
-    // Combine all points
+    console.log('Expanding contour - existing points:', existingPoints.length, 'brush points:', brushPoints.length);
+    
+    // For now, use a simple union approach - combine all points and create convex hull
     const allPoints = [...existingPoints, ...brushPoints];
     
     // Remove duplicates within tolerance
-    const tolerance = 2.0; // mm
+    const tolerance = 5.0; // mm - slightly larger tolerance for medical precision
     const uniquePoints: number[][] = [];
     
     for (const point of allPoints) {
@@ -515,8 +521,13 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       }
     }
     
+    console.log('After deduplication:', uniquePoints.length, 'unique points');
+    
     // Create ordered boundary that encompasses both regions
-    return createOrderedContour(uniquePoints);
+    const orderedContour = createOrderedContour(uniquePoints);
+    console.log('Final ordered contour:', orderedContour.length, 'points');
+    
+    return orderedContour;
   }, []);
 
   // Create properly ordered contour from combined points
