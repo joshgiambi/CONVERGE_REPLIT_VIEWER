@@ -499,9 +499,26 @@ export function WorkingViewer({
 
     // Get current slice position
     const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
-    const tolerance = 2.0; // mm tolerance for slice matching - increased to ensure we find matches at isocenter
+    const tolerance = 2.0; // mm tolerance for slice matching
 
-    // Clean up: Debug logs removed since slice position matching is now working
+    // CRITICAL DEBUG: Log current slice and what we expect to see
+    console.log(`🔍 Current CT slice: ${currentSlicePosition}mm`);
+    console.log(`📋 Available structures:`, rtStructures.structures.map((s: any) => s.structureName));
+    
+    // Get all RT structure Z positions to check coordinate space
+    const allRTZPositions: number[] = [];
+    rtStructures.structures.forEach((structure: any) => {
+      structure.contours.forEach((contour: any) => {
+        allRTZPositions.push(contour.slicePosition);
+      });
+    });
+    
+    if (allRTZPositions.length > 0) {
+      const rtZMin = Math.min(...allRTZPositions);
+      const rtZMax = Math.max(...allRTZPositions);
+      console.log(`🎯 RT coordinate range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm`);
+      console.log(`🎯 Current CT slice ${currentSlicePosition}mm should show structures at RT positions near this value`);
+    }
 
     // Save context state
     ctx.save();
