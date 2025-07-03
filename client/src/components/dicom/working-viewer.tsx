@@ -814,7 +814,7 @@ export function WorkingViewer({
               onClick={() => setShowStructures(!showStructures)}
               className="text-xs bg-green-600 hover:bg-green-700"
             >
-              RT ({rtStructures.structures.length})
+              RT ({rtStructures?.structures?.length || 0})
             </Button>
           )}
           <Button
