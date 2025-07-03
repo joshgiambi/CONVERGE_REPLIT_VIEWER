@@ -3,7 +3,8 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { OHIFEnhancedBrush } from './ohif-enhanced-brush';
+import { PixelBrushTool } from './pixel-brush-tool';
+import { BrushOperation } from '@shared/schema';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -861,9 +862,9 @@ export function WorkingViewer({
             }}
           />
 
-          {/* OHIF Enhanced Brush Tool overlay */}
+          {/* Pixel Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <OHIFEnhancedBrush
+            <PixelBrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
@@ -874,11 +875,11 @@ export function WorkingViewer({
                  images[currentIndex].parsedZPosition ??
                  currentIndex) : 0
               }
-              onContourUpdate={(updatedStructures) => {
+              onContourUpdate={(updatedStructures: any) => {
                 if (onContourUpdate) {
                   onContourUpdate(updatedStructures);
                 } else {
-                  console.log('Enhanced OHIF brush contour updated:', updatedStructures);
+                  console.log('Pixel brush painted:', updatedStructures);
                 }
               }}
               zoom={zoom}
@@ -886,10 +887,9 @@ export function WorkingViewer({
               panY={panY}
               imageMetadata={imageMetadata}
               smoothingEnabled={true}
-              interpolationDensity={0.25}
               enableSmartMode={true}
-              onBrushModeChange={(mode) => {
-                console.log('OHIF brush mode changed:', mode);
+              onBrushModeChange={(mode: BrushOperation) => {
+                console.log('Pixel brush mode changed:', mode);
               }}
             />
           )}
