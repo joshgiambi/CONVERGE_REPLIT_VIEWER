@@ -1,4 +1,4 @@
-// OHIF-Enhanced Brush Tool - Clean Implementation
+// OHIF-Enhanced Brush Tool - Final Clean Implementation
 // Medical-grade brush tool with proper functionality
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -129,26 +129,22 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     return points;
   };
 
-  // Draw brush preview on canvas
-  const drawBrushPreview = useCallback((canvasPoint: Point) => {
-    if (!canvasRef.current) return;
+  // Enhanced brush preview with dedicated canvas
+  const drawBrushPreviewOnOverlay = useCallback((canvasPoint: Point) => {
+    if (!previewCanvasRef.current) return;
     
-    const now = Date.now();
-    if (now - lastRenderTime.current < renderThrottleMs) return;
-    
-    const ctx = canvasRef.current.getContext('2d');
+    const canvas = previewCanvasRef.current;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Save current state
-    ctx.save();
-    
-    // Use globalCompositeOperation to ensure clean brush preview
-    ctx.globalCompositeOperation = 'source-over';
+    // Clear entire overlay
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw brush circle
     const radius = brushSize / 2;
     const color = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
     
+    ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
@@ -171,8 +167,7 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     ctx.stroke();
     
     ctx.restore();
-    lastRenderTime.current = now;
-  }, [brushSize, operation, renderThrottleMs]);
+  }, [brushSize, operation]);
 
   // Helper function to create circle from point
   const createCircleFromPoint = (center: Point, radius: number): Point[] => {
@@ -228,6 +223,7 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     });
   }, [isActive, selectedStructure, canvasToWorld, detectBrushMode, operationLocked, onBrushModeChange, operation, brushSize, currentSlicePosition]);
 
+  // Update mouse move to use overlay canvas
   const handleMouseMove = useCallback((event: MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const canvasPoint = {
@@ -237,9 +233,9 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
 
     setMousePosition(canvasPoint);
 
-    // Always draw preview when mouse is over canvas
+    // Always draw preview when mouse is over canvas and brush is active
     if (isActive) {
-      drawBrushPreview(canvasPoint);
+      drawBrushPreviewOnOverlay(canvasPoint);
     }
 
     if (!isDrawing || !lastPositionRef.current) return;
@@ -251,7 +247,7 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     const interpolatedPoints = interpolatePoints(lastPositionRef.current, worldPoint);
     strokePointsRef.current.push(...interpolatedPoints);
     lastPositionRef.current = worldPoint;
-  }, [isActive, isDrawing, canvasToWorld, drawBrushPreview]);
+  }, [isActive, isDrawing, canvasToWorld, drawBrushPreviewOnOverlay]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing || strokePointsRef.current.length === 0) return;
@@ -301,6 +297,38 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     setStrokeId(null);
   }, [isDrawing, brushSize, currentSlicePosition, onContourUpdate, selectedStructure, createCircleFromPoint, operation]);
 
+  // Create overlay canvas for brush cursor
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) {
+      if (previewCanvasRef.current) {
+        previewCanvasRef.current.remove();
+        previewCanvasRef.current = null;
+      }
+      return;
+    }
+
+    const mainCanvas = canvasRef.current;
+    
+    // Create overlay canvas for brush preview
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = mainCanvas.width;
+    overlayCanvas.height = mainCanvas.height;
+    overlayCanvas.style.position = 'absolute';
+    overlayCanvas.style.top = '0';
+    overlayCanvas.style.left = '0';
+    overlayCanvas.style.pointerEvents = 'none';
+    overlayCanvas.style.zIndex = '10';
+    
+    mainCanvas.parentElement?.appendChild(overlayCanvas);
+    previewCanvasRef.current = overlayCanvas;
+
+    return () => {
+      if (overlayCanvas && overlayCanvas.parentElement) {
+        overlayCanvas.remove();
+      }
+    };
+  }, [isActive]);
+
   // Set up mouse event listeners and cursor style
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
@@ -311,18 +339,18 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     canvas.style.cursor = 'none'; // Hide default cursor to show custom brush cursor
     
     canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMoveUpdated);
+    canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
 
     return () => {
       canvas.style.cursor = 'default'; // Reset cursor when deactivating
       canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMoveUpdated);
+      canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
     };
-  }, [isActive, handleMouseDown, handleMouseMoveUpdated, handleMouseUp]);
+  }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -356,105 +384,6 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
       document.removeEventListener('keyup', handleKeyUp);
     };
   }, [isActive, operationLocked, mousePosition, canvasToWorld, detectBrushMode]);
-
-  // Create overlay canvas for brush cursor
-  useEffect(() => {
-    if (!isActive || !canvasRef.current) {
-      if (previewCanvasRef.current) {
-        previewCanvasRef.current.remove();
-        previewCanvasRef.current = null;
-      }
-      return;
-    }
-
-    const mainCanvas = canvasRef.current;
-    const rect = mainCanvas.getBoundingClientRect();
-    
-    // Create overlay canvas for brush preview
-    const overlayCanvas = document.createElement('canvas');
-    overlayCanvas.width = mainCanvas.width;
-    overlayCanvas.height = mainCanvas.height;
-    overlayCanvas.style.position = 'absolute';
-    overlayCanvas.style.top = '0';
-    overlayCanvas.style.left = '0';
-    overlayCanvas.style.pointerEvents = 'none';
-    overlayCanvas.style.zIndex = '10';
-    
-    mainCanvas.parentElement?.appendChild(overlayCanvas);
-    previewCanvasRef.current = overlayCanvas;
-
-    return () => {
-      if (overlayCanvas && overlayCanvas.parentElement) {
-        overlayCanvas.remove();
-      }
-    };
-  }, [isActive]);
-
-  // Enhanced brush preview with dedicated canvas
-  const drawBrushPreviewOnOverlay = useCallback((canvasPoint: Point) => {
-    if (!previewCanvasRef.current) return;
-    
-    const canvas = previewCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    // Clear entire overlay
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw brush circle
-    const radius = brushSize / 2;
-    const color = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-    
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
-    ctx.globalAlpha = 0.8;
-    
-    ctx.beginPath();
-    ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
-    ctx.stroke();
-    
-    // Draw crosshair in center
-    ctx.setLineDash([]);
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 1;
-    
-    ctx.beginPath();
-    ctx.moveTo(canvasPoint.x - 6, canvasPoint.y);
-    ctx.lineTo(canvasPoint.x + 6, canvasPoint.y);
-    ctx.moveTo(canvasPoint.x, canvasPoint.y - 6);
-    ctx.lineTo(canvasPoint.x, canvasPoint.y + 6);
-    ctx.stroke();
-    
-    ctx.restore();
-  }, [brushSize, operation]);
-
-  // Update mouse move to use overlay canvas
-  const handleMouseMoveUpdated = useCallback((event: MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const canvasPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-
-    setMousePosition(canvasPoint);
-
-    // Always draw preview when mouse is over canvas and brush is active
-    if (isActive) {
-      drawBrushPreviewOnOverlay(canvasPoint);
-    }
-
-    if (!isDrawing || !lastPositionRef.current) return;
-
-    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-    if (!worldPoint) return;
-
-    // Add interpolated points for smooth stroke
-    const interpolatedPoints = interpolatePoints(lastPositionRef.current, worldPoint);
-    strokePointsRef.current.push(...interpolatedPoints);
-    lastPositionRef.current = worldPoint;
-  }, [isActive, isDrawing, canvasToWorld, drawBrushPreviewOnOverlay]);
 
   // Render component
   if (!isActive) return null;
