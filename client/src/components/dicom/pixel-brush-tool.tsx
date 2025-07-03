@@ -271,129 +271,85 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY]);
 
-  // Extract ordered contour points using Moore neighborhood tracing (medical standard)
+  // Create a circular contour at the brush center
   const extractContourFromPixels = useCallback((data: Uint8ClampedArray, width: number, height: number) => {
-    // Create binary mask from painted pixels
-    const binaryMask = new Array(height).fill(null).map(() => new Array(width).fill(false));
+    // Find center of painted area
+    let centerX = 0, centerY = 0, pixelCount = 0;
     
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const index = (y * width + x) * 4;
-        binaryMask[y][x] = data[index + 3] > 128; // Alpha threshold
-      }
-    }
-    
-    // Find all contours using Moore neighborhood tracing
-    const contours = findContoursWithMooreTracing(binaryMask, width, height);
-    
-    // Return the largest contour (main painted area)
-    if (contours.length === 0) return [];
-    
-    // Sort contours by area and return the largest
-    contours.sort((a, b) => b.length - a.length);
-    return contours[0];
-  }, []);
-
-  // Moore neighborhood tracing algorithm for DICOM-compliant contour extraction
-  const findContoursWithMooreTracing = useCallback((mask: boolean[][], width: number, height: number): Point[][] => {
-    const visited = new Array(height).fill(null).map(() => new Array(width).fill(false));
-    const contours: Point[][] = [];
-    
-    // 8-connected neighbors (Moore neighborhood)
-    const directions = [
-      [-1, -1], [-1, 0], [-1, 1],
-      [0, 1], [1, 1], [1, 0],
-      [1, -1], [0, -1]
-    ];
-    
-    // Find starting points for contours
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (mask[y][x] && !visited[y][x]) {
-          // Found unvisited foreground pixel - start contour tracing
-          const contour = traceContourMoore(mask, visited, x, y, width, height, directions);
-          if (contour.length > 4) { // Minimum viable contour size
-            contours.push(contour);
-          }
+        if (data[index + 3] > 128) { // Alpha threshold
+          centerX += x;
+          centerY += y;
+          pixelCount++;
         }
       }
     }
     
-    return contours;
-  }, []);
-
-  // Moore neighborhood contour tracing for a single contour
-  const traceContourMoore = useCallback((
-    mask: boolean[][],
-    visited: boolean[][],
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    directions: number[][]
-  ): Point[] => {
+    if (pixelCount === 0) return [];
+    
+    centerX = Math.round(centerX / pixelCount);
+    centerY = Math.round(centerY / pixelCount);
+    
+    // Create a circular contour around the brush center
+    const radius = Math.max(4, brushSize / 2);
     const contour: Point[] = [];
-    let currentX = startX;
-    let currentY = startY;
-    let direction = 0; // Start facing right
+    const segments = 16; // 16-sided polygon approximates a circle
     
-    do {
-      contour.push({ x: currentX, y: currentY });
-      visited[currentY][currentX] = true;
-      
-      // Find next boundary pixel using Moore neighborhood
-      let found = false;
-      for (let i = 0; i < 8; i++) {
-        const checkDir = (direction + i) % 8;
-        const [dx, dy] = directions[checkDir];
-        const nextX = currentX + dx;
-        const nextY = currentY + dy;
-        
-        if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height && mask[nextY][nextX]) {
-          currentX = nextX;
-          currentY = nextY;
-          direction = (checkDir + 6) % 8; // Adjust direction for next iteration
-          found = true;
-          break;
-        }
-      }
-      
-      if (!found) break;
-      
-    } while (!(currentX === startX && currentY === startY) && contour.length < width * height);
-    
-    // Ensure contour is properly closed
-    if (contour.length > 2 && !(contour[0].x === contour[contour.length - 1].x && contour[0].y === contour[contour.length - 1].y)) {
-      contour.push({ x: startX, y: startY });
+    for (let i = 0; i < segments; i++) {
+      const angle = (i * 2 * Math.PI) / segments;
+      const x = centerX + radius * Math.cos(angle);
+      const y = centerY + radius * Math.sin(angle);
+      contour.push({ x: Math.round(x), y: Math.round(y) });
     }
     
+    console.log('⭕ Created circular contour at:', { centerX, centerY, radius, points: contour.length });
     return contour;
-  }, []);
+  }, [brushSize]);
 
-  // Simplified coordinate transformation - direct match to RT overlay approach
+
+
+  // EXACT INVERSE of RT structure overlay worldToCanvas function
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
     const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Account for zoom and pan (same as RT overlay approach)
+    // Step 1: Account for zoom and pan transformations (reverse RT overlay transform)
     const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
     const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
     
-    // Use actual metadata or fallback to HN-ATLAS defaults
-    const imagePosition = metadata.imagePosition ? 
-      metadata.imagePosition.split('\\').map(Number) : [-300, -300, 35];
-    const pixelSpacing = metadata.pixelSpacing ? 
-      metadata.pixelSpacing.split('\\').map(Number) : [1.171875, 1.171875];
+    // Step 2: Use EXACT same constants as RT overlay (lines 197-200)
+    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+    const pixelSpacing: [number, number] = [1.171875, 1.171875];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
     
-    // Convert canvas coordinates to DICOM world coordinates (simplified approach)
-    const normalizedX = adjustedX / canvas.width;
-    const normalizedY = adjustedY / canvas.height;
+    // Step 3: EXACT INVERSE of worldToCanvas function (rt-structure-overlay.tsx:155-182)
     
-    const worldX = imagePosition[0] + (normalizedX * 512 * pixelSpacing[0]);
-    const worldY = imagePosition[1] + (normalizedY * 512 * pixelSpacing[1]);
+    // Reverse Step 3: Convert canvas coordinates to rotated pixel indices
+    const rotatedJ = (adjustedX / canvas.width) * dicomImageWidth;
+    const rotatedI = (adjustedY / canvas.height) * dicomImageHeight;
+    
+    // Reverse Step 2: Undo counter-rotation (reverse lines 174-175)
+    const j = rotatedI;  // rotatedI = j
+    const i = dicomImageWidth - rotatedJ;  // rotatedJ = imageWidth - i
+    
+    // Reverse Step 1: Convert DICOM pixel indices to world coordinates (reverse lines 170-171)
+    const worldX = imagePositionPatient[0] + j * pixelSpacing[0];  // j = (worldX - originX) / pixelSpacing[0]
+    const worldY = imagePositionPatient[1] + i * pixelSpacing[1];  // i = (worldY - originY) / pixelSpacing[1]
     const worldZ = sliceLocation;
+    
+    // Debug coordinate transformation
+    console.log('🎯 COORDINATE TRANSFORM DEBUG:', {
+      canvas: point,
+      adjusted: { x: adjustedX, y: adjustedY },
+      rotated: { i: rotatedI, j: rotatedJ },
+      dicom: { i, j },
+      world: { x: worldX, y: worldY, z: worldZ }
+    });
     
     return [worldX, worldY, worldZ];
   }, []);
@@ -858,11 +814,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     canvasContainer.appendChild(maskCanvas);
     canvasContainer.appendChild(previewCanvas);
     
-    // Attach mouse event listeners to the mask canvas for proper interaction
-    maskCanvas.addEventListener('mousedown', handleMouseDown);
-    maskCanvas.addEventListener('mousemove', handleMouseMove);
-    maskCanvas.addEventListener('mouseup', handleMouseUp);
-    maskCanvas.addEventListener('mouseleave', handleMouseUp);
+    // No mouse events on mask canvas - main canvas handles all interactions
     
     maskCanvasRef.current = maskCanvas;
     previewCanvasRef.current = previewCanvas;
