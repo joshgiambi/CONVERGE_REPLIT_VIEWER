@@ -733,11 +733,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     // Start painting immediately
     paintPixels(canvasPoint);
 
-    console.log('Pixel brush started painting:', {
+    console.log('🎨 BRUSH TOOL: Mouse down - starting to paint', {
       operation: operation,
       position: canvasPoint,
       slice: currentSlicePosition,
-      brushSize: brushSize
+      brushSize: brushSize,
+      smoothingEnabled: smoothingEnabled
     });
   }, [isActive, selectedStructure, paintPixels, operation, currentSlicePosition, brushSize]);
 
@@ -754,6 +755,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     drawBrushPreview(canvasPoint);
 
     if (isDrawing && lastPosition) {
+      console.log('🖌️ BRUSH TOOL: Drawing stroke', { from: lastPosition, to: canvasPoint, smoothingEnabled });
       if (smoothingEnabled) {
         paintLine(lastPosition, canvasPoint);
       } else {
