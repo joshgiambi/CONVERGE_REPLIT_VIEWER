@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { BrushTool } from './brush-tool';
+import { SimpleBrushTool } from './simple-brush-tool';
 import { BrushOperation } from '@shared/schema';
 import { growContour, smoothContour } from '@/lib/contour-grow';
 
@@ -966,9 +966,9 @@ export function WorkingViewer({
             }}
           />
 
-          {/* Pixel Brush Tool overlay */}
+          {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <BrushTool
+            <SimpleBrushTool
               canvasRef={canvasRef}
               isActive={brushToolState.isActive}
               brushSize={brushToolState.brushSize}
@@ -996,7 +996,7 @@ export function WorkingViewer({
               smoothingEnabled={true}
               enableSmartMode={true}
               onBrushModeChange={(mode: BrushOperation) => {
-                console.log('Pixel brush mode changed:', mode);
+                console.log('Brush mode changed:', mode);
               }}
             />
           )}
