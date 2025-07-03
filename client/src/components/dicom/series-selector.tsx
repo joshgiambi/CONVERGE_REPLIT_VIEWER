@@ -70,8 +70,8 @@ export function SeriesSelector({
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
-  const [contourWidth, setContourWidth] = useState([2]);
-  const [contourOpacity, setContourOpacity] = useState([80]);
+  const [contourWidth, setContourWidth] = useState([3]);
+  const [contourOpacity, setContourOpacity] = useState([30]);
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;

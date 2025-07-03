@@ -1,8 +1,10 @@
-// Pixel-Based Brush Tool - Video Game Style Painting
-// Paints pixels directly onto structure masks like a paint brush
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BrushOperation } from '@shared/schema';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Point, BrushOperation } from '@shared/schema';
+interface Point {
+  x: number;
+  y: number;
+}
 
 interface PixelBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -34,7 +36,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   panY,
   imageMetadata,
   smoothingEnabled = true,
-  enableSmartMode = true,
+  enableSmartMode = false,
   onBrushModeChange
 }) => {
   const [isDrawing, setIsDrawing] = useState(false);
@@ -49,51 +51,13 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   // Track the slice we're painting on to ensure slice-specific visibility
   const [paintingSlice, setPaintingSlice] = useState<number | null>(null);
   
-  // Get the actual structure object from rtStructures using the selectedStructure ID
-  const selectedStructureData = useMemo(() => {
-    if (!selectedStructure || !rtStructures?.structures) return null;
-    return rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-  }, [selectedStructure, rtStructures]);
+  // Convert millimeter brush size to canvas pixels based on zoom and pixel spacing
+  const brushSizePixels = Math.max(1, Math.round(brushSize * zoom * 0.85)); // ~1mm per pixel at zoom=1
   
-  // Structure color for painting (use the selected structure's color)
-  const structureColor = selectedStructureData?.color || [255, 0, 0];
-  
-  // Debug logging for structure color
-  useEffect(() => {
-    if (selectedStructureData) {
-      console.log('Brush tool selected structure:', {
-        roiNumber: selectedStructureData.roiNumber,
-        structureName: selectedStructureData.structureName,
-        color: selectedStructureData.color,
-        structureColor: structureColor
-      });
-    }
-  }, [selectedStructureData, structureColor]);
-
-  // Get pixel spacing in mm from image metadata
-  const pixelSpacingMm = useMemo(() => {
-    if (!imageMetadata?.pixelSpacing) return 1.171875; // HN-ATLAS default
-    const spacing = imageMetadata.pixelSpacing.split('\\');
-    return parseFloat(spacing[0]) || 1.171875;
-  }, [imageMetadata]);
-
-  // Convert brush size from pixels to millimeters for consistent physical sizing
-  const brushSizeMm = useMemo(() => {
-    return brushSize * pixelSpacingMm; // Convert pixels to mm
-  }, [brushSize, pixelSpacingMm]);
-
-  // Convert millimeters to pixels for current zoom level
-  const brushSizePixels = useMemo(() => {
-    return (brushSizeMm / pixelSpacingMm) * zoom;
-  }, [brushSizeMm, pixelSpacingMm, zoom]);
-
-  // Convert canvas coordinates to image pixel coordinates
-  const canvasToPixel = useCallback((canvasX: number, canvasY: number) => {
-    // Account for zoom and pan to get actual image coordinates
-    const imageX = Math.round((canvasX - panX) / zoom);
-    const imageY = Math.round((canvasY - panY) / zoom);
-    return { x: imageX, y: imageY };
-  }, [zoom, panX, panY]);
+  // Get structure color
+  const structureColor = selectedStructure && rtStructures?.structures 
+    ? rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure)?.color || [255, 255, 0]
+    : [255, 255, 0];
 
   // Draw brush preview cursor
   const drawBrushPreview = useCallback((canvasPoint: Point) => {
@@ -102,34 +66,31 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const ctx = previewCanvasRef.current.getContext('2d');
     if (!ctx) return;
     
-    // Clear entire preview canvas
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    // Clear previous preview
+    ctx.clearRect(0, 0, previewCanvasRef.current.width, previewCanvasRef.current.height);
     
-    // Draw brush circle using millimeter-based sizing
     const radius = brushSizePixels / 2;
-    const color = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+    const color = structureColor;
     
     ctx.save();
-    ctx.strokeStyle = color;
+    
+    // Draw cursor circle with structure color
+    ctx.strokeStyle = operation === BrushOperation.ADDITIVE 
+      ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.8)`
+      : 'rgba(255, 0, 0, 0.8)'; // Red for subtraction
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
-    ctx.globalAlpha = 0.8;
     
     ctx.beginPath();
     ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
     ctx.stroke();
     
-    // Draw crosshair
+    // Add center dot
+    ctx.fillStyle = ctx.strokeStyle;
     ctx.setLineDash([]);
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 1;
-    
     ctx.beginPath();
-    ctx.moveTo(canvasPoint.x - 6, canvasPoint.y);
-    ctx.lineTo(canvasPoint.x + 6, canvasPoint.y);
-    ctx.moveTo(canvasPoint.x, canvasPoint.y - 6);
-    ctx.lineTo(canvasPoint.x, canvasPoint.y + 6);
-    ctx.stroke();
+    ctx.arc(canvasPoint.x, canvasPoint.y, 1, 0, 2 * Math.PI);
+    ctx.fill();
     
     ctx.restore();
   }, [brushSizePixels, operation]);
@@ -257,6 +218,132 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.restore();
   }, [brushSizePixels, operation, structureColor]);
 
+  // Convert brush strokes to actual contour points in RT structure data
+  const convertBrushToContour = useCallback(() => {
+    if (!maskCanvasRef.current || !selectedStructure || !rtStructures || !imageMetadata) return;
+
+    const canvas = maskCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Get the painted pixels from the mask canvas
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Extract contour points from painted pixels
+    const contourPoints = extractContourFromPixels(data, canvas.width, canvas.height);
+    
+    if (contourPoints.length === 0) return;
+
+    // Convert canvas coordinates to DICOM world coordinates
+    const worldPoints = contourPoints.map(point => {
+      return canvasToWorldCoordinates(point, imageMetadata, zoom, panX, panY);
+    });
+
+    // Update the RT structure data
+    updateRTStructureContour(selectedStructure, currentSlicePosition, worldPoints);
+
+    // Clear the brush canvas since it's now part of the structure
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Trigger contour update callback to refresh the display
+    if (onContourUpdate && rtStructures) {
+      onContourUpdate(rtStructures);
+    }
+  }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY, onContourUpdate]);
+
+  // Extract contour points from painted pixels using edge detection
+  const extractContourFromPixels = useCallback((data: Uint8ClampedArray, width: number, height: number) => {
+    const contourPoints: Point[] = [];
+    
+    // Simple edge detection to find contour boundary
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const index = (y * width + x) * 4;
+        const alpha = data[index + 3];
+        
+        // If this pixel is painted
+        if (alpha > 0) {
+          // Check if it's on the edge (has unpainted neighbors)
+          const hasUnpaintedNeighbor = [
+            [-1, 0], [1, 0], [0, -1], [0, 1]
+          ].some(([dx, dy]) => {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) return true;
+            const nIndex = (ny * width + nx) * 4;
+            return data[nIndex + 3] === 0;
+          });
+          
+          if (hasUnpaintedNeighbor) {
+            contourPoints.push({ x, y });
+          }
+        }
+      }
+    }
+    
+    return contourPoints;
+  }, []);
+
+  // Convert canvas coordinates to DICOM world coordinates
+  const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
+    // Parse DICOM spatial parameters
+    const imagePosition = metadata.imagePosition?.split('\\').map(Number) || [-300, -300, 0];
+    const pixelSpacing = metadata.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
+    const imageOrientation = metadata.imageOrientation?.split('\\').map(Number) || [1, 0, 0, 0, 1, 0];
+    
+    // Account for zoom and pan
+    const canvasX = (point.x - currentPanX) / currentZoom;
+    const canvasY = (point.y - currentPanY) / currentZoom;
+    
+    // Convert to DICOM patient coordinates
+    const worldX = imagePosition[0] + (canvasX * pixelSpacing[0] * imageOrientation[0]) + (canvasY * pixelSpacing[1] * imageOrientation[3]);
+    const worldY = imagePosition[1] + (canvasX * pixelSpacing[0] * imageOrientation[1]) + (canvasY * pixelSpacing[1] * imageOrientation[4]);
+    const worldZ = imagePosition[2] + (canvasX * pixelSpacing[0] * imageOrientation[2]) + (canvasY * pixelSpacing[1] * imageOrientation[5]);
+    
+    return [worldX, worldY, worldZ];
+  }, []);
+
+  // Update RT structure contour data with new points
+  const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
+    if (!rtStructures) return;
+
+    // Find the structure to update
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) return;
+
+    // Find or create contour for this slice
+    let sliceContour = structure.contours.find((c: any) => 
+      Math.abs(c.slicePosition - slicePosition) < 1.0
+    );
+
+    if (!sliceContour) {
+      // Create new contour for this slice
+      sliceContour = {
+        slicePosition: slicePosition,
+        points: worldPoints.flat()
+      };
+      structure.contours.push(sliceContour);
+    } else {
+      // Update existing contour
+      if (operation === BrushOperation.ADDITIVE) {
+        // Merge with existing points
+        sliceContour.points = [...sliceContour.points, ...worldPoints.flat()];
+      } else {
+        // For subtraction, we'd need more complex polygon operations
+        // For now, replace the contour
+        sliceContour.points = worldPoints.flat();
+      }
+    }
+
+    console.log('Updated RT structure contour:', {
+      structureId,
+      slicePosition,
+      pointCount: worldPoints.length,
+      totalPoints: sliceContour.points.length / 3
+    });
+  }, [rtStructures, operation]);
+
   // Mouse event handlers
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!isActive || !selectedStructure || event.button !== 0) return;
@@ -288,6 +375,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   }, [isActive, selectedStructure, paintPixels, operation, currentSlicePosition, brushSize]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
+    if (!isActive) return;
+
     const rect = canvasRef.current!.getBoundingClientRect();
     const canvasPoint = {
       x: event.clientX - rect.left,
@@ -295,13 +384,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     };
 
     setMousePosition(canvasPoint);
+    drawBrushPreview(canvasPoint);
 
-    // Always show preview when brush is active
-    if (isActive) {
-      drawBrushPreview(canvasPoint);
-    }
-
-    // Continue painting if drawing
     if (isDrawing && lastPosition) {
       if (smoothingEnabled) {
         paintLine(lastPosition, canvasPoint);
@@ -312,16 +396,6 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
 
-  // Simplified flood fill for manual use (not automatic to prevent freezing)
-  const floodFillEnclosedRegions = useCallback(() => {
-    if (!maskCanvasRef.current) return;
-    
-    console.log('Manual flood fill would be implemented here');
-    // This would be triggered manually by user action, not automatically
-  }, []);
-  
-
-
   const handleMouseUp = useCallback((event?: MouseEvent) => {
     console.log('Mouse up event triggered', { isDrawing, selectedStructure });
     
@@ -331,8 +405,10 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     setLastPosition(null);
 
     try {
-      // Skip automatic flood fill to prevent freezing - user can manually fill if needed
-      console.log('Pixel brush stroke completed:', {
+      // Convert brush strokes to contour data and update RT structures
+      convertBrushToContour();
+      
+      console.log('Pixel brush stroke completed and converted to contour:', {
         structureId: selectedStructure,
         slice: currentSlicePosition,
         operation: operation,
@@ -342,7 +418,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     } catch (error) {
       console.error('Error in handleMouseUp:', error);
     }
-  }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize]);
+  }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize, convertBrushToContour]);
 
   // Hide mask canvas when not on the painting slice
   useEffect(() => {
@@ -431,17 +507,21 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Keyboard shortcuts for operation switching
   useEffect(() => {
-    if (!isActive) return;
-
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isActive) return;
+      
       if (event.key === 'Shift') {
         setOperation(BrushOperation.SUBTRACTIVE);
+        if (onBrushModeChange) onBrushModeChange(BrushOperation.SUBTRACTIVE);
       }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
+      if (!isActive) return;
+      
       if (event.key === 'Shift') {
         setOperation(BrushOperation.ADDITIVE);
+        if (onBrushModeChange) onBrushModeChange(BrushOperation.ADDITIVE);
       }
     };
 
@@ -452,43 +532,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isActive]);
+  }, [isActive, onBrushModeChange]);
 
-  // Render component
-  if (!isActive) return null;
-
-  return (
-    <div className="absolute inset-0 pointer-events-none">
-      {/* Brush info overlay */}
-      {mousePosition && (
-        <div 
-          className="absolute bg-black/90 text-white px-3 py-2 rounded-md text-sm font-medium pointer-events-none shadow-lg border"
-          style={{
-            left: mousePosition.x + 15,
-            top: mousePosition.y - 45,
-            zIndex: 20,
-            borderColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-3 h-3 rounded-full border-2"
-              style={{
-                backgroundColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000',
-                borderColor: operation === BrushOperation.ADDITIVE ? `rgb(${structureColor.join(',')})` : '#ff0000'
-              }}
-            />
-            <span>
-              {operation === BrushOperation.ADDITIVE ? 'Paint' : 'Erase'} • {brushSize}px
-            </span>
-          </div>
-          <div className="text-xs opacity-75 mt-1">
-            Hold Shift to erase
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return null;
 };
-
-export default PixelBrushTool;
