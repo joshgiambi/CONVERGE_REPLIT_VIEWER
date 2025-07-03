@@ -1,0 +1,459 @@
+# Code-Level Walkthrough: OHIF Brush Tool Implementation
+
+Let me walk you through the actual code implementation of the brush tool in OHIF, tracing the execution from user interaction to labelmap updates.
+
+## 1. **Tool Registration and Setup**
+
+Read file: modes/segmentation/src/initToolGroups.ts
+## 2. **Toolbar Button Definition**
+
+Read file: modes/segmentation/src/toolbarButtons.ts
+## 3. **Command Execution Flow**
+
+Read file: extensions/cornerstone/src/commandsModule.ts
+Let me find the setToolActive command:
+
+Ran tool
+Ran tool
+Read file: extensions/cornerstone/src/commandsModule.ts
+Now let me look at the brush size command:
+
+Ran tool
+Read file: extensions/cornerstone/src/commandsModule.ts
+Now let me look at the segmentation utilities to understand how brush size is managed:
+
+Ran tool
+Now let me look for the segmentation utilities:
+
+Ran tool
+Let me search for the segmentation utilities in the cornerstone extension:
+
+Ran tool
+Perfect! Now I have a complete picture. Let me provide the comprehensive code-level walkthrough:
+
+# **Complete Code-Level Walkthrough: OHIF Brush Tool Implementation**
+
+## **1. Tool Registration and Initialization**
+
+### **A. Tool Definition in `initToolGroups.ts`**
+```typescript
+// modes/segmentation/src/initToolGroups.ts
+function createTools(utilityModule) {
+  const { toolNames, Enums } = utilityModule.exports;
+  return {
+    passive: [
+      {
+        toolName: 'CircularBrush',
+        parentTool: 'Brush',
+        configuration: {
+          activeStrategy: 'FILL_INSIDE_CIRCLE',  // ← Key: Defines brush behavior
+        },
+      },
+      {
+        toolName: 'SphereBrush', 
+        parentTool: 'Brush',
+        configuration: {
+          activeStrategy: 'FILL_INSIDE_SPHERE',  // ← 3D brush behavior
+        },
+      },
+      // ... other brush variants
+    ],
+  };
+}
+```
+
+### **B. Tool Registration in Cornerstone**
+```typescript
+// extensions/cornerstone/src/initCornerstoneTools.js
+import { BrushTool } from '@cornerstonejs/tools';
+
+export default function initCornerstoneTools() {
+  addTool(BrushTool);  // ← Registers the core brush tool
+  
+  const toolNames = {
+    Brush: BrushTool.toolName,  // ← Maps to 'Brush'
+    // ...
+  };
+}
+```
+
+## **2. Toolbar Button Configuration**
+
+### **A. Button Definition in `toolbarButtons.ts`**
+```typescript
+// modes/segmentation/src/toolbarButtons.ts
+{
+  id: 'Brush',
+  uiType: 'ohif.toolBoxButton',
+  props: {
+    icon: 'icon-tool-brush',
+    label: 'Brush',
+    evaluate: {
+      name: 'evaluate.cornerstone.segmentation',  // ← Only enabled when segmentation exists
+      toolNames: ['CircularBrush', 'SphereBrush'],
+      disabledText: 'Create new segmentation to enable this tool.',
+    },
+    options: [
+      {
+        name: 'Radius (mm)',
+        id: 'brush-radius',
+        type: 'range',
+        min: 0.5,
+        max: 99.5,
+        step: 0.5,
+        value: 25,
+        commands: {
+          commandName: 'setBrushSize',  // ← Updates brush size
+          commandOptions: { toolNames: ['CircularBrush', 'SphereBrush'] },
+        },
+      },
+      {
+        name: 'Shape',
+        type: 'radio',
+        id: 'brush-mode',
+        value: 'CircularBrush',
+        values: [
+          { value: 'CircularBrush', label: 'Circle' },
+          { value: 'SphereBrush', label: 'Sphere' },
+        ],
+        commands: 'setToolActiveToolbar',  // ← Activates selected brush type
+      },
+    ],
+  },
+}
+```
+
+## **3. Command Execution Flow**
+
+### **A. Tool Activation Command**
+```typescript
+// extensions/cornerstone/src/commandsModule.ts
+setToolActive: ({ toolName, toolGroupId = null }) => {
+  const { viewports } = viewportGridService.getState();
+  
+  if (!viewports.size) return;
+  
+  const toolGroup = toolGroupService.getToolGroup(toolGroupId);
+  if (!toolGroup || !toolGroup?.hasTool(toolName)) return;
+  
+  // Deactivate current active tool
+  const activeToolName = toolGroup.getActivePrimaryMouseButtonTool();
+  if (activeToolName) {
+    const activeToolOptions = toolGroup.getToolConfiguration(activeToolName);
+    activeToolOptions?.disableOnPassive
+      ? toolGroup.setToolDisabled(activeToolName)
+      : toolGroup.setToolPassive(activeToolName);
+  }
+  
+  // Activate new tool with mouse binding
+  toolGroup.setToolActive(toolName, {
+    bindings: [
+      {
+        mouseButton: Enums.MouseBindings.Primary,  // ← Left mouse button
+      },
+    ],
+  });
+}
+```
+
+### **B. Brush Size Management**
+```typescript
+// extensions/cornerstone/src/commandsModule.ts
+setBrushSize: ({ value, toolNames }) => {
+  const brushSize = Number(value);
+  
+  toolGroupService.getToolGroupIds()?.forEach(toolGroupId => {
+    if (toolNames?.length === 0) {
+      // Update all brush tools in the tool group
+      segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize);
+    } else {
+      // Update specific brush tools
+      toolNames?.forEach(toolName => {
+        segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize, toolName);
+      });
+    }
+  });
+}
+```
+
+## **4. Core Brush Tool Implementation (Cornerstone Tools)**
+
+### **A. Brush Tool Class Structure**
+```typescript
+// @cornerstonejs/tools (external library)
+class BrushTool extends BaseTool {
+  static toolName = 'Brush';
+  
+  // Configuration determines brush behavior
+  configuration = {
+    activeStrategy: 'FILL_INSIDE_CIRCLE',  // or 'FILL_INSIDE_SPHERE'
+    brushSize: 25,  // mm
+    preview: {
+      enabled: true,
+    },
+  };
+  
+  // Event handlers
+  mouseDownCallback = (evt) => {
+    // 1. Get mouse position in image coordinates
+    const { element } = evt.detail;
+    const { currentImageIdIndex } = evt.detail;
+    const mousePos = evt.detail.currentPoints.image;
+    
+    // 2. Calculate brush mask (circle/sphere)
+    const brushMask = this._calculateBrushMask(mousePos);
+    
+    // 3. Update labelmap
+    this._updateLabelmap(brushMask, currentImageIdIndex);
+    
+    // 4. Trigger render
+    element.viewport.render();
+  };
+  
+  mouseDragCallback = (evt) => {
+    // Similar to mouseDown but for continuous drawing
+    // Interpolates between previous and current mouse positions
+  };
+  
+  mouseUpCallback = (evt) => {
+    // Finalize the brush stroke
+    // Commit changes to segmentation service
+  };
+}
+```
+
+### **B. Brush Mask Calculation**
+```typescript
+_calculateBrushMask(mousePos) {
+  const { brushSize, activeStrategy } = this.configuration;
+  
+  if (activeStrategy === 'FILL_INSIDE_CIRCLE') {
+    // 2D circle mask
+    return this._createCircleMask(mousePos, brushSize);
+  } else if (activeStrategy === 'FILL_INSIDE_SPHERE') {
+    // 3D sphere mask
+    return this._createSphereMask(mousePos, brushSize);
+  }
+}
+
+_createCircleMask(center, radius) {
+  // Convert radius from mm to pixels
+  const radiusInPixels = this._mmToPixels(radius);
+  
+  // Create circular mask using distance calculation
+  const mask = [];
+  for (let y = -radiusInPixels; y <= radiusInPixels; y++) {
+    for (let x = -radiusInPixels; x <= radiusInPixels; x++) {
+      const distance = Math.sqrt(x*x + y*y);
+      if (distance <= radiusInPixels) {
+        mask.push({
+          x: center.x + x,
+          y: center.y + y,
+          z: center.z
+        });
+      }
+    }
+  }
+  return mask;
+}
+```
+
+### **C. Labelmap Update Process**
+```typescript
+_updateLabelmap(brushMask, imageIndex) {
+  // 1. Get active segmentation
+  const segmentationService = this.servicesManager.services.segmentationService;
+  const activeSegmentation = segmentationService.getActiveSegmentation();
+  
+  if (!activeSegmentation) {
+    console.warn('No active segmentation for brush tool');
+    return;
+  }
+  
+  // 2. Get labelmap volume
+  const labelmapVolume = activeSegmentation.representationData.Labelmap;
+  
+  // 3. Update voxels in the brush mask
+  brushMask.forEach(voxel => {
+    const { x, y, z } = voxel;
+    
+    // Convert to volume coordinates
+    const volumeIndex = labelmapVolume.imageData.worldToIndex([x, y, z]);
+    
+    // Set the segment label (usually 1 for first segment)
+    const segmentIndex = this._getActiveSegmentIndex();
+    labelmapVolume.setPixelAt(volumeIndex, segmentIndex);
+  });
+  
+  // 4. Notify segmentation service of changes
+  segmentationService.updateSegmentation(activeSegmentation.segmentationId);
+}
+```
+
+## **5. Segmentation Service Integration**
+
+### **A. Segmentation State Management**
+```typescript
+// @ohif/core (segmentation service)
+class SegmentationService {
+  private segmentations = new Map();
+  
+  getActiveSegmentation(viewportId) {
+    // Returns the currently active segmentation for the viewport
+    return this.activeSegmentations.get(viewportId);
+  }
+  
+  updateSegmentation(segmentationId) {
+    // Triggers re-render of all viewports showing this segmentation
+    this._notifyViewports(segmentationId);
+  }
+  
+  addSegmentation(segmentation) {
+    // Creates new labelmap volume and stores segmentation metadata
+    const labelmapVolume = this._createLabelmapVolume(segmentation);
+    this.segmentations.set(segmentation.segmentationId, {
+      ...segmentation,
+      representationData: {
+        Labelmap: labelmapVolume
+      }
+    });
+  }
+}
+```
+
+### **B. Labelmap Volume Creation**
+```typescript
+_createLabelmapVolume(segmentation) {
+  // Create 3D array with same dimensions as image volume
+  const { dimensions, spacing, origin, direction } = this.imageVolume;
+  
+  const labelmapVolume = {
+    volumeId: `${segmentation.segmentationId}-labelmap`,
+    dimensions,
+    spacing,
+    origin,
+    direction,
+    imageData: new Uint8Array(dimensions[0] * dimensions[1] * dimensions[2]),
+    
+    // Methods for voxel access
+    setPixelAt: (index, value) => {
+      this.imageData[index] = value;
+    },
+    
+    getPixelAt: (index) => {
+      return this.imageData[index];
+    }
+  };
+  
+  return labelmapVolume;
+}
+```
+
+## **6. Rendering Pipeline**
+
+### **A. Segmentation Rendering**
+```typescript
+// Cornerstone rendering engine
+class SegmentationRenderingEngine {
+  renderSegmentation(viewport, segmentation) {
+    const labelmapVolume = segmentation.representationData.Labelmap;
+    const imageVolume = viewport.getImageData();
+    
+    // Create overlay canvas
+    const overlayCanvas = this._createOverlayCanvas();
+    
+    // For each slice
+    for (let z = 0; z < labelmapVolume.dimensions[2]; z++) {
+      this._renderSlice(labelmapVolume, imageVolume, z, overlayCanvas);
+    }
+    
+    // Blend overlay with image
+    this._blendOverlay(viewport.canvas, overlayCanvas);
+  }
+  
+  _renderSlice(labelmapVolume, imageVolume, sliceIndex, canvas) {
+    // Extract 2D slice from 3D labelmap
+    const sliceData = this._extractSlice(labelmapVolume, sliceIndex);
+    
+    // Map segment labels to colors
+    const coloredSlice = this._applyColormap(sliceData);
+    
+    // Draw to overlay canvas
+    this._drawToCanvas(coloredSlice, canvas, sliceIndex);
+  }
+}
+```
+
+## **7. Event Flow Summary**
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Toolbar
+    participant Commands
+    participant ToolGroup
+    participant BrushTool
+    participant SegmentationService
+    participant Viewport
+
+    User->>Toolbar: Click Brush button
+    Toolbar->>Commands: setToolActive('CircularBrush')
+    Commands->>ToolGroup: setToolActive(toolName, bindings)
+    ToolGroup->>BrushTool: Activate tool
+    
+    User->>Viewport: Mouse down + drag
+    Viewport->>BrushTool: mouseDownCallback()
+    BrushTool->>BrushTool: _calculateBrushMask()
+    BrushTool->>SegmentationService: _updateLabelmap()
+    SegmentationService->>Viewport: Trigger re-render
+    Viewport->>User: Show updated segmentation
+```
+
+## **8. Key Data Structures**
+
+### **A. Tool Configuration**
+```typescript
+interface BrushToolConfig {
+  activeStrategy: 'FILL_INSIDE_CIRCLE' | 'FILL_INSIDE_SPHERE';
+  brushSize: number;  // mm
+  preview: {
+    enabled: boolean;
+  };
+  threshold?: {
+    range: [number, number];
+    isDynamic: boolean;
+  };
+}
+```
+
+### **B. Segmentation Data**
+```typescript
+interface Segmentation {
+  segmentationId: string;
+  label: string;
+  segments: {
+    [index: number]: {
+      label: string;
+      color: [number, number, number];
+      active: boolean;
+    };
+  };
+  representationData: {
+    Labelmap: LabelmapVolume;
+  };
+}
+```
+
+### **C. Labelmap Volume**
+```typescript
+interface LabelmapVolume {
+  volumeId: string;
+  dimensions: [number, number, number];
+  spacing: [number, number, number];
+  origin: [number, number, number];
+  direction: number[][];
+  imageData: Uint8Array;  // Voxel values (0 = background, 1+ = segment labels)
+}
+```
+
+This walkthrough shows how the brush tool integrates with OHIF's architecture, from user interaction through to labelmap updates and rendering. The key insight is that the brush tool operates on **labelmap volumes** (3D arrays of segment labels) rather than directly on image data, and the segmentation service manages the state and rendering of these labelmaps.
