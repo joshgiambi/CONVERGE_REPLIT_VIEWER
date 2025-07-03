@@ -293,11 +293,16 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleGrowContour}
               className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
-              disabled={!growDistance || !currentSlicePosition}
+              disabled={!growDistance || currentSlicePosition === undefined || currentSlicePosition === null}
             >
               <ArrowUpFromLine className="w-4 h-4 mr-2" />
               Run Grow
             </Button>
+            
+            {/* Debug info */}
+            <div className="text-xs text-gray-500 mt-1">
+              Distance: {growDistance || 'not set'} | Slice: {currentSlicePosition !== undefined ? currentSlicePosition : 'not set'}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
