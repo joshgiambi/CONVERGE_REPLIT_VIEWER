@@ -108,43 +108,68 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Paint pixels matching medical contour style (filled with 3px border)
   const paintPixels = useCallback((canvasPoint: Point) => {
-    if (!maskCanvasRef.current) return;
+    if (!maskCanvasRef.current || !selectedStructure) return;
     
+    console.log('🖌️ PAINTING at canvas point:', canvasPoint);
+    
+    // 1. Paint to mask canvas for visual feedback
     const ctx = maskCanvasRef.current.getContext('2d');
-    if (!ctx) return;
-    
-    const radius = brushSizePixels / 2;
-    const color = structureColor;
-    
-    ctx.save();
-    
-    if (operation === BrushOperation.ADDITIVE) {
-      ctx.globalCompositeOperation = 'source-over';
+    if (ctx) {
+      const radius = brushSizePixels / 2;
+      const color = structureColor;
       
-      // Draw filled circle
-      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
-      ctx.beginPath();
-      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
-      ctx.fill();
+      ctx.save();
       
-      // Draw 3px border around the filled area
-      ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(canvasPoint.x, canvasPoint.y, radius + 1.5, 0, 2 * Math.PI); // Offset for border
-      ctx.stroke();
+      if (operation === BrushOperation.ADDITIVE) {
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Draw filled circle
+        ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+        ctx.beginPath();
+        ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Draw 3px border around the filled area
+        ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(canvasPoint.x, canvasPoint.y, radius + 1.5, 0, 2 * Math.PI); // Offset for border
+        ctx.stroke();
+        
+      } else {
+        // Erase pixels (including border area)
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
+        ctx.beginPath();
+        ctx.arc(canvasPoint.x, canvasPoint.y, radius + 3, 0, 2 * Math.PI); // Include border in erase
+        ctx.fill();
+      }
       
-    } else {
-      // Erase pixels (including border area)
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
-      ctx.beginPath();
-      ctx.arc(canvasPoint.x, canvasPoint.y, radius + 3, 0, 2 * Math.PI); // Include border in erase
-      ctx.fill();
+      ctx.restore();
     }
     
-    ctx.restore();
-  }, [brushSizePixels, operation, structureColor]);
+    // 2. Convert canvas point to world coordinates and update RT structure
+    const [worldX, worldY, worldZ] = canvasToWorldCoordinates(canvasPoint, metadata, zoom, panX, panY);
+    
+    // Create a simple circular brush in world coordinates
+    const pixelSpacing = 1.171875; // mm per pixel
+    const worldBrushRadius = brushSizePixels * pixelSpacing * 0.5; // Convert to world units
+    const worldPoints: number[][] = [];
+    
+    // Generate circle points in world coordinates
+    const segments = 8; // Simple circle
+    for (let i = 0; i < segments; i++) {
+      const angle = (i * 2 * Math.PI) / segments;
+      const x = worldX + worldBrushRadius * Math.cos(angle);
+      const y = worldY + worldBrushRadius * Math.sin(angle);
+      worldPoints.push([x, y, worldZ]);
+    }
+    
+    console.log('🌍 Generated world brush points:', worldPoints.length, 'at world coords:', { worldX, worldY, worldZ });
+    
+    // Update RT structure
+    updateRTStructureContour(selectedStructure.roiNumber, currentSlicePosition, worldPoints);
+  }, [brushSizePixels, operation, structureColor, selectedStructure, metadata, zoom, panX, panY, currentSlicePosition, canvasToWorldCoordinates, updateRTStructureContour]);
 
   // Paint continuous line matching medical contour style (filled with 3px border)
   const paintLine = useCallback((from: Point, to: Point) => {
@@ -292,53 +317,58 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     centerX = Math.round(centerX / pixelCount);
     centerY = Math.round(centerY / pixelCount);
     
-    // Create a circular contour around the brush center - use proper brush size
-    const radius = Math.max(8, brushSize); // Use actual brush size in canvas pixels
+    // Create a circular contour in world coordinates
+    // Convert brush size from canvas pixels to world millimeters
+    const worldPerCanvasPixelX = (512 * 1.171875) / canvasRef.current!.width;
+    const worldPerCanvasPixelY = (512 * 1.171875) / canvasRef.current!.height;
+    const worldBrushRadius = Math.max(2, brushSize * worldPerCanvasPixelX); // Convert to world units
+    
     const contour: Point[] = [];
     const segments = 12; // Simpler polygon for better performance
     
     for (let i = 0; i < segments; i++) {
       const angle = (i * 2 * Math.PI) / segments;
-      const x = centerX + radius * Math.cos(angle);
-      const y = centerY + radius * Math.sin(angle);
-      contour.push({ x: Math.round(x), y: Math.round(y) });
+      // Create circle in world coordinates
+      const worldX = centerX + worldBrushRadius * Math.cos(angle);
+      const worldY = centerY + worldBrushRadius * Math.sin(angle);
+      
+      // Convert back to canvas coordinates for display
+      const canvasX = ((worldX - (-300)) / (512 * 1.171875)) * canvasRef.current!.width;
+      const canvasY = ((worldY - (-300)) / (512 * 1.171875)) * canvasRef.current!.height;
+      
+      contour.push({ x: Math.round(canvasX), y: Math.round(canvasY) });
     }
     
-    console.log('⭕ Created circular contour at:', { centerX, centerY, radius, points: contour.length });
+    console.log('⭕ Created circular contour at:', { centerX, centerY, worldBrushRadius, points: contour.length });
     return contour;
   }, [brushSize]);
 
 
 
-  // PROPER DICOM coordinate transformation - inverse of corrected RT overlay
+  // SIMPLE DIRECT COORDINATE MAPPING - Use same method as RT overlay
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
     const canvas = canvasRef.current;
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Use same constants as RT overlay
+    // Use exact same constants as RT overlay
     const imagePositionPatient: [number, number, number] = [-300, -300, 35];
     const pixelSpacing: [number, number] = [1.171875, 1.171875];
     const dicomImageWidth = 512;
     const dicomImageHeight = 512;
     
-    // Account for zoom and pan
-    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
-    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
+    // Simple direct mapping - ignore zoom and pan for now to debug
+    const pixelX = (point.x / canvas.width) * dicomImageWidth;
+    const pixelY = (point.y / canvas.height) * dicomImageHeight;
     
-    // Convert canvas coordinates to pixel coordinates (inverse of RT overlay)
-    const pixelX = (adjustedX / canvas.width) * dicomImageWidth;
-    const pixelY = (adjustedY / canvas.height) * dicomImageHeight;
-    
-    // Convert pixel coordinates to world coordinates (inverse of RT overlay)
+    // Convert to world coordinates using exact RT overlay method
     const worldX = imagePositionPatient[0] + pixelX * pixelSpacing[0];
     const worldY = imagePositionPatient[1] + pixelY * pixelSpacing[1];
     const worldZ = sliceLocation;
     
-    console.log('🎯 PROPER DICOM COORDINATES:', {
+    console.log('🎯 DIRECT MAPPING:', {
       canvas: point,
-      adjusted: { x: adjustedX, y: adjustedY },
       pixel: { x: pixelX, y: pixelY },
       world: { x: worldX, y: worldY, z: worldZ }
     });
