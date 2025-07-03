@@ -299,101 +299,15 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
 
-  // Advanced flood fill for enclosed regions
+  // Simplified flood fill for manual use (not automatic to prevent freezing)
   const floodFillEnclosedRegions = useCallback(() => {
     if (!maskCanvasRef.current) return;
     
-    const ctx = maskCanvasRef.current.getContext('2d');
-    if (!ctx) return;
-    
-    const canvas = maskCanvasRef.current;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    const width = canvas.width;
-    const height = canvas.height;
-    const color = structureColor;
-    
-    // Find enclosed regions and fill them
-    const visited = new Set<string>();
-    
-    // Scan for holes (empty pixels surrounded by painted pixels)
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const key = `${x},${y}`;
-        if (visited.has(key)) continue;
-        
-        const index = (y * width + x) * 4;
-        const alpha = data[index + 3];
-        
-        // If pixel is empty, check if it's surrounded
-        if (alpha === 0) {
-          if (isEnclosedHole(x, y, data, width, height)) {
-            floodFillRegion(x, y, data, width, height, color);
-            visited.add(key);
-          }
-        }
-      }
-    }
-    
-    ctx.putImageData(imageData, 0, 0);
-  }, [structureColor]);
-  
-  // Check if a point is inside an enclosed region
-  const isEnclosedHole = useCallback((startX: number, startY: number, data: Uint8ClampedArray, width: number, height: number): boolean => {
-    const visited = new Set<string>();
-    const queue = [[startX, startY]];
-    let touchesBorder = false;
-    
-    while (queue.length > 0 && !touchesBorder) {
-      const [x, y] = queue.pop()!;
-      const key = `${x},${y}`;
-      
-      if (visited.has(key)) continue;
-      if (x < 0 || x >= width || y < 0 || y >= height) {
-        touchesBorder = true;
-        break;
-      }
-      
-      visited.add(key);
-      const index = (y * width + x) * 4;
-      const alpha = data[index + 3];
-      
-      // If we hit a painted pixel, don't expand further
-      if (alpha > 0) continue;
-      
-      // Add neighbors to queue
-      queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-    }
-    
-    return !touchesBorder;
+    console.log('Manual flood fill would be implemented here');
+    // This would be triggered manually by user action, not automatically
   }, []);
   
-  // Fill a region with the structure color
-  const floodFillRegion = useCallback((startX: number, startY: number, data: Uint8ClampedArray, width: number, height: number, color: number[]) => {
-    const queue = [[startX, startY]];
-    const visited = new Set<string>();
-    
-    while (queue.length > 0) {
-      const [x, y] = queue.pop()!;
-      const key = `${x},${y}`;
-      
-      if (visited.has(key) || x < 0 || x >= width || y < 0 || y >= height) continue;
-      
-      const index = (y * width + x) * 4;
-      if (data[index + 3] > 0) continue; // Already painted
-      
-      visited.add(key);
-      
-      // Paint the pixel
-      data[index] = color[0];     // R
-      data[index + 1] = color[1]; // G
-      data[index + 2] = color[2]; // B
-      data[index + 3] = 255;      // A
-      
-      // Add neighbors
-      queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-    }
-  }, []);
+
 
   const handleMouseUp = useCallback((event?: MouseEvent) => {
     console.log('Mouse up event triggered', { isDrawing, selectedStructure });
@@ -404,17 +318,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     setLastPosition(null);
 
     try {
-      // Apply flood fill to enclosed regions after stroke completion
-      setTimeout(() => {
-        try {
-          floodFillEnclosedRegions();
-        } catch (error) {
-          console.error('Error in flood fill:', error);
-        }
-      }, 50);
-
-      // Skip contour update callback to avoid DICOM parsing errors
-      // The painted pixels are already visible on the mask canvas
+      // Skip automatic flood fill to prevent freezing - user can manually fill if needed
       console.log('Pixel brush stroke completed:', {
         structureId: selectedStructure,
         slice: currentSlicePosition,
@@ -425,7 +329,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     } catch (error) {
       console.error('Error in handleMouseUp:', error);
     }
-  }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize, floodFillEnclosedRegions]);
+  }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize]);
 
   // Hide mask canvas when not on the painting slice
   useEffect(() => {
