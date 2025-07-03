@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { BrushTool } from './brush-tool';
 import { BrushOperation } from '@shared/schema';
+import { growContour, smoothContour } from '@/lib/contour-grow';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -83,6 +84,61 @@ export function WorkingViewer({
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+
+  // Handle grow contour operation using medical imaging algorithms
+  const handleGrowContour = (payload: any) => {
+    if (!rtStructures) {
+      console.error('RT structures not available for growing');
+      return;
+    }
+
+    const { structureId, slicePosition, distance } = payload;
+    console.log(`Growing contour for structure ${structureId} by ${distance}mm at slice ${slicePosition}`);
+
+    // Create a deep copy of RT structures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    
+    // Find the target structure
+    const structure = updatedRTStructures.structures?.find((s: any) => s.roiNumber === structureId);
+    if (!structure) {
+      console.error(`Structure ${structureId} not found`);
+      return;
+    }
+
+    // Find the contour for the specified slice
+    const contour = structure.contours?.find((c: any) => 
+      Math.abs(c.slicePosition - slicePosition) < 0.5
+    );
+
+    if (!contour || !contour.points || contour.points.length < 9) {
+      console.warn(`No contour found on slice ${slicePosition} or insufficient points`);
+      return;
+    }
+
+    try {
+      // Apply contour growing algorithm
+      const grownContour = growContour({
+        points: contour.points,
+        slicePosition: slicePosition
+      }, distance);
+
+      // Apply smoothing for medical-grade quality
+      const smoothedContour = smoothContour(grownContour, 0.15);
+
+      // Update the contour with grown points
+      contour.points = smoothedContour.points;
+      contour.numberOfPoints = smoothedContour.points.length / 3;
+
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      console.log(`Successfully grew contour by ${distance}mm`);
+    } catch (error) {
+      console.error('Error growing contour:', error);
+    }
+  };
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -855,11 +911,14 @@ export function WorkingViewer({
                  images[currentIndex].parsedZPosition ??
                  currentIndex) : 0
               }
-              onContourUpdate={(updatedStructures: any) => {
-                if (onContourUpdate) {
-                  onContourUpdate(updatedStructures);
+              onContourUpdate={(payload: any) => {
+                // Handle different types of contour updates
+                if (payload.action === 'grow_contour') {
+                  handleGrowContour(payload);
+                } else if (onContourUpdate) {
+                  onContourUpdate(payload);
                 } else {
-                  console.log('Pixel brush painted:', updatedStructures);
+                  console.log('Contour update:', payload);
                 }
               }}
               zoom={zoom}
