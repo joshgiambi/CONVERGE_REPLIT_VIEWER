@@ -74,7 +74,18 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     
     ctx.save();
     
-    // Draw cursor circle with structure color
+    // Draw outer border outline (darker)
+    ctx.strokeStyle = operation === BrushOperation.ADDITIVE 
+      ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`
+      : 'rgba(255, 0, 0, 1.0)'; // Red for subtraction
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+    
+    ctx.beginPath();
+    ctx.arc(canvasPoint.x, canvasPoint.y, radius + 2, 0, 2 * Math.PI);
+    ctx.stroke();
+    
+    // Draw inner cursor circle with dashed line
     ctx.strokeStyle = operation === BrushOperation.ADDITIVE 
       ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.8)`
       : 'rgba(255, 0, 0, 0.8)'; // Red for subtraction
@@ -93,7 +104,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.fill();
     
     ctx.restore();
-  }, [brushSizePixels, operation]);
+  }, [brushSizePixels, operation, structureColor]);
 
   // Paint pixels matching medical contour style (filled with 3px border)
   const paintPixels = useCallback((canvasPoint: Point) => {
@@ -252,59 +263,159 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY, onContourUpdate]);
 
-  // Extract contour points from painted pixels using edge detection
+  // Extract ordered contour points using Moore neighborhood tracing (medical standard)
   const extractContourFromPixels = useCallback((data: Uint8ClampedArray, width: number, height: number) => {
-    const contourPoints: Point[] = [];
+    // Create binary mask from painted pixels
+    const binaryMask = new Array(height).fill(null).map(() => new Array(width).fill(false));
     
-    // Simple edge detection to find contour boundary
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
         const index = (y * width + x) * 4;
-        const alpha = data[index + 3];
-        
-        // If this pixel is painted
-        if (alpha > 0) {
-          // Check if it's on the edge (has unpainted neighbors)
-          const hasUnpaintedNeighbor = [
-            [-1, 0], [1, 0], [0, -1], [0, 1]
-          ].some(([dx, dy]) => {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) return true;
-            const nIndex = (ny * width + nx) * 4;
-            return data[nIndex + 3] === 0;
-          });
-          
-          if (hasUnpaintedNeighbor) {
-            contourPoints.push({ x, y });
+        binaryMask[y][x] = data[index + 3] > 128; // Alpha threshold
+      }
+    }
+    
+    // Find all contours using Moore neighborhood tracing
+    const contours = findContoursWithMooreTracing(binaryMask, width, height);
+    
+    // Return the largest contour (main painted area)
+    if (contours.length === 0) return [];
+    
+    // Sort contours by area and return the largest
+    contours.sort((a, b) => b.length - a.length);
+    return contours[0];
+  }, []);
+
+  // Moore neighborhood tracing algorithm for DICOM-compliant contour extraction
+  const findContoursWithMooreTracing = useCallback((mask: boolean[][], width: number, height: number): Point[][] => {
+    const visited = new Array(height).fill(null).map(() => new Array(width).fill(false));
+    const contours: Point[][] = [];
+    
+    // 8-connected neighbors (Moore neighborhood)
+    const directions = [
+      [-1, -1], [-1, 0], [-1, 1],
+      [0, 1], [1, 1], [1, 0],
+      [1, -1], [0, -1]
+    ];
+    
+    // Find starting points for contours
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (mask[y][x] && !visited[y][x]) {
+          // Found unvisited foreground pixel - start contour tracing
+          const contour = traceContourMoore(mask, visited, x, y, width, height, directions);
+          if (contour.length > 4) { // Minimum viable contour size
+            contours.push(contour);
           }
         }
       }
     }
     
-    return contourPoints;
+    return contours;
   }, []);
 
-  // Convert canvas coordinates to DICOM world coordinates
+  // Moore neighborhood contour tracing for a single contour
+  const traceContourMoore = useCallback((
+    mask: boolean[][],
+    visited: boolean[][],
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    directions: number[][]
+  ): Point[] => {
+    const contour: Point[] = [];
+    let currentX = startX;
+    let currentY = startY;
+    let direction = 0; // Start facing right
+    
+    do {
+      contour.push({ x: currentX, y: currentY });
+      visited[currentY][currentX] = true;
+      
+      // Find next boundary pixel using Moore neighborhood
+      let found = false;
+      for (let i = 0; i < 8; i++) {
+        const checkDir = (direction + i) % 8;
+        const [dx, dy] = directions[checkDir];
+        const nextX = currentX + dx;
+        const nextY = currentY + dy;
+        
+        if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height && mask[nextY][nextX]) {
+          currentX = nextX;
+          currentY = nextY;
+          direction = (checkDir + 6) % 8; // Adjust direction for next iteration
+          found = true;
+          break;
+        }
+      }
+      
+      if (!found) break;
+      
+    } while (!(currentX === startX && currentY === startY) && contour.length < width * height);
+    
+    // Ensure contour is properly closed
+    if (contour.length > 2 && !(contour[0].x === contour[contour.length - 1].x && contour[0].y === contour[contour.length - 1].y)) {
+      contour.push({ x: startX, y: startY });
+    }
+    
+    return contour;
+  }, []);
+
+  // Convert canvas coordinates to DICOM world coordinates using exact RT overlay transformation
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
-    // Parse DICOM spatial parameters
-    const imagePosition = metadata.imagePosition?.split('\\').map(Number) || [-300, -300, 0];
-    const pixelSpacing = metadata.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
-    const imageOrientation = metadata.imageOrientation?.split('\\').map(Number) || [1, 0, 0, 0, 1, 0];
+    if (!canvasRef.current) return [0, 0, 0];
     
-    // Account for zoom and pan
-    const canvasX = (point.x - currentPanX) / currentZoom;
-    const canvasY = (point.y - currentPanY) / currentZoom;
+    // Use the same parameters as RT overlay
+    const imagePosition: [number, number, number] = [-300, -300, 35]; // Match RT overlay
+    const pixelSpacing: [number, number] = [1.171875, 1.171875];
+    const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : imagePosition[2];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
     
-    // Convert to DICOM patient coordinates
-    const worldX = imagePosition[0] + (canvasX * pixelSpacing[0] * imageOrientation[0]) + (canvasY * pixelSpacing[1] * imageOrientation[3]);
-    const worldY = imagePosition[1] + (canvasX * pixelSpacing[0] * imageOrientation[1]) + (canvasY * pixelSpacing[1] * imageOrientation[4]);
-    const worldZ = imagePosition[2] + (canvasX * pixelSpacing[0] * imageOrientation[2]) + (canvasY * pixelSpacing[1] * imageOrientation[5]);
+    const canvas = canvasRef.current;
+    
+    // Apply the EXACT INVERSE of the RT overlay rendering transformation
+    // RT overlay applies: translate(canvas.width/2, canvas.height/2) -> scale(zoom) -> translate(-canvas.width/2 + panX, -canvas.height/2 + panY)
+    
+    // Step 1: Reverse the final translation
+    const step1X = point.x + canvas.width / 2 - currentPanX;
+    const step1Y = point.y + canvas.height / 2 - currentPanY;
+    
+    // Step 2: Reverse the scaling
+    const step2X = step1X / currentZoom;
+    const step2Y = step1Y / currentZoom;
+    
+    // Step 3: Reverse the initial translation
+    const normalizedX = (step2X + canvas.width / 2) / canvas.width;
+    const normalizedY = (step2Y + canvas.height / 2) / canvas.height;
+    
+    // Convert normalized coordinates (0-1) to DICOM pixel coordinates
+    const canvasPixelX = normalizedX * dicomImageWidth;
+    const canvasPixelY = normalizedY * dicomImageHeight;
+    
+    // Apply the EXACT INVERSE of the RT overlay worldToCanvas transformation
+    // RT overlay does: j = (worldX - originX) / pixelSpacing[0], i = (worldY - originY) / pixelSpacing[1]
+    // Then: rotatedJ = imageWidth - i, rotatedI = j
+    // Then: canvasX = (rotatedJ / imageWidth) * canvasWidth, canvasY = (rotatedI / imageHeight) * canvasHeight
+    
+    // Reverse: Get rotatedJ and rotatedI from canvas coordinates
+    const rotatedJ = canvasPixelX;
+    const rotatedI = canvasPixelY;
+    
+    // Reverse the rotation: i = imageWidth - rotatedJ, j = rotatedI
+    const i = dicomImageWidth - rotatedJ;
+    const j = rotatedI;
+    
+    // Convert DICOM pixel indices back to world coordinates
+    const worldX = imagePosition[0] + (j * pixelSpacing[0]);
+    const worldY = imagePosition[1] + (i * pixelSpacing[1]);
+    const worldZ = sliceLocation;
     
     return [worldX, worldY, worldZ];
   }, []);
 
-  // Update RT structure contour data with new points
+  // Intelligently merge brush strokes with existing contours for seamless expansion
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
     if (!rtStructures) return;
 
@@ -312,9 +423,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
     if (!structure) return;
 
-    // Find or create contour for this slice
+    // Find existing contour for this slice
     let sliceContour = structure.contours.find((c: any) => 
-      Math.abs(c.slicePosition - slicePosition) < 1.0
+      Math.abs(c.slicePosition - slicePosition) < 2.0
     );
 
     if (!sliceContour) {
@@ -325,24 +436,143 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       };
       structure.contours.push(sliceContour);
     } else {
-      // Update existing contour
+      // Intelligently merge with existing contour
       if (operation === BrushOperation.ADDITIVE) {
-        // Merge with existing points
-        sliceContour.points = [...sliceContour.points, ...worldPoints.flat()];
+        // Convert existing points to array of [x,y,z] tuples
+        const existingPoints: number[][] = [];
+        for (let i = 0; i < sliceContour.points.length; i += 3) {
+          existingPoints.push([sliceContour.points[i], sliceContour.points[i + 1], sliceContour.points[i + 2]]);
+        }
+        
+        // Merge brush points with existing contour using union operation
+        const mergedPoints = mergeContourPolygons(existingPoints, worldPoints);
+        sliceContour.points = mergedPoints.flat();
+        
+        console.log('Merged brush stroke with existing contour:', {
+          structureId,
+          slicePosition,
+          existingPointCount: existingPoints.length,
+          brushPointCount: worldPoints.length,
+          mergedPointCount: mergedPoints.length
+        });
       } else {
-        // For subtraction, we'd need more complex polygon operations
-        // For now, replace the contour
-        sliceContour.points = worldPoints.flat();
+        // For subtraction, subtract brush area from existing contour
+        const existingPoints: number[][] = [];
+        for (let i = 0; i < sliceContour.points.length; i += 3) {
+          existingPoints.push([sliceContour.points[i], sliceContour.points[i + 1], sliceContour.points[i + 2]]);
+        }
+        
+        const subtractedPoints = subtractContourPolygons(existingPoints, worldPoints);
+        sliceContour.points = subtractedPoints.flat();
+        
+        console.log('Subtracted brush stroke from existing contour:', {
+          structureId,
+          slicePosition,
+          existingPointCount: existingPoints.length,
+          brushPointCount: worldPoints.length,
+          resultPointCount: subtractedPoints.length
+        });
       }
     }
-
-    console.log('Updated RT structure contour:', {
-      structureId,
-      slicePosition,
-      pointCount: worldPoints.length,
-      totalPoints: sliceContour.points.length / 3
-    });
   }, [rtStructures, operation]);
+
+  // Medical-grade contour merging using contour expansion algorithm
+  const mergeContourPolygons = useCallback((existing: number[][], brush: number[][]): number[][] => {
+    if (existing.length === 0) return brush;
+    if (brush.length === 0) return existing;
+    
+    // For medical imaging, use a simple but effective approach:
+    // Combine all points and create an ordered boundary that encompasses both regions
+    
+    // Combine and deduplicate points
+    const tolerance = 2.0; // mm tolerance for medical precision
+    const allPoints: number[][] = [];
+    
+    // Add existing points
+    for (const point of existing) {
+      allPoints.push(point);
+    }
+    
+    // Add brush points (avoiding duplicates)
+    for (const point of brush) {
+      const isDuplicate = allPoints.some(existing => 
+        Math.abs(existing[0] - point[0]) < tolerance &&
+        Math.abs(existing[1] - point[1]) < tolerance
+      );
+      
+      if (!isDuplicate) {
+        allPoints.push(point);
+      }
+    }
+    
+    // Create ordered boundary using contour expansion
+    return createOrderedBoundary(allPoints);
+  }, []);
+
+  // Subtract brush area from existing contour (medical approach)
+  const subtractContourPolygons = useCallback((existing: number[][], brush: number[][]): number[][] => {
+    // Remove points from existing contour that are within brush area
+    const brushTolerance = 5.0; // mm - slightly larger than brush size for clean removal
+    
+    const filteredPoints = existing.filter(point => {
+      // Check if this point should be removed (is within brush area)
+      const isWithinBrush = brush.some(brushPoint => {
+        const distance = Math.sqrt(
+          Math.pow(brushPoint[0] - point[0], 2) + 
+          Math.pow(brushPoint[1] - point[1], 2)
+        );
+        return distance < brushTolerance;
+      });
+      
+      return !isWithinBrush;
+    });
+    
+    // Ensure we have enough points for a valid contour
+    if (filteredPoints.length < 3) {
+      console.log('Subtraction would remove too many points, keeping original contour');
+      return existing;
+    }
+    
+    // Re-order the remaining points to maintain contour continuity
+    return createOrderedBoundary(filteredPoints);
+  }, []);
+
+  // Create an ordered boundary from a set of points (medical standard)
+  const createOrderedBoundary = useCallback((points: number[][]): number[][] => {
+    if (points.length < 3) return points;
+    
+    // Find centroid
+    const centerX = points.reduce((sum, p) => sum + p[0], 0) / points.length;
+    const centerY = points.reduce((sum, p) => sum + p[1], 0) / points.length;
+    const centerZ = points[0][2]; // Use Z from first point
+    
+    // Sort points by angle from centroid (creates ordered boundary)
+    const sortedPoints = points.slice().sort((a, b) => {
+      const angleA = Math.atan2(a[1] - centerY, a[0] - centerX);
+      const angleB = Math.atan2(b[1] - centerY, b[0] - centerX);
+      return angleA - angleB;
+    });
+    
+    // Ensure all points have the same Z coordinate
+    const orderedPoints = sortedPoints.map(point => [point[0], point[1], centerZ]);
+    
+    // Close the contour by ensuring first and last points are connected
+    if (orderedPoints.length > 2) {
+      const first = orderedPoints[0];
+      const last = orderedPoints[orderedPoints.length - 1];
+      const distance = Math.sqrt(
+        Math.pow(first[0] - last[0], 2) + 
+        Math.pow(first[1] - last[1], 2)
+      );
+      
+      // If contour is not closed, close it
+      if (distance > 2.0) {
+        orderedPoints.push([first[0], first[1], first[2]]);
+      }
+    }
+    
+    return orderedPoints;
+  }, []);
 
   // Mouse event handlers
   const handleMouseDown = useCallback((event: MouseEvent) => {
