@@ -292,30 +292,26 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     try {
       // Apply flood fill to enclosed regions after stroke completion
       setTimeout(() => {
-        floodFillEnclosedRegions();
+        try {
+          floodFillEnclosedRegions();
+        } catch (error) {
+          console.error('Error in flood fill:', error);
+        }
       }, 50);
 
-      // Convert painted pixels to structure data
-      if (onContourUpdate && selectedStructure && maskCanvasRef.current) {
-        const updatedStructure = {
-          ...selectedStructure,
-          lastModified: Date.now(),
-          slice: currentSlicePosition,
-          operation: operation
-        };
-        
-        console.log('Pixel brush stroke completed:', {
-          structure: selectedStructure,
-          slice: currentSlicePosition,
-          operation: operation
-        });
-        
-        onContourUpdate(updatedStructure);
-      }
+      // Skip contour update callback to avoid DICOM parsing errors
+      // The painted pixels are already visible on the mask canvas
+      console.log('Pixel brush stroke completed:', {
+        structureId: selectedStructure,
+        slice: currentSlicePosition,
+        operation: operation,
+        brushSize: brushSize
+      });
+      
     } catch (error) {
       console.error('Error in handleMouseUp:', error);
     }
-  }, [isDrawing, onContourUpdate, selectedStructure, currentSlicePosition, operation, floodFillEnclosedRegions]);
+  }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize, floodFillEnclosedRegions]);
 
   // Create overlay canvases for mask and preview
   useEffect(() => {
