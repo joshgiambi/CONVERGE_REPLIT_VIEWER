@@ -497,12 +497,43 @@ export function WorkingViewer({
   const renderRTStructures = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, currentImage: any) => {
     if (!rtStructures || !currentImage) return;
 
-    // Get current slice position
-    const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
+    // FIXED: Get current slice position from actual DICOM metadata
+    let currentSlicePosition;
+    
+    // Priority 1: Use parsed slice location from DICOM
+    if (currentImage.parsedSliceLocation !== undefined) {
+      currentSlicePosition = currentImage.parsedSliceLocation;
+    }
+    // Priority 2: Use parsed Z position from DICOM
+    else if (currentImage.parsedZPosition !== undefined) {
+      currentSlicePosition = currentImage.parsedZPosition;
+    }
+    // Priority 3: Extract from image metadata directly
+    else if (imageMetadata && imageMetadata.sliceLocation) {
+      currentSlicePosition = parseFloat(imageMetadata.sliceLocation);
+    }
+    // Priority 4: Extract Z from image position
+    else if (imageMetadata && imageMetadata.imagePosition) {
+      const imagePos = imageMetadata.imagePosition.split('\\');
+      if (imagePos.length >= 3) {
+        currentSlicePosition = parseFloat(imagePos[2]);
+      }
+    }
+    // Last resort: Use index (this was causing the error)
+    else {
+      currentSlicePosition = currentIndex + 1;
+    }
+    
     const tolerance = 2.0; // mm tolerance for slice matching
 
-    // CRITICAL DEBUG: Log current slice and what we expect to see
-    console.log(`🔍 Current CT slice: ${currentSlicePosition}mm`);
+    // CRITICAL DEBUG: Log all slice position sources for comparison
+    console.log(`🔍 SLICE POSITION DEBUG:
+      parsedSliceLocation: ${currentImage.parsedSliceLocation}
+      parsedZPosition: ${currentImage.parsedZPosition} 
+      imageMetadata.sliceLocation: ${imageMetadata?.sliceLocation}
+      imageMetadata.imagePosition Z: ${imageMetadata?.imagePosition ? imageMetadata.imagePosition.split('\\')[2] : 'N/A'}
+      currentIndex: ${currentIndex}
+      FINAL currentSlicePosition: ${currentSlicePosition}mm`);
     console.log(`📋 Available structures:`, rtStructures.structures.map((s: any) => s.structureName));
     
     // Get all RT structure Z positions to check coordinate space

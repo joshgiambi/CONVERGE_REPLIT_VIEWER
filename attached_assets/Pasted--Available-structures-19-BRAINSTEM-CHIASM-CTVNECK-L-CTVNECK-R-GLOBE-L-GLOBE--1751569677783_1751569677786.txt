@@ -1,0 +1,51 @@
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
+Image metadata: 
+Object {imagePosition: "-300-3000", imageOrientation: "100010", pixelSpacing: "1.1718751.171875", sliceLocation: "0", frameOfReferenceUID: "1.2.840.113619.2.55.3.34214794.732.1517448797.356.10725.1", …}
+🔍 Current CT slice: 73mm
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
+Image metadata: 
+Object {imagePosition: "-300-3000", imageOrientation: "100010", pixelSpacing: "1.1718751.171875", sliceLocation: "0", frameOfReferenceUID: "1.2.840.113619.2.55.3.34214794.732.1517448797.356.10725.1", …}
+🔍 Current CT slice: 73mm
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
+Image metadata: 
+Object {imagePosition: "-300-3000", imageOrientation: "100010", pixelSpacing: "1.1718751.171875", sliceLocation: "0", frameOfReferenceUID: "1.2.840.113619.2.55.3.34214794.732.1517448797.356.10725.1", …}
+🔍 Current CT slice: 73mm
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
+Image metadata: 
+Object {imagePosition: "-300-3000", imageOrientation: "100010", pixelSpacing: "1.1718751.171875", sliceLocation: "0", frameOfReferenceUID: "1.2.840.113619.2.55.3.34214794.732.1517448797.356.10725.1", …}
+🔍 Current CT slice: 73mm
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
+Image metadata: 
+Object {imagePosition: "-300-3000", imageOrientation: "100010", pixelSpacing: "1.1718751.171875", sliceLocation: "0", frameOfReferenceUID: "1.2.840.113619.2.55.3.34214794.732.1517448797.356.10725.1", …}
+🔍 Current CT slice: 73mm
+📋 Available structures: 
+(19) ["BRAINSTEM", "CHIASM", "CTVNECK_L", "CTVNECK_R", "GLOBE_L", "GLOBE_R", "LACRIMAL_R", "LENS_L", "LENS_R", "LIPS", "LXPX", "OPTICNERVE_L", "OPTICNERVE_R", "ORALCAVITY", "PAROTID_L", "PAROTID_R", "SM_L", "SM_R", "SPINALCORD"]
+🎯 RT coordinate range: -180.0 to 102.5mm
+🎯 Current CT slice 73mm should show structures at RT positions near this value
+✓ Drawing BRAINSTEM contour at RT 75.0mm (CT slice: 73.0mm, diff: 2.0mm)
+✓ Drawing BRAINSTEM contour at RT 72.5mm (CT slice: 73.0mm, diff: 0.5mm)
