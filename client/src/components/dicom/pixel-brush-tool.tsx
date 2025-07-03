@@ -46,6 +46,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
+  // Track the slice we're painting on to ensure slice-specific visibility
+  const [paintingSlice, setPaintingSlice] = useState<number | null>(null);
+  
   // Get the actual structure object from rtStructures using the selectedStructure ID
   const selectedStructureData = useMemo(() => {
     if (!selectedStructure || !rtStructures?.structures) return null;
@@ -131,7 +134,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.restore();
   }, [brushSizePixels, operation]);
 
-  // Paint pixels on the mask canvas with continuous brush strokes
+  // Paint pixels matching medical contour style (filled + 3px outline)
   const paintPixels = useCallback((canvasPoint: Point) => {
     if (!maskCanvasRef.current) return;
     
@@ -139,34 +142,39 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     if (!ctx) return;
     
     const radius = brushSizePixels / 2;
+    const color = structureColor;
     
     ctx.save();
     
-    // Use proper structure color from selected structure
-    const color = structureColor;
-    
     if (operation === BrushOperation.ADDITIVE) {
-      // Paint with exact structure color
       ctx.globalCompositeOperation = 'source-over';
+      
+      // Draw filled circle first
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      ctx.beginPath();
+      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Add 3px outline for medical contour appearance
+      ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+      ctx.stroke();
+      
     } else {
       // Erase pixels
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
+      ctx.beginPath();
+      ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+      ctx.fill();
     }
     
-    // Draw filled circle with smooth edges
-    ctx.beginPath();
-    ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
-    ctx.fill();
-    
     ctx.restore();
+  }, [brushSizePixels, operation, structureColor]);
 
-    // Don't modify the main canvas directly - let the mask canvas handle the overlay
-    // The mask canvas will be composited later
-  }, [brushSizePixels, operation, selectedStructure]);
-
-  // Paint continuous line using rectangle for smooth strokes instead of overlapping circles
+  // Paint continuous line matching medical contour style (3px outline + fill)
   const paintLine = useCallback((from: Point, to: Point) => {
     if (!maskCanvasRef.current) return;
     
@@ -180,35 +188,61 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     
     if (operation === BrushOperation.ADDITIVE) {
       ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      
+      // Draw filled area first
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      
+      // Add filled circles at endpoints for smooth connection
+      ctx.beginPath();
+      ctx.arc(from.x, from.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Now draw 3px outline for medical contour appearance
+      ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1.0)`;
+      ctx.lineWidth = 3;
+      ctx.globalCompositeOperation = 'source-over';
+      
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      
     } else {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0, 0, 0, 1.0)';
       ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
+      
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.arc(from.x, from.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, lineWidth / 2, 0, 2 * Math.PI);
+      ctx.fill();
     }
     
-    // Draw line with round caps for smooth continuous strokes
-    ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    
-    // Add round end caps
-    ctx.beginPath();
-    ctx.arc(from.x, from.y, lineWidth / 2, 0, 2 * Math.PI);
-    ctx.fill();
-    
-    ctx.beginPath();
-    ctx.arc(to.x, to.y, lineWidth / 2, 0, 2 * Math.PI);
-    ctx.fill();
-    
     ctx.restore();
-  }, [brushSizePixels, operation, selectedStructure]);
+  }, [brushSizePixels, operation, structureColor]);
 
   // Mouse event handlers
   const handleMouseDown = useCallback((event: MouseEvent) => {
@@ -225,6 +259,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
     setIsDrawing(true);
     setLastPosition(canvasPoint);
+    
+    // Set the painting slice to ensure slice-specific visibility
+    setPaintingSlice(currentSlicePosition);
     
     // Start painting immediately
     paintPixels(canvasPoint);
@@ -262,7 +299,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
 
-  // Flood fill for enclosed regions
+  // Advanced flood fill for enclosed regions
   const floodFillEnclosedRegions = useCallback(() => {
     if (!maskCanvasRef.current) return;
     
@@ -272,13 +309,90 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const canvas = maskCanvasRef.current;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
+    const width = canvas.width;
+    const height = canvas.height;
+    const color = structureColor;
     
-    // Simple flood fill algorithm to fill enclosed regions
-    // This would be implemented with a proper seed fill algorithm
-    // For now, we'll just update the display
+    // Find enclosed regions and fill them
+    const visited = new Set<string>();
+    
+    // Scan for holes (empty pixels surrounded by painted pixels)
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const key = `${x},${y}`;
+        if (visited.has(key)) continue;
+        
+        const index = (y * width + x) * 4;
+        const alpha = data[index + 3];
+        
+        // If pixel is empty, check if it's surrounded
+        if (alpha === 0) {
+          if (isEnclosedHole(x, y, data, width, height)) {
+            floodFillRegion(x, y, data, width, height, color);
+            visited.add(key);
+          }
+        }
+      }
+    }
+    
     ctx.putImageData(imageData, 0, 0);
+  }, [structureColor]);
+  
+  // Check if a point is inside an enclosed region
+  const isEnclosedHole = useCallback((startX: number, startY: number, data: Uint8ClampedArray, width: number, height: number): boolean => {
+    const visited = new Set<string>();
+    const queue = [[startX, startY]];
+    let touchesBorder = false;
     
-    // The mask canvas will be automatically visible as an overlay
+    while (queue.length > 0 && !touchesBorder) {
+      const [x, y] = queue.pop()!;
+      const key = `${x},${y}`;
+      
+      if (visited.has(key)) continue;
+      if (x < 0 || x >= width || y < 0 || y >= height) {
+        touchesBorder = true;
+        break;
+      }
+      
+      visited.add(key);
+      const index = (y * width + x) * 4;
+      const alpha = data[index + 3];
+      
+      // If we hit a painted pixel, don't expand further
+      if (alpha > 0) continue;
+      
+      // Add neighbors to queue
+      queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+    
+    return !touchesBorder;
+  }, []);
+  
+  // Fill a region with the structure color
+  const floodFillRegion = useCallback((startX: number, startY: number, data: Uint8ClampedArray, width: number, height: number, color: number[]) => {
+    const queue = [[startX, startY]];
+    const visited = new Set<string>();
+    
+    while (queue.length > 0) {
+      const [x, y] = queue.pop()!;
+      const key = `${x},${y}`;
+      
+      if (visited.has(key) || x < 0 || x >= width || y < 0 || y >= height) continue;
+      
+      const index = (y * width + x) * 4;
+      if (data[index + 3] > 0) continue; // Already painted
+      
+      visited.add(key);
+      
+      // Paint the pixel
+      data[index] = color[0];     // R
+      data[index + 1] = color[1]; // G
+      data[index + 2] = color[2]; // B
+      data[index + 3] = 255;      // A
+      
+      // Add neighbors
+      queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
   }, []);
 
   const handleMouseUp = useCallback((event?: MouseEvent) => {
@@ -313,6 +427,14 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
   }, [isDrawing, selectedStructure, currentSlicePosition, operation, brushSize, floodFillEnclosedRegions]);
 
+  // Hide mask canvas when not on the painting slice
+  useEffect(() => {
+    if (maskCanvasRef.current) {
+      const isOnPaintingSlice = paintingSlice === null || paintingSlice === currentSlicePosition;
+      maskCanvasRef.current.style.visibility = isOnPaintingSlice ? 'visible' : 'hidden';
+    }
+  }, [currentSlicePosition, paintingSlice]);
+
   // Create overlay canvases for mask and preview
   useEffect(() => {
     if (!isActive || !canvasRef.current) {
@@ -325,6 +447,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
         previewCanvasRef.current.remove();
         previewCanvasRef.current = null;
       }
+      // Reset painting slice when tool is deactivated
+      setPaintingSlice(null);
       return;
     }
 
@@ -341,7 +465,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     maskCanvas.style.left = '0';
     maskCanvas.style.pointerEvents = 'none';
     maskCanvas.style.zIndex = '5';
-    maskCanvas.style.opacity = '0.6'; // Make it semi-transparent so we can see the underlying image
+    maskCanvas.style.opacity = '0.15'; // Match medical imaging standard: 15% opacity
     
     // Create preview canvas for cursor
     const previewCanvas = document.createElement('canvas');
