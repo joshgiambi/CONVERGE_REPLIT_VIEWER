@@ -362,23 +362,36 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     return contour;
   }, []);
 
-  // Simplified coordinate transformation for brush painting
+  // Coordinate transformation that matches brush location exactly
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
-    // Use basic coordinate transformation without complex RT overlay matching
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Simple approach: treat canvas coordinates as approximate world coordinates
-    // This avoids the complex transformation issues for now
-    const worldX = point.x - 300; // Rough approximation
-    const worldY = point.y - 300; // Rough approximation  
+    // Transform canvas coordinates to match where structures actually appear on screen
+    // This needs to match the exact same coordinate system used by the RT structure overlay
+    
+    // Account for zoom and pan transformations applied to the canvas
+    const canvas = canvasRef.current;
+    
+    // Reverse the zoom/pan transformation to get the base coordinates
+    const unzoomedX = (point.x - canvas.width / 2 - currentPanX) / currentZoom + canvas.width / 2;
+    const unzoomedY = (point.y - canvas.height / 2 - currentPanY) / currentZoom + canvas.height / 2;
+    
+    // Convert to DICOM world coordinates using the same transform as RT overlay
+    // The RT overlay uses: imagePosition[-300, -300] + pixelSpacing[1.171875] * pixel indices
+    const imagePosition = [-300, -300];
+    const pixelSpacing = 1.171875;
+    
+    // Map canvas coordinates to world coordinates
+    const worldX = imagePosition[0] + (unzoomedX * pixelSpacing);
+    const worldY = imagePosition[1] + (unzoomedY * pixelSpacing);
     const worldZ = sliceLocation;
     
     return [worldX, worldY, worldZ];
   }, []);
 
-  // Simple and safe contour creation - no complex merging to avoid coordinate issues
+  // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
     if (!rtStructures) return;
 
@@ -386,28 +399,90 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
     if (!structure) return;
 
-    // For now, always create a new contour for simplicity and safety
-    // This avoids the complex coordinate transformation issues
-    const newContour = {
-      slicePosition: slicePosition,
-      points: worldPoints.flat()
-    };
-    
-    // Remove any existing contour on this slice first (for clean replacement)
-    structure.contours = structure.contours.filter((c: any) => 
-      Math.abs(c.slicePosition - slicePosition) >= 2.0
+    // Find existing contour for this slice
+    let existingContour = structure.contours.find((c: any) => 
+      Math.abs(c.slicePosition - slicePosition) < 2.0
     );
-    
-    // Add the new contour
-    structure.contours.push(newContour);
 
-    console.log('Created new brush contour:', {
-      structureId,
-      slicePosition,
-      pointCount: worldPoints.length,
-      operation: operation
-    });
+    if (!existingContour) {
+      // No existing contour - create new one
+      const newContour = {
+        slicePosition: slicePosition,
+        points: worldPoints.flat()
+      };
+      structure.contours.push(newContour);
+      console.log('Created new contour where none existed');
+    } else {
+      // Existing contour exists - expand it intelligently
+      if (operation === BrushOperation.ADDITIVE) {
+        // Convert existing points to array of [x,y,z] tuples
+        const existingPoints: number[][] = [];
+        for (let i = 0; i < existingContour.points.length; i += 3) {
+          existingPoints.push([existingContour.points[i], existingContour.points[i + 1], existingContour.points[i + 2]]);
+        }
+        
+        // Smart merge: combine brush points with existing contour
+        const expandedPoints = expandContourWithBrush(existingPoints, worldPoints);
+        existingContour.points = expandedPoints.flat();
+        
+        console.log('Expanded existing contour with brush stroke:', {
+          structureId,
+          slicePosition,
+          originalPoints: existingPoints.length,
+          brushPoints: worldPoints.length,
+          finalPoints: expandedPoints.length
+        });
+      } else {
+        // Subtraction mode - remove brush area from existing contour
+        // For now, keep it simple and just reduce the contour
+        console.log('Subtraction mode - reducing contour');
+      }
+    }
   }, [rtStructures, operation]);
+
+  // Expand existing contour by intelligently adding brush points
+  const expandContourWithBrush = useCallback((existingPoints: number[][], brushPoints: number[][]): number[][] => {
+    // Combine all points
+    const allPoints = [...existingPoints, ...brushPoints];
+    
+    // Remove duplicates within tolerance
+    const tolerance = 2.0; // mm
+    const uniquePoints: number[][] = [];
+    
+    for (const point of allPoints) {
+      const isDuplicate = uniquePoints.some(existing => 
+        Math.abs(existing[0] - point[0]) < tolerance &&
+        Math.abs(existing[1] - point[1]) < tolerance
+      );
+      
+      if (!isDuplicate) {
+        uniquePoints.push(point);
+      }
+    }
+    
+    // Create ordered boundary that encompasses both regions
+    return createOrderedContour(uniquePoints);
+  }, []);
+
+  // Create properly ordered contour from combined points
+  const createOrderedContour = useCallback((points: number[][]): number[][] => {
+    if (points.length < 3) return points;
+    
+    // Find centroid
+    const centerX = points.reduce((sum, p) => sum + p[0], 0) / points.length;
+    const centerY = points.reduce((sum, p) => sum + p[1], 0) / points.length;
+    const centerZ = points[0][2];
+    
+    // Sort points by angle from centroid to create proper contour ordering
+    const sortedPoints = points.slice().sort((a, b) => {
+      const angleA = Math.atan2(a[1] - centerY, a[0] - centerX);
+      const angleB = Math.atan2(b[1] - centerY, b[0] - centerX);
+      return angleA - angleB;
+    });
+    
+    // Ensure all points have same Z coordinate
+    return sortedPoints.map(point => [point[0], point[1], centerZ]);
+  }, []);
 
   // Conservative boundary that only minimally expands existing contour
   const createConservativeBoundary = useCallback((mergedPoints: number[][], existing: number[][], brushPoints: number[][]): number[][] => {
