@@ -241,15 +241,39 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
     
+    console.log('=== BRUSH TOOL DEBUG START ===');
+    console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
+    console.log('Current zoom:', zoom, 'panX:', panX, 'panY:', panY);
+    console.log('Slice position:', currentSlicePosition);
+    console.log('Image metadata:', imageMetadata);
+    
     // Extract contour points from painted pixels
     const contourPoints = extractContourFromPixels(data, canvas.width, canvas.height);
     
-    if (contourPoints.length === 0) return;
+    console.log('Extracted contour points from canvas:', contourPoints.length, 'points');
+    if (contourPoints.length > 0) {
+      console.log('First few canvas points:', contourPoints.slice(0, 5));
+      console.log('Canvas point range - X:', Math.min(...contourPoints.map(p => p.x)), 'to', Math.max(...contourPoints.map(p => p.x)));
+      console.log('Canvas point range - Y:', Math.min(...contourPoints.map(p => p.y)), 'to', Math.max(...contourPoints.map(p => p.y)));
+    }
+    
+    if (contourPoints.length === 0) {
+      console.log('No contour points found - nothing painted?');
+      return;
+    }
 
     // Convert canvas coordinates to DICOM world coordinates
     const worldPoints = contourPoints.map(point => {
-      return canvasToWorldCoordinates(point, imageMetadata, zoom, panX, panY);
+      const worldCoord = canvasToWorldCoordinates(point, imageMetadata, zoom, panX, panY);
+      console.log(`Canvas point (${point.x}, ${point.y}) -> World (${worldCoord[0].toFixed(1)}, ${worldCoord[1].toFixed(1)}, ${worldCoord[2].toFixed(1)})`);
+      return worldCoord;
     });
+
+    console.log('Converted to world coordinates:', worldPoints.length, 'points');
+    if (worldPoints.length > 0) {
+      console.log('World point range - X:', Math.min(...worldPoints.map(p => p[0])).toFixed(1), 'to', Math.max(...worldPoints.map(p => p[0])).toFixed(1));
+      console.log('World point range - Y:', Math.min(...worldPoints.map(p => p[1])).toFixed(1), 'to', Math.max(...worldPoints.map(p => p[1])).toFixed(1));
+    }
 
     // Update the RT structure data
     updateRTStructureContour(selectedStructure, currentSlicePosition, worldPoints);
@@ -261,6 +285,8 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     if (onContourUpdate && rtStructures) {
       onContourUpdate(rtStructures);
     }
+    
+    console.log('=== BRUSH TOOL DEBUG END ===');
   }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY, onContourUpdate]);
 
   // Extract ordered contour points using Moore neighborhood tracing (medical standard)
@@ -362,30 +388,43 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     return contour;
   }, []);
 
-  // Coordinate transformation that matches brush location exactly
+  // Exact INVERSE of RT structure overlay coordinate transformation
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
-    
-    // Transform canvas coordinates to match where structures actually appear on screen
-    // This needs to match the exact same coordinate system used by the RT structure overlay
-    
-    // Account for zoom and pan transformations applied to the canvas
     const canvas = canvasRef.current;
     
-    // Reverse the zoom/pan transformation to get the base coordinates
-    const unzoomedX = (point.x - canvas.width / 2 - currentPanX) / currentZoom + canvas.width / 2;
-    const unzoomedY = (point.y - canvas.height / 2 - currentPanY) / currentZoom + canvas.height / 2;
+    // Step 1: Reverse the zoom/pan transformation applied by RT overlay
+    // RT overlay applies: translate(canvas.width / 2, canvas.height / 2), scale(zoom), translate(-canvas.width / 2 + panX, -canvas.height / 2 + panY)
+    const step1X = point.x - canvas.width / 2;
+    const step1Y = point.y - canvas.height / 2;
     
-    // Convert to DICOM world coordinates using the same transform as RT overlay
-    // The RT overlay uses: imagePosition[-300, -300] + pixelSpacing[1.171875] * pixel indices
-    const imagePosition = [-300, -300];
-    const pixelSpacing = 1.171875;
+    const step2X = step1X / currentZoom;
+    const step2Y = step1Y / currentZoom;
     
-    // Map canvas coordinates to world coordinates
-    const worldX = imagePosition[0] + (unzoomedX * pixelSpacing);
-    const worldY = imagePosition[1] + (unzoomedY * pixelSpacing);
+    const unzoomedX = step2X + canvas.width / 2 - currentPanX;
+    const unzoomedY = step2Y + canvas.height / 2 - currentPanY;
+    
+    // Step 2: EXACT INVERSE of RT overlay worldToCanvas transformation (lines 155-182)
+    // RT overlay uses these constants (from lines 197-200):
+    const imagePositionPatient = [-300, -300, 35];
+    const pixelSpacing = [1.171875, 1.171875];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
+    
+    // Reverse: canvasX = (rotatedJ / imageWidth) * canvasWidth -> rotatedJ = (canvasX / canvasWidth) * imageWidth
+    const rotatedJ = (unzoomedX / canvas.width) * dicomImageWidth;
+    const rotatedI = (unzoomedY / canvas.height) * dicomImageHeight;
+    
+    // Reverse: rotatedJ = imageWidth - i, rotatedI = j -> i = imageWidth - rotatedJ, j = rotatedI
+    const i = dicomImageWidth - rotatedJ;
+    const j = rotatedI;
+    
+    // Reverse: j = (worldX - originX) / pixelSpacing[0], i = (worldY - originY) / pixelSpacing[1]
+    // -> worldX = originX + j * pixelSpacing[0], worldY = originY + i * pixelSpacing[1]
+    const worldX = imagePositionPatient[0] + (j * pixelSpacing[0]);
+    const worldY = imagePositionPatient[1] + (i * pixelSpacing[1]);
     const worldZ = sliceLocation;
     
     return [worldX, worldY, worldZ];
@@ -395,9 +434,18 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
     if (!rtStructures) return;
 
+    console.log('=== RT STRUCTURE UPDATE DEBUG ===');
+    console.log('Structure ID:', structureId, 'Slice:', slicePosition);
+    console.log('Brush world points to add:', worldPoints.length);
+
     // Find the structure to update
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
-    if (!structure) return;
+    if (!structure) {
+      console.log('ERROR: Structure not found with ROI number:', structureId);
+      return;
+    }
+
+    console.log('Found structure:', structure.structureName, 'with', structure.contours.length, 'existing contours');
 
     // Find existing contour for this slice
     let existingContour = structure.contours.find((c: any) => 
@@ -411,8 +459,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
         points: worldPoints.flat()
       };
       structure.contours.push(newContour);
-      console.log('Created new contour where none existed');
+      console.log('Created new contour - no existing contour found for this slice');
+      console.log('New contour points (first 5):', newContour.points.slice(0, 15)); // 5 points x 3 coords each
     } else {
+      console.log('Found existing contour with', existingContour.points.length / 3, 'points');
+      console.log('Existing contour points (first 5):', existingContour.points.slice(0, 15));
+      
       // Existing contour exists - expand it intelligently
       if (operation === BrushOperation.ADDITIVE) {
         // Convert existing points to array of [x,y,z] tuples
@@ -421,23 +473,26 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
           existingPoints.push([existingContour.points[i], existingContour.points[i + 1], existingContour.points[i + 2]]);
         }
         
+        console.log('Existing points range - X:', Math.min(...existingPoints.map(p => p[0])).toFixed(1), 'to', Math.max(...existingPoints.map(p => p[0])).toFixed(1));
+        console.log('Existing points range - Y:', Math.min(...existingPoints.map(p => p[1])).toFixed(1), 'to', Math.max(...existingPoints.map(p => p[1])).toFixed(1));
+        
         // Smart merge: combine brush points with existing contour
         const expandedPoints = expandContourWithBrush(existingPoints, worldPoints);
         existingContour.points = expandedPoints.flat();
         
-        console.log('Expanded existing contour with brush stroke:', {
+        console.log('Expanded existing contour:', {
           structureId,
           slicePosition,
           originalPoints: existingPoints.length,
           brushPoints: worldPoints.length,
           finalPoints: expandedPoints.length
         });
+        console.log('Final contour points (first 5):', existingContour.points.slice(0, 15));
       } else {
-        // Subtraction mode - remove brush area from existing contour
-        // For now, keep it simple and just reduce the contour
         console.log('Subtraction mode - reducing contour');
       }
     }
+    console.log('=== RT STRUCTURE UPDATE COMPLETE ===');
   }, [rtStructures, operation]);
 
   // Expand existing contour by intelligently adding brush points
