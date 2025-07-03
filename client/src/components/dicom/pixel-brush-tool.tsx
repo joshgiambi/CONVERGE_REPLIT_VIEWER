@@ -721,6 +721,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     setIsDrawing(true);
     setLastPosition(canvasPoint);
     
+    // CRITICAL: Enable pointer events on mask canvas during active painting
+    if (maskCanvasRef.current) {
+      maskCanvasRef.current.style.pointerEvents = 'auto';
+      console.log('🖱️ ENABLED mask canvas pointer events for painting');
+    }
+    
     // Set the painting slice to ensure slice-specific visibility
     setPaintingSlice(currentSlicePosition);
     
@@ -767,6 +773,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
     setIsDrawing(false);
     setLastPosition(null);
+
+    // CRITICAL: Disable pointer events on mask canvas to restore scroll wheel functionality
+    if (maskCanvasRef.current) {
+      maskCanvasRef.current.style.pointerEvents = 'none';
+      console.log('🖱️ DISABLED mask canvas pointer events - scroll wheel restored');
+    }
 
     try {
       // Convert brush strokes to contour data and update RT structures
@@ -838,7 +850,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     maskCanvas.style.position = 'absolute';
     maskCanvas.style.top = '0';
     maskCanvas.style.left = '0';
-    maskCanvas.style.pointerEvents = 'auto'; // CRITICAL: Enable pointer events for mouse interactions
+    maskCanvas.style.pointerEvents = 'none'; // Start with pointer events disabled to allow scroll wheel
     maskCanvas.style.zIndex = '5';
     maskCanvas.style.opacity = '0.3'; // Match medical imaging standard: 30% opacity
     
