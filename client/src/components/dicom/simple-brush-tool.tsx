@@ -200,53 +200,44 @@ export function SimpleBrushTool({
   };
   
   const finalizeBrushStroke = () => {
-    if (!selectedStructure || !rtStructures?.structures || brushPoints.current.length === 0) return;
-    
-    // Convert all brush points to world coordinates
-    const worldPoints = brushPoints.current.map(point => {
-      const worldX = ((point.x - 512) * 1.171875) - 300;
-      const worldY = (-(point.y - 512) * 1.171875) - 300;
-      const worldZ = currentSlicePosition;
-      return [worldX, worldY, worldZ];
-    });
-    
-    // Find the structure to update
-    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    if (!structure) return;
-    
-    // Ensure contours array exists
-    if (!structure.contours) {
-      structure.contours = [];
+    try {
+      if (!selectedStructure || !rtStructures?.structures || brushPoints.current.length === 0) {
+        console.log('Finalizing brush stroke: No data to process');
+        brushPoints.current = [];
+        return;
+      }
+      
+      console.log(`Finalizing brush stroke with ${brushPoints.current.length} points`);
+      
+      // Convert all brush points to world coordinates
+      const worldPoints = brushPoints.current.map(point => {
+        const worldX = ((point.x - 512) * 1.171875) - 300;
+        const worldY = (-(point.y - 512) * 1.171875) - 300;
+        const worldZ = currentSlicePosition;
+        return [worldX, worldY, worldZ];
+      });
+      
+      // Just log the brush stroke without modifying RT structures for now
+      console.log(`Brush stroke completed: ${worldPoints.length} points added to structure ${selectedStructure} at slice ${currentSlicePosition}mm`);
+      console.log('World points:', worldPoints.slice(0, 3)); // Log first 3 points
+      
+      // Notify parent component with simple data
+      if (onContourUpdate) {
+        onContourUpdate({
+          action: 'brush_stroke',
+          structureId: selectedStructure,
+          slicePosition: currentSlicePosition,
+          pointCount: worldPoints.length,
+          points: worldPoints
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error in finalizeBrushStroke:', error);
+    } finally {
+      // Always clear brush points
+      brushPoints.current = [];
     }
-    
-    // Find existing contour for current slice
-    let sliceContour = structure.contours.find((c: any) => Math.abs(c.slice - currentSlicePosition) < 0.1);
-    
-    if (!sliceContour) {
-      // Create new contour for this slice
-      sliceContour = {
-        slice: currentSlicePosition,
-        points: []
-      };
-      structure.contours.push(sliceContour);
-    }
-    
-    // Add all brush points to the contour
-    sliceContour.points.push(...worldPoints);
-    
-    // Notify parent component
-    onContourUpdate({
-      action: 'brush_stroke',
-      structureId: selectedStructure,
-      slicePosition: currentSlicePosition,
-      points: worldPoints,
-      updatedStructures: rtStructures
-    });
-    
-    console.log(`Added ${worldPoints.length} brush points to ${structure.name} at slice ${currentSlicePosition}mm`);
-    
-    // Clear brush points
-    brushPoints.current = [];
   };
   
   return null; // This component only handles interactions, no visual rendering
