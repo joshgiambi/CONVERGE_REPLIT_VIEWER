@@ -46,7 +46,6 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
   const [strokeId, setStrokeId] = useState<string | null>(null);
   const strokePointsRef = useRef<Point[]>([]);
   const lastPositionRef = useRef<Point | null>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushHistoryRef = useRef<Array<{id: string, points: Point[], operation: BrushOperation}>>([]);
   
   // Performance tracking
@@ -157,9 +156,100 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     }
 
     return BrushOperation.SUBTRACTIVE; // Red cursor - not touching contour
-  }, [enableSmartMode, selectedStructure, rtStructures, currentSlicePosition, brushSize, operation]);
+  }, [enableSmartMode, selectedStructure, rtStructures, currentSlicePosition, brushSize, operation, mmToWorldSpace, brushIntersectsContour]);
 
-  // Mouse event handlers - OHIF style
+  // Enhanced stroke interpolation - OHIF style
+  const interpolatePoints = useCallback((start: Point, end: Point): Point[] => {
+    const distance = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
+    const steps = Math.max(1, Math.floor(distance / (brushSize * interpolationDensity)));
+    const points: Point[] = [];
+    
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      let interpolatedPoint = {
+        x: start.x + (end.x - start.x) * t,
+        y: start.y + (end.y - start.y) * t
+      };
+      
+      // Apply smoothing if enabled
+      if (smoothingEnabled && strokePointsRef.current.length > 0) {
+        const prevPoint = strokePointsRef.current[strokePointsRef.current.length - 1];
+        const smoothingFactor = 0.6;
+        interpolatedPoint = {
+          x: prevPoint.x + (interpolatedPoint.x - prevPoint.x) * smoothingFactor,
+          y: prevPoint.y + (interpolatedPoint.y - prevPoint.y) * smoothingFactor
+        };
+      }
+      
+      points.push(interpolatedPoint);
+    }
+    
+    return points;
+  }, [brushSize, interpolationDensity, smoothingEnabled]);
+
+  // Enhanced brush preview rendering
+  const drawBrushPreview = useCallback((canvasPoint: Point) => {
+    if (!canvasRef.current) return;
+    
+    const now = Date.now();
+    if (now - lastRenderTime.current < renderThrottleMs) return;
+    
+    const ctx = canvasRef.current.getContext('2d');
+    if (!ctx) return;
+    
+    // Clear previous preview (simplified)
+    const radius = brushSize / 2;
+    const color = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
+    
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.globalAlpha = 0.8;
+    
+    ctx.beginPath();
+    ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, 2 * Math.PI);
+    ctx.stroke();
+    
+    // Draw operation indicator
+    const size = 8;
+    ctx.setLineDash([]);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    
+    if (operation === BrushOperation.ADDITIVE) {
+      // Draw cross for additive
+      ctx.moveTo(canvasPoint.x - size, canvasPoint.y);
+      ctx.lineTo(canvasPoint.x + size, canvasPoint.y);
+      ctx.moveTo(canvasPoint.x, canvasPoint.y - size);
+      ctx.lineTo(canvasPoint.x, canvasPoint.y + size);
+    } else {
+      // Draw minus for subtractive
+      ctx.moveTo(canvasPoint.x - size, canvasPoint.y);
+      ctx.lineTo(canvasPoint.x + size, canvasPoint.y);
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+    
+    lastRenderTime.current = now;
+  }, [brushSize, operation, renderThrottleMs]);
+
+  // Helper function to create circle from point
+  const createCircleFromPoint = (center: Point, radius: number): Point[] => {
+    const points: Point[] = [];
+    const steps = 12;
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * 2 * Math.PI;
+      points.push({
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius
+      });
+    }
+    return points;
+  };
+
+  // Mouse event handlers - Enhanced OHIF style
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!isActive || !selectedStructure || event.button !== 0) return;
 
@@ -175,20 +265,31 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
     if (!worldPoint) return;
 
-    // Detect brush mode based on existing contours
-    const currentOperation = detectBrushMode(worldPoint);
-    setOperation(currentOperation);
+    // Smart brush mode detection with operation locking
+    if (!operationLocked) {
+      const detectedOperation = detectBrushMode(worldPoint);
+      setOperation(detectedOperation);
+      setOperationLocked(true);
+      
+      // Notify parent of operation change
+      if (onBrushModeChange) {
+        onBrushModeChange(detectedOperation);
+      }
+    }
 
     setIsDrawing(true);
+    setStrokeId(`stroke_${Date.now()}`);
     strokePointsRef.current = [worldPoint];
     lastPositionRef.current = worldPoint;
 
-    console.log('OHIF brush stroke started:', {
-      operation: currentOperation,
+    console.log('Enhanced OHIF brush stroke started:', {
+      operation: operation,
       position: worldPoint,
-      slice: currentSlicePosition
+      slice: currentSlicePosition,
+      strokeId: strokeId,
+      brushSize: brushSize
     });
-  }, [isActive, selectedStructure, canvasToWorld, detectBrushMode, currentSlicePosition]);
+  }, [isActive, selectedStructure, canvasToWorld, detectBrushMode, operationLocked, onBrushModeChange, operation, strokeId, brushSize, currentSlicePosition]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -211,156 +312,67 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
 
     // Visual feedback on canvas
     drawBrushPreview(canvasPoint);
-  }, [isDrawing, canvasToWorld]);
+  }, [isDrawing, canvasToWorld, interpolatePoints, drawBrushPreview]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing || strokePointsRef.current.length === 0) return;
 
     setIsDrawing(false);
+    setOperationLocked(false);
 
-    // Convert stroke to polygon and apply to structure
-    const strokePolygon = strokeToPolygon(strokePointsRef.current, brushSize);
-    applyBrushStroke(strokePolygon, operation);
+    // Create brush stroke data
+    const strokeData = {
+      id: strokeId || `stroke_${Date.now()}`,
+      points: [...strokePointsRef.current],
+      operation: operation,
+      brushSize: brushSize,
+      timestamp: Date.now(),
+      slice: currentSlicePosition
+    };
+
+    // Store in history
+    brushHistoryRef.current.push(strokeData);
+
+    // Apply to structure if callback provided
+    if (onContourUpdate && selectedStructure) {
+      // Create simplified polygon from stroke points
+      const strokePolygon = strokePointsRef.current.length > 2 ? 
+        strokePointsRef.current : 
+        createCircleFromPoint(strokePointsRef.current[0], brushSize / 2);
+      
+      // Apply stroke to structure (simplified implementation)
+      const updatedStructure = {
+        ...selectedStructure,
+        contours: {
+          ...selectedStructure.contours,
+          [currentSlicePosition]: [
+            ...(selectedStructure.contours?.[currentSlicePosition] || []),
+            strokePolygon
+          ]
+        }
+      };
+      
+      onContourUpdate(updatedStructure);
+    }
 
     // Clear stroke data
     strokePointsRef.current = [];
     lastPositionRef.current = null;
+    setStrokeId(null);
 
-    console.log('OHIF brush stroke completed');
-  }, [isDrawing, brushSize, operation]);
+    console.log('Enhanced OHIF brush stroke completed:', {
+      pointCount: strokeData.points.length,
+      operation: strokeData.operation,
+      slice: strokeData.slice
+    });
+  }, [isDrawing, brushSize, operation, strokeId, currentSlicePosition, onContourUpdate, selectedStructure, createCircleFromPoint]);
 
-  // Interpolate points for smooth strokes
-  const interpolatePoints = (start: Point, end: Point): Point[] => {
-    const distance = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
-    const steps = Math.max(1, Math.floor(distance / (brushSize * 0.3)));
-    
-    const points: Point[] = [];
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      points.push({
-        x: start.x + (end.x - start.x) * t,
-        y: start.y + (end.y - start.y) * t
-      });
-    }
-    
-    return points;
-  };
-
-  // Convert stroke points to polygon
-  const strokeToPolygon = (points: Point[], radius: number): Point[] => {
-    if (points.length === 1) {
-      // Single point - create circle
-      return createCircle(points[0], radius / 2);
-    }
-
-    // Create stroke path with rounded ends
-    const polygon: Point[] = [];
-    const halfRadius = radius / 2;
-
-    for (let i = 0; i < points.length; i++) {
-      const current = points[i];
-      
-      if (i === 0) {
-        // First point - add circle
-        const circle = createCircle(current, halfRadius);
-        polygon.push(...circle);
-      } else {
-        // Create rectangular section between points
-        const prev = points[i - 1];
-        const dx = current.x - prev.x;
-        const dy = current.y - prev.y;
-        const length = Math.sqrt(dx * dx + dy * dy);
-        
-        if (length > 0) {
-          const perpX = -dy / length * halfRadius;
-          const perpY = dx / length * halfRadius;
-          
-          polygon.push(
-            { x: current.x + perpX, y: current.y + perpY },
-            { x: current.x - perpX, y: current.y - perpY }
-          );
-        }
-      }
-    }
-
-    return polygon;
-  };
-
-  // Create circle points
-  const createCircle = (center: Point, radius: number, segments = 16): Point[] => {
-    const points: Point[] = [];
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * 2 * Math.PI;
-      points.push({
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y + Math.sin(angle) * radius
-      });
-    }
-    return points;
-  };
-
-  // Apply brush stroke to structure
-  const applyBrushStroke = (strokePolygon: Point[], brushOperation: BrushOperation) => {
-    if (!selectedStructure || !rtStructures || !onContourUpdate) return;
-
-    const updatedStructures = { ...rtStructures };
-    const structure = updatedStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    
-    if (!structure) return;
-
-    if (!structure.contours) structure.contours = {};
-    if (!structure.contours[currentSlicePosition]) structure.contours[currentSlicePosition] = [];
-
-    const currentContours = structure.contours[currentSlicePosition];
-
-    if (brushOperation === BrushOperation.ADDITIVE) {
-      // Add new contour
-      currentContours.push(strokePolygon);
-    } else {
-      // Subtract from existing contours (simplified - in full implementation would use proper clipping)
-      // For now, remove intersecting contours
-      structure.contours[currentSlicePosition] = currentContours.filter((contour: Point[]) => 
-        !polygonsIntersect(contour, strokePolygon)
-      );
-    }
-
-    onContourUpdate(updatedStructures);
-  };
-
-  // Simple polygon intersection check
-  const polygonsIntersect = (poly1: Point[], poly2: Point[]): boolean => {
-    // Simplified - would need proper polygon intersection in production
-    return false;
-  };
-
-  // Draw brush preview cursor
-  const drawBrushPreview = (canvasPoint: Point) => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Clear previous preview (would need proper overlay system)
-    const color = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-    
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
-    
-    ctx.beginPath();
-    ctx.arc(canvasPoint.x, canvasPoint.y, brushSize / 2, 0, 2 * Math.PI);
-    ctx.stroke();
-    
-    ctx.restore();
-  };
-
-  // Setup event listeners
+  // Set up mouse event listeners
   useEffect(() => {
-    if (!canvasRef.current || !isActive) return;
+    if (!isActive || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
+    
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
@@ -374,38 +386,76 @@ export const OHIFEnhancedBrush: React.FC<OHIFEnhancedBrushProps> = ({
     };
   }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp]);
 
-  // Render cursor preview overlay
-  if (!isActive || !mousePosition) return null;
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isActive) return;
 
-  const cursorColor = operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000';
-  const operationText = operation === BrushOperation.ADDITIVE ? 'Add' : 'Erase';
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift' && !operationLocked) {
+        // Invert operation temporarily
+        setOperation(prev => prev === BrushOperation.ADDITIVE ? BrushOperation.SUBTRACTIVE : BrushOperation.ADDITIVE);
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Shift' && !operationLocked) {
+        // Reset to smart mode
+        if (mousePosition) {
+          const worldPoint = canvasToWorld(mousePosition.x, mousePosition.y);
+          if (worldPoint) {
+            const detectedOperation = detectBrushMode(worldPoint);
+            setOperation(detectedOperation);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isActive, operationLocked, mousePosition, canvasToWorld, detectBrushMode]);
+
+  // Render component
+  if (!isActive) return null;
 
   return (
     <div className="absolute inset-0 pointer-events-none">
-      {/* Brush cursor indicator */}
-      <div
-        className="absolute border-2 rounded-full pointer-events-none"
-        style={{
-          left: mousePosition.x - brushSize / 2,
-          top: mousePosition.y - brushSize / 2,
-          width: brushSize,
-          height: brushSize,
-          borderColor: cursorColor,
-          borderStyle: 'dashed'
-        }}
-      />
-      
-      {/* Operation indicator */}
-      <div
-        className="absolute bg-black/80 text-white px-2 py-1 rounded text-xs pointer-events-none"
-        style={{
-          left: mousePosition.x + 15,
-          top: mousePosition.y - 30,
-          color: cursorColor
-        }}
-      >
-        {operationText} • {brushSize}px
-      </div>
+      {/* Enhanced brush info overlay */}
+      {mousePosition && (
+        <div 
+          className="absolute bg-black/90 text-white px-3 py-2 rounded-md text-sm font-medium pointer-events-none shadow-lg border"
+          style={{
+            left: mousePosition.x + 15,
+            top: mousePosition.y - 45,
+            zIndex: 20,
+            borderColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000'
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div 
+              className="w-3 h-3 rounded-full border-2"
+              style={{
+                backgroundColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000',
+                borderColor: operation === BrushOperation.ADDITIVE ? '#00ff00' : '#ff0000'
+              }}
+            />
+            <span>
+              {operation === BrushOperation.ADDITIVE ? 'Add' : 'Erase'} • {brushSize}px
+            </span>
+          </div>
+          {enableSmartMode && (
+            <div className="text-xs opacity-75 mt-1">
+              Smart Mode • Shift to invert
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
+export default OHIFEnhancedBrush;

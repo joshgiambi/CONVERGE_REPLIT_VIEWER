@@ -878,13 +878,19 @@ export function WorkingViewer({
                 if (onContourUpdate) {
                   onContourUpdate(updatedStructures);
                 } else {
-                  console.log('Contour updated:', updatedStructures);
+                  console.log('Enhanced OHIF brush contour updated:', updatedStructures);
                 }
               }}
               zoom={zoom}
               panX={panX}
               panY={panY}
               imageMetadata={imageMetadata}
+              smoothingEnabled={true}
+              interpolationDensity={0.25}
+              enableSmartMode={true}
+              onBrushModeChange={(mode) => {
+                console.log('OHIF brush mode changed:', mode);
+              }}
             />
           )}
 
