@@ -47,7 +47,8 @@ export function WorkingViewer({
   onContourUpdate,
   contourSettings,
   autoZoomLevel,
-  autoLocalizeTarget
+  autoLocalizeTarget,
+  onSlicePositionChange
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
