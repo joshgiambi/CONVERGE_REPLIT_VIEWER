@@ -445,14 +445,17 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
     console.log('Found structure:', structure.structureName, 'with', structure.contours.length, 'existing contours');
 
-    // Find existing contour for this slice
+    // Find existing contour for this slice - use stricter tolerance to prevent cross-slice contamination
     let existingContour = structure.contours.find((c: any) => 
-      Math.abs(c.slicePosition - slicePosition) < 2.0
+      Math.abs(c.slicePosition - slicePosition) < 0.1
     );
     
     console.log('Looking for existing contour on slice:', slicePosition);
     console.log('Available contours on slices:', structure.contours.map((c: any) => c.slicePosition));
     console.log('Found existing contour:', existingContour ? 'YES' : 'NO');
+    
+    // CRITICAL: Ensure we're storing the EXACT slice position to prevent cross-slice contamination
+    console.log('EXACT slice position being stored:', slicePosition);
 
     if (!existingContour) {
       // No existing contour - create new one

@@ -461,7 +461,7 @@ export function WorkingViewer({
 
     // Get current slice position
     const currentSlicePosition = currentImage.parsedSliceLocation || currentImage.parsedZPosition || (currentIndex + 1);
-    const tolerance = 2.0; // mm tolerance for slice matching
+    const tolerance = 0.1; // mm tolerance for slice matching - strict to prevent cross-slice contamination
 
     // Save context state
     ctx.save();
