@@ -292,10 +292,10 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     centerX = Math.round(centerX / pixelCount);
     centerY = Math.round(centerY / pixelCount);
     
-    // Create a circular contour around the brush center
-    const radius = Math.max(4, brushSize / 2);
+    // Create a circular contour around the brush center - use proper brush size
+    const radius = Math.max(8, brushSize); // Use actual brush size in canvas pixels
     const contour: Point[] = [];
-    const segments = 16; // 16-sided polygon approximates a circle
+    const segments = 12; // Simpler polygon for better performance
     
     for (let i = 0; i < segments; i++) {
       const angle = (i * 2 * Math.PI) / segments;
@@ -388,19 +388,26 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       console.log('Created new contour - no existing contour found for this slice');
       console.log('New contour points (first 5):', newContour.points.slice(0, 15)); // 5 points x 3 coords each
     } else {
-      // TEMPORARILY: Always create new separate contour to test coordinate positioning
-      console.log('TEMP: Creating separate contour instead of merging to test coordinates');
-      const newContour = {
-        slicePosition: slicePosition,
-        points: worldPoints.flat()
-      };
-      structure.contours.push(newContour);
-      console.log('Created NEW separate contour for testing:', {
-        structureId,
-        slicePosition,
-        brushPoints: worldPoints.length,
-        firstFewPoints: newContour.points.slice(0, 9) // 3 points x 3 coords each
-      });
+      // Merge with existing contour for seamless expansion
+      console.log('Found existing contour with', existingContour.points.length / 3, 'points');
+      
+      if (operation === BrushOperation.ADDITIVE) {
+        // Convert existing points to array of [x,y,z] tuples
+        const existingPoints: number[][] = [];
+        for (let i = 0; i < existingContour.points.length; i += 3) {
+          existingPoints.push([existingContour.points[i], existingContour.points[i + 1], existingContour.points[i + 2]]);
+        }
+        
+        // Combine all points (existing + new brush points)
+        const combinedPoints = [...existingPoints, ...worldPoints];
+        existingContour.points = combinedPoints.flat();
+        
+        console.log('Merged brush with existing contour:', {
+          existingPoints: existingPoints.length,
+          newPoints: worldPoints.length,
+          totalPoints: combinedPoints.length
+        });
+      }
     }
     
     console.log('=== RT STRUCTURE UPDATE COMPLETE ===');
@@ -663,17 +670,18 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     setMousePosition(canvasPoint);
     drawBrushPreview(canvasPoint);
 
-    if (isDrawing && lastPosition) {
+    if (isDrawing) {
       console.log('🖌️ BRUSH TOOL: Drawing stroke', { from: lastPosition, to: canvasPoint, smoothingEnabled });
-      if (smoothingEnabled) {
+      
+      if (lastPosition && smoothingEnabled) {
+        // Draw line from last position to current position for smooth continuous strokes
         paintLine(lastPosition, canvasPoint);
       } else {
+        // Paint at current position
         paintPixels(canvasPoint);
       }
-    }
-    
-    // Always update last position when drawing for next stroke
-    if (isDrawing) {
+      
+      // Always update last position for next stroke
       setLastPosition(canvasPoint);
     }
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
