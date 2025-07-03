@@ -106,6 +106,100 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     ctx.restore();
   }, [brushSizePixels, operation, structureColor]);
 
+  // SIMPLE DIRECT COORDINATE MAPPING - Use same method as RT overlay
+  const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
+    if (!canvasRef.current) return [0, 0, 0];
+    
+    const canvas = canvasRef.current;
+    const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
+    
+    // Use exact same constants as RT overlay
+    const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+    const pixelSpacing: [number, number] = [1.171875, 1.171875];
+    const dicomImageWidth = 512;
+    const dicomImageHeight = 512;
+    
+    // Simple direct mapping - ignore zoom and pan for now to debug
+    const pixelX = (point.x / canvas.width) * dicomImageWidth;
+    const pixelY = (point.y / canvas.height) * dicomImageHeight;
+    
+    // Convert to world coordinates using exact RT overlay method
+    const worldX = imagePositionPatient[0] + pixelX * pixelSpacing[0];
+    const worldY = imagePositionPatient[1] + pixelY * pixelSpacing[1];
+    const worldZ = sliceLocation;
+    
+    console.log('🎯 DIRECT MAPPING:', {
+      canvas: point,
+      pixel: { x: pixelX, y: pixelY },
+      world: { x: worldX, y: worldY, z: worldZ }
+    });
+    
+    return [worldX, worldY, worldZ];
+  }, []);
+
+  // Smart contour expansion - merge with existing contours like pushing boundaries
+  const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
+    if (!rtStructures || !onContourUpdate) return;
+
+    console.log('=== RT STRUCTURE UPDATE DEBUG ===');
+    console.log('Structure ID:', structureId, 'Slice:', slicePosition);
+    console.log('Brush world points to add:', worldPoints.length);
+
+    // Create a deep copy of rtStructures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    
+    // Find the structure to update
+    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) {
+      console.log('ERROR: Structure not found with ROI number:', structureId);
+      return;
+    }
+
+    console.log('Found structure:', structure.structureName, 'with', structure.contours.length, 'existing contours');
+
+    // Find existing contour for this slice - use stricter tolerance to prevent cross-slice contamination
+    let existingContour = structure.contours.find((c: any) => 
+      Math.abs(c.slicePosition - slicePosition) < 0.5 // Very strict slice matching: 0.5mm tolerance
+    );
+    
+    if (!existingContour) {
+      // Create new contour for this slice
+      const newContour = {
+        slicePosition: slicePosition,
+        points: worldPoints.flat()
+      };
+      structure.contours.push(newContour);
+      console.log('Created new contour - no existing contour found for this slice');
+      console.log('New contour points (first 5):', newContour.points.slice(0, 15)); // 5 points x 3 coords each
+    } else {
+      // Merge with existing contour for seamless expansion
+      console.log('Found existing contour with', existingContour.points.length / 3, 'points');
+      
+      if (operation === BrushOperation.ADDITIVE) {
+        // Convert existing points to array of [x,y,z] tuples
+        const existingPoints: number[][] = [];
+        for (let i = 0; i < existingContour.points.length; i += 3) {
+          existingPoints.push([existingContour.points[i], existingContour.points[i + 1], existingContour.points[i + 2]]);
+        }
+        
+        // Combine all points (existing + new brush points)
+        const combinedPoints = [...existingPoints, ...worldPoints];
+        existingContour.points = combinedPoints.flat();
+        
+        console.log('Merged brush with existing contour:', {
+          existingPoints: existingPoints.length,
+          newPoints: worldPoints.length,
+          totalPoints: combinedPoints.length
+        });
+      }
+    }
+    
+    console.log('=== RT STRUCTURE UPDATE COMPLETE ===');
+    
+    // Trigger update with the new rtStructures copy
+    onContourUpdate(updatedRTStructures);
+  }, [rtStructures, operation, onContourUpdate]);
+
   // Paint pixels matching medical contour style (filled with 3px border)
   const paintPixels = useCallback((canvasPoint: Point) => {
     if (!maskCanvasRef.current || !selectedStructure) return;
@@ -149,7 +243,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     }
     
     // 2. Convert canvas point to world coordinates and update RT structure
-    const [worldX, worldY, worldZ] = canvasToWorldCoordinates(canvasPoint, metadata, zoom, panX, panY);
+    const [worldX, worldY, worldZ] = canvasToWorldCoordinates(canvasPoint, imageMetadata, zoom, panX, panY);
     
     // Create a simple circular brush in world coordinates
     const pixelSpacing = 1.171875; // mm per pixel
@@ -169,7 +263,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     
     // Update RT structure
     updateRTStructureContour(selectedStructure.roiNumber, currentSlicePosition, worldPoints);
-  }, [brushSizePixels, operation, structureColor, selectedStructure, metadata, zoom, panX, panY, currentSlicePosition, canvasToWorldCoordinates, updateRTStructureContour]);
+  }, [brushSizePixels, operation, structureColor, selectedStructure, imageMetadata, zoom, panX, panY, currentSlicePosition, canvasToWorldCoordinates, updateRTStructureContour]);
 
   // Paint continuous line matching medical contour style (filled with 3px border)
   const paintLine = useCallback((from: Point, to: Point) => {
