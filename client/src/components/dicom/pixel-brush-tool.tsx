@@ -231,60 +231,45 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Convert brush strokes to actual contour points in RT structure data
   const convertBrushToContour = useCallback(() => {
-    if (!maskCanvasRef.current || !selectedStructure || !rtStructures || !imageMetadata) return;
+    try {
+      if (!maskCanvasRef.current || !selectedStructure || !rtStructures || !imageMetadata) return;
 
-    console.log('🎨 STARTING BRUSH TO CONTOUR CONVERSION');
-    
-    const canvas = maskCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      console.log('🎨 Converting brush to contour');
+      
+      const canvas = maskCanvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    // Get the painted pixels from the mask canvas
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    
-    console.log('=== BRUSH TOOL DEBUG START ===');
-    console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
-    console.log('Current zoom:', zoom, 'panX:', panX, 'panY:', panY);
-    console.log('Slice position:', currentSlicePosition);
-    console.log('Image metadata:', imageMetadata);
-    
-    // Extract contour points from painted pixels
-    const contourPoints = extractContourFromPixels(data, canvas.width, canvas.height);
-    
-    console.log('Extracted contour points from canvas:', contourPoints.length, 'points');
-    if (contourPoints.length > 0) {
-      console.log('First few canvas points:', contourPoints.slice(0, 5));
-      console.log('Canvas point range - X:', Math.min(...contourPoints.map(p => p.x)), 'to', Math.max(...contourPoints.map(p => p.x)));
-      console.log('Canvas point range - Y:', Math.min(...contourPoints.map(p => p.y)), 'to', Math.max(...contourPoints.map(p => p.y)));
+      // Get the painted pixels from the mask canvas
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Extract contour points from painted pixels - SIMPLIFIED VERSION
+      const contourPoints = extractContourFromPixels(data, canvas.width, canvas.height);
+      
+      if (contourPoints.length === 0) {
+        console.log('No brush strokes found');
+        return;
+      }
+
+      console.log(`Found ${contourPoints.length} contour points`);
+
+      // Convert canvas coordinates to DICOM world coordinates
+      const worldPoints = contourPoints.map(point => 
+        canvasToWorldCoordinates(point, imageMetadata, zoom, panX, panY)
+      );
+
+      // Update the RT structure data
+      updateRTStructureContour(selectedStructure, currentSlicePosition, worldPoints);
+
+      // Clear the brush canvas since it's now part of the structure
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      console.log('✅ Brush converted to contour successfully');
+    } catch (error) {
+      console.error('❌ Error converting brush to contour:', error);
     }
-    
-    if (contourPoints.length === 0) {
-      console.log('No contour points found - nothing painted?');
-      return;
-    }
-
-    // Convert canvas coordinates to DICOM world coordinates
-    const worldPoints = contourPoints.map(point => {
-      const worldCoord = canvasToWorldCoordinates(point, imageMetadata, zoom, panX, panY);
-      console.log(`Canvas point (${point.x}, ${point.y}) -> World (${worldCoord[0].toFixed(1)}, ${worldCoord[1].toFixed(1)}, ${worldCoord[2].toFixed(1)})`);
-      return worldCoord;
-    });
-
-    console.log('Converted to world coordinates:', worldPoints.length, 'points');
-    if (worldPoints.length > 0) {
-      console.log('World point range - X:', Math.min(...worldPoints.map(p => p[0])).toFixed(1), 'to', Math.max(...worldPoints.map(p => p[0])).toFixed(1));
-      console.log('World point range - Y:', Math.min(...worldPoints.map(p => p[1])).toFixed(1), 'to', Math.max(...worldPoints.map(p => p[1])).toFixed(1));
-    }
-
-    // Update the RT structure data (this will trigger onContourUpdate internally)
-    updateRTStructureContour(selectedStructure, currentSlicePosition, worldPoints);
-
-    // Clear the brush canvas since it's now part of the structure
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    console.log('=== BRUSH TOOL DEBUG END ===');
-  }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY, onContourUpdate]);
+  }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY]);
 
   // Extract ordered contour points using Moore neighborhood tracing (medical standard)
   const extractContourFromPixels = useCallback((data: Uint8ClampedArray, width: number, height: number) => {

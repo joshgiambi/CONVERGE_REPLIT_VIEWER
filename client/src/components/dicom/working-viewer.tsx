@@ -306,27 +306,7 @@ export function WorkingViewer({
         console.log('Image metadata:', metadata);
         setImageMetadata(metadata);
 
-        // Debug Frame of Reference UID matching
-        if (studyId) {
-          const frameRefResponse = await fetch(`/api/studies/${studyId}/frame-references`);
-          if (frameRefResponse.ok) {
-            const frameRefs = await frameRefResponse.json();
-            console.log('Frame of Reference UIDs by modality:', frameRefs);
-
-            // Check if CT and RTSTRUCT have matching Frame of Reference UIDs
-            if (frameRefs.CT && frameRefs.RTSTRUCT) {
-              const ctFrame = frameRefs.CT.frameOfReferenceUID;
-              const rtFrame = frameRefs.RTSTRUCT.frameOfReferenceUID;
-              if (ctFrame !== rtFrame) {
-                console.warn('Frame of Reference UID mismatch!');
-                console.warn('CT Frame UID:', ctFrame);
-                console.warn('RTSTRUCT Frame UID:', rtFrame);
-              } else {
-                console.log('Frame of Reference UIDs match - good alignment expected');
-              }
-            }
-          }
-        }
+        // Frame of Reference UIDs are verified during data import
       }
     } catch (error) {
       console.error('Failed to load image metadata:', error);

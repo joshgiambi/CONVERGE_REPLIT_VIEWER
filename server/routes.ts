@@ -649,8 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse DICOM file to extract spatial metadata  
       const buffer = fs.readFileSync(image.filePath);
 
-      // Debug: Log which file we're parsing
-      console.log(`Attempting to parse metadata from: ${image.filePath}`);
+      // Parse metadata from file
 
       const byteArray = new Uint8Array(buffer);
       const dataSet = (dicomParser as any).parseDicom(byteArray, {});
@@ -686,7 +685,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Debug: Log extracted metadata
-      console.log('Extracted metadata:', metadata);
+      // Metadata extracted successfully
 
       res.json(metadata);
     } catch (error) {
