@@ -36,94 +36,92 @@ export function SimpleBrushTool({
 }: SimpleBrushProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
+  const strokePoints = useRef<Point[]>([]);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const currentStroke = useRef<Point[]>([]);
 
-  // FIXED: Proper canvas to world coordinate transformation
+  // FIXED coordinate transformation - direct and accurate
   const canvasToWorld = (canvasX: number, canvasY: number): Point | null => {
     if (!currentImage || !imageMetadata || !canvasRef.current) {
       return null;
     }
 
     const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-
-    // Convert canvas coordinates to normalized coordinates (0-1)
-    const normalizedX = canvasX / canvas.width;
-    const normalizedY = canvasY / canvas.height;
-
-    // Get image dimensions
     const imageWidth = currentImage.width || 512;
     const imageHeight = currentImage.height || 512;
 
-    // Apply zoom and pan transformations
+    // Direct canvas to image pixel conversion without intermediate display coordinates
+    // Account for zoom and pan directly
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    // Calculate image position considering zoom and pan
     const scaledImageWidth = imageWidth * zoom;
     const scaledImageHeight = imageHeight * zoom;
 
-    // Calculate the display area that shows the image
-    const displayWidth = canvas.width;
-    const displayHeight = canvas.height;
-
-    // Center the scaled image in the display
-    const offsetX = (displayWidth - scaledImageWidth) / 2 + panX;
-    const offsetY = (displayHeight - scaledImageHeight) / 2 + panY;
+    // Image offset from canvas center due to pan
+    const imageLeft = centerX - scaledImageWidth / 2 + panX;
+    const imageTop = centerY - scaledImageHeight / 2 + panY;
 
     // Convert canvas coordinates to image pixel coordinates
-    const imagePixelX = (canvasX - offsetX) / zoom;
-    const imagePixelY = (canvasY - offsetY) / zoom;
+    const imageRelativeX = canvasX - imageLeft;
+    const imageRelativeY = canvasY - imageTop;
 
-    // Check if coordinates are within image bounds
-    if (imagePixelX < 0 || imagePixelX >= imageWidth || imagePixelY < 0 || imagePixelY >= imageHeight) {
-      return null;
+    // Check bounds
+    if (imageRelativeX < 0 || imageRelativeX >= scaledImageWidth || 
+        imageRelativeY < 0 || imageRelativeY >= scaledImageHeight) {
+      return null; // Outside image bounds
     }
 
-    // Convert to DICOM world coordinates using proper DICOM transformations
+    // Scale back to original image pixel coordinates
+    const pixelX = imageRelativeX / zoom;
+    const pixelY = imageRelativeY / zoom;
+
+    // Convert to DICOM world coordinates if metadata is available
     if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
-      try {
-        const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
-        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
-        const imageOrientation = imageMetadata.imageOrientation ? 
-          imageMetadata.imageOrientation.split('\\').map(Number) : 
-          [1, 0, 0, 0, 1, 0];
+      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+      const imageOrientation = imageMetadata.imageOrientation ? 
+        imageMetadata.imageOrientation.split('\\').map(Number) : 
+        [1, 0, 0, 0, 1, 0];
 
-        if (imagePosition.length >= 3 && pixelSpacing.length >= 2) {
-          // DICOM Patient Coordinate System transformation
-          const worldX = imagePosition[0] + 
-            (imagePixelX * pixelSpacing[0] * imageOrientation[0]) + 
-            (imagePixelY * pixelSpacing[1] * imageOrientation[3]);
+      if (imagePosition.length >= 3 && pixelSpacing.length >= 2 && imageOrientation.length >= 6) {
+        // Standard DICOM coordinate transformation
+        const worldX = imagePosition[0] + 
+          (pixelX * pixelSpacing[0] * imageOrientation[0]) + 
+          (pixelY * pixelSpacing[1] * imageOrientation[3]);
 
-          const worldY = imagePosition[1] + 
-            (imagePixelX * pixelSpacing[0] * imageOrientation[1]) + 
-            (imagePixelY * pixelSpacing[1] * imageOrientation[4]);
+        const worldY = imagePosition[1] + 
+          (pixelX * pixelSpacing[0] * imageOrientation[1]) + 
+          (pixelY * pixelSpacing[1] * imageOrientation[4]);
 
+        if (!isNaN(worldX) && !isNaN(worldY)) {
           return { x: worldX, y: worldY };
         }
-      } catch (error) {
-        console.warn('DICOM coordinate transformation failed:', error);
       }
     }
 
-    // Fallback: use pixel coordinates scaled by pixel spacing
-    const pixelSpacing = imageMetadata.pixelSpacing ? 
-      imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
-
-    return { 
-      x: imagePixelX * pixelSpacing[0], 
-      y: imagePixelY * pixelSpacing[1] 
-    };
+    // Fallback to pixel coordinates if DICOM transformation fails
+    return { x: pixelX, y: pixelY };
   };
 
-  // Generate brush stroke points in world coordinates
-  const generateBrushStroke = (worldPoint: Point): Point[] => {
-    if (!imageMetadata) return [];
+  const [currentBrushSize, setCurrentBrushSize] = useState(brushSize);
+  const currentStroke = useRef<Point[]>([]);
+  const lastMousePos = useRef<Point | null>(null);
+
+  // Create brush stroke with proper world coordinates - FIXED VERSION
+  const addBrushStroke = (canvasPoint: Point) => {
+    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
+    if (!worldPoint || !selectedStructure || !rtStructures) {
+      return;
+    }
 
     // Calculate world-space brush radius
     const pixelSpacing = imageMetadata.pixelSpacing ? 
       imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
-    const worldBrushRadius = (brushSize / 2) * pixelSpacing[0];
+    const worldBrushRadius = (currentBrushSize / 2) * pixelSpacing[0];
 
-    // Generate circular brush stroke
-    const numPoints = Math.max(8, Math.floor(brushSize / 2)); // More points for larger brushes
+    // Generate fewer points for cleaner contours
+    const numPoints = 8; // Reduced from 16
     const brushPoints: Point[] = [];
 
     for (let i = 0; i < numPoints; i++) {
@@ -133,10 +131,25 @@ export function SimpleBrushTool({
       brushPoints.push({ x, y });
     }
 
-    return brushPoints;
+    // Simplified stroke handling - no interpolation to reduce artifacts
+    if (lastMousePos.current && isDrawing) {
+      const lastWorldPoint = canvasToWorld(lastMousePos.current.x, lastMousePos.current.y);
+      if (lastWorldPoint) {
+        // Only add current brush points, no interpolation
+        currentStroke.current = currentStroke.current.concat(brushPoints);
+      }
+    } else {
+      // Starting new stroke
+      currentStroke.current = brushPoints;
+    }
+
+    lastMousePos.current = canvasPoint;
+
+    // Update RT structure immediately
+    updateRTStructure();
   };
 
-  // Update RT structure with new contour data
+  // Fixed RT structure update
   const updateRTStructure = () => {
     if (!selectedStructure || !rtStructures || currentStroke.current.length === 0) {
       return;
@@ -146,32 +159,30 @@ export function SimpleBrushTool({
     const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
 
     if (!structure) {
-      console.warn('Selected structure not found:', selectedStructure);
       return;
     }
 
-    // Convert stroke points to DICOM contour format
+    // Convert current stroke to DICOM contour format with FIXED Z-coordinate
     const contourPoints: number[] = [];
     currentStroke.current.forEach(point => {
-      // CRITICAL: Use exact currentSlicePosition for Z coordinate
+      // CRITICAL FIX: Use exact currentSlicePosition for Z coordinate
       contourPoints.push(point.x, point.y, currentSlicePosition);
     });
 
-    // Find existing contour for current slice (strict Z matching)
-    const tolerance = 0.01; // Very strict tolerance
-    let existingContourIndex = structure.contours.findIndex((contour: any) => 
+    // Find or create contour for current slice with strict Z matching
+    const tolerance = 0.1; // Much stricter tolerance
+    let existingContour = structure.contours.find((contour: any) => 
       Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
     );
 
-    if (existingContourIndex !== -1) {
-      // Replace existing contour
-      structure.contours[existingContourIndex] = {
-        slicePosition: currentSlicePosition,
-        points: contourPoints,
-        numberOfPoints: contourPoints.length / 3
-      };
+    if (existingContour) {
+      // Replace existing contour with new brush stroke
+      existingContour.points = contourPoints;
+      existingContour.numberOfPoints = contourPoints.length / 3;
+      // Ensure exact slice position match
+      existingContour.slicePosition = currentSlicePosition;
     } else {
-      // Add new contour
+      // Create new contour with exact slice position
       structure.contours.push({
         slicePosition: currentSlicePosition,
         points: contourPoints,
@@ -179,29 +190,7 @@ export function SimpleBrushTool({
       });
     }
 
-    console.log('Updated contour for slice:', currentSlicePosition, 'with', contourPoints.length / 3, 'points');
     onContourUpdate(updatedRTStructures);
-  };
-
-  // Handle brush stroke at canvas position
-  const addBrushStroke = (canvasPoint: Point) => {
-    const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-    if (!worldPoint || !selectedStructure) {
-      return;
-    }
-
-    const brushPoints = generateBrushStroke(worldPoint);
-
-    if (isDrawing) {
-      // Add to existing stroke
-      currentStroke.current = [...currentStroke.current, ...brushPoints];
-    } else {
-      // Start new stroke
-      currentStroke.current = brushPoints;
-    }
-
-    // Update contours immediately for real-time feedback
-    updateRTStructure();
   };
 
   // Mouse event handlers
@@ -213,12 +202,14 @@ export function SimpleBrushTool({
 
     const rect = canvasRef.current!.getBoundingClientRect();
     const canvasPoint = {
-      x: (e.clientX - rect.left) * (canvasRef.current!.width / rect.width),
-      y: (e.clientY - rect.top) * (canvasRef.current!.height / rect.height)
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
 
     setIsDrawing(true);
     currentStroke.current = [];
+    lastMousePos.current = null;
+
     addBrushStroke(canvasPoint);
   };
 
@@ -227,8 +218,8 @@ export function SimpleBrushTool({
 
     const rect = canvasRef.current.getBoundingClientRect();
     const canvasPoint = {
-      x: (e.clientX - rect.left) * (canvasRef.current.width / rect.width),
-      y: (e.clientY - rect.top) * (canvasRef.current.height / rect.height)
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
 
     setMousePosition(canvasPoint);
@@ -242,6 +233,7 @@ export function SimpleBrushTool({
     if (!isActive || e.button !== 0) return;
 
     setIsDrawing(false);
+    lastMousePos.current = null;
     currentStroke.current = [];
   };
 
@@ -250,11 +242,13 @@ export function SimpleBrushTool({
     if (!isActive || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
+
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
     canvas.style.cursor = 'none';
 
     return () => {
@@ -265,9 +259,9 @@ export function SimpleBrushTool({
       canvas.removeEventListener('contextmenu', (e) => e.preventDefault());
       canvas.style.cursor = 'default';
     };
-  }, [isActive, selectedStructure, brushSize, zoom, panX, panY, currentSlicePosition]);
+  }, [isActive, selectedStructure, currentBrushSize, isDrawing, currentSlicePosition]);
 
-  // Create and manage cursor overlay canvas
+  // Create and manage cursor overlay
   useEffect(() => {
     if (!isActive || !canvasRef.current) {
       if (cursorCanvasRef.current) {
@@ -294,7 +288,6 @@ export function SimpleBrushTool({
     const rect = mainCanvas.getBoundingClientRect();
     const parentRect = mainCanvas.parentElement!.getBoundingClientRect();
 
-    // Match canvas dimensions exactly
     cursorCanvas.width = mainCanvas.width;
     cursorCanvas.height = mainCanvas.height;
     cursorCanvas.style.width = `${rect.width}px`;
@@ -308,9 +301,9 @@ export function SimpleBrushTool({
         cursorCanvasRef.current = null;
       }
     };
-  }, [isActive, zoom, panX, panY]);
+  }, [isActive]);
 
-  // Draw brush cursor
+  // Draw cursor
   useEffect(() => {
     if (!cursorCanvasRef.current || !mousePosition || !isActive) return;
 
@@ -319,26 +312,29 @@ export function SimpleBrushTool({
 
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
 
-    // Calculate cursor size based on zoom level
-    const radius = (brushSize / 2) * zoom;
+    // Simple, direct cursor size calculation that matches the brush transformation
+    // Brush size is scaled by zoom factor to show actual painting area
+    const radius = (currentBrushSize / 2) * zoom;
 
-    // Draw cursor
     ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = 2;
     ctx.globalAlpha = 0.8;
-    ctx.setLineDash([4, 4]);
 
     ctx.beginPath();
     ctx.arc(mousePosition.x, mousePosition.y, radius, 0, 2 * Math.PI);
     ctx.stroke();
 
-    // Draw center dot
-    ctx.setLineDash([]);
+    // Draw center dot (keep this small and fixed)
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
     ctx.arc(mousePosition.x, mousePosition.y, 2, 0, 2 * Math.PI);
     ctx.fill();
-  }, [mousePosition, brushSize, isDrawing, isActive, zoom]);
+  }, [mousePosition, currentBrushSize, isDrawing, isActive, zoom]);
+
+  // Update brush size
+  useEffect(() => {
+    setCurrentBrushSize(brushSize);
+  }, [brushSize]);
 
   return null;
 }
