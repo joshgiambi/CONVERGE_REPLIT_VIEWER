@@ -370,43 +370,29 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     return contour;
   }, []);
 
-  // Exact INVERSE of RT structure overlay coordinate transformation
+  // Simplified coordinate transformation - direct match to RT overlay approach
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
     if (!canvasRef.current) return [0, 0, 0];
     
-    const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     const canvas = canvasRef.current;
+    const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Step 1: Reverse the zoom/pan transformation applied by RT overlay
-    // RT overlay applies: translate(canvas.width / 2, canvas.height / 2), scale(zoom), translate(-canvas.width / 2 + panX, -canvas.height / 2 + panY)
-    const step1X = point.x - canvas.width / 2;
-    const step1Y = point.y - canvas.height / 2;
+    // Account for zoom and pan (same as RT overlay approach)
+    const adjustedX = (point.x - canvas.width / 2) / currentZoom + canvas.width / 2 - currentPanX;
+    const adjustedY = (point.y - canvas.height / 2) / currentZoom + canvas.height / 2 - currentPanY;
     
-    const step2X = step1X / currentZoom;
-    const step2Y = step1Y / currentZoom;
+    // Use actual metadata or fallback to HN-ATLAS defaults
+    const imagePosition = metadata.imagePosition ? 
+      metadata.imagePosition.split('\\').map(Number) : [-300, -300, 35];
+    const pixelSpacing = metadata.pixelSpacing ? 
+      metadata.pixelSpacing.split('\\').map(Number) : [1.171875, 1.171875];
     
-    const unzoomedX = step2X + canvas.width / 2 - currentPanX;
-    const unzoomedY = step2Y + canvas.height / 2 - currentPanY;
+    // Convert canvas coordinates to DICOM world coordinates (simplified approach)
+    const normalizedX = adjustedX / canvas.width;
+    const normalizedY = adjustedY / canvas.height;
     
-    // Step 2: EXACT INVERSE of RT overlay worldToCanvas transformation (lines 155-182)
-    // RT overlay uses these constants (from lines 197-200):
-    const imagePositionPatient = [-300, -300, 35];
-    const pixelSpacing = [1.171875, 1.171875];
-    const dicomImageWidth = 512;
-    const dicomImageHeight = 512;
-    
-    // Reverse: canvasX = (rotatedJ / imageWidth) * canvasWidth -> rotatedJ = (canvasX / canvasWidth) * imageWidth
-    const rotatedJ = (unzoomedX / canvas.width) * dicomImageWidth;
-    const rotatedI = (unzoomedY / canvas.height) * dicomImageHeight;
-    
-    // Reverse: rotatedJ = imageWidth - i, rotatedI = j -> i = imageWidth - rotatedJ, j = rotatedI
-    const i = dicomImageWidth - rotatedJ;
-    const j = rotatedI;
-    
-    // Reverse: j = (worldX - originX) / pixelSpacing[0], i = (worldY - originY) / pixelSpacing[1]
-    // -> worldX = originX + j * pixelSpacing[0], worldY = originY + i * pixelSpacing[1]
-    const worldX = imagePositionPatient[0] + (j * pixelSpacing[0]);
-    const worldY = imagePositionPatient[1] + (i * pixelSpacing[1]);
+    const worldX = imagePosition[0] + (normalizedX * 512 * pixelSpacing[0]);
+    const worldY = imagePosition[1] + (normalizedY * 512 * pixelSpacing[1]);
     const worldZ = sliceLocation;
     
     return [worldX, worldY, worldZ];
@@ -457,7 +443,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       console.log('Found existing contour with', existingContour.points.length / 3, 'points');
       console.log('Existing contour points (first 5):', existingContour.points.slice(0, 15));
       
-      // Existing contour exists - expand it intelligently
+      // Existing contour exists - check if brush touches it or should be separate  
       if (operation === BrushOperation.ADDITIVE) {
         // Convert existing points to array of [x,y,z] tuples
         const existingPoints: number[][] = [];
@@ -731,9 +717,9 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!isActive) return;
     
-    // Basic debug - only log when drawing
+    // Enhanced debug - track all mouse movements
     if (isDrawing) {
-      console.log('🖱️ MOUSE MOVE while drawing');
+      console.log('🖱️ MOUSE MOVE while drawing', { x: event.clientX, y: event.clientY });
     }
 
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -752,6 +738,10 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       } else {
         paintPixels(canvasPoint);
       }
+    }
+    
+    // Always update last position when drawing for next stroke
+    if (isDrawing) {
       setLastPosition(canvasPoint);
     }
   }, [isActive, isDrawing, lastPosition, drawBrushPreview, paintPixels, paintLine, smoothingEnabled]);
