@@ -69,27 +69,18 @@ export function SimpleBrushTool({
       return null;
     }
 
-    // Convert to DICOM world coordinates
-    if (imageMetadata.imagePosition && imageMetadata.pixelSpacing) {
-      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+    // Use simplified coordinate system - just return pixel coordinates scaled to world space
+    // This avoids complex DICOM transformations that cause coordinate misalignment
+    if (imageMetadata.pixelSpacing) {
       const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
-      const imageOrientation = imageMetadata.imageOrientation ? 
-        imageMetadata.imageOrientation.split('\\').map(Number) : 
-        [1, 0, 0, 0, 1, 0]; // Default orientation
-
-      // Proper DICOM coordinate transformation
-      const worldX = imagePosition[0] + 
-        (pixelX * pixelSpacing[0] * imageOrientation[0]) + 
-        (pixelY * pixelSpacing[1] * imageOrientation[3]);
-        
-      const worldY = imagePosition[1] + 
-        (pixelX * pixelSpacing[0] * imageOrientation[1]) + 
-        (pixelY * pixelSpacing[1] * imageOrientation[4]);
-
-      return { x: worldX, y: worldY };
+      return {
+        x: pixelX * pixelSpacing[0],
+        y: pixelY * pixelSpacing[1]
+      };
     }
 
-    return null;
+    // Fallback to pixel coordinates
+    return { x: pixelX, y: pixelY };
   };
 
   const [currentBrushSize, setCurrentBrushSize] = useState(brushSize);
@@ -103,13 +94,15 @@ export function SimpleBrushTool({
       return;
     }
 
-    // Calculate world-space brush radius
+    // Calculate appropriate brush radius in world coordinates
     const pixelSpacing = imageMetadata.pixelSpacing ? 
       imageMetadata.pixelSpacing.split('\\').map(Number) : [1, 1];
-    const worldBrushRadius = (currentBrushSize / 2) * pixelSpacing[0]; // Use actual pixel spacing
+    
+    // Scale brush size properly - make it much smaller
+    const worldBrushRadius = (currentBrushSize / 4) * Math.min(pixelSpacing[0], pixelSpacing[1]);
 
-    // Generate circular brush points in world coordinates
-    const numPoints = 16;
+    // Generate smaller, more precise brush points
+    const numPoints = 8; // Fewer points for smaller brush
     const brushPoints: Point[] = [];
     
     for (let i = 0; i < numPoints; i++) {
@@ -119,32 +112,32 @@ export function SimpleBrushTool({
       brushPoints.push({ x, y });
     }
 
-    // Add interpolated points for smooth strokes
+    // Add interpolated points for smooth strokes only when moving
     if (lastMousePos.current && isDrawing) {
       const lastWorldPoint = canvasToWorld(lastMousePos.current.x, lastMousePos.current.y);
       if (lastWorldPoint) {
         const dx = worldPoint.x - lastWorldPoint.x;
         const dy = worldPoint.y - lastWorldPoint.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        const steps = Math.max(1, Math.floor(distance / (worldBrushRadius * 0.5)));
         
-        for (let step = 1; step <= steps; step++) {
-          const t = step / steps;
-          const interpX = lastWorldPoint.x + dx * t;
-          const interpY = lastWorldPoint.y + dy * t;
+        // Only interpolate if we moved a significant distance
+        if (distance > worldBrushRadius * 0.3) {
+          const steps = Math.max(1, Math.floor(distance / (worldBrushRadius * 0.8)));
           
-          for (let i = 0; i < numPoints; i++) {
-            const angle = (i / numPoints) * 2 * Math.PI;
-            const x = interpX + Math.cos(angle) * worldBrushRadius;
-            const y = interpY + Math.sin(angle) * worldBrushRadius;
-            currentStroke.current.push({ x, y });
+          for (let step = 1; step <= steps; step++) {
+            const t = step / steps;
+            const interpX = lastWorldPoint.x + dx * t;
+            const interpY = lastWorldPoint.y + dy * t;
+            
+            // Add just the center point for interpolation, not full circles
+            currentStroke.current.push({ x: interpX, y: interpY });
           }
         }
       }
-    } else {
-      currentStroke.current = currentStroke.current.concat(brushPoints);
     }
     
+    // Add current brush points
+    currentStroke.current = currentStroke.current.concat(brushPoints);
     lastMousePos.current = canvasPoint;
 
     // Update RT structure immediately
@@ -164,24 +157,52 @@ export function SimpleBrushTool({
       return;
     }
 
+    // Only add stroke points if we have a reasonable number (avoid huge blobs)
+    if (currentStroke.current.length > 100) {
+      console.warn('Stroke too large, skipping to prevent blob creation');
+      return;
+    }
+
     // Convert current stroke to DICOM contour format
     const contourPoints: number[] = [];
     currentStroke.current.forEach(point => {
       contourPoints.push(point.x, point.y, currentSlicePosition);
     });
 
-    // Find or create contour for current slice
+    // Find existing contour for current slice
     const tolerance = 1.0;
     let existingContour = structure.contours.find((contour: any) => 
       Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance
     );
 
-    if (existingContour) {
-      // Replace existing contour with new brush stroke
-      existingContour.points = contourPoints;
-      existingContour.numberOfPoints = contourPoints.length / 3;
+    if (existingContour && existingContour.points.length > 0) {
+      // Merge with existing contour instead of replacing
+      const existingPoints = [];
+      for (let i = 0; i < existingContour.points.length; i += 3) {
+        existingPoints.push({
+          x: existingContour.points[i],
+          y: existingContour.points[i + 1],
+          z: existingContour.points[i + 2]
+        });
+      }
+      
+      // Add new stroke points to existing contour
+      const mergedPoints: number[] = [];
+      
+      // Add existing points
+      existingContour.points.forEach((point: number) => {
+        mergedPoints.push(point);
+      });
+      
+      // Add new stroke points
+      contourPoints.forEach((point: number) => {
+        mergedPoints.push(point);
+      });
+      
+      existingContour.points = mergedPoints;
+      existingContour.numberOfPoints = mergedPoints.length / 3;
     } else {
-      // Create new contour
+      // Create new contour only if it's reasonably sized
       structure.contours.push({
         slicePosition: currentSlicePosition,
         points: contourPoints,
