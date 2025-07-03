@@ -310,54 +310,22 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
 
 
-  // Use existing RT structure coordinates as reference - just copy their approach
+  // SIMPLE: Just use mouse coordinates directly as world coordinates
   const canvasToWorldCoordinates = useCallback((point: Point, metadata: any, currentZoom: number, currentPanX: number, currentPanY: number) => {
-    if (!canvasRef.current) return [0, 0, 0];
-    
     const sliceLocation = metadata.sliceLocation ? parseFloat(metadata.sliceLocation) : 0;
     
-    // Get an existing contour point from the selected structure to see what coordinates look like
-    if (rtStructures && selectedStructure) {
-      const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
-      if (structure && structure.contours && structure.contours.length > 0) {
-        const existingContour = structure.contours.find((c: any) => 
-          Math.abs(c.slicePosition - sliceLocation) < 0.1
-        );
-        
-        if (existingContour && existingContour.points.length >= 3) {
-          // Use existing contour coordinates as reference
-          const refX = existingContour.points[0];
-          const refY = existingContour.points[1];
-          const refZ = existingContour.points[2];
-          
-          // Create new point near the reference point but offset by click position
-          // FLIP the coordinates since they're appearing on opposite side
-          const offsetX = (256 - point.x) * 0.5; // Flip X axis
-          const offsetY = (256 - point.y) * 0.5; // Flip Y axis
-          
-          const worldX = refX + offsetX;
-          const worldY = refY + offsetY;
-          const worldZ = refZ;
-          
-          console.log('🎯 REFERENCE-BASED COORDINATES:', {
-            canvas: point,
-            reference: { x: refX, y: refY, z: refZ },
-            offset: { x: offsetX, y: offsetY },
-            world: { x: worldX, y: worldY, z: worldZ }
-          });
-          
-          return [worldX, worldY, worldZ];
-        }
-      }
-    }
-    
-    // Fallback: use center of image with simple offset (flipped coordinates)
-    const worldX = -200 + (256 - point.x) * 0.5; // Flip X
-    const worldY = -200 + (256 - point.y) * 0.5; // Flip Y
+    // Try the most basic approach: use canvas coordinates directly
+    const worldX = point.x - 250; // Center around 0
+    const worldY = point.y - 250; // Center around 0
     const worldZ = sliceLocation;
     
+    console.log('🎯 DIRECT COORDINATES:', {
+      canvas: point,
+      world: { x: worldX, y: worldY, z: worldZ }
+    });
+    
     return [worldX, worldY, worldZ];
-  }, [rtStructures, selectedStructure]);
+  }, []);
 
   // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
