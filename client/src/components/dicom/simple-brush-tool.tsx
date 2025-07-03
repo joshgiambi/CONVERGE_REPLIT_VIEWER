@@ -311,8 +311,8 @@ export function SimpleBrushTool({
 
     ctx.clearRect(0, 0, cursorCanvasRef.current.width, cursorCanvasRef.current.height);
 
-    // Draw brush cursor circle
-    const radius = currentBrushSize / 2;
+    // Scale brush cursor with zoom level - this makes it show actual brush size in world coordinates
+    const radius = (currentBrushSize / 2) * zoom;
 
     ctx.strokeStyle = isDrawing ? '#00ff00' : '#ffffff';
     ctx.lineWidth = 2;
@@ -322,12 +322,12 @@ export function SimpleBrushTool({
     ctx.arc(mousePosition.x, mousePosition.y, radius, 0, 2 * Math.PI);
     ctx.stroke();
 
-    // Draw center dot
+    // Draw center dot (keep this small and fixed)
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
     ctx.arc(mousePosition.x, mousePosition.y, 2, 0, 2 * Math.PI);
     ctx.fill();
-  }, [mousePosition, currentBrushSize, isDrawing, isActive]);
+  }, [mousePosition, currentBrushSize, isDrawing, isActive, zoom]);
 
   // Update brush size
   useEffect(() => {
