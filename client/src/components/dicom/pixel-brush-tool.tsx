@@ -275,16 +275,11 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
       console.log('World point range - Y:', Math.min(...worldPoints.map(p => p[1])).toFixed(1), 'to', Math.max(...worldPoints.map(p => p[1])).toFixed(1));
     }
 
-    // Update the RT structure data
+    // Update the RT structure data (this will trigger onContourUpdate internally)
     updateRTStructureContour(selectedStructure, currentSlicePosition, worldPoints);
 
     // Clear the brush canvas since it's now part of the structure
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Trigger contour update callback to refresh the display
-    if (onContourUpdate && rtStructures) {
-      onContourUpdate(rtStructures);
-    }
     
     console.log('=== BRUSH TOOL DEBUG END ===');
   }, [selectedStructure, currentSlicePosition, rtStructures, imageMetadata, zoom, panX, panY, onContourUpdate]);
@@ -432,14 +427,17 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
 
   // Smart contour expansion - merge with existing contours like pushing boundaries
   const updateRTStructureContour = useCallback((structureId: number, slicePosition: number, worldPoints: number[][]) => {
-    if (!rtStructures) return;
+    if (!rtStructures || !onContourUpdate) return;
 
     console.log('=== RT STRUCTURE UPDATE DEBUG ===');
     console.log('Structure ID:', structureId, 'Slice:', slicePosition);
     console.log('Brush world points to add:', worldPoints.length);
 
+    // Create a deep copy of rtStructures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    
     // Find the structure to update
-    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    const structure = updatedRTStructures.structures.find((s: any) => s.roiNumber === structureId);
     if (!structure) {
       console.log('ERROR: Structure not found with ROI number:', structureId);
       return;
@@ -453,7 +451,7 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
     );
     
     console.log('Looking for existing contour on slice:', slicePosition);
-    console.log('Available contours on slices:', structure.contours.map(c => c.slicePosition));
+    console.log('Available contours on slices:', structure.contours.map((c: any) => c.slicePosition));
     console.log('Found existing contour:', existingContour ? 'YES' : 'NO');
 
     if (!existingContour) {
@@ -496,8 +494,12 @@ export const PixelBrushTool: React.FC<PixelBrushToolProps> = ({
         console.log('Subtraction mode - reducing contour');
       }
     }
+    
     console.log('=== RT STRUCTURE UPDATE COMPLETE ===');
-  }, [rtStructures, operation]);
+    
+    // Trigger update with the new rtStructures copy
+    onContourUpdate(updatedRTStructures);
+  }, [rtStructures, operation, onContourUpdate]);
 
   // Expand existing contour by intelligently adding brush points
   const expandContourWithBrush = useCallback((existingPoints: number[][], brushPoints: number[][]): number[][] => {

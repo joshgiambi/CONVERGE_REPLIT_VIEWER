@@ -126,8 +126,8 @@ function renderRTStructures(
   ctx.scale(zoom, zoom);
   ctx.translate(-canvas.width / 2 + panX, -canvas.height / 2 + panY);
   
-  // Set overlay drawing properties
-  ctx.lineWidth = contourWidth / zoom; // Use actual contour width setting
+  // Set overlay drawing properties - make line width zoom-independent
+  ctx.lineWidth = contourWidth / zoom; // Adjust for zoom to maintain constant visual thickness
   ctx.globalAlpha = 1; // Keep stroke at full opacity
   
   // Find contours that match the current slice position (within tolerance)
