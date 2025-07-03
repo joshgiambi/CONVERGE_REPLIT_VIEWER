@@ -498,31 +498,35 @@ export function WorkingViewer({
     if (!rtStructures || !currentImage) return;
 
     // FIXED: Get current slice position from actual DICOM metadata
-    let currentSlicePosition;
+    let currentSlicePosition: number = currentIndex + 1; // Default fallback
     
-    // Priority 1: Use parsed slice location from DICOM
-    if (currentImage.parsedSliceLocation !== undefined) {
+    // Priority 1: Use parsed slice location from DICOM (check for null/undefined)
+    if (currentImage.parsedSliceLocation !== undefined && currentImage.parsedSliceLocation !== null) {
       currentSlicePosition = currentImage.parsedSliceLocation;
     }
-    // Priority 2: Use parsed Z position from DICOM
-    else if (currentImage.parsedZPosition !== undefined) {
+    // Priority 2: Use parsed Z position from DICOM (check for null/undefined)
+    else if (currentImage.parsedZPosition !== undefined && currentImage.parsedZPosition !== null) {
       currentSlicePosition = currentImage.parsedZPosition;
     }
     // Priority 3: Extract from image metadata directly
-    else if (imageMetadata && imageMetadata.sliceLocation) {
-      currentSlicePosition = parseFloat(imageMetadata.sliceLocation);
+    else if (imageMetadata && imageMetadata.sliceLocation !== undefined) {
+      const parsed = parseFloat(imageMetadata.sliceLocation);
+      if (!isNaN(parsed)) {
+        currentSlicePosition = parsed;
+      }
     }
     // Priority 4: Extract Z from image position
     else if (imageMetadata && imageMetadata.imagePosition) {
       const imagePos = imageMetadata.imagePosition.split('\\');
       if (imagePos.length >= 3) {
-        currentSlicePosition = parseFloat(imagePos[2]);
+        const parsed = parseFloat(imagePos[2]);
+        if (!isNaN(parsed)) {
+          currentSlicePosition = parsed;
+        }
       }
     }
-    // Last resort: Use index (this was causing the error)
-    else {
-      currentSlicePosition = currentIndex + 1;
-    }
+    
+    // Note: currentSlicePosition already has a fallback initialization, no need for additional check
     
     const tolerance = 2.0; // mm tolerance for slice matching
 
