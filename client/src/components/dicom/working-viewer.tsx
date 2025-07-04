@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SimpleBrushTool } from './simple-brush-tool';
+import { PenTool } from './pen-tool';
 import { BrushOperation } from '@shared/schema';
 import { growContour, smoothContour } from '@/lib/contour-grow';
 import { addBrushToContour, eraseBrushFromContour } from '@/lib/brush-to-polygon';
@@ -235,6 +236,37 @@ export function WorkingViewer({
         structure.contours = [];
         setLocalRTStructures(updatedStructures);
       }
+    } else if (payload.action === 'add_pen_stroke' || payload.action === 'cut_pen_stroke') {
+      // Handle pen tool operations
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (!structure) return;
+      
+      // Find contour on current slice
+      const tolerance = 1.5;
+      const sliceContour = structure.contours.find((c: any) => 
+        Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
+      );
+      
+      if (payload.action === 'add_pen_stroke') {
+        if (sliceContour) {
+          // Merge pen stroke with existing contour
+          const mergedPoints = [...sliceContour.points, ...payload.points];
+          sliceContour.points = mergedPoints;
+          sliceContour.numberOfPoints = mergedPoints.length / 3;
+        } else {
+          // Create new contour from pen stroke
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: payload.points,
+            numberOfPoints: payload.points.length / 3
+          });
+        }
+      } else if (payload.action === 'cut_pen_stroke') {
+        // TODO: Implement contour cutting logic
+        console.log('Cut pen stroke not yet implemented');
+      }
+      
+      setLocalRTStructures(updatedStructures);
     }
   };
 
@@ -1087,6 +1119,28 @@ export function WorkingViewer({
               onBrushModeChange={(mode: BrushOperation) => {
                 console.log('Brush mode changed:', mode);
               }}
+            />
+          )}
+
+          {/* Pen Tool overlay */}
+          {brushToolState?.isActive && brushToolState?.tool === 'pen' && selectedForEdit && (
+            <PenTool
+              canvasRef={canvasRef}
+              isActive={brushToolState.isActive}
+              selectedStructure={selectedForEdit}
+              rtStructures={rtStructures}
+              currentSlicePosition={images.length > 0 && images[currentIndex] ? 
+                (images[currentIndex].parsedSliceLocation ?? 
+                 images[currentIndex].parsedZPosition ??
+                 currentIndex) : 0
+              }
+              onContourUpdate={(payload: any) => {
+                handleContourUpdate(payload);
+              }}
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+              imageMetadata={imageMetadata}
             />
           )}
 

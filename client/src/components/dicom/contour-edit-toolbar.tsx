@@ -60,7 +60,7 @@ export function ContourEditToolbar({
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
 
-  // Notify parent when brush tool is activated
+  // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
     if (toolId === 'grow') {
       // For grow button, just toggle the settings panel directly
@@ -72,12 +72,12 @@ export function ContourEditToolbar({
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
     
-    // Pass brush tool state to parent
+    // Pass tool state to parent
     if (onToolChange) {
       onToolChange({
         tool: newTool,
         brushSize: brushThickness[0],
-        isActive: newTool === 'brush'
+        isActive: newTool === 'brush' || newTool === 'pen'
       });
     }
   };

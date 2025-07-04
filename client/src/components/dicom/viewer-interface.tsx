@@ -304,33 +304,33 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     return Math.min(zoomX, zoomY, 5); // cap max zoom at 5x
   };
 
-  // Auto-zoom effect when structure is selected for editing
-  useEffect(() => {
-    if (!selectedForEdit || !rtStructures?.structures) return;
+  // Auto-zoom effect disabled per user request
+  // useEffect(() => {
+  //   if (!selectedForEdit || !rtStructures?.structures) return;
 
-    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit);
-    if (!structure || !structure.contours || structure.contours.length === 0) return;
+  //   const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit);
+  //   if (!structure || !structure.contours || structure.contours.length === 0) return;
 
-    try {
-      const { centroid, widthMM, heightMM } = getStructureBounds(structure);
+  //   try {
+  //     const { centroid, widthMM, heightMM } = getStructureBounds(structure);
       
-      // Only auto-zoom if we have valid bounds
-      if (isFinite(widthMM) && isFinite(heightMM) && widthMM > 0 && heightMM > 0) {
-        console.log(`Auto-zooming to structure ${structure.structureName}: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
+  //     // Only auto-zoom if we have valid bounds
+  //     if (isFinite(widthMM) && isFinite(heightMM) && widthMM > 0 && heightMM > 0) {
+  //       console.log(`Auto-zooming to structure ${structure.structureName}: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
         
-        // Focus on the structure's centroid slice
-        const newSlice = Math.round(centroid.z);
+  //       // Focus on the structure's centroid slice
+  //       const newSlice = Math.round(centroid.z);
         
-        // For now, we'll just log the auto-zoom intent
-        // The actual zoom/pan implementation would need to be integrated 
-        // with the WorkingViewer component's zoom and pan state
-        console.log(`Centering on slice ${newSlice}, structure centroid:`, centroid);
-        console.log(`Recommended zoom for structure size: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
-      }
-    } catch (error) {
-      console.warn('Error calculating auto-zoom for structure:', error);
-    }
-  }, [selectedForEdit, rtStructures]);
+  //       // For now, we'll just log the auto-zoom intent
+  //       // The actual zoom/pan implementation would need to be integrated 
+  //       // with the WorkingViewer component's zoom and pan state
+  //       console.log(`Centering on slice ${newSlice}, structure centroid:`, centroid);
+  //       console.log(`Recommended zoom for structure size: ${widthMM.toFixed(1)}mm x ${heightMM.toFixed(1)}mm`);
+  //     }
+  //   } catch (error) {
+  //     console.warn('Error calculating auto-zoom for structure:', error);
+  //   }
+  // }, [selectedForEdit, rtStructures]);
 
   if (isLoading) {
     return (
