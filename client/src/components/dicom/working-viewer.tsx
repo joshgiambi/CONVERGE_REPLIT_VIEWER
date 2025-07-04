@@ -267,6 +267,36 @@ export function WorkingViewer({
       }
       
       setLocalRTStructures(updatedStructures);
+    } else if (payload.action === 'replace_contour') {
+      // Handle contour replacement (morphing)
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (!structure) return;
+      
+      // Find and replace the contour on current slice
+      const tolerance = 1.5;
+      const contourIndex = structure.contours.findIndex((c: any) => 
+        Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
+      );
+      
+      if (contourIndex >= 0) {
+        // Replace existing contour with new points
+        structure.contours[contourIndex] = {
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3
+        };
+        console.log(`Replaced contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`);
+      } else {
+        // Create new contour if none exists
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3
+        });
+        console.log(`Created new contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`);
+      }
+      
+      setLocalRTStructures(updatedStructures);
     }
   };
 

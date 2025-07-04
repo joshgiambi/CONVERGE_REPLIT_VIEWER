@@ -96,13 +96,13 @@ export function SeriesSelector({
       setLocalSelectedForEdit(newSelected);
     }
     
-    // Apply auto-zoom and auto-localize if enabled
-    if (newSelected && rtStructures?.structures) {
-      const structure = rtStructures.structures.find((s: any) => s.roiNumber === newSelected);
-      if (structure && (autoZoomEnabled || autoLocalizeEnabled)) {
-        applyAutoZoomAndLocalize(structure);
-      }
-    }
+    // Auto-zoom and auto-localize disabled per user request
+    // if (newSelected && rtStructures?.structures) {
+    //   const structure = rtStructures.structures.find((s: any) => s.roiNumber === newSelected);
+    //   if (structure && (autoZoomEnabled || autoLocalizeEnabled)) {
+    //     applyAutoZoomAndLocalize(structure);
+    //   }
+    // }
   };
 
   // Calculate contour centroid and apply auto-zoom/localize

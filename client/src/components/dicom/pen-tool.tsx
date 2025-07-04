@@ -34,10 +34,13 @@ export function PenTool({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [currentPoints, setCurrentPoints] = useState<PenPoint[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
   const [draggedPointIndex, setDraggedPointIndex] = useState<number | null>(null);
   const [hoverPointIndex, setHoverPointIndex] = useState<number | null>(null);
   const [isInsideContour, setIsInsideContour] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
+  const [hoveredContour, setHoveredContour] = useState<any | null>(null);
+  const [hoveredContourPoints, setHoveredContourPoints] = useState<PenPoint[]>([]);
 
   // Update overlay canvas size
   useEffect(() => {
@@ -53,6 +56,17 @@ export function PenTool({
     overlay.style.left = '0';
     overlay.style.pointerEvents = isActive ? 'auto' : 'none';
     overlay.style.cursor = isActive ? 'crosshair' : 'default';
+    
+    // Allow wheel events to pass through for scrolling
+    const handleWheel = (e: WheelEvent) => {
+      e.stopPropagation(); // Stop propagation but don't prevent default
+    };
+    
+    overlay.addEventListener('wheel', handleWheel, { passive: true });
+    
+    return () => {
+      overlay.removeEventListener('wheel', handleWheel);
+    };
   }, [canvasRef, isActive, zoom, panX, panY]);
 
   // Get selected structure
@@ -223,10 +237,7 @@ export function PenTool({
         }
       });
       
-      if (showPreview && currentPoints.length > 2) {
-        ctx.closePath();
-        ctx.fill();
-      }
+      // Don't fill while drawing - only show outline
       ctx.stroke();
 
       // Draw points
@@ -241,7 +252,37 @@ export function PenTool({
         ctx.stroke();
       });
     }
-  }, [isActive, currentPoints, getSelectedStructure, isInsideContour, hoverPointIndex, showPreview]);
+    
+    // Draw existing contour points when hovering
+    if (hoveredContourPoints.length > 0 && currentPoints.length === 0) {
+      const [r, g, b] = color;
+      
+      // Draw the hovered contour line faintly
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      hoveredContourPoints.forEach((point, index) => {
+        if (index === 0) {
+          ctx.moveTo(point.canvas.x, point.canvas.y);
+        } else {
+          ctx.lineTo(point.canvas.x, point.canvas.y);
+        }
+      });
+      ctx.closePath();
+      ctx.stroke();
+      
+      // Draw the contour points as draggable handles
+      hoveredContourPoints.forEach((point, index) => {
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(point.canvas.x, point.canvas.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+  }, [isActive, currentPoints, getSelectedStructure, isInsideContour, hoverPointIndex, showPreview, hoveredContourPoints]);
 
   // Redraw on changes
   useEffect(() => {
@@ -256,7 +297,27 @@ export function PenTool({
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
 
-    // Check if clicking on existing point
+    // Check if clicking on existing contour point for morphing
+    if (hoveredContourPoints.length > 0 && currentPoints.length === 0) {
+      const clickedContourPoint = hoveredContourPoints.findIndex(point => {
+        const dist = Math.sqrt(
+          Math.pow(point.canvas.x - canvasX, 2) + 
+          Math.pow(point.canvas.y - canvasY, 2)
+        );
+        return dist < 8;
+      });
+      
+      if (clickedContourPoint >= 0) {
+        // Start morphing - load the contour as current points
+        setCurrentPoints([...hoveredContourPoints]);
+        setIsDragging(true);
+        setDraggedPointIndex(clickedContourPoint);
+        setIsInsideContour(false); // Morphing mode
+        return;
+      }
+    }
+
+    // Check if clicking on existing point in current drawing
     const clickedPointIndex = currentPoints.findIndex(point => {
       const dist = Math.sqrt(
         Math.pow(point.canvas.x - canvasX, 2) + 
@@ -270,7 +331,7 @@ export function PenTool({
       setIsDragging(true);
       setDraggedPointIndex(clickedPointIndex);
     } else {
-      // Add new point
+      // Start drawing - add first point
       const worldCoords = canvasToWorld(canvasX, canvasY);
       if (worldCoords) {
         const newPoint: PenPoint = {
@@ -284,9 +345,10 @@ export function PenTool({
         }
 
         setCurrentPoints([...currentPoints, newPoint]);
+        setIsDrawing(true); // Enable continuous drawing
       }
     }
-  }, [isActive, currentPoints, canvasToWorld, checkInsideContour]);
+  }, [isActive, currentPoints, canvasToWorld, checkInsideContour, hoveredContourPoints]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isActive || !overlayCanvasRef.current) return;
@@ -306,8 +368,30 @@ export function PenTool({
         };
         setCurrentPoints(updatedPoints);
       }
+    } else if (isDrawing) {
+      // Add points while drawing
+      const worldCoords = canvasToWorld(canvasX, canvasY);
+      if (worldCoords) {
+        // Check minimum distance from last point to avoid too many points
+        if (currentPoints.length > 0) {
+          const lastPoint = currentPoints[currentPoints.length - 1];
+          const dist = Math.sqrt(
+            Math.pow(lastPoint.canvas.x - canvasX, 2) + 
+            Math.pow(lastPoint.canvas.y - canvasY, 2)
+          );
+          
+          // Only add point if moved at least 5 pixels
+          if (dist >= 5) {
+            const newPoint: PenPoint = {
+              canvas: { x: canvasX, y: canvasY },
+              world: worldCoords
+            };
+            setCurrentPoints([...currentPoints, newPoint]);
+          }
+        }
+      }
     } else {
-      // Check hover over points
+      // Check hover over current drawing points
       const hoverIndex = currentPoints.findIndex(point => {
         const dist = Math.sqrt(
           Math.pow(point.canvas.x - canvasX, 2) + 
@@ -316,17 +400,62 @@ export function PenTool({
         return dist < 8;
       });
       setHoverPointIndex(hoverIndex >= 0 ? hoverIndex : null);
+      
+      // If not drawing, check hover over existing contour points
+      if (currentPoints.length === 0) {
+        const nearestPoint = findNearestContourPoint(canvasX, canvasY);
+        if (nearestPoint) {
+          // Convert contour to pen points for visualization
+          const contourPoints: PenPoint[] = [];
+          for (let i = 0; i < nearestPoint.contour.points.length; i += 3) {
+            const worldPoint = {
+              x: nearestPoint.contour.points[i],
+              y: nearestPoint.contour.points[i + 1],
+              z: nearestPoint.contour.points[i + 2]
+            };
+            
+            const imagePosition = imageMetadata.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
+            const pixelSpacing = imageMetadata.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
+            
+            const canvasPoint = worldToCanvas(
+              worldPoint.x,
+              worldPoint.y,
+              imagePosition,
+              pixelSpacing,
+              overlayCanvasRef.current!.width,
+              overlayCanvasRef.current!.height
+            );
+            
+            if (canvasPoint) {
+              const centerX = overlayCanvasRef.current!.width / 2;
+              const centerY = overlayCanvasRef.current!.height / 2;
+              const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
+              const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
+              
+              contourPoints.push({
+                canvas: { x: displayX, y: displayY },
+                world: worldPoint
+              });
+            }
+          }
+          setHoveredContour(nearestPoint.contour);
+          setHoveredContourPoints(contourPoints);
+        } else {
+          setHoveredContour(null);
+          setHoveredContourPoints([]);
+        }
+      }
     }
-  }, [isActive, isDragging, draggedPointIndex, currentPoints, canvasToWorld]);
+  }, [isActive, isDragging, isDrawing, draggedPointIndex, currentPoints, canvasToWorld]);
 
   const handleMouseUp = useCallback(() => {
+    // Only stop dragging on mouse up - keep drawing active
     setIsDragging(false);
     setDraggedPointIndex(null);
+    // Don't stop drawing - continuous drawing until right-click
   }, []);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    
+  const completeContour = useCallback(() => {
     if (!isActive || currentPoints.length < 3) return;
 
     // Complete the contour
@@ -336,7 +465,16 @@ export function PenTool({
     });
 
     // Send update based on mode
-    if (isInsideContour) {
+    if (hoveredContour) {
+      // Replace existing contour (morphing)
+      onContourUpdate({
+        action: 'replace_contour',
+        structureId: selectedStructure,
+        points: worldPoints,
+        slicePosition: currentSlicePosition,
+        oldContourId: hoveredContour.id
+      });
+    } else if (isInsideContour) {
       // Add to existing contour
       onContourUpdate({
         action: 'add_pen_stroke',
@@ -354,9 +492,17 @@ export function PenTool({
       });
     }
 
-    // Clear points
+    // Clear points and reset state
     setCurrentPoints([]);
-  }, [isActive, currentPoints, isInsideContour, selectedStructure, currentSlicePosition, onContourUpdate]);
+    setIsDrawing(false);
+    setHoveredContour(null);
+    setHoveredContourPoints([]);
+  }, [isActive, currentPoints, isInsideContour, selectedStructure, currentSlicePosition, onContourUpdate, hoveredContour]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    completeContour();
+  }, [completeContour]);
 
   if (!isActive || !canvasRef.current) return null;
 

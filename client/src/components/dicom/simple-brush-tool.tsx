@@ -289,10 +289,17 @@ export function SimpleBrushTool({
     const canvasWidth = canvasRef.current?.width || 512;
     const canvasHeight = canvasRef.current?.height || 512;
 
-    // Use the shared coordinate transformation function
+    // Apply zoom and pan transformations (matching pen tool logic)
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2;
+    
+    const transformedX = (x - centerX - panX) / zoom + centerX;
+    const transformedY = (y - centerY - panY) / zoom + centerY;
+
+    // Use the shared coordinate transformation function with transformed coordinates
     const [worldX, worldY, worldZ] = canvasToWorld(
-      x, 
-      y, 
+      transformedX, 
+      transformedY, 
       canvasWidth, 
       canvasHeight, 
       imageMetadata,
@@ -300,7 +307,7 @@ export function SimpleBrushTool({
     );
 
     console.log(
-      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
+      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> Transformed(${transformedX.toFixed(1)}, ${transformedY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
     );
   };
 
@@ -325,17 +332,24 @@ export function SimpleBrushTool({
       const canvasHeight = canvasRef.current?.height || 512;
 
       const worldPoints = brushPointsRef.current.map((point) => {
+        // Apply zoom and pan transformations before converting to world coordinates
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+        
+        const transformedX = (point.x - centerX - panX) / zoom + centerX;
+        const transformedY = (point.y - centerY - panY) / zoom + centerY;
+        
         // Use the shared coordinate transformation function
         const [worldX, worldY, worldZ] = canvasToWorld(
-          point.x,
-          point.y,
+          transformedX,
+          transformedY,
           canvasWidth,
           canvasHeight,
           imageMetadata,
           currentSlicePosition
         );
         
-        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
+        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> Transformed(${transformedX.toFixed(1)}, ${transformedY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
         
         return [worldX, worldY, worldZ];
       });

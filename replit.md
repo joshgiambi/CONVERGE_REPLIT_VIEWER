@@ -89,6 +89,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 04, 2025: Medical-Grade Pen Tool with Morphing - COMPLETED
+  - ✅ Fixed brush tool coordinate system - now draws at correct position with zoom/pan
+  - ✅ Applied zoom and pan transformations to match pen tool's accurate positioning
+  - ✅ Pen tool completes polygon only on right-click (following 3D Slicer and Varian Eclipse standards)
+  - ✅ Continuous drawing mode - mouse up doesn't stop drawing, only right-click completes
+  - ✅ Hover detection shows existing contour points as draggable handles
+  - ✅ Click and drag existing contour points to morph/edit contours
+  - ✅ Added 'replace_contour' action for morphing existing contours
+  - ✅ Visual feedback with structure-colored handles and faint contour lines when hovering
 - July 04, 2025: HFS Radiological Viewing Convention Fixed - COMPLETED
   - ✅ Fixed scrolling issue - wheel events now work when brush tool is active
   - ✅ Analyzed DICOM metadata: HFS patient position, [1,0,0,0,1,0] orientation
