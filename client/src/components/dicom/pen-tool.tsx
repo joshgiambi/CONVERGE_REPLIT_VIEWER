@@ -169,17 +169,20 @@ export function PenTool({
           worldPoint.y,
           imagePosition,
           pixelSpacing,
-          overlayCanvasRef.current!.width,
-          overlayCanvasRef.current!.height
+          canvasRef.current!.width,
+          canvasRef.current!.height
         );
 
         if (canvasPoint) {
           // Apply zoom and pan to canvas point
-          const centerX = overlayCanvasRef.current!.width / 2;
-          const centerY = overlayCanvasRef.current!.height / 2;
+          const rect = overlayCanvasRef.current!.getBoundingClientRect();
+          const scaleX = rect.width / canvasRef.current!.width;
+          const scaleY = rect.height / canvasRef.current!.height;
           
-          const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
-          const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
+          const centerX = rect.width / 2;
+          const centerY = rect.height / 2;
+          const displayX = (canvasPoint[0] * scaleX - centerX) * zoom + centerX + panX;
+          const displayY = (canvasPoint[1] * scaleY - centerY) * zoom + centerY + panY;
 
           const dist = Math.sqrt(
             Math.pow(displayX - canvasX, 2) + 
@@ -422,15 +425,20 @@ export function PenTool({
               worldPoint.y,
               imagePosition,
               pixelSpacing,
-              overlayCanvasRef.current!.width,
-              overlayCanvasRef.current!.height
+              canvasRef.current!.width,
+              canvasRef.current!.height
             );
             
             if (canvasPoint) {
-              const centerX = overlayCanvasRef.current!.width / 2;
-              const centerY = overlayCanvasRef.current!.height / 2;
-              const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
-              const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
+              const rect = overlayCanvasRef.current!.getBoundingClientRect();
+              const mainRect = canvasRef.current!.getBoundingClientRect();
+              const scaleX = rect.width / canvasRef.current!.width;
+              const scaleY = rect.height / canvasRef.current!.height;
+              
+              const centerX = rect.width / 2;
+              const centerY = rect.height / 2;
+              const displayX = (canvasPoint[0] * scaleX - centerX) * zoom + centerX + panX;
+              const displayY = (canvasPoint[1] * scaleY - centerY) * zoom + centerY + panY;
               
               contourPoints.push({
                 canvas: { x: displayX, y: displayY },
