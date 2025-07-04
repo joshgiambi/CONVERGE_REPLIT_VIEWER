@@ -286,15 +286,22 @@ export function SimpleBrushTool({
     if (!selectedStructure || !rtStructures?.structures || !imageMetadata) return;
 
     // Convert canvas coordinates to world coordinates using actual DICOM metadata
-    const canvasWidth = canvasRef.current?.width || 512;
-    const canvasHeight = canvasRef.current?.height || 512;
+    const canvasWidth = canvasRef.current?.width || 1024;
+    const canvasHeight = canvasRef.current?.height || 1024;
 
-    // Apply zoom and pan transformations (matching pen tool logic)
+    // Calculate base scale to match contour rendering
+    const imageWidth = 512;
+    const imageHeight = 512;
+    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
+    
+    // Apply zoom and pan transformations accounting for base scale
     const centerX = canvasWidth / 2;
     const centerY = canvasHeight / 2;
     
-    const transformedX = (x - centerX - panX) / zoom + centerX;
-    const transformedY = (y - centerY - panY) / zoom + centerY;
+    // Normalize zoom relative to base scale
+    const effectiveZoom = zoom / baseScale;
+    const transformedX = (x - centerX - panX) / (baseScale * effectiveZoom) + centerX;
+    const transformedY = (y - centerY - panY) / (baseScale * effectiveZoom) + centerY;
 
     // Use the shared coordinate transformation function with transformed coordinates
     const [worldX, worldY, worldZ] = canvasToWorld(
@@ -328,16 +335,23 @@ export function SimpleBrushTool({
       );
 
       // Convert all brush points to world coordinates using actual image metadata
-      const canvasWidth = canvasRef.current?.width || 512;
-      const canvasHeight = canvasRef.current?.height || 512;
+      const canvasWidth = canvasRef.current?.width || 1024;
+      const canvasHeight = canvasRef.current?.height || 1024;
 
+      // Calculate base scale to match contour rendering
+      const imageWidth = 512;
+      const imageHeight = 512;
+      const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
+      
       const worldPoints = brushPointsRef.current.map((point) => {
         // Apply zoom and pan transformations before converting to world coordinates
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
         
-        const transformedX = (point.x - centerX - panX) / zoom + centerX;
-        const transformedY = (point.y - centerY - panY) / zoom + centerY;
+        // Normalize zoom relative to base scale
+        const effectiveZoom = zoom / baseScale;
+        const transformedX = (point.x - centerX - panX) / (baseScale * effectiveZoom) + centerX;
+        const transformedY = (point.y - centerY - panY) / (baseScale * effectiveZoom) + centerY;
         
         // Use the shared coordinate transformation function
         const [worldX, worldY, worldZ] = canvasToWorld(

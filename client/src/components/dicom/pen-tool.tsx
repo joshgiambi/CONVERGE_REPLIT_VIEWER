@@ -86,12 +86,20 @@ export function PenTool({
     const relX = canvasX / rect.width;
     const relY = canvasY / rect.height;
 
-    // Apply zoom and pan transformations
+    // Calculate base scale to match contour rendering
+    const imgWidth = 512;
+    const imgHeight = 512;
+    const baseScale = Math.min(canvas.width / imgWidth, canvas.height / imgHeight); // = 2 for 512x512 in 1024x1024
+    
+    // Apply zoom and pan transformations accounting for base scale
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     
-    const transformedX = (canvasX - centerX - panX) / zoom + centerX;
-    const transformedY = (canvasY - centerY - panY) / zoom + centerY;
+    // Normalize zoom relative to base scale
+    const effectiveZoom = zoom / baseScale;
+    
+    const transformedX = (canvasX - centerX - panX) / (baseScale * effectiveZoom) + centerX;
+    const transformedY = (canvasY - centerY - panY) / (baseScale * effectiveZoom) + centerY;
     
     const adjustedRelX = transformedX / rect.width;
     const adjustedRelY = transformedY / rect.height;
@@ -101,8 +109,8 @@ export function PenTool({
     const imagePosition = imageMetadata.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
 
     // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-    const worldX = imagePosition[0] + (adjustedRelX * 512 * pixelSpacing[1]); // column spacing
-    const worldY = imagePosition[1] + (adjustedRelY * 512 * pixelSpacing[0]); // row spacing
+    const worldX = imagePosition[0] + (adjustedRelX * imgWidth * pixelSpacing[1]); // column spacing
+    const worldY = imagePosition[1] + (adjustedRelY * imgHeight * pixelSpacing[0]); // row spacing
     const worldZ = currentSlicePosition;
 
     return { x: worldX, y: worldY, z: worldZ };
@@ -175,14 +183,22 @@ export function PenTool({
         );
 
         if (canvasPoint) {
+          // Calculate base scale to match contour rendering
+          const imgWidth = 512;
+          const imgHeight = 512;
+          const canvasWidth = canvasRef.current!.width;
+          const canvasHeight = canvasRef.current!.height;
+          const baseScale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight); // = 2
+          
           // Apply zoom and pan to canvas point  
           const rect = overlayCanvasRef.current!.getBoundingClientRect();
           const centerX = rect.width / 2;
           const centerY = rect.height / 2;
           
-          // Canvas point is already in canvas space, just apply zoom/pan
-          const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
-          const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
+          // Canvas point is already in canvas space, apply zoom/pan with base scale
+          const effectiveZoom = zoom / baseScale;
+          const displayX = (canvasPoint[0] - centerX) * baseScale * effectiveZoom + centerX + panX;
+          const displayY = (canvasPoint[1] - centerY) * baseScale * effectiveZoom + centerY + panY;
 
           const dist = Math.sqrt(
             Math.pow(displayX - canvasX, 2) + 
