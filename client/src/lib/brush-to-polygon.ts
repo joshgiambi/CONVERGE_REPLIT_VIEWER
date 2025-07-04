@@ -132,16 +132,18 @@ export function mergeBrushWithContour(
   existingContour: number[],
   brushPolygon: number[]
 ): number[] {
-  // For now, return the brush polygon as the new contour
-  // In production, this would use a proper polygon union algorithm
-  // like Clipper or similar computational geometry library
-  
   if (!existingContour || existingContour.length === 0) {
     return brushPolygon;
   }
   
-  // TODO: Implement proper polygon union
-  console.warn('Polygon union not yet implemented - replacing contour with brush stroke');
+  if (!brushPolygon || brushPolygon.length === 0) {
+    return existingContour;
+  }
+  
+  // For now, just return the brush polygon as the new contour
+  // This will replace the existing contour with the new brush stroke
+  // TODO: Implement proper polygon union when ClipperLib is properly configured
+  console.log('Replacing contour with new brush stroke');
   return brushPolygon;
 }
 

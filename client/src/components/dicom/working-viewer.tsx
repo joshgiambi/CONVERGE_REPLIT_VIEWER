@@ -743,11 +743,10 @@ export function WorkingViewer({
         // - Patient's LEFT should appear on screen RIGHT (flip X)
         // - Patient's ANTERIOR should appear on screen TOP
         
-        // Apply radiological viewing convention for HFS
-        // Note: DICOM X increases from patient right to left
-        // Screen X increases from left to right, so we need to flip
-        pixelX = (imageWidth - 1) - (deltaX / pixelSpacing[1]); // Flip X for radiological view (0->511, 511->0)
-        pixelY = deltaY / pixelSpacing[0]; // Y maps directly
+        // Direct mapping - no flip needed based on user feedback
+        // The source DICOM data already has correct orientation
+        pixelX = deltaX / pixelSpacing[1]; // Direct X mapping
+        pixelY = deltaY / pixelSpacing[0]; // Direct Y mapping
 
         // Debug coordinate transformation for verification (can be removed in production)
         if (i === 0 && currentIndex === 0) {
@@ -901,27 +900,22 @@ export function WorkingViewer({
   };
 
   const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    // Only handle wheel events if brush tool is NOT active
-    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
-    
-    if (!isBrushActive) {
-      e.preventDefault();
-      e.stopPropagation();
+    // Always handle wheel events
+    e.preventDefault();
+    e.stopPropagation();
 
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+scroll for zoom
-        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-        setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+scroll for zoom
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+    } else {
+      // Regular scroll for slice navigation
+      if (e.deltaY > 0) {
+        goToNext();
       } else {
-        // Regular scroll for slice navigation
-        if (e.deltaY > 0) {
-          goToNext();
-        } else {
-          goToPrevious();
-        }
+        goToPrevious();
       }
     }
-    // If brush tool is active, let the event bubble up naturally
   };
 
   const handleZoomIn = () => {

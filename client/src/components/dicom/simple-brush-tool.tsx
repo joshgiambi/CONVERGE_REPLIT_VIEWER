@@ -258,6 +258,9 @@ export function SimpleBrushTool({
       // Don't prevent default or stop propagation - let it bubble to parent
       // This allows the parent canvas to handle slice navigation
     };
+    
+    // Add wheel listener to explicitly allow scrolling
+    canvas.addEventListener("wheel", handleWheel, { passive: true });
 
     // Add event listeners to the main canvas
     canvas.addEventListener("mousemove", handleMouseMove, { passive: false });
@@ -274,6 +277,7 @@ export function SimpleBrushTool({
       canvas.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("mouseleave", handleMouseLeave);
       canvas.removeEventListener("contextmenu", handleContextMenu);
+      canvas.removeEventListener("wheel", handleWheel);
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isActive, isDrawing, brushSize, selectedStructure]);

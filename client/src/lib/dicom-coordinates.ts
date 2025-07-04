@@ -27,13 +27,9 @@ export function canvasToWorld(
   const pixelX = (canvasX / canvasWidth) * imageWidth;
   const pixelY = (canvasY / canvasHeight) * imageHeight;
   
-  // Convert to world coordinates with HFS radiological viewing convention
-  // For HFS: screen X is flipped (patient's left appears on right)
-  // Need to unflip X when converting back to world coordinates
-  const unflippedPixelX = (imageWidth - 1) - pixelX; // Unflip X for world coords
-  
+  // Direct conversion - no flip needed based on user feedback
   // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-  const worldX = imagePosition[0] + (unflippedPixelX * pixelSpacing[1]); // column spacing
+  const worldX = imagePosition[0] + (pixelX * pixelSpacing[1]); // column spacing
   const worldY = imagePosition[1] + (pixelY * pixelSpacing[0]); // row spacing
   const worldZ = slicePosition;
   
@@ -52,11 +48,10 @@ export function worldToCanvas(
   const imageWidth = 512;
   const imageHeight = 512;
   
-  // Convert world to pixel coordinates with HFS radiological viewing convention
-  // For HFS: patient's LEFT appears on screen RIGHT (flip X)
+  // Direct conversion - no flip needed based on user feedback
   // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-  const pixelX = (imageWidth - 1) - ((worldX - imagePosition[0]) / pixelSpacing[1]); // Flip X for radiological view
-  const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // Y maps directly
+  const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // Direct X mapping
+  const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // Direct Y mapping
   
   // Scale to canvas
   const canvasX = (pixelX / imageWidth) * canvasWidth;
