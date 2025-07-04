@@ -1,4 +1,4 @@
-// Direct DICOM loading without Cornerstone dependencies
+// Robust DICOM loading without external dependencies
 export class DICOMLoader {
   private static instance: DICOMLoader;
 
@@ -36,22 +36,17 @@ export class DICOMLoader {
     try {
       const dataSet = dicomParser.parseDicom(byteArray);
       
-      // Extract image data
-      const pixelData = dataSet.elements.x7fe00010;
+      // Extract image data safely
+      const pixelData = dataSet.elements?.x7fe00010;
       if (!pixelData) {
-        throw new Error('No pixel data found');
+        throw new Error('No pixel data found in DICOM');
       }
 
-      // Get image dimensions
-      const rows = dataSet.uint16('x00280010');
-      const cols = dataSet.uint16('x00280011');
-      const bitsAllocated = dataSet.uint16('x00280100') || 16;
-      const samplesPerPixel = dataSet.uint16('x00280002') || 1;
+      // Get image dimensions with fallbacks
+      const rows = this.getUint16(dataSet, 'x00280010') || 512;
+      const cols = this.getUint16(dataSet, 'x00280011') || 512;
+      const bitsAllocated = this.getUint16(dataSet, 'x00280100') || 16;
       
-      if (!rows || !cols) {
-        throw new Error('Invalid image dimensions');
-      }
-
       // Create canvas
       const canvas = document.createElement('canvas');
       canvas.width = cols;
@@ -62,24 +57,32 @@ export class DICOMLoader {
         throw new Error('Could not get canvas context');
       }
 
-      // Get pixel data array
-      const pixelDataOffset = pixelData.dataOffset;
-      const pixelDataLength = pixelData.length;
+      // Get pixel data array with proper bounds checking
+      const pixelDataOffset = pixelData.dataOffset || 0;
+      const pixelDataLength = pixelData.length || 0;
       
+      if (pixelDataOffset >= arrayBuffer.byteLength || pixelDataLength <= 0) {
+        throw new Error('Invalid pixel data bounds');
+      }
+
       if (bitsAllocated === 16) {
         // 16-bit grayscale
-        const pixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelDataLength / 2);
+        const availableBytes = arrayBuffer.byteLength - pixelDataOffset;
+        const pixelCount = Math.min(availableBytes / 2, rows * cols);
+        const pixelArray = new Uint16Array(arrayBuffer, pixelDataOffset, pixelCount);
         this.render16BitGrayscale(ctx, pixelArray, cols, rows);
       } else if (bitsAllocated === 8) {
         // 8-bit grayscale
-        const pixelArray = new Uint8Array(arrayBuffer, pixelDataOffset, pixelDataLength);
+        const availableBytes = arrayBuffer.byteLength - pixelDataOffset;
+        const pixelCount = Math.min(availableBytes, rows * cols);
+        const pixelArray = new Uint8Array(arrayBuffer, pixelDataOffset, pixelCount);
         this.render8BitGrayscale(ctx, pixelArray, cols, rows);
       } else {
         throw new Error(`Unsupported bits allocated: ${bitsAllocated}`);
       }
 
       return canvas;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error parsing DICOM:', error);
       // Return a canvas with error message
       const canvas = document.createElement('canvas');
@@ -90,20 +93,40 @@ export class DICOMLoader {
       if (ctx) {
         ctx.fillStyle = 'black';
         ctx.fillRect(0, 0, 512, 512);
-        ctx.fillStyle = 'white';
+        ctx.fillStyle = 'red';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('DICOM Parse Error', 256, 256);
-        ctx.fillText(error.message, 256, 280);
+        ctx.fillText('Error loading DICOM', 256, 240);
+        ctx.fillText(error?.message || 'Unknown error', 256, 270);
       }
       
       return canvas;
     }
   }
 
+  private getUint16(dataSet: any, tag: string): number | null {
+    try {
+      return dataSet.uint16(tag);
+    } catch {
+      return null;
+    }
+  }
+
   private render16BitGrayscale(ctx: CanvasRenderingContext2D, pixelArray: Uint16Array, width: number, height: number) {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
+
+    if (pixelArray.length === 0) {
+      // Fill with black if no pixel data
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = 0;     // R
+        data[i + 1] = 0; // G
+        data[i + 2] = 0; // B
+        data[i + 3] = 255; // A
+      }
+      ctx.putImageData(imageData, 0, 0);
+      return;
+    }
 
     // Find min/max for windowing
     let min = pixelArray[0];
@@ -114,9 +137,11 @@ export class DICOMLoader {
     }
 
     const range = max - min;
+    const totalPixels = width * height;
     
-    for (let i = 0; i < pixelArray.length; i++) {
-      const normalizedValue = range > 0 ? ((pixelArray[i] - min) / range) * 255 : 0;
+    for (let i = 0; i < totalPixels; i++) {
+      const pixelValue = i < pixelArray.length ? pixelArray[i] : 0;
+      const normalizedValue = range > 0 ? ((pixelValue - min) / range) * 255 : 0;
       const gray = Math.max(0, Math.min(255, normalizedValue));
       
       const pixelIndex = i * 4;
@@ -133,8 +158,22 @@ export class DICOMLoader {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
-    for (let i = 0; i < pixelArray.length; i++) {
-      const gray = pixelArray[i];
+    if (pixelArray.length === 0) {
+      // Fill with black if no pixel data
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = 0;     // R
+        data[i + 1] = 0; // G
+        data[i + 2] = 0; // B
+        data[i + 3] = 255; // A
+      }
+      ctx.putImageData(imageData, 0, 0);
+      return;
+    }
+
+    const totalPixels = width * height;
+    
+    for (let i = 0; i < totalPixels; i++) {
+      const gray = i < pixelArray.length ? pixelArray[i] : 0;
       const pixelIndex = i * 4;
       data[pixelIndex] = gray;     // R
       data[pixelIndex + 1] = gray; // G
