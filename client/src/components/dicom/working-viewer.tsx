@@ -737,19 +737,19 @@ export function WorkingViewer({
         const deltaX = dicomX - imagePosition[0];
         const deltaY = dicomY - imagePosition[1];
 
-        // Project onto row and column directions, then divide by spacing
-        const origPixelX = (deltaX * colCosX + deltaY * colCosY) / pixelSpacing[1]; // column index
-        const origPixelY = (deltaX * rowCosX + deltaY * rowCosY) / pixelSpacing[0]; // row index
-
-        // No rotation or flip needed for standard axial orientation
-        pixelX = origPixelX;
-        pixelY = origPixelY;
+        // For standard axial images with orientation [1,0,0,0,1,0]:
+        // The first row direction is along X (left-right)
+        // The first column direction is along Y (anterior-posterior)
+        // But canvas coordinates have Y going down, not up
+        
+        // Direct mapping for standard axial orientation
+        pixelX = deltaX / pixelSpacing[1]; // X maps to columns
+        pixelY = deltaY / pixelSpacing[0]; // Y maps to rows
 
         // Debug coordinate transformation for verification (can be removed in production)
         if (i === 0 && currentIndex === 0) {
           console.log('RT coordinate transformation verified:', {
             dicomCoords: [dicomX, dicomY],
-            originalPixel: [origPixelX, origPixelY],
             finalPixel: [pixelX, pixelY]
           });
         }
@@ -898,21 +898,27 @@ export function WorkingViewer({
   };
 
   const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    // Only handle wheel events if brush tool is NOT active
+    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    
+    if (!isBrushActive) {
+      e.preventDefault();
+      e.stopPropagation();
 
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl+scroll for zoom
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
-    } else {
-      // Regular scroll for slice navigation
-      if (e.deltaY > 0) {
-        goToNext();
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+scroll for zoom
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
       } else {
-        goToPrevious();
+        // Regular scroll for slice navigation
+        if (e.deltaY > 0) {
+          goToNext();
+        } else {
+          goToPrevious();
+        }
       }
     }
+    // If brush tool is active, let the event bubble up naturally
   };
 
   const handleZoomIn = () => {

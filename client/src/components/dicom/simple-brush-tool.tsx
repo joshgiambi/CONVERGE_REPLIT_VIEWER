@@ -279,21 +279,21 @@ export function SimpleBrushTool({
   }, [isActive, isDrawing, brushSize, selectedStructure]);
 
   const addBrushPoint = (x: number, y: number) => {
-    if (!selectedStructure || !rtStructures?.structures) return;
+    if (!selectedStructure || !rtStructures?.structures || !imageMetadata) return;
 
-    // Convert canvas coordinates to world coordinates (DICOM coordinate system)
-    // This assumes a specific canvas size and world coordinate mapping
-    // You may need to adjust these calculations based on your actual image metadata
-    const canvasWidth = canvasRef.current?.width || 1024;
-    const canvasHeight = canvasRef.current?.height || 1024;
+    // Convert canvas coordinates to world coordinates using actual DICOM metadata
+    const canvasWidth = canvasRef.current?.width || 512;
+    const canvasHeight = canvasRef.current?.height || 512;
 
-    // Assuming the canvas represents a 600x600mm field of view centered at origin
-    const fieldOfViewX = 600; // mm
-    const fieldOfViewY = 600; // mm
-
-    const worldX = (x / canvasWidth - 0.5) * fieldOfViewX;
-    const worldY = -(y / canvasHeight - 0.5) * fieldOfViewY; // Flip Y for DICOM
-    const worldZ = currentSlicePosition;
+    // Use the shared coordinate transformation function
+    const [worldX, worldY, worldZ] = canvasToWorld(
+      x, 
+      y, 
+      canvasWidth, 
+      canvasHeight, 
+      imageMetadata,
+      currentSlicePosition
+    );
 
     console.log(
       `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,

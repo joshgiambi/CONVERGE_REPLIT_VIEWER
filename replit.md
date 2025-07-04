@@ -89,6 +89,12 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 04, 2025: Coordinate System Investigation - IN PROGRESS
+  - Fixed scrolling issue - wheel events now work when brush tool is active
+  - Removed 90-degree rotation and flip transformations based on user feedback
+  - Updated to direct coordinate mapping for standard axial DICOM images
+  - Fixed brush tool to use shared DICOM coordinate transformation
+  - Investigating why contours appear sideways without rotation despite correct source data
 - July 03, 2025: Complete Brush Tool Rebuild - COMPLETED
   - ✅ Completely rebuilt brush tool from scratch using medical imaging best practices
   - ✅ Researched 3D Slicer paint tool implementation for medical-grade functionality  
