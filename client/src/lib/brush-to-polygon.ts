@@ -7,8 +7,8 @@ interface Point3D {
 }
 
 /**
- * Convert brush stroke points to a polygon contour with accurate outline
- * This creates a medical-grade contour that follows the brush stroke precisely
+ * Convert brush stroke points to a polygon contour
+ * Simple and clean approach for medical imaging contours
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
@@ -18,162 +18,115 @@ export function brushStrokeToPolygon(
     return [];
   }
   
+  // Adjust brush size to match visual preview (slightly smaller for accurate output)
+  const adjustedBrushSize = brushSize * 0.9;
+  
   // Handle single point - create a circle
   if (brushPoints.length === 1) {
     const center = brushPoints[0];
-    const circlePoints = 32; // Points for a smooth circle
+    const circlePoints = 12; // Simple circle
     const result: number[] = [];
     
     for (let i = 0; i < circlePoints; i++) {
       const angle = (i / circlePoints) * 2 * Math.PI;
       result.push(
-        center[0] + brushSize * Math.cos(angle),
-        center[1] + brushSize * Math.sin(angle),
+        center[0] + adjustedBrushSize * Math.cos(angle),
+        center[1] + adjustedBrushSize * Math.sin(angle),
         center[2]
       );
     }
     
     return result;
   }
-  
-  // Handle two points - create a capsule shape
-  if (brushPoints.length === 2) {
-    const p1 = brushPoints[0];
-    const p2 = brushPoints[1];
-    const dx = p2[0] - p1[0];
-    const dy = p2[1] - p1[1];
-    const len = Math.sqrt(dx * dx + dy * dy);
-    
-    // Normal vector
-    const nx = len > 0 ? -dy / len : 0;
-    const ny = len > 0 ? dx / len : 1;
-    
-    const result: number[] = [];
-    const capPoints = 16;
-    
-    // First cap
-    for (let i = 0; i <= capPoints / 2; i++) {
-      const angle = Math.PI / 2 + (i / (capPoints / 2)) * Math.PI;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      result.push(
-        p1[0] + brushSize * (nx * cos - dx / len * sin),
-        p1[1] + brushSize * (ny * cos - dy / len * sin),
-        p1[2]
-      );
-    }
-    
-    // Second cap
-    for (let i = 0; i <= capPoints / 2; i++) {
-      const angle = -Math.PI / 2 + (i / (capPoints / 2)) * Math.PI;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      result.push(
-        p2[0] + brushSize * (nx * cos + dx / len * sin),
-        p2[1] + brushSize * (ny * cos + dy / len * sin),
-        p2[2]
-      );
-    }
-    
-    return result;
-  }
 
-  // Convert to Point3D format for easier manipulation
+  // Convert to Point3D format
   const points: Point3D[] = brushPoints.map(p => ({
     x: p[0],
     y: p[1],
     z: p[2]
   }));
 
-  // Generate outline points by creating an accurate buffer around the stroke
-  const leftSide: Point3D[] = [];
-  const rightSide: Point3D[] = [];
+  // Create a simple offset outline
+  const leftPoints: Point3D[] = [];
+  const rightPoints: Point3D[] = [];
   
-  // Process each segment of the brush stroke
+  // Calculate normals for each segment
   for (let i = 0; i < points.length; i++) {
     const curr = points[i];
-    let tangent = { x: 0, y: 0 };
+    let normal = { x: 0, y: 1 };
     
-    if (i === 0) {
-      // First point - use direction to next point
+    if (i < points.length - 1) {
+      // Use direction to next point
       const next = points[i + 1];
-      tangent.x = next.x - curr.x;
-      tangent.y = next.y - curr.y;
-    } else if (i === points.length - 1) {
-      // Last point - use direction from previous point
+      const dx = next.x - curr.x;
+      const dy = next.y - curr.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      
+      if (len > 0) {
+        // Perpendicular vector (rotated 90 degrees)
+        normal = { x: -dy / len, y: dx / len };
+      }
+    } else if (i > 0) {
+      // Last point - use direction from previous
       const prev = points[i - 1];
-      tangent.x = curr.x - prev.x;
-      tangent.y = curr.y - prev.y;
-    } else {
-      // Middle points - average of directions
-      const prev = points[i - 1];
-      const next = points[i + 1];
-      tangent.x = next.x - prev.x;
-      tangent.y = next.y - prev.y;
+      const dx = curr.x - prev.x;
+      const dy = curr.y - prev.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      
+      if (len > 0) {
+        normal = { x: -dy / len, y: dx / len };
+      }
     }
     
-    // Normalize tangent
-    const len = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
-    if (len > 0) {
-      tangent.x /= len;
-      tangent.y /= len;
-    } else {
-      tangent = { x: 1, y: 0 };
-    }
-    
-    // Calculate perpendicular (normal) vector
-    const normal = { x: -tangent.y, y: tangent.x };
-    
-    // Add points on both sides
-    leftSide.push({
-      x: curr.x + normal.x * brushSize,
-      y: curr.y + normal.y * brushSize,
+    // Add offset points
+    leftPoints.push({
+      x: curr.x + normal.x * adjustedBrushSize,
+      y: curr.y + normal.y * adjustedBrushSize,
       z: curr.z
     });
     
-    rightSide.push({
-      x: curr.x - normal.x * brushSize,
-      y: curr.y - normal.y * brushSize,
+    rightPoints.push({
+      x: curr.x - normal.x * adjustedBrushSize,
+      y: curr.y - normal.y * adjustedBrushSize,
       z: curr.z
     });
   }
   
-  // Add rounded caps at the ends
-  const capPoints = 16; // More points for smoother caps
+  // Create simple caps at the ends
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
   
-  // Start cap
+  // Start cap (half circle)
   const startCap: Point3D[] = [];
-  for (let i = 0; i <= capPoints / 2; i++) {
-    const angle = Math.PI + (i / (capPoints / 2)) * Math.PI;
+  for (let i = 0; i <= 6; i++) {
+    const angle = Math.PI + (i / 6) * Math.PI;
     startCap.push({
-      x: firstPoint.x + brushSize * Math.cos(angle),
-      y: firstPoint.y + brushSize * Math.sin(angle),
+      x: firstPoint.x + adjustedBrushSize * Math.cos(angle),
+      y: firstPoint.y + adjustedBrushSize * Math.sin(angle),
       z: firstPoint.z
     });
   }
   
-  // End cap
+  // End cap (half circle)
   const endCap: Point3D[] = [];
-  for (let i = 0; i <= capPoints / 2; i++) {
-    const angle = (i / (capPoints / 2)) * Math.PI;
+  for (let i = 0; i <= 6; i++) {
+    const angle = (i / 6) * Math.PI;
     endCap.push({
-      x: lastPoint.x + brushSize * Math.cos(angle),
-      y: lastPoint.y + brushSize * Math.sin(angle),
+      x: lastPoint.x + adjustedBrushSize * Math.cos(angle),
+      y: lastPoint.y + adjustedBrushSize * Math.sin(angle),
       z: lastPoint.z
     });
   }
   
-  // Combine all points in order: start cap + right side + end cap + left side (reversed)
+  // Combine in order to create closed polygon
   const outlinePoints: Point3D[] = [
     ...startCap,
-    ...rightSide,
+    ...rightPoints,
     ...endCap,
-    ...leftSide.reverse()
+    ...leftPoints.reverse()
   ];
   
-  // Convert back to flattened array format (x,y,z,x,y,z,...)
+  // Convert to flattened array
   const result: number[] = [];
   outlinePoints.forEach(point => {
     result.push(point.x, point.y, point.z);
