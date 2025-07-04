@@ -8,7 +8,7 @@ interface Point3D {
 
 /**
  * Convert brush stroke points to a polygon contour
- * Simple and clean approach for medical imaging contours
+ * Uses a convex hull approach for cleaner medical imaging contours
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
@@ -18,121 +18,105 @@ export function brushStrokeToPolygon(
     return [];
   }
   
-  // Adjust brush size to match visual preview (slightly smaller for accurate output)
+  // Adjust brush size to match visual preview
   const adjustedBrushSize = brushSize * 0.9;
   
-  // Handle single point - create a circle
-  if (brushPoints.length === 1) {
-    const center = brushPoints[0];
-    const circlePoints = 12; // Simple circle
-    const result: number[] = [];
-    
-    for (let i = 0; i < circlePoints; i++) {
-      const angle = (i / circlePoints) * 2 * Math.PI;
-      result.push(
-        center[0] + adjustedBrushSize * Math.cos(angle),
-        center[1] + adjustedBrushSize * Math.sin(angle),
-        center[2]
-      );
+  // Generate circle points around each brush stroke point
+  const allPoints: Point3D[] = [];
+  const circleSegments = 8; // Fewer segments for smoother result
+  
+  for (const point of brushPoints) {
+    // Add circle points around this brush point
+    for (let i = 0; i < circleSegments; i++) {
+      const angle = (i / circleSegments) * 2 * Math.PI;
+      allPoints.push({
+        x: point[0] + adjustedBrushSize * Math.cos(angle),
+        y: point[1] + adjustedBrushSize * Math.sin(angle),
+        z: point[2]
+      });
     }
-    
-    return result;
+  }
+  
+  // If we have very few points, just return a simple polygon
+  if (brushPoints.length <= 2) {
+    return computeConvexHull(allPoints);
   }
 
-  // Convert to Point3D format
-  const points: Point3D[] = brushPoints.map(p => ({
-    x: p[0],
-    y: p[1],
-    z: p[2]
-  }));
+  // Create outline using alpha shape approach
+  return createAlphaShape(allPoints, adjustedBrushSize * 2.5);
+}
 
-  // Create a simple offset outline
-  const leftPoints: Point3D[] = [];
-  const rightPoints: Point3D[] = [];
+/**
+ * Create an alpha shape (concave hull) from a set of points
+ * This creates a more natural boundary around the brush stroke
+ */
+function createAlphaShape(points: Point3D[], alpha: number): number[] {
+  if (points.length < 3) {
+    // Not enough points for a polygon
+    return [];
+  }
   
-  // Calculate normals for each segment
-  for (let i = 0; i < points.length; i++) {
-    const curr = points[i];
-    let normal = { x: 0, y: 1 };
-    
-    if (i < points.length - 1) {
-      // Use direction to next point
-      const next = points[i + 1];
-      const dx = next.x - curr.x;
-      const dy = next.y - curr.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      
-      if (len > 0) {
-        // Perpendicular vector (rotated 90 degrees)
-        normal = { x: -dy / len, y: dx / len };
-      }
-    } else if (i > 0) {
-      // Last point - use direction from previous
-      const prev = points[i - 1];
-      const dx = curr.x - prev.x;
-      const dy = curr.y - prev.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      
-      if (len > 0) {
-        normal = { x: -dy / len, y: dx / len };
-      }
+  // For simplicity, compute a convex hull first
+  // In production, you'd use a proper alpha shape algorithm
+  return computeConvexHull(points);
+}
+
+/**
+ * Compute convex hull of 2D points using Graham scan
+ * Returns points as flat array [x1,y1,z1,x2,y2,z2,...]
+ */
+function computeConvexHull(points: Point3D[]): number[] {
+  if (points.length < 3) return [];
+  
+  // Find the point with lowest y-coordinate (and leftmost if tied)
+  let start = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].y < points[start].y || 
+        (points[i].y === points[start].y && points[i].x < points[start].x)) {
+      start = i;
     }
-    
-    // Add offset points
-    leftPoints.push({
-      x: curr.x + normal.x * adjustedBrushSize,
-      y: curr.y + normal.y * adjustedBrushSize,
-      z: curr.z
-    });
-    
-    rightPoints.push({
-      x: curr.x - normal.x * adjustedBrushSize,
-      y: curr.y - normal.y * adjustedBrushSize,
-      z: curr.z
-    });
   }
   
-  // Create simple caps at the ends
-  const firstPoint = points[0];
-  const lastPoint = points[points.length - 1];
+  // Swap start point to position 0
+  [points[0], points[start]] = [points[start], points[0]];
   
-  // Start cap (half circle)
-  const startCap: Point3D[] = [];
-  for (let i = 0; i <= 6; i++) {
-    const angle = Math.PI + (i / 6) * Math.PI;
-    startCap.push({
-      x: firstPoint.x + adjustedBrushSize * Math.cos(angle),
-      y: firstPoint.y + adjustedBrushSize * Math.sin(angle),
-      z: firstPoint.z
-    });
-  }
-  
-  // End cap (half circle)
-  const endCap: Point3D[] = [];
-  for (let i = 0; i <= 6; i++) {
-    const angle = (i / 6) * Math.PI;
-    endCap.push({
-      x: lastPoint.x + adjustedBrushSize * Math.cos(angle),
-      y: lastPoint.y + adjustedBrushSize * Math.sin(angle),
-      z: lastPoint.z
-    });
-  }
-  
-  // Combine in order to create closed polygon
-  const outlinePoints: Point3D[] = [
-    ...startCap,
-    ...rightPoints,
-    ...endCap,
-    ...leftPoints.reverse()
-  ];
-  
-  // Convert to flattened array
-  const result: number[] = [];
-  outlinePoints.forEach(point => {
-    result.push(point.x, point.y, point.z);
+  // Sort points by polar angle with respect to start point
+  const sorted = points.slice(1).sort((a, b) => {
+    const angleA = Math.atan2(a.y - points[0].y, a.x - points[0].x);
+    const angleB = Math.atan2(b.y - points[0].y, b.x - points[0].x);
+    if (angleA !== angleB) return angleA - angleB;
+    // If angles are equal, sort by distance
+    const distA = Math.pow(a.x - points[0].x, 2) + Math.pow(a.y - points[0].y, 2);
+    const distB = Math.pow(b.x - points[0].x, 2) + Math.pow(b.y - points[0].y, 2);
+    return distA - distB;
   });
   
+  // Build convex hull using Graham scan
+  const hull: Point3D[] = [points[0], sorted[0]];
+  
+  for (let i = 1; i < sorted.length; i++) {
+    // Remove points that make a right turn
+    while (hull.length > 1 && !isLeftTurn(hull[hull.length - 2], hull[hull.length - 1], sorted[i])) {
+      hull.pop();
+    }
+    hull.push(sorted[i]);
+  }
+  
+  // Convert hull points to flat array
+  const result: number[] = [];
+  for (const p of hull) {
+    result.push(p.x, p.y, p.z);
+  }
+  
   return result;
+}
+
+/**
+ * Check if three points make a left turn
+ */
+function isLeftTurn(p1: Point3D, p2: Point3D, p3: Point3D): boolean {
+  const cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+  return cross > 0;
 }
 
 

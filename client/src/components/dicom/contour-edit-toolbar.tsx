@@ -189,26 +189,28 @@ export function ContourEditToolbar({
   const handleGrowContour = () => {
     if (!selectedStructure || !growDistance || !currentSlicePosition) return;
     
-    const distance = parseFloat(growDistance);
-    if (isNaN(distance) || distance <= 0) {
-      toast({ title: "Please enter a valid positive distance in mm", variant: "destructive" });
+    const distanceCm = parseFloat(growDistance);
+    if (isNaN(distanceCm) || distanceCm <= 0) {
+      toast({ title: "Please enter a valid positive distance in cm", variant: "destructive" });
       return;
     }
     
-    console.log(`Growing contour for structure ${selectedStructure.roiNumber} by ${distance}mm at slice ${currentSlicePosition}`);
+    // Convert cm to mm for the grow function
+    const distanceMm = distanceCm * 10;
+    
+    console.log(`Growing contour for structure ${selectedStructure.roiNumber} by ${distanceCm}cm (${distanceMm}mm) at slice ${currentSlicePosition}`);
     
     if (onContourUpdate) {
       const updatePayload = {
         action: 'grow_contour',
         structureId: selectedStructure.roiNumber,
         slicePosition: currentSlicePosition,
-        distance: distance // in millimeters
+        distance: distanceMm // in millimeters
       };
       onContourUpdate(updatePayload);
     }
     
-    toast({ title: `Growing contour by ${distance}mm on current slice` });
-    setGrowDistance('');
+    toast({ title: `Growing contour by ${distanceCm}cm on current slice` });
   };
 
   if (!isVisible || !selectedStructure) return null;
@@ -273,18 +275,20 @@ export function ContourEditToolbar({
         {showSettings === 'grow' ? (
           <div className="space-y-3 w-full">
             <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (mm)</Label>
-              <Input
-                type="number"
-                placeholder="Enter distance in mm"
-                value={growDistance}
-                onChange={(e) => setGrowDistance(e.target.value)}
-                className="w-full h-8 bg-gray-800/70 border-gray-600 text-white text-sm"
-                min="0"
-                step="0.1"
+              <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (cm)</Label>
+              <Slider
+                value={[parseFloat(growDistance) || 0]}
+                onValueChange={(value) => setGrowDistance(value[0].toString())}
+                max={2.0}
+                min={0}
+                step={0.1}
+                className="w-full"
               />
+              <div className="text-xs text-gray-400 mt-1">
+                {parseFloat(growDistance) || 0} cm ({((parseFloat(growDistance) || 0) * 10).toFixed(1)} mm)
+              </div>
               <div className="text-xs text-gray-500 mt-2">
-                Expands the selected contour radially by the specified distance in millimeters on the current slice.
+                Expands the selected contour radially by the specified distance on the current slice.
               </div>
             </div>
             
@@ -293,7 +297,7 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleGrowContour}
               className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
-              disabled={!growDistance || currentSlicePosition === undefined || currentSlicePosition === null}
+              disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
             >
               <ArrowUpFromLine className="w-4 h-4 mr-2" />
               Run Grow
@@ -304,7 +308,7 @@ export function ContourEditToolbar({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <div>
-                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
+                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness (cm)</Label>
                 <Slider
                   value={brushThickness}
                   onValueChange={(value) => {
@@ -323,7 +327,9 @@ export function ContourEditToolbar({
                   step={1}
                   className="w-full"
                 />
-                <div className="text-xs text-gray-400 mt-1">{brushThickness[0]}px</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {(brushThickness[0] * 0.1171875).toFixed(2)} cm ({brushThickness[0]}px)
+                </div>
               </div>
               
               <div className="flex items-center justify-between">

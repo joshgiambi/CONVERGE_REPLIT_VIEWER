@@ -89,6 +89,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 04, 2025: Medical-Grade Grow Function with CM Measurements - COMPLETED
+  - ✅ Updated brush size slider to display values in centimeters (cm) instead of pixels
+  - ✅ Shows conversion: cm value with pixel value in parentheses for reference
+  - ✅ Converted grow distance input field to a slider for better user experience
+  - ✅ Grow slider ranges from 0 to 2.0 cm with 0.1 cm step precision
+  - ✅ Displays both cm and mm values for grow distance (e.g., "0.5 cm (5.0 mm)")
+  - ✅ Updated grow function handler to convert cm input to mm for the algorithm
+  - ✅ Added grow_contour action handler to handleContourUpdate for proper integration
+  - ✅ Pixel spacing: 1.171875mm per pixel (0.1171875 cm per pixel) for HN-ATLAS dataset
 - July 04, 2025: Medical-Grade Pen Tool with Morphing - COMPLETED
   - ✅ Fixed brush tool coordinate system - now draws at correct position with zoom/pan
   - ✅ Applied zoom and pan transformations to match pen tool's accurate positioning

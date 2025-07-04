@@ -370,6 +370,9 @@ export function WorkingViewer({
       }
 
       setLocalRTStructures(updatedStructures);
+    } else if (payload.action === "grow_contour") {
+      // Handle contour growing
+      handleGrowContour(payload);
     }
   };
 
