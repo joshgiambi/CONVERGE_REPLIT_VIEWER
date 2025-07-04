@@ -694,6 +694,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve DICOM image files
+  app.get("/api/images/:sopInstanceUID", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sopInstanceUID = req.params.sopInstanceUID;
+      const image = await storage.getImageByUID(sopInstanceUID);
+      
+      if (!image) {
+        return res.status(404).json({ message: "Image not found" });
+      }
+      
+      if (!fs.existsSync(image.filePath)) {
+        return res.status(404).json({ message: "Image file not found on disk" });
+      }
+      
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      
+      const fileStream = fs.createReadStream(image.filePath);
+      fileStream.pipe(res);
+      
+    } catch (error) {
+      console.error('Error serving DICOM file:', error);
+      res.status(500).json({ message: "Failed to serve image" });
+    }
+  });
+
   // Get RT Structure Set for a study
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {

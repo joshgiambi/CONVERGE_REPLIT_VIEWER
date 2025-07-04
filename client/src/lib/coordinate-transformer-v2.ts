@@ -1,13 +1,13 @@
 // V2 Professional Coordinate Transformer
 // Medical-grade DICOM spatial transformation system
 
-import { 
-  Point, 
-  Point3D, 
-  DisplayPoint, 
+import {
+  Point,
+  Point3D,
+  DisplayPoint,
   DICOMImageMetadata,
-  SlicingMode 
-} from '@shared/schema';
+  SlicingMode,
+} from "@shared/schema";
 
 export class CoordinateTransformerV2 {
   private static readonly SCALING_FACTOR = 1000;
@@ -15,27 +15,27 @@ export class CoordinateTransformerV2 {
   // Transform patient coordinates to pixel coordinates
   static patientToPixel(
     patientPoint: Point3D,
-    imageMetadata: DICOMImageMetadata
+    imageMetadata: DICOMImageMetadata,
   ): Point {
     const {
       imagePositionPatient,
       imageOrientationPatient,
       pixelSpacing,
       rows,
-      columns
+      columns,
     } = imageMetadata;
 
     // Extract image orientation vectors
     const rowVector = [
       imageOrientationPatient[0],
       imageOrientationPatient[1],
-      imageOrientationPatient[2]
+      imageOrientationPatient[2],
     ];
-    
+
     const colVector = [
       imageOrientationPatient[3],
       imageOrientationPatient[4],
-      imageOrientationPatient[5]
+      imageOrientationPatient[5],
     ];
 
     // Calculate relative position from image origin
@@ -44,56 +44,60 @@ export class CoordinateTransformerV2 {
     const deltaZ = patientPoint.z - imagePositionPatient[2];
 
     // Project onto image plane using orientation vectors
-    const pixelX = (deltaX * rowVector[0] + deltaY * rowVector[1] + deltaZ * rowVector[2]) / pixelSpacing[0];
-    const pixelY = (deltaX * colVector[0] + deltaY * colVector[1] + deltaZ * colVector[2]) / pixelSpacing[1];
+    const pixelX =
+      (deltaX * rowVector[0] + deltaY * rowVector[1] + deltaZ * rowVector[2]) /
+      pixelSpacing[0];
+    const pixelY =
+      (deltaX * colVector[0] + deltaY * colVector[1] + deltaZ * colVector[2]) /
+      pixelSpacing[1];
 
     return {
       x: Math.round(pixelX),
-      y: Math.round(pixelY)
+      y: Math.round(pixelY),
     };
   }
 
   // Transform pixel coordinates to patient coordinates
   static pixelToPatient(
     pixelPoint: Point,
-    imageMetadata: DICOMImageMetadata
+    imageMetadata: DICOMImageMetadata,
   ): Point3D {
-    const {
-      imagePositionPatient,
-      imageOrientationPatient,
-      pixelSpacing
-    } = imageMetadata;
+    const { imagePositionPatient, imageOrientationPatient, pixelSpacing } =
+      imageMetadata;
 
     // Extract image orientation vectors
     const rowVector = [
       imageOrientationPatient[0],
       imageOrientationPatient[1],
-      imageOrientationPatient[2]
+      imageOrientationPatient[2],
     ];
-    
+
     const colVector = [
       imageOrientationPatient[3],
       imageOrientationPatient[4],
-      imageOrientationPatient[5]
+      imageOrientationPatient[5],
     ];
 
     // Calculate patient position using DICOM transformation
-    const patientX = imagePositionPatient[0] + 
-      (pixelPoint.x * pixelSpacing[0] * rowVector[0]) + 
-      (pixelPoint.y * pixelSpacing[1] * colVector[0]);
-      
-    const patientY = imagePositionPatient[1] + 
-      (pixelPoint.x * pixelSpacing[0] * rowVector[1]) + 
-      (pixelPoint.y * pixelSpacing[1] * colVector[1]);
-      
-    const patientZ = imagePositionPatient[2] + 
-      (pixelPoint.x * pixelSpacing[0] * rowVector[2]) + 
-      (pixelPoint.y * pixelSpacing[1] * colVector[2]);
+    const patientX =
+      imagePositionPatient[0] +
+      pixelPoint.x * pixelSpacing[0] * rowVector[0] +
+      pixelPoint.y * pixelSpacing[1] * colVector[0];
+
+    const patientY =
+      imagePositionPatient[1] +
+      pixelPoint.x * pixelSpacing[0] * rowVector[1] +
+      pixelPoint.y * pixelSpacing[1] * colVector[1];
+
+    const patientZ =
+      imagePositionPatient[2] +
+      pixelPoint.x * pixelSpacing[0] * rowVector[2] +
+      pixelPoint.y * pixelSpacing[1] * colVector[2];
 
     return {
       x: patientX,
       y: patientY,
-      z: patientZ
+      z: patientZ,
     };
   }
 
@@ -101,7 +105,7 @@ export class CoordinateTransformerV2 {
   static worldToScaled(point: Point): Point {
     return {
       x: Math.round(point.x * this.SCALING_FACTOR),
-      y: Math.round(point.y * this.SCALING_FACTOR)
+      y: Math.round(point.y * this.SCALING_FACTOR),
     };
   }
 
@@ -109,37 +113,40 @@ export class CoordinateTransformerV2 {
   static scaledToWorld(point: Point): Point {
     return {
       x: point.x / this.SCALING_FACTOR,
-      y: point.y / this.SCALING_FACTOR
+      y: point.y / this.SCALING_FACTOR,
     };
   }
 
   // Transform world coordinates to display coordinates using viewport
   static worldToDisplay(worldPoint: Point, viewport: any): DisplayPoint {
     if (!viewport) {
-      console.warn('No viewport provided for coordinate transformation');
+      console.warn("No viewport provided for coordinate transformation");
       return { x: worldPoint.x, y: worldPoint.y };
     }
 
     try {
       // Use cornerstone viewport transformation if available
       if (window.cornerstone && viewport) {
-        const canvasPoint = window.cornerstone.pixelToCanvas(viewport.element, worldPoint);
+        const canvasPoint = window.cornerstone.pixelToCanvas(
+          viewport.element,
+          worldPoint,
+        );
         return {
           x: Math.round(canvasPoint.x),
-          y: Math.round(canvasPoint.y)
+          y: Math.round(canvasPoint.y),
         };
       }
 
       // Fallback transformation using viewport properties
       const scale = viewport.scale || 1;
       const translation = viewport.translation || { x: 0, y: 0 };
-      
+
       return {
-        x: Math.round((worldPoint.x * scale) + translation.x),
-        y: Math.round((worldPoint.y * scale) + translation.y)
+        x: Math.round(worldPoint.x * scale + translation.x),
+        y: Math.round(worldPoint.y * scale + translation.y),
       };
     } catch (error) {
-      console.error('World to display transformation failed:', error);
+      console.error("World to display transformation failed:", error);
       return { x: worldPoint.x, y: worldPoint.y };
     }
   }
@@ -147,57 +154,66 @@ export class CoordinateTransformerV2 {
   // Transform display coordinates to world coordinates using viewport
   static displayToWorld(displayPoint: DisplayPoint, viewport: any): Point {
     if (!viewport) {
-      console.warn('No viewport provided for coordinate transformation');
+      console.warn("No viewport provided for coordinate transformation");
       return { x: displayPoint.x, y: displayPoint.y };
     }
 
     try {
       // Use cornerstone viewport transformation if available
       if (window.cornerstone && viewport) {
-        const pixelPoint = window.cornerstone.canvasToPixel(viewport.element, displayPoint);
+        const pixelPoint = window.cornerstone.canvasToPixel(
+          viewport.element,
+          displayPoint,
+        );
         return {
           x: Math.round(pixelPoint.x),
-          y: Math.round(pixelPoint.y)
+          y: Math.round(pixelPoint.y),
         };
       }
 
       // Fallback transformation using viewport properties
       const scale = viewport.scale || 1;
       const translation = viewport.translation || { x: 0, y: 0 };
-      
+
       return {
         x: Math.round((displayPoint.x - translation.x) / scale),
-        y: Math.round((displayPoint.y - translation.y) / scale)
+        y: Math.round((displayPoint.y - translation.y) / scale),
       };
     } catch (error) {
-      console.error('Display to world transformation failed:', error);
+      console.error("Display to world transformation failed:", error);
       return { x: displayPoint.x, y: displayPoint.y };
     }
   }
 
   // Apply medical coordinate system transformation for proper anatomical orientation
-  static applyMedicalTransform(point: Point, imageMetadata: DICOMImageMetadata): Point {
+  static applyMedicalTransform(
+    point: Point,
+    imageMetadata: DICOMImageMetadata,
+  ): Point {
     // Apply 90-degree counter-rotation and horizontal flip for correct anatomical display
     // This addresses the coordinate system issues identified in the V2 guide
     const { rows, columns } = imageMetadata;
-    
+
     // Apply coordinate transformation for proper medical display
     const transformed = {
       x: columns - point.y, // 90-degree rotation + horizontal flip
-      y: point.x            // 90-degree rotation
+      y: point.x, // 90-degree rotation
     };
 
     return transformed;
   }
 
   // Reverse medical coordinate system transformation
-  static reverseMedicalTransform(point: Point, imageMetadata: DICOMImageMetadata): Point {
+  static reverseMedicalTransform(
+    point: Point,
+    imageMetadata: DICOMImageMetadata,
+  ): Point {
     // Reverse the medical transformation
     const { rows, columns } = imageMetadata;
-    
+
     const reversed = {
-      x: point.y,                // Reverse 90-degree rotation
-      y: columns - point.x       // Reverse horizontal flip and rotation
+      x: point.y, // Reverse 90-degree rotation
+      y: columns - point.x, // Reverse horizontal flip and rotation
     };
 
     return reversed;
@@ -207,12 +223,12 @@ export class CoordinateTransformerV2 {
   static getSlicePosition(
     patientPoint: Point3D,
     slicingMode: SlicingMode,
-    imageMetadata: DICOMImageMetadata
+    imageMetadata: DICOMImageMetadata,
   ): number {
     switch (slicingMode) {
       case SlicingMode.K: // Axial
         return patientPoint.z;
-      case SlicingMode.J: // Coronal  
+      case SlicingMode.J: // Coronal
         return patientPoint.y;
       case SlicingMode.I: // Sagittal
         return patientPoint.x;
@@ -232,7 +248,7 @@ export class CoordinateTransformerV2 {
   // Calculate pixel area to physical area conversion
   static pixelAreaToPhysicalArea(
     pixelArea: number,
-    imageMetadata: DICOMImageMetadata
+    imageMetadata: DICOMImageMetadata,
   ): number {
     const { pixelSpacing } = imageMetadata;
     return pixelArea * pixelSpacing[0] * pixelSpacing[1];
@@ -240,23 +256,29 @@ export class CoordinateTransformerV2 {
 
   // Validate coordinate transformation parameters
   static validateImageMetadata(metadata: DICOMImageMetadata): boolean {
-    if (!metadata.imagePositionPatient || metadata.imagePositionPatient.length !== 3) {
-      console.error('Invalid image position patient');
+    if (
+      !metadata.imagePositionPatient ||
+      metadata.imagePositionPatient.length !== 3
+    ) {
+      console.error("Invalid image position patient");
       return false;
     }
 
-    if (!metadata.imageOrientationPatient || metadata.imageOrientationPatient.length !== 6) {
-      console.error('Invalid image orientation patient');
+    if (
+      !metadata.imageOrientationPatient ||
+      metadata.imageOrientationPatient.length !== 6
+    ) {
+      console.error("Invalid image orientation patient");
       return false;
     }
 
     if (!metadata.pixelSpacing || metadata.pixelSpacing.length !== 2) {
-      console.error('Invalid pixel spacing');
+      console.error("Invalid pixel spacing");
       return false;
     }
 
     if (!metadata.rows || !metadata.columns) {
-      console.error('Invalid image dimensions');
+      console.error("Invalid image dimensions");
       return false;
     }
 
@@ -264,16 +286,15 @@ export class CoordinateTransformerV2 {
   }
 
   // Create transformation matrix for advanced operations
-  static createTransformationMatrix(imageMetadata: DICOMImageMetadata): number[][] {
+  static createTransformationMatrix(
+    imageMetadata: DICOMImageMetadata,
+  ): number[][] {
     if (!this.validateImageMetadata(imageMetadata)) {
-      throw new Error('Invalid image metadata for transformation matrix');
+      throw new Error("Invalid image metadata for transformation matrix");
     }
 
-    const {
-      imagePositionPatient,
-      imageOrientationPatient,
-      pixelSpacing
-    } = imageMetadata;
+    const { imagePositionPatient, imageOrientationPatient, pixelSpacing } =
+      imageMetadata;
 
     // Create 4x4 transformation matrix for homogeneous coordinates
     const matrix = [
@@ -281,21 +302,21 @@ export class CoordinateTransformerV2 {
         imageOrientationPatient[0] * pixelSpacing[0],
         imageOrientationPatient[3] * pixelSpacing[1],
         0,
-        imagePositionPatient[0]
+        imagePositionPatient[0],
       ],
       [
         imageOrientationPatient[1] * pixelSpacing[0],
         imageOrientationPatient[4] * pixelSpacing[1],
         0,
-        imagePositionPatient[1]
+        imagePositionPatient[1],
       ],
       [
         imageOrientationPatient[2] * pixelSpacing[0],
         imageOrientationPatient[5] * pixelSpacing[1],
         0,
-        imagePositionPatient[2]
+        imagePositionPatient[2],
       ],
-      [0, 0, 0, 1]
+      [0, 0, 0, 1],
     ];
 
     return matrix;
@@ -305,7 +326,7 @@ export class CoordinateTransformerV2 {
   static applyTransformationMatrix(
     point: Point,
     matrix: number[][],
-    zValue = 0
+    zValue = 0,
   ): Point3D {
     const homogeneous = [point.x, point.y, zValue, 1];
     const result = [0, 0, 0, 0];
@@ -319,7 +340,7 @@ export class CoordinateTransformerV2 {
     return {
       x: result[0] / result[3],
       y: result[1] / result[3],
-      z: result[2] / result[3]
+      z: result[2] / result[3],
     };
   }
 }
