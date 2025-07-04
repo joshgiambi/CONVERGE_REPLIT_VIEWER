@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from "react";
+import { canvasToWorld } from "@/lib/dicom-coordinates";
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -310,33 +311,19 @@ export function SimpleBrushTool({
       // Convert all brush points to world coordinates using actual image metadata
       const canvasWidth = canvasRef.current?.width || 512;
       const canvasHeight = canvasRef.current?.height || 512;
-      
-      // Use actual image metadata for coordinate transformation
-      const imagePosition = imageMetadata?.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
-      const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
-      
-      // Image dimensions (typically 512x512 for CT)
-      const imageWidth = 512;
-      const imageHeight = 512;
 
       const worldPoints = brushPointsRef.current.map((point) => {
-        // Inverse of the worldToCanvas transformation used in RT overlay
-        // Convert canvas coordinates to pixel coordinates
-        const pixelX = (point.x / canvasWidth) * imageWidth;
-        const pixelY = (point.y / canvasHeight) * imageHeight;
+        // Use the shared coordinate transformation function
+        const [worldX, worldY, worldZ] = canvasToWorld(
+          point.x,
+          point.y,
+          canvasWidth,
+          canvasHeight,
+          imageMetadata,
+          currentSlicePosition
+        );
         
-        // Apply inverse of the rotation and flip that's applied in RT overlay
-        // First, undo the horizontal flip
-        const unflippedPixelX = imageWidth - pixelX;
-        
-        // Then, undo the 90-degree counter-rotation
-        const origPixelY = imageHeight - unflippedPixelX;
-        const origPixelX = pixelY;
-        
-        // Convert pixel coordinates to DICOM world coordinates
-        const worldX = imagePosition[0] + (origPixelX * pixelSpacing[1]);
-        const worldY = imagePosition[1] + (origPixelY * pixelSpacing[0]);
-        const worldZ = currentSlicePosition;
+        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
         
         return [worldX, worldY, worldZ];
       });
