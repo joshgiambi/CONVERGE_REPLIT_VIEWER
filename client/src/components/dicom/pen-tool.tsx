@@ -100,8 +100,9 @@ export function PenTool({
     const pixelSpacing = imageMetadata.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
     const imagePosition = imageMetadata.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
 
-    const worldX = imagePosition[0] + (adjustedRelX * 512 * pixelSpacing[0]);
-    const worldY = imagePosition[1] + (adjustedRelY * 512 * pixelSpacing[1]);
+    // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
+    const worldX = imagePosition[0] + (adjustedRelX * 512 * pixelSpacing[1]); // column spacing
+    const worldY = imagePosition[1] + (adjustedRelY * 512 * pixelSpacing[0]); // row spacing
     const worldZ = currentSlicePosition;
 
     return { x: worldX, y: worldY, z: worldZ };
@@ -174,15 +175,14 @@ export function PenTool({
         );
 
         if (canvasPoint) {
-          // Apply zoom and pan to canvas point
+          // Apply zoom and pan to canvas point  
           const rect = overlayCanvasRef.current!.getBoundingClientRect();
-          const scaleX = rect.width / canvasRef.current!.width;
-          const scaleY = rect.height / canvasRef.current!.height;
-          
           const centerX = rect.width / 2;
           const centerY = rect.height / 2;
-          const displayX = (canvasPoint[0] * scaleX - centerX) * zoom + centerX + panX;
-          const displayY = (canvasPoint[1] * scaleY - centerY) * zoom + centerY + panY;
+          
+          // Canvas point is already in canvas space, just apply zoom/pan
+          const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
+          const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
 
           const dist = Math.sqrt(
             Math.pow(displayX - canvasX, 2) + 
@@ -431,14 +431,12 @@ export function PenTool({
             
             if (canvasPoint) {
               const rect = overlayCanvasRef.current!.getBoundingClientRect();
-              const mainRect = canvasRef.current!.getBoundingClientRect();
-              const scaleX = rect.width / canvasRef.current!.width;
-              const scaleY = rect.height / canvasRef.current!.height;
-              
               const centerX = rect.width / 2;
               const centerY = rect.height / 2;
-              const displayX = (canvasPoint[0] * scaleX - centerX) * zoom + centerX + panX;
-              const displayY = (canvasPoint[1] * scaleY - centerY) * zoom + centerY + panY;
+              
+              // Canvas point is already in canvas space, just apply zoom/pan
+              const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
+              const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
               
               contourPoints.push({
                 canvas: { x: displayX, y: displayY },
