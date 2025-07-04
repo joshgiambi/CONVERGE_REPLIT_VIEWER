@@ -629,7 +629,12 @@ export function WorkingViewer({
 
       // Render RT structure overlays if available
       if (rtStructures && showStructures) {
-        renderRTStructures(ctx, canvas, currentImage);
+        // Pass currentImage with its metadata attached
+        const imageWithMetadata = {
+          ...currentImage,
+          imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+        };
+        renderRTStructures(ctx, canvas, imageWithMetadata);
       }
     } catch (error: any) {
       console.error("Error displaying image:", error);
@@ -758,15 +763,15 @@ export function WorkingViewer({
       currentSlicePosition = currentImage.parsedZPosition;
     }
     // Priority 3: Extract from image metadata directly
-    else if (imageMetadata && imageMetadata.sliceLocation !== undefined) {
-      const parsed = parseFloat(imageMetadata.sliceLocation);
+    else if (currentImage.imageMetadata && currentImage.imageMetadata.sliceLocation !== undefined) {
+      const parsed = parseFloat(currentImage.imageMetadata.sliceLocation);
       if (!isNaN(parsed)) {
         currentSlicePosition = parsed;
       }
     }
     // Priority 4: Extract Z from image position
-    else if (imageMetadata && imageMetadata.imagePosition) {
-      const imagePos = imageMetadata.imagePosition.split("\\");
+    else if (currentImage.imageMetadata && currentImage.imageMetadata.imagePosition) {
+      const imagePos = currentImage.imageMetadata.imagePosition.split("\\");
       if (imagePos.length >= 3) {
         const parsed = parseFloat(imagePos[2]);
         if (!isNaN(parsed)) {
@@ -783,8 +788,8 @@ export function WorkingViewer({
     console.log(`🔍 SLICE POSITION DEBUG:
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
       parsedZPosition: ${currentImage.parsedZPosition} 
-      imageMetadata.sliceLocation: ${imageMetadata?.sliceLocation}
-      imageMetadata.imagePosition Z: ${imageMetadata?.imagePosition ? imageMetadata.imagePosition.split("\\")[2] : "N/A"}
+      imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
+      imageMetadata.imagePosition Z: ${currentImage.imageMetadata?.imagePosition ? currentImage.imageMetadata.imagePosition.split("\\")[2] : currentImage.imagePosition?.split("\\")[2] || "N/A"}
       currentIndex: ${currentIndex}
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
     console.log(
@@ -872,6 +877,18 @@ export function WorkingViewer({
       console.warn("No image metadata available for contour drawing");
       return;
     }
+    
+    // Debug: Log first few points of the contour
+    if (contour.points.length >= 6) {
+      console.log('Drawing contour with metadata:', {
+        imagePosition: imgMetadata.imagePosition,
+        pixelSpacing: imgMetadata.pixelSpacing,
+        firstWorldPoint: [contour.points[0], contour.points[1], contour.points[2]],
+        canvasSize: [canvasWidth, canvasHeight],
+        zoom: zoom,
+        pan: [panX, panY]
+      });
+    }
 
     // Parse DICOM metadata
     const imagePosition = imgMetadata.imagePosition
@@ -885,13 +902,17 @@ export function WorkingViewer({
     const imageWidth = 512;
     const imageHeight = 512;
 
-    // Calculate the same scaling as the image rendering
-    const baseScale = Math.max(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    const totalScale = baseScale * zoom;
+    // Calculate base scale to fit image in canvas (matching render16BitImage logic)
+    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+    // For a 512x512 image in 1024x1024 canvas, baseScale = 2
+    
+    // Apply additional zoom on top of base scale
+    const effectiveZoom = zoom / baseScale; // Normalize the zoom relative to base scale
+    const totalScale = baseScale * effectiveZoom;
     const scaledWidth = imageWidth * totalScale;
     const scaledHeight = imageHeight * totalScale;
     
-    // Apply pan offset to centering (same as image rendering)
+    // Center the image on canvas with pan offset (same as render16BitImage)
     const imageX = (canvasWidth - scaledWidth) / 2 + panX;
     const imageY = (canvasHeight - scaledHeight) / 2 + panY;
 
