@@ -289,22 +289,14 @@ export function SimpleBrushTool({
     const canvasWidth = canvasRef.current?.width || 1024;
     const canvasHeight = canvasRef.current?.height || 1024;
 
-    // SIMPLIFIED - NO ZOOM FOR DEBUGGING
-    const imageWidth = 512;
-    const imageHeight = 512;
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
+    // NO TRANSFORMATION NEEDED - mouse coordinates are already in canvas space
+    // The image is displayed at 2x scale to fill the canvas, so canvas coordinates
+    // directly map to the displayed image
     
-    // Only apply base scale, no zoom or pan
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2;
-    
-    const transformedX = (x - centerX) / baseScale + centerX;
-    const transformedY = (y - centerY) / baseScale + centerY;
-
-    // Use the shared coordinate transformation function with transformed coordinates
+    // Use the shared coordinate transformation function with raw canvas coordinates
     const [worldX, worldY, worldZ] = canvasToWorld(
-      transformedX, 
-      transformedY, 
+      x, 
+      y, 
       canvasWidth, 
       canvasHeight, 
       imageMetadata,
@@ -312,7 +304,7 @@ export function SimpleBrushTool({
     );
 
     console.log(
-      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> Transformed(${transformedX.toFixed(1)}, ${transformedY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
+      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
     );
   };
 
@@ -336,30 +328,19 @@ export function SimpleBrushTool({
       const canvasWidth = canvasRef.current?.width || 1024;
       const canvasHeight = canvasRef.current?.height || 1024;
 
-      // SIMPLIFIED - NO ZOOM FOR DEBUGGING
-      const imageWidth = 512;
-      const imageHeight = 512;
-      const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
-      
+      // NO TRANSFORMATION NEEDED - mouse coordinates are already in canvas space
       const worldPoints = brushPointsRef.current.map((point) => {
-        // Only apply base scale, no zoom or pan
-        const centerX = canvasWidth / 2;
-        const centerY = canvasHeight / 2;
-        
-        const transformedX = (point.x - centerX) / baseScale + centerX;
-        const transformedY = (point.y - centerY) / baseScale + centerY;
-        
-        // Use the shared coordinate transformation function
+        // Use the shared coordinate transformation function with raw canvas coordinates
         const [worldX, worldY, worldZ] = canvasToWorld(
-          transformedX,
-          transformedY,
+          point.x,
+          point.y,
           canvasWidth,
           canvasHeight,
           imageMetadata,
           currentSlicePosition
         );
         
-        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> Transformed(${transformedX.toFixed(1)}, ${transformedY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
+        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
         
         return [worldX, worldY, worldZ];
       });
