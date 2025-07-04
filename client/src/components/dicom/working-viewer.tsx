@@ -175,6 +175,31 @@ export function WorkingViewer({
 
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = (payload: any) => {
+    // Check if two polygons intersect by checking if any points are close
+    const checkPolygonIntersection = (polygon1: number[], polygon2: number[]) => {
+      const threshold = 5.0; // Distance threshold in world coordinates (mm)
+      
+      // Check each point in polygon1 against polygon2
+      for (let i = 0; i < polygon1.length; i += 3) {
+        const p1x = polygon1[i];
+        const p1y = polygon1[i + 1];
+        
+        for (let j = 0; j < polygon2.length; j += 3) {
+          const p2x = polygon2[j];
+          const p2y = polygon2[j + 1];
+          
+          const distance = Math.sqrt(
+            Math.pow(p1x - p2x, 2) + Math.pow(p1y - p2y, 2)
+          );
+          
+          if (distance < threshold) {
+            return true; // Found intersection
+          }
+        }
+      }
+      
+      return false; // No intersection found
+    };
     console.log("Handling contour update:", payload);
 
     if (!rtStructures || !rtStructures.structures) {
@@ -195,60 +220,61 @@ export function WorkingViewer({
         return;
       }
 
-      // Find or create contour for this slice
-      let contour = structure.contours.find(
+      // Convert brush stroke to polygon
+      const brushPolygon = addBrushToContour(
+        [], // Empty array to get just the brush polygon
+        payload.points,
+        payload.brushSize,
+      );
+
+      // Find all contours on this slice
+      const sliceContours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) < 0.5,
       );
 
-      if (!contour) {
-        // Create new contour for this slice
-        contour = {
-          slicePosition: payload.slicePosition,
-          points: [],
-          numberOfPoints: 0,
-        };
-        structure.contours.push(contour);
+      // Check if brush stroke intersects with any existing contour
+      let foundIntersection = false;
+      let mergedWithContour = null;
+
+      for (const contour of sliceContours) {
+        if (contour.points && contour.points.length > 0) {
+          // Check if brush polygon intersects with this contour
+          // For now, use a simple approach: check if any brush point is close to any contour point
+          const intersects = checkPolygonIntersection(brushPolygon, contour.points);
+          
+          if (intersects) {
+            // Merge with this contour
+            console.log(
+              `Merging brush stroke with existing contour of ${contour.points.length / 3} points`,
+            );
+            
+            // Simple merge: combine all points
+            const allPoints = [...contour.points, ...brushPolygon];
+            contour.points = allPoints;
+            contour.numberOfPoints = allPoints.length / 3;
+            
+            foundIntersection = true;
+            mergedWithContour = contour;
+            break;
+          }
+        }
       }
 
-      // Convert brush stroke to polygon and merge with existing contour
-      console.log(
-        `Converting ${payload.points.length} brush points to polygon for slice ${payload.slicePosition}`,
-      );
-
-      // Get existing contour points or empty array
-      const existingPoints = contour.points || [];
-
-      // If there are existing points, we need to merge the brush stroke with them
-      if (existingPoints.length > 0) {
-        // For now, append the new brush stroke points to existing contour
-        // In production, this would use proper polygon union algorithms
+      if (!foundIntersection) {
+        // No intersection found - create new separate contour
         console.log(
-          `Merging with existing contour of ${existingPoints.length / 3} points`,
+          `Creating new separate contour for brush stroke at slice ${payload.slicePosition}`,
         );
-
-        // Convert brush points to polygon
-        const brushPolygon = addBrushToContour(
-          [], // Empty array to get just the brush polygon
-          payload.points,
-          payload.brushSize,
-        );
-
-        // Simple merge: combine all points (not ideal but prevents deletion)
-        const allPoints = [...existingPoints, ...brushPolygon];
-        contour.points = allPoints;
-        contour.numberOfPoints = allPoints.length / 3;
-      } else {
-        // No existing contour, create new one from brush stroke
-        const newContourPoints = addBrushToContour(
-          [],
-          payload.points,
-          payload.brushSize,
-        );
-        contour.points = newContourPoints;
-        contour.numberOfPoints = newContourPoints.length / 3;
+        
+        const newContour = {
+          slicePosition: payload.slicePosition,
+          points: brushPolygon,
+          numberOfPoints: brushPolygon.length / 3,
+        };
+        structure.contours.push(newContour);
       }
 
-      console.log(`Updated contour now has ${contour.numberOfPoints} points`);
+      console.log(`Structure now has ${structure.contours.length} contours`);
       setLocalRTStructures(updatedStructures);
     } else if (payload.action === "delete_slice") {
       // Handle slice deletion
