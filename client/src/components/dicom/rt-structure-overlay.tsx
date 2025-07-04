@@ -130,64 +130,21 @@ function renderRTStructures(
   ctx.lineWidth = contourWidth / zoom; // Adjust for zoom to maintain constant visual thickness
   ctx.globalAlpha = 1; // Keep stroke at full opacity
   
-  // CRITICAL FIX: Transform RT structure coordinates to CT image coordinates
-  // CT images are in range ~460-506mm, RT structures are in range -180 to 102.5mm
-  // We need to map RT structure coordinates to CT coordinates
+  // RT structures and CT images share the same coordinate system when they have the same Frame of Reference UID
+  // The RT structure positions should directly match the CT image positions
+  // No transformation needed - just use the actual Z positions from the contours
   
-  // Get all RT structure Z positions to understand their coordinate space
-  const rtZPositions: number[] = [];
+  const tolerance = 1.5; // mm tolerance for slice matching (half slice thickness typical for CT)
+  
+  // Count how many contours match the current slice
+  let contoursOnSlice = 0;
   rtStructures.structures.forEach(structure => {
     structure.contours.forEach(contour => {
-      rtZPositions.push(contour.slicePosition);
-    });
-  });
-  
-  if (rtZPositions.length === 0) return;
-  
-  // Find RT coordinate range
-  const rtZMin = Math.min(...rtZPositions);
-  const rtZMax = Math.max(...rtZPositions);
-  
-  // Assume CT images are in range 460-506 (based on data analysis)
-  // This should be dynamically determined, but for now use the known range
-  const ctZMin = 460;
-  const ctZMax = 506;
-  
-  // Create linear transformation from RT space to CT space
-  const rtRange = rtZMax - rtZMin;
-  const ctRange = ctZMax - ctZMin;
-  
-  // Transform function: map RT Z to CT Z
-  const transformRTtoCtZ = (rtZ: number) => {
-    const normalizedRtZ = (rtZ - rtZMin) / rtRange; // Normalize to 0-1
-    return ctZMin + normalizedRtZ * ctRange; // Map to CT range
-  };
-  
-  // Debug: Log transformation details every time to track the issue
-  console.log(`🔄 RT→CT Coordinate Transformation:
-    RT Range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm
-    CT Range: ${ctZMin.toFixed(1)} to ${ctZMax.toFixed(1)}mm
-    Current CT slice: ${currentSlicePosition.toFixed(1)}mm
-    Sample RT→CT mappings:
-      RT ${rtZMin.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMin).toFixed(1)}mm
-      RT 0.0mm → CT ${transformRTtoCtZ(0).toFixed(1)}mm
-      RT ${rtZMax.toFixed(1)}mm → CT ${transformRTtoCtZ(rtZMax).toFixed(1)}mm`);
-  
-  const tolerance = 2.0; // mm tolerance for slice matching
-  
-  // Debug: Check what contours are actually being drawn
-  let contoursDrawn = 0;
-  rtStructures.structures.forEach(structure => {
-    structure.contours.forEach(contour => {
-      const transformedZ = transformRTtoCtZ(contour.slicePosition);
-      if (Math.abs(transformedZ - currentSlicePosition) <= tolerance) {
-        contoursDrawn++;
-        console.log(`✓ Drawing ${structure.structureName} contour: RT ${contour.slicePosition.toFixed(1)}mm → CT ${transformedZ.toFixed(1)}mm`);
+      if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+        contoursOnSlice++;
       }
     });
   });
-  
-  console.log(`📊 Drawing ${contoursDrawn} contours on current slice`);
   
   rtStructures.structures.forEach(structure => {
     // Set color for this structure
@@ -196,11 +153,11 @@ function renderRTStructures(
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${contourOpacity / 100})`;
     
     structure.contours.forEach(contour => {
-      // Transform RT structure Z position to CT coordinate space
-      const transformedZ = transformRTtoCtZ(contour.slicePosition);
+      // Check if this contour is on the current slice
+      const sliceZ = contour.slicePosition;
       
-      // Check if this contour is on the current slice (after transformation)
-      if (Math.abs(transformedZ - currentSlicePosition) <= tolerance) {
+      // Check if this contour is on the current slice
+      if (Math.abs(sliceZ - currentSlicePosition) <= tolerance) {
         drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity);
       }
     });

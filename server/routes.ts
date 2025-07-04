@@ -23,8 +23,7 @@ function extractDICOMMetadata(filePath: string) {
     const buffer = fs.readFileSync(filePath);
     const byteArray = new Uint8Array(buffer);
     const dataSet = dicomParser.parseDicom(byteArray, {
-      untilTag: 'x7fe00010', // stop before pixel data
-      stopAtPixelData: true
+      untilTag: 'x7fe00010' // stop before pixel data
     });
 
     const getString = (tag: string) => {
@@ -55,7 +54,16 @@ function extractDICOMMetadata(filePath: string) {
       instanceNumber: getString('x00200013'),
       pixelSpacing: getArray('x00280030'),             // [rowSpacing, colSpacing]
       imagePositionPatient: getArray('x00200032'),     // [x, y, z]
-      imageOrientationPatient: getArray('x00200037')   // [rx, ry, rz, cx, cy, cz]
+      imageOrientationPatient: getArray('x00200037'),  // [rx, ry, rz, cx, cy, cz]
+      sliceThickness: getString('x00180050'),          // Slice thickness in mm
+      sliceLocation: getString('x00201041'),           // Slice location
+      frameOfReferenceUID: getString('x00200052'),     // Frame of Reference UID
+      rows: getString('x00280010'),                    // Image rows
+      columns: getString('x00280011'),                 // Image columns
+      windowCenter: getString('x00281050'),            // Window center
+      windowWidth: getString('x00281051'),             // Window width
+      rescaleSlope: getString('x00281053'),            // Rescale slope
+      rescaleIntercept: getString('x00281052')         // Rescale intercept
     };
   } catch (error) {
     console.error('DICOM parse error:', error);

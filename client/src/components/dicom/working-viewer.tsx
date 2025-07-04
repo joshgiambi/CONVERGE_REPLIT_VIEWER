@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SimpleBrushTool } from './simple-brush-tool';
 import { BrushOperation } from '@shared/schema';
 import { growContour, smoothContour } from '@/lib/contour-grow';
+import { addBrushToContour, eraseBrushFromContour } from '@/lib/brush-to-polygon';
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -146,6 +147,79 @@ export function WorkingViewer({
   const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
+
+  // Handle contour updates from brush tool and other contour editing operations
+  const handleContourUpdate = (payload: any) => {
+    console.log('Handling contour update:', payload);
+    
+    if (!rtStructures || !rtStructures.structures) {
+      console.error('No RT structures available');
+      return;
+    }
+
+    // Create a deep copy to avoid mutations
+    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    
+    if (payload.action === 'brush_stroke') {
+      // Handle brush stroke - add points to contour
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (!structure) {
+        console.error(`Structure ${payload.structureId} not found`);
+        return;
+      }
+
+      // Find or create contour for this slice
+      let contour = structure.contours.find((c: any) => 
+        Math.abs(c.slicePosition - payload.slicePosition) < 0.5
+      );
+
+      if (!contour) {
+        // Create new contour for this slice
+        contour = {
+          slicePosition: payload.slicePosition,
+          points: [],
+          numberOfPoints: 0
+        };
+        structure.contours.push(contour);
+      }
+
+      // Convert brush stroke to polygon and update contour
+      console.log(`Converting ${payload.points.length} brush points to polygon for slice ${payload.slicePosition}`);
+      
+      // Get existing contour points or empty array
+      const existingPoints = contour.points || [];
+      
+      // Convert brush stroke to polygon and merge with existing contour
+      const updatedPoints = addBrushToContour(
+        existingPoints,
+        payload.points,
+        payload.brushSize
+      );
+      
+      // Update contour with new points
+      contour.points = updatedPoints;
+      contour.numberOfPoints = updatedPoints.length / 3; // Each point has x,y,z
+      
+      console.log(`Updated contour now has ${contour.numberOfPoints} points`);
+      setLocalRTStructures(updatedStructures);
+    } else if (payload.action === 'delete_slice') {
+      // Handle slice deletion
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (structure) {
+        structure.contours = structure.contours.filter((c: any) => 
+          Math.abs(c.slicePosition - payload.slicePosition) > 0.5
+        );
+        setLocalRTStructures(updatedStructures);
+      }
+    } else if (payload.action === 'clear_all') {
+      // Handle clear all contours
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (structure) {
+        structure.contours = [];
+        setLocalRTStructures(updatedStructures);
+      }
+    }
+  };
 
   // Handle auto-zoom when autoZoomLevel prop changes
   useEffect(() => {
@@ -983,10 +1057,8 @@ export function WorkingViewer({
                 // Handle different types of contour updates
                 if (payload.action === 'grow_contour') {
                   handleGrowContour(payload);
-                } else if (onContourUpdate) {
-                  onContourUpdate(payload);
                 } else {
-                  console.log('Contour update:', payload);
+                  handleContourUpdate(payload);
                 }
               }}
               zoom={zoom}
