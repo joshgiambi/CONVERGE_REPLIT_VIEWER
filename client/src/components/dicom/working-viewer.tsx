@@ -1,19 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { SimpleBrushTool } from './simple-brush-tool';
-import { PenTool } from './pen-tool';
-import { BrushOperation } from '@shared/schema';
-import { growContour, smoothContour } from '@/lib/contour-grow';
-import { addBrushToContour, eraseBrushFromContour } from '@/lib/brush-to-polygon';
+import { useEffect, useRef, useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { SimpleBrushTool } from "./simple-brush-tool";
+import { PenTool } from "./pen-tool";
+import { BrushOperation } from "@shared/schema";
+import { growContour, smoothContour } from "@/lib/contour-grow";
+import {
+  addBrushToContour,
+  eraseBrushFromContour,
+} from "@/lib/brush-to-polygon";
 
 interface WorkingViewerProps {
   seriesId: number;
   studyId?: number;
   windowLevel?: { window: number; level: number };
-  onWindowLevelChange?: (windowLevel: { window: number; level: number }) => void;
+  onWindowLevelChange?: (windowLevel: {
+    window: number;
+    level: number;
+  }) => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onResetZoom?: () => void;
@@ -33,15 +39,15 @@ interface WorkingViewerProps {
   onSlicePositionChange?: (slicePosition: number) => void;
 }
 
-export function WorkingViewer({ 
-  seriesId, 
-  studyId, 
-  windowLevel: externalWindowLevel, 
-  onWindowLevelChange, 
-  onZoomIn, 
-  onZoomOut, 
-  onResetZoom, 
-  rtStructures: externalRTStructures, 
+export function WorkingViewer({
+  seriesId,
+  studyId,
+  windowLevel: externalWindowLevel,
+  onWindowLevelChange,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  rtStructures: externalRTStructures,
   structureVisibility: externalStructureVisibility,
   brushToolState,
   selectedForEdit,
@@ -50,7 +56,7 @@ export function WorkingViewer({
   contourSettings,
   autoZoomLevel,
   autoLocalizeTarget,
-  onSlicePositionChange
+  onSlicePositionChange,
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -58,7 +64,8 @@ export function WorkingViewer({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Use external RT structures if provided, otherwise load our own
-  const [localRTStructures, setLocalRTStructures] = useState(externalRTStructures);
+  const [localRTStructures, setLocalRTStructures] =
+    useState(externalRTStructures);
   const rtStructures = localRTStructures || externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
@@ -71,17 +78,25 @@ export function WorkingViewer({
 
   // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
-  const currentWindowLevel = externalWindowLevel 
+  const currentWindowLevel = externalWindowLevel
     ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
     : { width: 400, center: 40 };
 
   // Function to update external window/level when internal changes
-  const updateWindowLevel = (newWindowLevel: { width: number; center: number }) => {
+  const updateWindowLevel = (newWindowLevel: {
+    width: number;
+    center: number;
+  }) => {
     if (onWindowLevelChange) {
-      onWindowLevelChange({ window: newWindowLevel.width, level: newWindowLevel.center });
+      onWindowLevelChange({
+        window: newWindowLevel.width,
+        level: newWindowLevel.center,
+      });
     }
   };
-  const [imageCache, setImageCache] = useState<Map<string, { data: Float32Array, width: number, height: number }>>(new Map());
+  const [imageCache, setImageCache] = useState<
+    Map<string, { data: Float32Array; width: number; height: number }>
+  >(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
 
   // Zoom and pan state
@@ -92,39 +107,48 @@ export function WorkingViewer({
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
     if (!rtStructures) {
-      console.error('RT structures not available for growing');
+      console.error("RT structures not available for growing");
       return;
     }
 
     const { structureId, slicePosition, distance } = payload;
-    console.log(`Growing contour for structure ${structureId} by ${distance}mm at slice ${slicePosition}`);
+    console.log(
+      `Growing contour for structure ${structureId} by ${distance}mm at slice ${slicePosition}`,
+    );
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
-    
+
     // Find the target structure
-    const structure = updatedRTStructures.structures?.find((s: any) => s.roiNumber === structureId);
+    const structure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
     if (!structure) {
       console.error(`Structure ${structureId} not found`);
       return;
     }
 
     // Find the contour for the specified slice
-    const contour = structure.contours?.find((c: any) => 
-      Math.abs(c.slicePosition - slicePosition) < 0.5
+    const contour = structure.contours?.find(
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
     );
 
     if (!contour || !contour.points || contour.points.length < 9) {
-      console.warn(`No contour found on slice ${slicePosition} or insufficient points`);
+      console.warn(
+        `No contour found on slice ${slicePosition} or insufficient points`,
+      );
       return;
     }
 
     try {
       // Apply contour growing algorithm
-      const grownContour = growContour({
-        points: contour.points,
-        slicePosition: slicePosition
-      }, distance);
+      const grownContour = growContour(
+        {
+          points: contour.points,
+          slicePosition: slicePosition,
+        },
+        distance,
+      );
 
       // Apply smoothing for medical-grade quality
       const smoothedContour = smoothContour(grownContour, 0.15);
@@ -140,7 +164,7 @@ export function WorkingViewer({
 
       console.log(`Successfully grew contour by ${distance}mm`);
     } catch (error) {
-      console.error('Error growing contour:', error);
+      console.error("Error growing contour:", error);
     }
   };
   const [isDragging, setIsDragging] = useState(false);
@@ -151,27 +175,29 @@ export function WorkingViewer({
 
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = (payload: any) => {
-    console.log('Handling contour update:', payload);
-    
+    console.log("Handling contour update:", payload);
+
     if (!rtStructures || !rtStructures.structures) {
-      console.error('No RT structures available');
+      console.error("No RT structures available");
       return;
     }
 
     // Create a deep copy to avoid mutations
     const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
-    
-    if (payload.action === 'brush_stroke') {
+
+    if (payload.action === "brush_stroke") {
       // Handle brush stroke - add points to contour
-      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
       if (!structure) {
         console.error(`Structure ${payload.structureId} not found`);
         return;
       }
 
       // Find or create contour for this slice
-      let contour = structure.contours.find((c: any) => 
-        Math.abs(c.slicePosition - payload.slicePosition) < 0.5
+      let contour = structure.contours.find(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) < 0.5,
       );
 
       if (!contour) {
@@ -179,30 +205,34 @@ export function WorkingViewer({
         contour = {
           slicePosition: payload.slicePosition,
           points: [],
-          numberOfPoints: 0
+          numberOfPoints: 0,
         };
         structure.contours.push(contour);
       }
 
       // Convert brush stroke to polygon and merge with existing contour
-      console.log(`Converting ${payload.points.length} brush points to polygon for slice ${payload.slicePosition}`);
-      
+      console.log(
+        `Converting ${payload.points.length} brush points to polygon for slice ${payload.slicePosition}`,
+      );
+
       // Get existing contour points or empty array
       const existingPoints = contour.points || [];
-      
+
       // If there are existing points, we need to merge the brush stroke with them
       if (existingPoints.length > 0) {
         // For now, append the new brush stroke points to existing contour
         // In production, this would use proper polygon union algorithms
-        console.log(`Merging with existing contour of ${existingPoints.length / 3} points`);
-        
+        console.log(
+          `Merging with existing contour of ${existingPoints.length / 3} points`,
+        );
+
         // Convert brush points to polygon
         const brushPolygon = addBrushToContour(
-          [],  // Empty array to get just the brush polygon
+          [], // Empty array to get just the brush polygon
           payload.points,
-          payload.brushSize
+          payload.brushSize,
         );
-        
+
         // Simple merge: combine all points (not ideal but prevents deletion)
         const allPoints = [...existingPoints, ...brushPolygon];
         contour.points = allPoints;
@@ -212,42 +242,52 @@ export function WorkingViewer({
         const newContourPoints = addBrushToContour(
           [],
           payload.points,
-          payload.brushSize
+          payload.brushSize,
         );
         contour.points = newContourPoints;
         contour.numberOfPoints = newContourPoints.length / 3;
       }
-      
+
       console.log(`Updated contour now has ${contour.numberOfPoints} points`);
       setLocalRTStructures(updatedStructures);
-    } else if (payload.action === 'delete_slice') {
+    } else if (payload.action === "delete_slice") {
       // Handle slice deletion
-      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
       if (structure) {
-        structure.contours = structure.contours.filter((c: any) => 
-          Math.abs(c.slicePosition - payload.slicePosition) > 0.5
+        structure.contours = structure.contours.filter(
+          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 0.5,
         );
         setLocalRTStructures(updatedStructures);
       }
-    } else if (payload.action === 'clear_all') {
+    } else if (payload.action === "clear_all") {
       // Handle clear all contours
-      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
       if (structure) {
         structure.contours = [];
         setLocalRTStructures(updatedStructures);
       }
-    } else if (payload.action === 'add_pen_stroke' || payload.action === 'cut_pen_stroke') {
+    } else if (
+      payload.action === "add_pen_stroke" ||
+      payload.action === "cut_pen_stroke"
+    ) {
       // Handle pen tool operations
-      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
       if (!structure) return;
-      
+
       // Find contour on current slice
       const tolerance = 1.5;
-      const sliceContour = structure.contours.find((c: any) => 
-        Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
+      const sliceContour = structure.contours.find(
+        (c: any) =>
+          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
       );
-      
-      if (payload.action === 'add_pen_stroke') {
+
+      if (payload.action === "add_pen_stroke") {
         if (sliceContour) {
           // Merge pen stroke with existing contour
           const mergedPoints = [...sliceContour.points, ...payload.points];
@@ -258,44 +298,51 @@ export function WorkingViewer({
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: payload.points,
-            numberOfPoints: payload.points.length / 3
+            numberOfPoints: payload.points.length / 3,
           });
         }
-      } else if (payload.action === 'cut_pen_stroke') {
+      } else if (payload.action === "cut_pen_stroke") {
         // TODO: Implement contour cutting logic
-        console.log('Cut pen stroke not yet implemented');
+        console.log("Cut pen stroke not yet implemented");
       }
-      
+
       setLocalRTStructures(updatedStructures);
-    } else if (payload.action === 'replace_contour') {
+    } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
-      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
       if (!structure) return;
-      
+
       // Find and replace the contour on current slice
       const tolerance = 1.5;
-      const contourIndex = structure.contours.findIndex((c: any) => 
-        Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
+      const contourIndex = structure.contours.findIndex(
+        (c: any) =>
+          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
       );
-      
+
       if (contourIndex >= 0) {
         // Replace existing contour with new points
         structure.contours[contourIndex] = {
           slicePosition: payload.slicePosition,
           points: payload.points,
-          numberOfPoints: payload.points.length / 3
+          numberOfPoints: payload.points.length / 3,
         };
-        console.log(`Replaced contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`);
+        console.log(
+          `Replaced contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`,
+        );
       } else {
         // Create new contour if none exists
         structure.contours.push({
           slicePosition: payload.slicePosition,
           points: payload.points,
-          numberOfPoints: payload.points.length / 3
+          numberOfPoints: payload.points.length / 3,
         });
-        console.log(`Created new contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`);
+        console.log(
+          `Created new contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`,
+        );
       }
-      
+
       setLocalRTStructures(updatedStructures);
     }
   };
@@ -355,46 +402,57 @@ export function WorkingViewer({
       const seriesImages = await response.json();
 
       // First parse DICOM metadata for proper spatial ordering
-      const imagesWithMetadata = await Promise.all(seriesImages.map(async (img: any) => {
-        try {
-          const response = await fetch(`/api/images/${img.sopInstanceUID}`);
-          const arrayBuffer = await response.arrayBuffer();
+      const imagesWithMetadata = await Promise.all(
+        seriesImages.map(async (img: any) => {
+          try {
+            const response = await fetch(`/api/images/${img.sopInstanceUID}`);
+            const arrayBuffer = await response.arrayBuffer();
 
-          if (!window.dicomParser) {
-            await loadDicomParser();
+            if (!window.dicomParser) {
+              await loadDicomParser();
+            }
+
+            const byteArray = new Uint8Array(arrayBuffer);
+            const dataSet = window.dicomParser.parseDicom(byteArray);
+
+            // Extract spatial metadata
+            const sliceLocation = dataSet.floatString("x00201041");
+            const imagePosition = dataSet.string("x00200032");
+            const instanceNumber = dataSet.intString("x00200013");
+
+            // Parse image position (z-coordinate is third value)
+            let zPosition = null;
+            if (imagePosition) {
+              const positions = imagePosition
+                .split("\\")
+                .map((p: string) => parseFloat(p));
+              zPosition = positions[2];
+            }
+
+            return {
+              ...img,
+              parsedSliceLocation: sliceLocation
+                ? parseFloat(sliceLocation)
+                : null,
+              parsedZPosition: zPosition,
+              parsedInstanceNumber: instanceNumber
+                ? parseInt(instanceNumber)
+                : img.instanceNumber,
+            };
+          } catch (error) {
+            console.warn(
+              `Failed to parse DICOM metadata for ${img.fileName}:`,
+              error,
+            );
+            return {
+              ...img,
+              parsedSliceLocation: null,
+              parsedZPosition: null,
+              parsedInstanceNumber: img.instanceNumber,
+            };
           }
-
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataSet = window.dicomParser.parseDicom(byteArray);
-
-          // Extract spatial metadata
-          const sliceLocation = dataSet.floatString('x00201041');
-          const imagePosition = dataSet.string('x00200032');
-          const instanceNumber = dataSet.intString('x00200013');
-
-          // Parse image position (z-coordinate is third value)
-          let zPosition = null;
-          if (imagePosition) {
-            const positions = imagePosition.split('\\').map((p: string) => parseFloat(p));
-            zPosition = positions[2];
-          }
-
-          return {
-            ...img,
-            parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
-            parsedZPosition: zPosition,
-            parsedInstanceNumber: instanceNumber ? parseInt(instanceNumber) : img.instanceNumber
-          };
-        } catch (error) {
-          console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
-          return {
-            ...img,
-            parsedSliceLocation: null,
-            parsedZPosition: null,
-            parsedInstanceNumber: img.instanceNumber
-          };
-        }
-      }));
+        }),
+      );
 
       // Sort by spatial position - prefer slice location, then z-position, then instance number
       const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
@@ -409,12 +467,17 @@ export function WorkingViewer({
         }
 
         // Tertiary: instance number
-        if (a.parsedInstanceNumber !== null && b.parsedInstanceNumber !== null) {
+        if (
+          a.parsedInstanceNumber !== null &&
+          b.parsedInstanceNumber !== null
+        ) {
           return a.parsedInstanceNumber - b.parsedInstanceNumber;
         }
 
         // Final fallback: filename
-        return a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+        return a.fileName.localeCompare(b.fileName, undefined, {
+          numeric: true,
+        });
       });
 
       setImages(sortedImages);
@@ -422,7 +485,6 @@ export function WorkingViewer({
 
       // Preload all images immediately
       preloadAllImages(sortedImages);
-
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -443,20 +505,24 @@ export function WorkingViewer({
       // Extract image data
       const pixelDataElement = dataSet.elements.x7fe00010;
       if (!pixelDataElement) {
-        throw new Error('No pixel data found in DICOM file');
+        throw new Error("No pixel data found in DICOM file");
       }
 
       // Get image dimensions and parameters
-      const rows = dataSet.uint16('x00280010') || 512;
-      const cols = dataSet.uint16('x00280011') || 512;
-      const bitsAllocated = dataSet.uint16('x00280100') || 16;
+      const rows = dataSet.uint16("x00280010") || 512;
+      const cols = dataSet.uint16("x00280011") || 512;
+      const bitsAllocated = dataSet.uint16("x00280100") || 16;
 
       // Get rescale parameters for Hounsfield Units
-      const rescaleSlope = dataSet.floatString('x00281053') || 1;
-      const rescaleIntercept = dataSet.floatString('x00281052') || -1024;
+      const rescaleSlope = dataSet.floatString("x00281053") || 1;
+      const rescaleIntercept = dataSet.floatString("x00281052") || -1024;
 
       if (bitsAllocated === 16) {
-        const rawPixelArray = new Uint16Array(arrayBuffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+        const rawPixelArray = new Uint16Array(
+          arrayBuffer,
+          pixelDataElement.dataOffset,
+          pixelDataElement.length / 2,
+        );
         // Convert to Hounsfield Units
         const huPixelArray = new Float32Array(rawPixelArray.length);
         for (let i = 0; i < rawPixelArray.length; i++) {
@@ -466,26 +532,28 @@ export function WorkingViewer({
         return {
           data: huPixelArray,
           width: cols,
-          height: rows
+          height: rows,
         };
       } else {
-        throw new Error('Only 16-bit images supported');
+        throw new Error("Only 16-bit images supported");
       }
     } catch (error) {
-      console.error('Error parsing DICOM image:', error);
+      console.error("Error parsing DICOM image:", error);
       return null;
     }
   };
 
   const preloadAllImages = async (imageList: any[]) => {
-    console.log('Starting to preload all images...');
+    console.log("Starting to preload all images...");
     setIsPreloading(true);
     const newCache = new Map();
 
     // Load all images in parallel
     const loadPromises = imageList.map(async (image, index) => {
       try {
-        const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+        const imageResponse = await fetch(
+          `/api/images/${image.sopInstanceUID}`,
+        );
         if (!imageResponse.ok) {
           throw new Error(`Failed to load image ${index + 1}`);
         }
@@ -506,7 +574,9 @@ export function WorkingViewer({
     await Promise.allSettled(loadPromises);
     setImageCache(newCache);
     setIsPreloading(false);
-    console.log(`Preloading complete: ${newCache.size}/${imageList.length} images cached`);
+    console.log(
+      `Preloading complete: ${newCache.size}/${imageList.length} images cached`,
+    );
   };
 
   const loadImageMetadata = async (imageId: number) => {
@@ -514,13 +584,13 @@ export function WorkingViewer({
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
-        console.log('Image metadata:', metadata);
+        console.log("Image metadata:", metadata);
         setImageMetadata(metadata);
 
         // Frame of Reference UIDs are verified during data import
       }
     } catch (error) {
-      console.error('Failed to load image metadata:', error);
+      console.error("Failed to load image metadata:", error);
     }
   };
 
@@ -528,7 +598,7 @@ export function WorkingViewer({
     if (!canvasRef.current || images.length === 0) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     try {
@@ -536,15 +606,18 @@ export function WorkingViewer({
       const cacheKey = currentImage.sopInstanceUID;
 
       // Clear canvas
-      ctx.fillStyle = 'black';
+      ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       let imageData = imageCache.get(cacheKey);
 
       if (!imageData) {
         // Image should be preloaded, but fallback just in case
-        console.warn('Image not in cache, this should not happen after preloading:', cacheKey);
-        throw new Error('Image not available in cache');
+        console.warn(
+          "Image not in cache, this should not happen after preloading:",
+          cacheKey,
+        );
+        throw new Error("Image not available in cache");
       }
 
       // Keep fixed canvas size for consistent display
@@ -558,20 +631,28 @@ export function WorkingViewer({
       if (rtStructures && showStructures) {
         renderRTStructures(ctx, canvas, currentImage);
       }
-
     } catch (error: any) {
-      console.error('Error displaying image:', error);
-      ctx.fillStyle = 'black';
+      console.error("Error displaying image:", error);
+      ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'red';
-      ctx.font = '16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Error loading DICOM', canvas.width / 2, canvas.height / 2 - 10);
+      ctx.fillStyle = "red";
+      ctx.font = "16px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        "Error loading DICOM",
+        canvas.width / 2,
+        canvas.height / 2 - 10,
+      );
       ctx.fillText(error.message, canvas.width / 2, canvas.height / 2 + 10);
     }
   };
 
-  const render16BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Float32Array, width: number, height: number) => {
+  const render16BitImage = (
+    ctx: CanvasRenderingContext2D,
+    pixelArray: Float32Array,
+    width: number,
+    height: number,
+  ) => {
     // Create image data at original size
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
@@ -597,17 +678,17 @@ export function WorkingViewer({
       const gray = Math.max(0, Math.min(255, normalizedValue));
 
       const pixelIndex = i * 4;
-      data[pixelIndex] = gray;     // R
+      data[pixelIndex] = gray; // R
       data[pixelIndex + 1] = gray; // G
       data[pixelIndex + 2] = gray; // B
-      data[pixelIndex + 3] = 255;  // A
+      data[pixelIndex + 3] = 255; // A
     }
 
     // Create a temporary canvas for the original image
-    const tempCanvas = document.createElement('canvas');
+    const tempCanvas = document.createElement("canvas");
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d');
+    const tempCtx = tempCanvas.getContext("2d");
     if (!tempCtx) return;
 
     tempCtx.putImageData(imageData, 0, 0);
@@ -627,38 +708,53 @@ export function WorkingViewer({
 
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
-  const render8BitImage = (ctx: CanvasRenderingContext2D, pixelArray: Uint8Array, width: number, height: number) => {
+  const render8BitImage = (
+    ctx: CanvasRenderingContext2D,
+    pixelArray: Uint8Array,
+    width: number,
+    height: number,
+  ) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
     for (let i = 0; i < pixelArray.length; i++) {
       const gray = pixelArray[i];
       const pixelIndex = i * 4;
-      data[pixelIndex] = gray;     // R
+      data[pixelIndex] = gray; // R
       data[pixelIndex + 1] = gray; // G
       data[pixelIndex + 2] = gray; // B
-      data[pixelIndex + 3] = 255;  // A
+      data[pixelIndex + 3] = 255; // A
     }
 
     ctx.putImageData(imageData, 0, 0);
   };
 
-  const renderRTStructures = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, currentImage: any) => {
+  const renderRTStructures = (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    currentImage: any,
+  ) => {
     if (!rtStructures || !currentImage) return;
 
     // FIXED: Get current slice position from actual DICOM metadata
     let currentSlicePosition: number = currentIndex + 1; // Default fallback
-    
+
     // Priority 1: Use parsed slice location from DICOM (check for null/undefined)
-    if (currentImage.parsedSliceLocation !== undefined && currentImage.parsedSliceLocation !== null) {
+    if (
+      currentImage.parsedSliceLocation !== undefined &&
+      currentImage.parsedSliceLocation !== null
+    ) {
       currentSlicePosition = currentImage.parsedSliceLocation;
     }
     // Priority 2: Use parsed Z position from DICOM (check for null/undefined)
-    else if (currentImage.parsedZPosition !== undefined && currentImage.parsedZPosition !== null) {
+    else if (
+      currentImage.parsedZPosition !== undefined &&
+      currentImage.parsedZPosition !== null
+    ) {
       currentSlicePosition = currentImage.parsedZPosition;
     }
     // Priority 3: Extract from image metadata directly
@@ -670,7 +766,7 @@ export function WorkingViewer({
     }
     // Priority 4: Extract Z from image position
     else if (imageMetadata && imageMetadata.imagePosition) {
-      const imagePos = imageMetadata.imagePosition.split('\\');
+      const imagePos = imageMetadata.imagePosition.split("\\");
       if (imagePos.length >= 3) {
         const parsed = parseFloat(imagePos[2]);
         if (!isNaN(parsed)) {
@@ -678,9 +774,9 @@ export function WorkingViewer({
         }
       }
     }
-    
+
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
-    
+
     const tolerance = 2.0; // mm tolerance for slice matching
 
     // CRITICAL DEBUG: Log all slice position sources for comparison
@@ -688,11 +784,14 @@ export function WorkingViewer({
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
       parsedZPosition: ${currentImage.parsedZPosition} 
       imageMetadata.sliceLocation: ${imageMetadata?.sliceLocation}
-      imageMetadata.imagePosition Z: ${imageMetadata?.imagePosition ? imageMetadata.imagePosition.split('\\')[2] : 'N/A'}
+      imageMetadata.imagePosition Z: ${imageMetadata?.imagePosition ? imageMetadata.imagePosition.split("\\")[2] : "N/A"}
       currentIndex: ${currentIndex}
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
-    console.log(`📋 Available structures:`, rtStructures.structures.map((s: any) => s.structureName));
-    
+    console.log(
+      `📋 Available structures:`,
+      rtStructures.structures.map((s: any) => s.structureName),
+    );
+
     // Get all RT structure Z positions to check coordinate space
     const allRTZPositions: number[] = [];
     rtStructures.structures.forEach((structure: any) => {
@@ -700,12 +799,16 @@ export function WorkingViewer({
         allRTZPositions.push(contour.slicePosition);
       });
     });
-    
+
     if (allRTZPositions.length > 0) {
       const rtZMin = Math.min(...allRTZPositions);
       const rtZMax = Math.max(...allRTZPositions);
-      console.log(`🎯 RT coordinate range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm`);
-      console.log(`🎯 Current CT slice ${currentSlicePosition}mm should show structures at RT positions near this value`);
+      console.log(
+        `🎯 RT coordinate range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm`,
+      );
+      console.log(
+        `🎯 Current CT slice ${currentSlicePosition}mm should show structures at RT positions near this value`,
+      );
     }
 
     // Save context state
@@ -715,8 +818,8 @@ export function WorkingViewer({
     const lineWidth = contourSettings?.width || 3;
     const fillOpacity = (contourSettings?.opacity || 30) / 100;
 
-    // Set line width (scaled for zoom)
-    ctx.lineWidth = lineWidth / zoom;
+    // Set line width
+    ctx.lineWidth = lineWidth;
     // Keep stroke at full opacity - only fill should be affected by opacity setting
     ctx.globalAlpha = 1;
 
@@ -736,9 +839,13 @@ export function WorkingViewer({
 
       structure.contours.forEach((contour: any) => {
         // Debug: Log what contours are being considered for drawing
-        const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
+        const positionDiff = Math.abs(
+          contour.slicePosition - currentSlicePosition,
+        );
         if (positionDiff <= tolerance) {
-          console.log(`✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`);
+          console.log(
+            `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
+          );
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
         }
       });
@@ -748,99 +855,59 @@ export function WorkingViewer({
     ctx.restore();
   };
 
-  const drawContour = (ctx: CanvasRenderingContext2D, contour: any, canvasWidth: number, canvasHeight: number, currentImage: any) => {
+  const drawContour = (
+    ctx: CanvasRenderingContext2D,
+    contour: any,
+    canvasWidth: number,
+    canvasHeight: number,
+    currentImage: any,
+  ) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
 
     ctx.beginPath();
 
-    // Get image dimensions for proper scaling
-    const imageWidth = currentImage?.width || 512;
-    const imageHeight = currentImage?.height || 512;
+    // Get image metadata from current image
+    const imgMetadata = currentImage?.imageMetadata;
+    if (!imgMetadata) {
+      console.warn("No image metadata available for contour drawing");
+      return;
+    }
 
-    // Calculate base scaling to fill the entire canvas (same as image rendering)
+    // Parse DICOM metadata
+    const imagePosition = imgMetadata.imagePosition
+      ?.split("\\")
+      .map(Number) || [-300, -300, 0];
+    const pixelSpacing = imgMetadata.pixelSpacing
+      ?.split("\\")
+      .map(Number) || [1.171875, 1.171875];
+
+    // Image dimensions
+    const imageWidth = 512;
+    const imageHeight = 512;
+
+    // Calculate the same scaling as the image rendering
     const baseScale = Math.max(canvasWidth / imageWidth, canvasHeight / imageHeight);
     const totalScale = baseScale * zoom;
     const scaledWidth = imageWidth * totalScale;
     const scaledHeight = imageHeight * totalScale;
-
+    
     // Apply pan offset to centering (same as image rendering)
     const imageX = (canvasWidth - scaledWidth) / 2 + panX;
     const imageY = (canvasHeight - scaledHeight) / 2 + panY;
 
-    // Convert DICOM coordinates to canvas coordinates with proper scaling
+    // Convert DICOM world coordinates to canvas coordinates
     for (let i = 0; i < contour.points.length; i += 3) {
-      const dicomX = contour.points[i];     // DICOM X coordinate
-      const dicomY = contour.points[i + 1]; // DICOM Y coordinate
+      const worldX = contour.points[i]; // DICOM X coordinate
+      const worldY = contour.points[i + 1]; // DICOM Y coordinate
 
-      // Coordinate transformation that matches the image scale
-      const imageWidth = currentImage?.width || 512;
-      const imageHeight = currentImage?.height || 512;
-
-      // Proper DICOM coordinate transformation with affine matrix
-      let pixelX, pixelY;
-
-      if (imageMetadata && imageMetadata.imagePosition && imageMetadata.pixelSpacing && imageMetadata.imageOrientation) {
-        // Parse DICOM spatial metadata
-        const imagePosition = imageMetadata.imagePosition.split('\\').map(Number); // [x, y, z] origin
-        const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);   // [row_spacing, col_spacing]
-        const imageOrientation = imageMetadata.imageOrientation.split('\\').map(Number); // 6 values: row_cosines, col_cosines
-
-        // Build affine transformation matrix from patient coordinates to voxel indices
-        // ImageOrientationPatient contains direction cosines for rows and columns
-        const rowCosX = imageOrientation[0];
-        const rowCosY = imageOrientation[1]; 
-        const rowCosZ = imageOrientation[2];
-        const colCosX = imageOrientation[3];
-        const colCosY = imageOrientation[4];
-        const colCosZ = imageOrientation[5];
-
-        // Transform from patient coordinates (mm) to voxel indices
-        // Using inverse affine transformation
-        const deltaX = dicomX - imagePosition[0];
-        const deltaY = dicomY - imagePosition[1];
-
-        // For HFS (Head First Supine) axial images:
-        // - Patient is lying on their back
-        // - We view from feet looking toward head
-        // - Patient's LEFT should appear on screen RIGHT (flip X)
-        // - Patient's ANTERIOR should appear on screen TOP
-        
-        // Direct mapping - no flip needed based on user feedback
-        // The source DICOM data already has correct orientation
-        pixelX = deltaX / pixelSpacing[1]; // Direct X mapping
-        pixelY = deltaY / pixelSpacing[0]; // Direct Y mapping
-
-        // Debug coordinate transformation for verification (can be removed in production)
-        if (i === 0 && currentIndex === 0) {
-          console.log('RT coordinate transformation verified:', {
-            dicomCoords: [dicomX, dicomY],
-            finalPixel: [pixelX, pixelY]
-          });
-        }
-      } else {
-        // Enhanced fallback with better anatomical scaling
-        const scale = 0.8; // Better scale for anatomical accuracy
-        const centerX = imageWidth / 2;
-        const centerY = imageHeight / 2;
-        pixelX = centerX + (dicomX * scale);
-        pixelY = centerY + (dicomY * scale);
-
-        if (i === 0 && currentIndex === 0) {
-          console.log('Using fallback transformation - metadata unavailable');
-          console.log('DICOM coordinates:', dicomX, dicomY);
-          console.log('Pixel coordinates:', pixelX, pixelY);
-          console.log('Applied scale factor:', scale);
-        }
-      }
-
-      // Apply same transformation as image (zoom and pan)
-      const scaledWidth = imageWidth * zoom;
-      const scaledHeight = imageHeight * zoom;
-      const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-      const imageY = (canvasHeight - scaledHeight) / 2 + panY;
-
-      const canvasX = imageX + (pixelX * zoom);
-      const canvasY = imageY + (pixelY * zoom);
+      // Convert world coordinates to pixel coordinates
+      // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
+      const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
+      const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
+      
+      // Apply the same transformation as the image
+      const canvasX = imageX + (pixelX * totalScale);
+      const canvasY = imageY + (pixelY * totalScale);
 
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
@@ -864,10 +931,11 @@ export function WorkingViewer({
         return;
       }
 
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js';
+      const script = document.createElement("script");
+      script.src =
+        "https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js";
       script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load dicom-parser'));
+      script.onerror = () => reject(new Error("Failed to load dicom-parser"));
       document.head.appendChild(script);
     });
   };
@@ -887,18 +955,18 @@ export function WorkingViewer({
   // Notify parent when slice position changes
   useEffect(() => {
     if (images.length > 0 && images[currentIndex] && onSlicePositionChange) {
-      const slicePosition = images[currentIndex].parsedSliceLocation ?? 
-                           images[currentIndex].parsedZPosition ?? 
-                           currentIndex;
+      const slicePosition =
+        images[currentIndex].parsedSliceLocation ??
+        images[currentIndex].parsedZPosition ??
+        currentIndex;
       onSlicePositionChange(slicePosition);
     }
   }, [currentIndex, images, onSlicePositionChange]);
 
-
-
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Check if brush tool is active - if so, skip pan functionality
-    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    const isBrushActive =
+      brushToolState?.isActive && brushToolState?.tool === "brush";
 
     // Only prevent default and stop propagation if brush tool is NOT active
     if (!isBrushActive) {
@@ -906,12 +974,14 @@ export function WorkingViewer({
       e.stopPropagation();
     }
 
-    if (e.button === 0 && !isBrushActive) { // Left click for pan (disabled during brush mode)
+    if (e.button === 0 && !isBrushActive) {
+      // Left click for pan (disabled during brush mode)
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
       setLastPanX(panX);
       setLastPanY(panY);
-    } else if (e.button === 2 && !isBrushActive) { // Right click for window/level (disabled during brush mode)
+    } else if (e.button === 2 && !isBrushActive) {
+      // Right click for window/level (disabled during brush mode)
       const startX = e.clientX;
       const startY = e.clientY;
       const startWindow = currentWindowLevel.width;
@@ -930,18 +1000,19 @@ export function WorkingViewer({
 
       const handleWindowLevelEnd = (endEvent: MouseEvent) => {
         endEvent.preventDefault();
-        document.removeEventListener('mousemove', handleWindowLevelDrag);
-        document.removeEventListener('mouseup', handleWindowLevelEnd);
+        document.removeEventListener("mousemove", handleWindowLevelDrag);
+        document.removeEventListener("mouseup", handleWindowLevelEnd);
       };
 
-      document.addEventListener('mousemove', handleWindowLevelDrag);
-      document.addEventListener('mouseup', handleWindowLevelEnd);
+      document.addEventListener("mousemove", handleWindowLevelDrag);
+      document.addEventListener("mouseup", handleWindowLevelEnd);
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Skip pan functionality if brush tool is active
-    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    const isBrushActive =
+      brushToolState?.isActive && brushToolState?.tool === "brush";
 
     // Only handle pan if brush tool is NOT active
     if (isDragging && !isBrushActive) {
@@ -954,7 +1025,8 @@ export function WorkingViewer({
 
   const handleCanvasMouseUp = () => {
     // Skip pan functionality if brush tool is active
-    const isBrushActive = brushToolState?.isActive && brushToolState?.tool === 'brush';
+    const isBrushActive =
+      brushToolState?.isActive && brushToolState?.tool === "brush";
 
     if (!isBrushActive) {
       setIsDragging(false);
@@ -969,7 +1041,7 @@ export function WorkingViewer({
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom(prev => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+      setZoom((prev) => Math.max(0.1, Math.min(5, prev * zoomFactor)));
     } else {
       // Regular scroll for slice navigation
       if (e.deltaY > 0) {
@@ -981,11 +1053,11 @@ export function WorkingViewer({
   };
 
   const handleZoomIn = () => {
-    setZoom(prev => Math.min(5, prev * 1.2));
+    setZoom((prev) => Math.min(5, prev * 1.2));
   };
 
   const handleZoomOut = () => {
-    setZoom(prev => Math.max(0.1, prev / 1.2));
+    setZoom((prev) => Math.max(0.1, prev / 1.2));
   };
 
   const handleResetZoom = () => {
@@ -1000,10 +1072,8 @@ export function WorkingViewer({
     (window as any).currentViewerZoom = {
       zoomIn: handleZoomIn,
       zoomOut: handleZoomOut,
-      resetZoom: handleResetZoom
+      resetZoom: handleResetZoom,
     };
-
-
 
     return () => {
       delete (window as any).currentViewerZoom;
@@ -1012,14 +1082,14 @@ export function WorkingViewer({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') goToPrevious();
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goToNext();
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") goToPrevious();
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") goToNext();
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [currentIndex, images]);
 
@@ -1040,7 +1110,10 @@ export function WorkingViewer({
         <div className="text-center text-red-400">
           <p className="mb-2">Error loading CT scan:</p>
           <p className="text-sm">{error}</p>
-          <Button onClick={loadImages} className="mt-4 bg-indigo-600 hover:bg-indigo-700">
+          <Button
+            onClick={loadImages}
+            className="mt-4 bg-indigo-600 hover:bg-indigo-700"
+          >
             Retry
           </Button>
         </div>
@@ -1053,11 +1126,12 @@ export function WorkingViewer({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-indigo-700">
         <div className="flex items-center space-x-2">
-          <Badge className="bg-indigo-900 text-indigo-200">
-            CT Scan
-          </Badge>
+          <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
           {images.length > 0 && (
-            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+            <Badge
+              variant="outline"
+              className="border-indigo-600 text-indigo-300"
+            >
               {currentIndex + 1} / {images.length}
             </Badge>
           )}
@@ -1108,80 +1182,92 @@ export function WorkingViewer({
             onWheel={handleCanvasWheel}
             onContextMenu={(e) => e.preventDefault()}
             className={`max-w-full max-h-full object-contain rounded ${
-              brushToolState?.isActive && brushToolState?.tool === 'brush' 
-                ? '' 
-                : 'cursor-move'
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? ""
+                : "cursor-move"
             }`}
-            style={{ 
-              backgroundColor: 'black',
-              imageRendering: 'auto',
-              userSelect: 'none'
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
             }}
           />
 
           {/* Simple Brush Tool overlay */}
-          {brushToolState?.isActive && brushToolState?.tool === 'brush' && selectedForEdit && (
-            <SimpleBrushTool
-              canvasRef={canvasRef}
-              isActive={brushToolState.isActive}
-              brushSize={brushToolState.brushSize}
-              selectedStructure={selectedForEdit}
-              rtStructures={rtStructures}
-              currentSlicePosition={images.length > 0 && images[currentIndex] ? 
-                (images[currentIndex].parsedSliceLocation ?? 
-                 images[currentIndex].parsedZPosition ??
-                 currentIndex) : 0
-              }
-              onContourUpdate={(payload: any) => {
-                // Handle different types of contour updates
-                if (payload.action === 'grow_contour') {
-                  handleGrowContour(payload);
-                } else {
-                  handleContourUpdate(payload);
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "brush" &&
+            selectedForEdit && (
+              <SimpleBrushTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                brushSize={brushToolState.brushSize}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
                 }
-              }}
-              zoom={zoom}
-              panX={panX}
-              panY={panY}
-              imageMetadata={imageMetadata}
-              smoothingEnabled={true}
-              enableSmartMode={true}
-              onBrushModeChange={(mode: BrushOperation) => {
-                console.log('Brush mode changed:', mode);
-              }}
-            />
-          )}
+                onContourUpdate={(payload: any) => {
+                  // Handle different types of contour updates
+                  if (payload.action === "grow_contour") {
+                    handleGrowContour(payload);
+                  } else {
+                    handleContourUpdate(payload);
+                  }
+                }}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+                smoothingEnabled={true}
+                enableSmartMode={true}
+                onBrushModeChange={(mode: BrushOperation) => {
+                  console.log("Brush mode changed:", mode);
+                }}
+              />
+            )}
 
           {/* Pen Tool overlay */}
-          {brushToolState?.isActive && brushToolState?.tool === 'pen' && selectedForEdit && (
-            <PenTool
-              canvasRef={canvasRef}
-              isActive={brushToolState.isActive}
-              selectedStructure={selectedForEdit}
-              rtStructures={rtStructures}
-              currentSlicePosition={images.length > 0 && images[currentIndex] ? 
-                (images[currentIndex].parsedSliceLocation ?? 
-                 images[currentIndex].parsedZPosition ??
-                 currentIndex) : 0
-              }
-              onContourUpdate={(payload: any) => {
-                handleContourUpdate(payload);
-              }}
-              zoom={zoom}
-              panX={panX}
-              panY={panY}
-              imageMetadata={imageMetadata}
-            />
-          )}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "pen" &&
+            selectedForEdit && (
+              <PenTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+              />
+            )}
 
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
-            <div>W:{Math.round(currentWindowLevel.width)} L:{Math.round(currentWindowLevel.center)}</div>
+            <div>
+              W:{Math.round(currentWindowLevel.width)} L:
+              {Math.round(currentWindowLevel.center)}
+            </div>
             {images.length > 0 && images[currentIndex] && (
               <div className="mt-1">
-                Z: {images[currentIndex].parsedSliceLocation?.toFixed(1) || 
-                     images[currentIndex].parsedZPosition?.toFixed(1) || 
-                     (currentIndex + 1)}
+                Z:{" "}
+                {images[currentIndex].parsedSliceLocation?.toFixed(1) ||
+                  images[currentIndex].parsedZPosition?.toFixed(1) ||
+                  currentIndex + 1}
               </div>
             )}
             {rtStructures && showStructures && (
@@ -1190,13 +1276,8 @@ export function WorkingViewer({
               </div>
             )}
           </div>
-
-
-
-
         </div>
       </div>
-
     </Card>
   );
 }
