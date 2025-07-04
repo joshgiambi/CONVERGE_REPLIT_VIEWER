@@ -183,22 +183,39 @@ export function WorkingViewer({
         structure.contours.push(contour);
       }
 
-      // Convert brush stroke to polygon and update contour
+      // Convert brush stroke to polygon and merge with existing contour
       console.log(`Converting ${payload.points.length} brush points to polygon for slice ${payload.slicePosition}`);
       
       // Get existing contour points or empty array
       const existingPoints = contour.points || [];
       
-      // Convert brush stroke to polygon and merge with existing contour
-      const updatedPoints = addBrushToContour(
-        existingPoints,
-        payload.points,
-        payload.brushSize
-      );
-      
-      // Update contour with new points
-      contour.points = updatedPoints;
-      contour.numberOfPoints = updatedPoints.length / 3; // Each point has x,y,z
+      // If there are existing points, we need to merge the brush stroke with them
+      if (existingPoints.length > 0) {
+        // For now, append the new brush stroke points to existing contour
+        // In production, this would use proper polygon union algorithms
+        console.log(`Merging with existing contour of ${existingPoints.length / 3} points`);
+        
+        // Convert brush points to polygon
+        const brushPolygon = addBrushToContour(
+          [],  // Empty array to get just the brush polygon
+          payload.points,
+          payload.brushSize
+        );
+        
+        // Simple merge: combine all points (not ideal but prevents deletion)
+        const allPoints = [...existingPoints, ...brushPolygon];
+        contour.points = allPoints;
+        contour.numberOfPoints = allPoints.length / 3;
+      } else {
+        // No existing contour, create new one from brush stroke
+        const newContourPoints = addBrushToContour(
+          [],
+          payload.points,
+          payload.brushSize
+        );
+        contour.points = newContourPoints;
+        contour.numberOfPoints = newContourPoints.length / 3;
+      }
       
       console.log(`Updated contour now has ${contour.numberOfPoints} points`);
       setLocalRTStructures(updatedStructures);

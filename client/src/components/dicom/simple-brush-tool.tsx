@@ -28,6 +28,7 @@ export function SimpleBrushTool({
   zoom,
   panX,
   panY,
+  imageMetadata,
 }: SimpleBrushToolProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<{
@@ -299,15 +300,19 @@ export function SimpleBrushTool({
         `Finalizing brush stroke with ${brushPointsRef.current.length} points`,
       );
 
-      // Convert all brush points to world coordinates
-      const canvasWidth = canvasRef.current?.width || 1024;
-      const canvasHeight = canvasRef.current?.height || 1024;
-      const fieldOfViewX = 600; // mm
-      const fieldOfViewY = 600; // mm
+      // Convert all brush points to world coordinates using actual image metadata
+      const canvasWidth = canvasRef.current?.width || 512;
+      const canvasHeight = canvasRef.current?.height || 512;
+      
+      // Use actual image metadata for coordinate transformation
+      const imagePosition = imageMetadata?.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
+      const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
 
       const worldPoints = brushPointsRef.current.map((point) => {
-        const worldX = (point.x / canvasWidth - 0.5) * fieldOfViewX;
-        const worldY = -(point.y / canvasHeight - 0.5) * fieldOfViewY;
+        // Convert canvas coordinates to DICOM world coordinates
+        // Note: Canvas Y axis is inverted compared to DICOM
+        const worldX = imagePosition[0] + (point.x * pixelSpacing[0]);
+        const worldY = imagePosition[1] + ((canvasHeight - point.y) * pixelSpacing[1]);
         const worldZ = currentSlicePosition;
         return [worldX, worldY, worldZ];
       });
