@@ -289,19 +289,17 @@ export function SimpleBrushTool({
     const canvasWidth = canvasRef.current?.width || 1024;
     const canvasHeight = canvasRef.current?.height || 1024;
 
-    // Calculate base scale to match contour rendering
+    // SIMPLIFIED - NO ZOOM FOR DEBUGGING
     const imageWidth = 512;
     const imageHeight = 512;
     const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
     
-    // Apply zoom and pan transformations accounting for base scale
+    // Only apply base scale, no zoom or pan
     const centerX = canvasWidth / 2;
     const centerY = canvasHeight / 2;
     
-    // Normalize zoom relative to base scale
-    const effectiveZoom = zoom / baseScale;
-    const transformedX = (x - centerX - panX) / (baseScale * effectiveZoom) + centerX;
-    const transformedY = (y - centerY - panY) / (baseScale * effectiveZoom) + centerY;
+    const transformedX = (x - centerX) / baseScale + centerX;
+    const transformedY = (y - centerY) / baseScale + centerY;
 
     // Use the shared coordinate transformation function with transformed coordinates
     const [worldX, worldY, worldZ] = canvasToWorld(
@@ -338,20 +336,18 @@ export function SimpleBrushTool({
       const canvasWidth = canvasRef.current?.width || 1024;
       const canvasHeight = canvasRef.current?.height || 1024;
 
-      // Calculate base scale to match contour rendering
+      // SIMPLIFIED - NO ZOOM FOR DEBUGGING
       const imageWidth = 512;
       const imageHeight = 512;
       const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight); // = 2 for 512x512 in 1024x1024
       
       const worldPoints = brushPointsRef.current.map((point) => {
-        // Apply zoom and pan transformations before converting to world coordinates
+        // Only apply base scale, no zoom or pan
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
         
-        // Normalize zoom relative to base scale
-        const effectiveZoom = zoom / baseScale;
-        const transformedX = (point.x - centerX - panX) / (baseScale * effectiveZoom) + centerX;
-        const transformedY = (point.y - centerY - panY) / (baseScale * effectiveZoom) + centerY;
+        const transformedX = (point.x - centerX) / baseScale + centerX;
+        const transformedY = (point.y - centerY) / baseScale + centerY;
         
         // Use the shared coordinate transformation function
         const [worldX, worldY, worldZ] = canvasToWorld(

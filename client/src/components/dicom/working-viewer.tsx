@@ -99,8 +99,8 @@ export function WorkingViewer({
   >(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
 
-  // Zoom and pan state
-  const [zoom, setZoom] = useState(1);
+  // Zoom and pan state - DISABLED FOR DEBUGGING
+  const zoom = 1; // Fixed zoom for debugging
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
 
@@ -347,7 +347,8 @@ export function WorkingViewer({
     }
   };
 
-  // Handle auto-zoom when autoZoomLevel prop changes
+  // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
+  /*
   useEffect(() => {
     if (autoZoomLevel && autoZoomLevel !== zoom) {
       setZoom(autoZoomLevel);
@@ -356,6 +357,7 @@ export function WorkingViewer({
       }
     }
   }, [autoZoomLevel, zoom, images.length]);
+  */
 
   // Handle auto-localize when autoLocalizeTarget prop changes
   useEffect(() => {
@@ -702,8 +704,9 @@ export function WorkingViewer({
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
 
-    // Use 1:1 pixel scaling at default zoom for proper alignment
-    const totalScale = zoom; // No base scaling - use original image size
+    // SIMPLIFIED - NO ZOOM FOR DEBUGGING  
+    const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
+    const totalScale = baseScale; // Just base scale, no zoom
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
 
@@ -902,13 +905,12 @@ export function WorkingViewer({
     const imageWidth = 512;
     const imageHeight = 512;
 
-    // Calculate base scale to fit image in canvas (matching render16BitImage logic)
+    // SIMPLIFIED - NO ZOOM FOR DEBUGGING
     const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
     // For a 512x512 image in 1024x1024 canvas, baseScale = 2
     
-    // Apply additional zoom on top of base scale
-    const effectiveZoom = zoom / baseScale; // Normalize the zoom relative to base scale
-    const totalScale = baseScale * effectiveZoom;
+    // Just use base scale, ignore zoom completely
+    const totalScale = baseScale; // NO ZOOM
     const scaledWidth = imageWidth * totalScale;
     const scaledHeight = imageHeight * totalScale;
     
@@ -1059,20 +1061,25 @@ export function WorkingViewer({
     e.preventDefault();
     e.stopPropagation();
 
+    // ZOOM DISABLED FOR DEBUGGING
+    /*
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
       setZoom((prev) => Math.max(0.1, Math.min(5, prev * zoomFactor)));
     } else {
+    */
       // Regular scroll for slice navigation
       if (e.deltaY > 0) {
         goToNext();
       } else {
         goToPrevious();
       }
-    }
+    //}
   };
 
+  // ZOOM FUNCTIONS DISABLED FOR DEBUGGING
+  /*
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(5, prev * 1.2));
   };
@@ -1086,7 +1093,10 @@ export function WorkingViewer({
     setPanX(0);
     setPanY(0);
   };
+  */
 
+  // ZOOM EXPOSURE DISABLED FOR DEBUGGING
+  /*
   // Expose zoom functions to parent component via imperative handle
   useEffect(() => {
     // Always expose zoom functions for toolbar access
@@ -1100,6 +1110,7 @@ export function WorkingViewer({
       delete (window as any).currentViewerZoom;
     };
   }, []);
+  */
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

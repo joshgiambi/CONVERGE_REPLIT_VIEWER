@@ -86,20 +86,17 @@ export function PenTool({
     const relX = canvasX / rect.width;
     const relY = canvasY / rect.height;
 
-    // Calculate base scale to match contour rendering
+    // SIMPLIFIED - NO ZOOM FOR DEBUGGING
     const imgWidth = 512;
     const imgHeight = 512;
     const baseScale = Math.min(canvas.width / imgWidth, canvas.height / imgHeight); // = 2 for 512x512 in 1024x1024
     
-    // Apply zoom and pan transformations accounting for base scale
+    // Only apply base scale, no zoom or pan
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     
-    // Normalize zoom relative to base scale
-    const effectiveZoom = zoom / baseScale;
-    
-    const transformedX = (canvasX - centerX - panX) / (baseScale * effectiveZoom) + centerX;
-    const transformedY = (canvasY - centerY - panY) / (baseScale * effectiveZoom) + centerY;
+    const transformedX = (canvasX - centerX) / baseScale + centerX;
+    const transformedY = (canvasY - centerY) / baseScale + centerY;
     
     const adjustedRelX = transformedX / rect.width;
     const adjustedRelY = transformedY / rect.height;
@@ -195,10 +192,9 @@ export function PenTool({
           const centerX = rect.width / 2;
           const centerY = rect.height / 2;
           
-          // Canvas point is already in canvas space, apply zoom/pan with base scale
-          const effectiveZoom = zoom / baseScale;
-          const displayX = (canvasPoint[0] - centerX) * baseScale * effectiveZoom + centerX + panX;
-          const displayY = (canvasPoint[1] - centerY) * baseScale * effectiveZoom + centerY + panY;
+          // SIMPLIFIED - NO ZOOM FOR DEBUGGING
+          const displayX = (canvasPoint[0] - centerX) * baseScale + centerX;
+          const displayY = (canvasPoint[1] - centerY) * baseScale + centerY;
 
           const dist = Math.sqrt(
             Math.pow(displayX - canvasX, 2) + 
