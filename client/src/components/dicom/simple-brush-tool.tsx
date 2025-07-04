@@ -60,7 +60,7 @@ export function SimpleBrushTool({
       overlayCanvas.style.position = "absolute";
       overlayCanvas.style.top = "0";
       overlayCanvas.style.left = "0";
-      overlayCanvas.style.pointerEvents = "auto"; // Changed from 'none' to allow mouse events
+      overlayCanvas.style.pointerEvents = "none"; // Allow events to pass through for scrolling
       overlayCanvas.style.zIndex = "10";
       overlayCanvas.width = mainCanvas.width;
       overlayCanvas.height = mainCanvas.height;
@@ -244,11 +244,18 @@ export function SimpleBrushTool({
       e.preventDefault();
     };
 
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mouseup", handleMouseUp);
-    canvas.addEventListener("mouseleave", handleMouseLeave);
-    canvas.addEventListener("contextmenu", handleContextMenu);
+    // Handle wheel events - don't prevent them so scrolling works
+    const handleWheel = (e: WheelEvent) => {
+      // Don't prevent default or stop propagation - let it bubble to parent
+      // This allows the parent canvas to handle slice navigation
+    };
+
+    // Add event listeners to the main canvas
+    canvas.addEventListener("mousemove", handleMouseMove, { passive: false });
+    canvas.addEventListener("mousedown", handleMouseDown, { passive: false });
+    canvas.addEventListener("mouseup", handleMouseUp, { passive: false });
+    canvas.addEventListener("mouseleave", handleMouseLeave, { passive: false });
+    canvas.addEventListener("contextmenu", handleContextMenu, { passive: false });
     // Also listen for mouseup on window to catch when mouse is released outside canvas
     window.addEventListener("mouseup", handleMouseUp);
 
@@ -307,13 +314,30 @@ export function SimpleBrushTool({
       // Use actual image metadata for coordinate transformation
       const imagePosition = imageMetadata?.imagePosition?.split('\\').map(Number) || [-300, -300, currentSlicePosition];
       const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
+      
+      // Image dimensions (typically 512x512 for CT)
+      const imageWidth = 512;
+      const imageHeight = 512;
 
       const worldPoints = brushPointsRef.current.map((point) => {
-        // Convert canvas coordinates to DICOM world coordinates
-        // Note: Canvas Y axis is inverted compared to DICOM
-        const worldX = imagePosition[0] + (point.x * pixelSpacing[0]);
-        const worldY = imagePosition[1] + ((canvasHeight - point.y) * pixelSpacing[1]);
+        // Inverse of the worldToCanvas transformation used in RT overlay
+        // Convert canvas coordinates to pixel coordinates
+        const pixelX = (point.x / canvasWidth) * imageWidth;
+        const pixelY = (point.y / canvasHeight) * imageHeight;
+        
+        // Apply inverse of the rotation and flip that's applied in RT overlay
+        // First, undo the horizontal flip
+        const unflippedPixelX = imageWidth - pixelX;
+        
+        // Then, undo the 90-degree counter-rotation
+        const origPixelY = imageHeight - unflippedPixelX;
+        const origPixelX = pixelY;
+        
+        // Convert pixel coordinates to DICOM world coordinates
+        const worldX = imagePosition[0] + (origPixelX * pixelSpacing[1]);
+        const worldY = imagePosition[1] + (origPixelY * pixelSpacing[0]);
         const worldZ = currentSlicePosition;
+        
         return [worldX, worldY, worldZ];
       });
 
