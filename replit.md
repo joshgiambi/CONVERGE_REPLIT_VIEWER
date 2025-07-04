@@ -89,12 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 04, 2025: Coordinate System Investigation - IN PROGRESS
-  - Fixed scrolling issue - wheel events now work when brush tool is active
-  - Removed 90-degree rotation and flip transformations based on user feedback
-  - Updated to direct coordinate mapping for standard axial DICOM images
-  - Fixed brush tool to use shared DICOM coordinate transformation
-  - Investigating why contours appear sideways without rotation despite correct source data
+- July 04, 2025: HFS Radiological Viewing Convention Fixed - COMPLETED
+  - ✅ Fixed scrolling issue - wheel events now work when brush tool is active
+  - ✅ Analyzed DICOM metadata: HFS patient position, [1,0,0,0,1,0] orientation
+  - ✅ Implemented proper HFS radiological viewing convention (patient's left on screen right)
+  - ✅ Applied X-axis flip for correct anatomical orientation in axial views
+  - ✅ Updated both viewer and shared coordinate transformation functions
+  - ✅ Fixed pixel index calculations (0-511 range instead of 0-512)
+  - ✅ Brush tool now uses consistent HFS coordinate transformations
 - July 03, 2025: Complete Brush Tool Rebuild - COMPLETED
   - ✅ Completely rebuilt brush tool from scratch using medical imaging best practices
   - ✅ Researched 3D Slicer paint tool implementation for medical-grade functionality  

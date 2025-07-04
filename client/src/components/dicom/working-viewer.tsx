@@ -737,14 +737,17 @@ export function WorkingViewer({
         const deltaX = dicomX - imagePosition[0];
         const deltaY = dicomY - imagePosition[1];
 
-        // For standard axial images with orientation [1,0,0,0,1,0]:
-        // The first row direction is along X (left-right)
-        // The first column direction is along Y (anterior-posterior)
-        // But canvas coordinates have Y going down, not up
+        // For HFS (Head First Supine) axial images:
+        // - Patient is lying on their back
+        // - We view from feet looking toward head
+        // - Patient's LEFT should appear on screen RIGHT (flip X)
+        // - Patient's ANTERIOR should appear on screen TOP
         
-        // Direct mapping for standard axial orientation
-        pixelX = deltaX / pixelSpacing[1]; // X maps to columns
-        pixelY = deltaY / pixelSpacing[0]; // Y maps to rows
+        // Apply radiological viewing convention for HFS
+        // Note: DICOM X increases from patient right to left
+        // Screen X increases from left to right, so we need to flip
+        pixelX = (imageWidth - 1) - (deltaX / pixelSpacing[1]); // Flip X for radiological view (0->511, 511->0)
+        pixelY = deltaY / pixelSpacing[0]; // Y maps directly
 
         // Debug coordinate transformation for verification (can be removed in production)
         if (i === 0 && currentIndex === 0) {
