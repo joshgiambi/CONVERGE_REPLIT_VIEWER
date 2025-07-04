@@ -31,6 +31,7 @@ export function SimpleBrushTool({
   panY,
   imageMetadata,
 }: SimpleBrushToolProps) {
+  console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
   const [isDrawing, setIsDrawing] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<{
     x: number;
@@ -57,6 +58,7 @@ export function SimpleBrushTool({
 
     // Create overlay canvas if it doesn't exist
     if (!overlayCanvasRef.current) {
+      console.log('Creating overlay canvas');
       const overlayCanvas = document.createElement("canvas");
       overlayCanvas.style.position = "absolute";
       overlayCanvas.style.top = "0";
@@ -108,6 +110,11 @@ export function SimpleBrushTool({
 
     const ctx = overlayCanvasRef.current.getContext("2d");
     if (!ctx) return;
+    
+    // Add debug info
+    if (!cursorPosition) {
+      console.log('No cursor position set');
+    }
 
     // Clear canvas
     ctx.clearRect(
@@ -182,9 +189,9 @@ export function SimpleBrushTool({
 
   // Handle mouse events
   useEffect(() => {
-    if (!overlayCanvasRef.current || !isActive) return;
+    if (!canvasRef.current || !isActive) return;
 
-    const canvas = overlayCanvasRef.current;
+    const canvas = canvasRef.current; // Use the main canvas for events
 
     const getCanvasCoords = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -196,6 +203,7 @@ export function SimpleBrushTool({
     const handleMouseMove = (e: MouseEvent) => {
       const coords = getCanvasCoords(e);
       setCursorPosition(coords);
+      console.log('Mouse move:', coords, 'isActive:', isActive);
 
       if (isDrawing && selectedStructure) {
         e.preventDefault();

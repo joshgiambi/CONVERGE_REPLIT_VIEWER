@@ -741,12 +741,9 @@ export function WorkingViewer({
         const origPixelX = (deltaX * colCosX + deltaY * colCosY) / pixelSpacing[1]; // column index
         const origPixelY = (deltaX * rowCosX + deltaY * rowCosY) / pixelSpacing[0]; // row index
 
-        // Apply 90-degree counter-rotation to fix sideways orientation
-        pixelX = imageHeight - origPixelY; // Rotate coordinates
-        pixelY = origPixelX;
-
-        // Apply horizontal flip to correct mirrored appearance
-        pixelX = imageWidth - pixelX;
+        // No rotation or flip needed for standard axial orientation
+        pixelX = origPixelX;
+        pixelY = origPixelY;
 
         // Debug coordinate transformation for verification (can be removed in production)
         if (i === 0 && currentIndex === 0) {
