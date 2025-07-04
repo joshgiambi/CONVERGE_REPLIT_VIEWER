@@ -446,13 +446,21 @@ export function PenTool({
             );
             
             if (canvasPoint) {
+              // Calculate base scale to match contour rendering
+              const imgWidth = 512;
+              const imgHeight = 512;
+              const canvasWidth = canvasRef.current!.width;
+              const canvasHeight = canvasRef.current!.height;
+              const baseScale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight); // = 2
+              
               const rect = overlayCanvasRef.current!.getBoundingClientRect();
               const centerX = rect.width / 2;
               const centerY = rect.height / 2;
               
-              // Canvas point is already in canvas space, just apply zoom/pan
-              const displayX = (canvasPoint[0] - centerX) * zoom + centerX + panX;
-              const displayY = (canvasPoint[1] - centerY) * zoom + centerY + panY;
+              // Canvas point is already in canvas space, apply zoom/pan with base scale
+              const effectiveZoom = zoom / baseScale;
+              const displayX = (canvasPoint[0] - centerX) * baseScale * effectiveZoom + centerX + panX;
+              const displayY = (canvasPoint[1] - centerY) * baseScale * effectiveZoom + centerY + panY;
               
               contourPoints.push({
                 canvas: { x: displayX, y: displayY },
