@@ -177,7 +177,7 @@ export function WorkingViewer({
   const handleContourUpdate = (payload: any) => {
     // Check if two polygons intersect by checking if any points are close
     const checkPolygonIntersection = (polygon1: number[], polygon2: number[]) => {
-      const threshold = 5.0; // Distance threshold in world coordinates (mm)
+      const threshold = 2.0; // Distance threshold in world coordinates (mm) - reduced for more accurate contours
       
       // Check each point in polygon1 against polygon2
       for (let i = 0; i < polygon1.length; i += 3) {

@@ -7,16 +7,75 @@ interface Point3D {
 }
 
 /**
- * Convert brush stroke points to a polygon contour using a simplified convex hull approach
- * This is suitable for radiotherapy contouring where we need closed polygons
+ * Convert brush stroke points to a polygon contour with accurate outline
+ * This creates a medical-grade contour that follows the brush stroke precisely
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
   brushSize: number
 ): number[] {
-  if (brushPoints.length < 3) {
-    console.warn('Not enough points to create a polygon');
+  if (brushPoints.length === 0) {
     return [];
+  }
+  
+  // Handle single point - create a circle
+  if (brushPoints.length === 1) {
+    const center = brushPoints[0];
+    const circlePoints = 32; // Points for a smooth circle
+    const result: number[] = [];
+    
+    for (let i = 0; i < circlePoints; i++) {
+      const angle = (i / circlePoints) * 2 * Math.PI;
+      result.push(
+        center[0] + brushSize * Math.cos(angle),
+        center[1] + brushSize * Math.sin(angle),
+        center[2]
+      );
+    }
+    
+    return result;
+  }
+  
+  // Handle two points - create a capsule shape
+  if (brushPoints.length === 2) {
+    const p1 = brushPoints[0];
+    const p2 = brushPoints[1];
+    const dx = p2[0] - p1[0];
+    const dy = p2[1] - p1[1];
+    const len = Math.sqrt(dx * dx + dy * dy);
+    
+    // Normal vector
+    const nx = len > 0 ? -dy / len : 0;
+    const ny = len > 0 ? dx / len : 1;
+    
+    const result: number[] = [];
+    const capPoints = 16;
+    
+    // First cap
+    for (let i = 0; i <= capPoints / 2; i++) {
+      const angle = Math.PI / 2 + (i / (capPoints / 2)) * Math.PI;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      result.push(
+        p1[0] + brushSize * (nx * cos - dx / len * sin),
+        p1[1] + brushSize * (ny * cos - dy / len * sin),
+        p1[2]
+      );
+    }
+    
+    // Second cap
+    for (let i = 0; i <= capPoints / 2; i++) {
+      const angle = -Math.PI / 2 + (i / (capPoints / 2)) * Math.PI;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      result.push(
+        p2[0] + brushSize * (nx * cos + dx / len * sin),
+        p2[1] + brushSize * (ny * cos + dy / len * sin),
+        p2[2]
+      );
+    }
+    
+    return result;
   }
 
   // Convert to Point3D format for easier manipulation
@@ -26,103 +85,104 @@ export function brushStrokeToPolygon(
     z: p[2]
   }));
 
-  // Generate outline points by creating a buffer around the stroke
-  const outlinePoints: Point3D[] = [];
+  // Generate outline points by creating an accurate buffer around the stroke
+  const leftSide: Point3D[] = [];
+  const rightSide: Point3D[] = [];
   
-  // For each point in the stroke, generate circle points around it
-  const circleSegments = 8; // Number of points around each brush center
-  
-  points.forEach((center, idx) => {
-    // Calculate direction vector for this segment
-    let direction = { x: 0, y: 1 }; // Default direction
+  // Process each segment of the brush stroke
+  for (let i = 0; i < points.length; i++) {
+    const curr = points[i];
+    let tangent = { x: 0, y: 0 };
     
-    if (idx > 0 && idx < points.length - 1) {
-      // Calculate tangent direction
-      const prev = points[idx - 1];
-      const next = points[idx + 1];
-      const dx = next.x - prev.x;
-      const dy = next.y - prev.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      
-      if (len > 0) {
-        // Perpendicular to the stroke direction
-        direction = { x: -dy / len, y: dx / len };
-      }
+    if (i === 0) {
+      // First point - use direction to next point
+      const next = points[i + 1];
+      tangent.x = next.x - curr.x;
+      tangent.y = next.y - curr.y;
+    } else if (i === points.length - 1) {
+      // Last point - use direction from previous point
+      const prev = points[i - 1];
+      tangent.x = curr.x - prev.x;
+      tangent.y = curr.y - prev.y;
+    } else {
+      // Middle points - average of directions
+      const prev = points[i - 1];
+      const next = points[i + 1];
+      tangent.x = next.x - prev.x;
+      tangent.y = next.y - prev.y;
     }
     
-    // Generate points on both sides of the stroke
-    for (let side = -1; side <= 1; side += 2) {
-      const angle = Math.atan2(direction.y, direction.x) + side * Math.PI / 2;
-      const px = center.x + brushSize * Math.cos(angle);
-      const py = center.y + brushSize * Math.sin(angle);
-      outlinePoints.push({ x: px, y: py, z: center.z });
+    // Normalize tangent
+    const len = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+    if (len > 0) {
+      tangent.x /= len;
+      tangent.y /= len;
+    } else {
+      tangent = { x: 1, y: 0 };
     }
-  });
-
-  // Simplify the outline using a basic convex hull algorithm
-  const hull = computeConvexHull2D(outlinePoints);
+    
+    // Calculate perpendicular (normal) vector
+    const normal = { x: -tangent.y, y: tangent.x };
+    
+    // Add points on both sides
+    leftSide.push({
+      x: curr.x + normal.x * brushSize,
+      y: curr.y + normal.y * brushSize,
+      z: curr.z
+    });
+    
+    rightSide.push({
+      x: curr.x - normal.x * brushSize,
+      y: curr.y - normal.y * brushSize,
+      z: curr.z
+    });
+  }
+  
+  // Add rounded caps at the ends
+  const capPoints = 16; // More points for smoother caps
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+  
+  // Start cap
+  const startCap: Point3D[] = [];
+  for (let i = 0; i <= capPoints / 2; i++) {
+    const angle = Math.PI + (i / (capPoints / 2)) * Math.PI;
+    startCap.push({
+      x: firstPoint.x + brushSize * Math.cos(angle),
+      y: firstPoint.y + brushSize * Math.sin(angle),
+      z: firstPoint.z
+    });
+  }
+  
+  // End cap
+  const endCap: Point3D[] = [];
+  for (let i = 0; i <= capPoints / 2; i++) {
+    const angle = (i / (capPoints / 2)) * Math.PI;
+    endCap.push({
+      x: lastPoint.x + brushSize * Math.cos(angle),
+      y: lastPoint.y + brushSize * Math.sin(angle),
+      z: lastPoint.z
+    });
+  }
+  
+  // Combine all points in order: start cap + right side + end cap + left side (reversed)
+  const outlinePoints: Point3D[] = [
+    ...startCap,
+    ...rightSide,
+    ...endCap,
+    ...leftSide.reverse()
+  ];
   
   // Convert back to flattened array format (x,y,z,x,y,z,...)
   const result: number[] = [];
-  hull.forEach(point => {
+  outlinePoints.forEach(point => {
     result.push(point.x, point.y, point.z);
   });
   
   return result;
 }
 
-/**
- * Simple 2D convex hull using Graham scan algorithm
- * Projects 3D points to 2D for hull computation
- */
-function computeConvexHull2D(points: Point3D[]): Point3D[] {
-  if (points.length < 3) return points;
 
-  // Find the starting point (lowest y, then leftmost x)
-  let start = points[0];
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].y < start.y || (points[i].y === start.y && points[i].x < start.x)) {
-      start = points[i];
-    }
-  }
-
-  // Sort points by polar angle with respect to start point
-  const sorted = points.slice().sort((a, b) => {
-    if (a === start) return -1;
-    if (b === start) return 1;
-    
-    const angleA = Math.atan2(a.y - start.y, a.x - start.x);
-    const angleB = Math.atan2(b.y - start.y, b.x - start.x);
-    
-    if (angleA !== angleB) return angleA - angleB;
-    
-    // If angles are equal, sort by distance
-    const distA = Math.hypot(a.x - start.x, a.y - start.y);
-    const distB = Math.hypot(b.x - start.x, b.y - start.y);
-    return distA - distB;
-  });
-
-  // Build the hull
-  const hull: Point3D[] = [];
-  
-  for (const point of sorted) {
-    // Remove points that make a right turn
-    while (hull.length >= 2 && !isLeftTurn(hull[hull.length - 2], hull[hull.length - 1], point)) {
-      hull.pop();
-    }
-    hull.push(point);
-  }
-  
-  return hull;
-}
-
-/**
- * Check if three points make a left turn (counter-clockwise)
- */
-function isLeftTurn(p1: Point3D, p2: Point3D, p3: Point3D): boolean {
-  const cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
-  return cross > 0;
-}
 
 /**
  * Merge brush stroke with existing contour using polygon union
