@@ -1,0 +1,845 @@
+# Exhaustive Pen Tool Operation Manual for Eclipse TPS
+
+## Tool State Machine and Initialization
+
+### Tool States
+
+```
+IDLE → ACTIVE → DRAWING → EDITING → COMPLETE
+```
+
+1. **IDLE State**:
+- Tool selected but not engaged
+- No active polygon
+- Mouse cursor: Standard crosshair
+- Memory: Empty vertex buffer
+1. **ACTIVE State**:
+- First click registered
+- Vertex buffer initialized
+- Active polygon ID assigned
+- Undo stack created
+1. **DRAWING State**:
+- One or more vertices placed
+- Active line segment from last vertex to cursor
+- Polygon remains open
+- All editing operations available
+1. **EDITING State**:
+- Existing vertex selected
+- Drag operation in progress
+- Temporary vertex position stored
+- Preview updates in real-time
+1. **COMPLETE State**:
+- Polygon closed or finalized
+- Vertex buffer committed to structure
+- Tool returns to IDLE or ACTIVE
+
+## Mouse Position Tracking
+
+### Coordinate Systems
+
+```
+Screen Space (pixels) → Image Space (mm) → Patient Space (DICOM)
+```
+
+1. **Mouse Position Capture**:
+- Raw Position: `(mouseX, mouseY)` in screen pixels
+- Update Rate: 60-120 Hz typically
+- Smoothing: 3-sample moving average
+- Dead Zone: 0.5 pixel threshold
+1. **Coordinate Transformation**:
+   
+   ```
+   imageX = (mouseX - viewportOriginX) / zoomFactor + panOffsetX
+   imageY = (mouseY - viewportOriginY) / zoomFactor + panOffsetY
+   patientZ = currentSlicePosition + sliceThickness * sliceIndex
+   ```
+1. **Boundary Constraints**:
+- Clamp to image boundaries
+- Prevent vertices outside FOV
+- Maintain minimum 1mm from edge
+
+## Mouse Button State Machine
+
+### Left Mouse Button (LMB)
+
+**Button Down Event**:
+
+```
+ON_LMB_DOWN:
+  IF (cursor over existing vertex):
+    IF (vertex belongs to active polygon):
+      state = EDITING
+      selectedVertex = vertexUnderCursor
+      dragStartPos = currentMousePos
+      createUndoPoint()
+    ELSE IF (vertex belongs to structure):
+      IF (shiftPressed):
+        addToSelection(vertex)
+      ELSE:
+        beginNewSelection(vertex)
+  ELSE IF (cursor over line segment):
+    insertVertex(at: cursorPosition)
+    state = EDITING
+    selectedVertex = newVertex
+  ELSE:
+    IF (state == IDLE or shift pressed):
+      beginNewPolygon()
+    placeVertex(at: cursorPosition)
+    state = DRAWING
+```
+
+**Button Held State**:
+
+```
+WHILE_LMB_HELD:
+  IF (state == EDITING):
+    deltaX = currentMouseX - dragStartPos.x
+    deltaY = currentMouseY - dragStartPos.y
+    
+    IF (distance(delta) > dragThreshold):
+      isDragging = true
+      
+    IF (isDragging):
+      newPos = constrainPosition(originalPos + delta)
+      updateVertexPosition(selectedVertex, newPos)
+      updateConnectedSegments()
+      updatePreview()
+      checkForSnapping()
+```
+
+**Button Release Event**:
+
+```
+ON_LMB_UP:
+  IF (state == EDITING):
+    IF (isDragging):
+      finalizeVertexPosition()
+      mergeIfSnapped()
+      updatePolygonGeometry()
+      addToUndoStack()
+    ELSE:
+      // Was just a click, not a drag
+      selectVertex(clickedVertex)
+    state = previousState
+```
+
+### Right Mouse Button (RMB)
+
+**Context Menu Generation**:
+
+```
+ON_RMB_DOWN:
+  contextMenuItems = []
+  
+  IF (cursor over vertex):
+    contextMenuItems.add("Delete Vertex")
+    contextMenuItems.add("Split Here")
+    contextMenuItems.add("Set as Start Point")
+    IF (vertex == firstVertex AND polygonOpen):
+      contextMenuItems.add("Close Polygon Here")
+  
+  ELSE IF (cursor over segment):
+    contextMenuItems.add("Insert Vertex")
+    contextMenuItems.add("Delete Segment")
+    contextMenuItems.add("Split Polygon")
+  
+  ELSE IF (activePolygon exists):
+    contextMenuItems.add("Close Polygon")
+    contextMenuItems.add("Cancel Polygon")
+    contextMenuItems.add("Delete Last Vertex")
+  
+  ELSE:
+    contextMenuItems.add("Start New Polygon")
+    contextMenuItems.add("Copy Structure")
+    contextMenuItems.add("Paste Structure")
+  
+  displayContextMenu(at: mousePosition)
+```
+
+### Middle Mouse Button (MMB)
+
+**Pan and Navigation**:
+
+```
+ON_MMB_DOWN:
+  panStartPos = currentMousePos
+  originalViewOffset = currentViewOffset
+  enterPanMode()
+
+WHILE_MMB_HELD:
+  deltaX = currentMouseX - panStartPos.x
+  deltaY = currentMouseY - panStartPos.y
+  newOffset = originalViewOffset + delta * panSensitivity
+  updateViewport(offset: newOffset)
+
+ON_MMB_UP:
+  exitPanMode()
+  resumePreviousTool()
+```
+
+**Scroll Wheel**:
+
+```
+ON_SCROLL:
+  IF (altPressed):
+    // Zoom operation
+    zoomFactor *= (1 + scrollDelta * 0.1)
+    zoomFactor = clamp(zoomFactor, 0.1, 10.0)
+    recenterOn(mousePosition)
+  ELSE IF (ctrlPressed):
+    // Adjust working plane opacity
+    structureOpacity += scrollDelta * 0.05
+    structureOpacity = clamp(structureOpacity, 0.1, 1.0)
+  ELSE:
+    // Navigate slices
+    newSliceIndex = currentSliceIndex + scrollDelta
+    newSliceIndex = clamp(newSliceIndex, 0, totalSlices-1)
+    loadSlice(newSliceIndex)
+    updatePolygonVisibility()
+```
+
+## Vertex Placement Logic
+
+### Initial Vertex
+
+```
+placeFirstVertex(position):
+  vertex = {
+    id: generateUUID(),
+    position: position,
+    index: 0,
+    polygonId: currentPolygonId,
+    connections: [],
+    isFirst: true,
+    isLast: true
+  }
+  
+  vertices.append(vertex)
+  currentPolygon.vertices.append(vertex)
+  updateRenderList()
+  return vertex
+```
+
+### Subsequent Vertices
+
+```
+placeVertex(position):
+  // Check proximity to first vertex for auto-close
+  IF (vertices.length >= 3):
+    distToFirst = distance(position, vertices[0].position)
+    IF (distToFirst < autoCloseThreshold):
+      highlightFirstVertex()
+      IF (leftClickReleased):
+        closePolygon()
+        return
+  
+  lastVertex = vertices[vertices.length - 1]
+  
+  vertex = {
+    id: generateUUID(),
+    position: snapPosition(position),
+    index: vertices.length,
+    polygonId: currentPolygonId,
+    connections: [lastVertex.id],
+    isFirst: false,
+    isLast: true
+  }
+  
+  // Update previous last vertex
+  lastVertex.isLast = false
+  lastVertex.connections.push(vertex.id)
+  
+  // Create line segment
+  segment = {
+    id: generateUUID(),
+    startVertex: lastVertex.id,
+    endVertex: vertex.id,
+    polygonId: currentPolygonId
+  }
+  
+  segments.append(segment)
+  vertices.append(vertex)
+  updateRenderList()
+```
+
+## Snapping System
+
+### Snap Detection
+
+```
+checkForSnapping(position):
+  snapTargets = []
+  
+  // Check vertex snapping
+  FOR each vertex in visibleVertices:
+    dist = distance(position, vertex.position)
+    IF (dist < vertexSnapRadius):
+      snapTargets.append({
+        type: 'vertex',
+        target: vertex,
+        distance: dist,
+        position: vertex.position
+      })
+  
+  // Check edge snapping
+  FOR each segment in visibleSegments:
+    closestPoint = closestPointOnSegment(position, segment)
+    dist = distance(position, closestPoint)
+    IF (dist < edgeSnapRadius):
+      snapTargets.append({
+        type: 'edge',
+        target: segment,
+        distance: dist,
+        position: closestPoint
+      })
+  
+  // Check grid snapping
+  IF (gridSnapEnabled):
+    gridPoint = {
+      x: round(position.x / gridSize) * gridSize,
+      y: round(position.y / gridSize) * gridSize
+    }
+    dist = distance(position, gridPoint)
+    IF (dist < gridSnapRadius):
+      snapTargets.append({
+        type: 'grid',
+        distance: dist,
+        position: gridPoint
+      })
+  
+  // Return closest snap target
+  IF (snapTargets.length > 0):
+    return snapTargets.sortBy(distance)[0]
+  ELSE:
+    return null
+```
+
+### Snap Visualization
+
+```
+renderSnapIndicator(snapTarget):
+  SWITCH (snapTarget.type):
+    CASE 'vertex':
+      drawCircle(snapTarget.position, 8, PURPLE)
+      drawCircle(snapTarget.position, 12, PURPLE, 0.5)
+      
+    CASE 'edge':
+      drawSquare(snapTarget.position, 6, BLUE)
+      drawLine(position, snapTarget.position, BLUE, dashed)
+      
+    CASE 'grid':
+      drawCross(snapTarget.position, 10, GRAY)
+```
+
+## Polygon Intersection with Existing Contours
+
+### Intersection Detection
+
+```
+checkContourIntersections(newSegment):
+  intersections = []
+  
+  FOR each structure in activeStructures:
+    IF (structure == currentStructure):
+      continue  // Skip self-intersection for now
+    
+    FOR each polygon in structure.polygons:
+      FOR each segment in polygon.segments:
+        intersection = segmentIntersection(newSegment, segment)
+        IF (intersection exists):
+          intersections.append({
+            point: intersection,
+            structure: structure,
+            polygon: polygon,
+            segment: segment,
+            type: determineIntersectionType()
+          })
+  
+  return intersections
+```
+
+### Intersection Handling
+
+```
+handleIntersection(intersection):
+  SWITCH (intersection.type):
+    CASE 'CROSSING':
+      // Segments cross each other
+      IF (allowCrossing):
+        createIntersectionVertex(intersection.point)
+      ELSE:
+        showWarning("Contours cannot cross")
+        preventVertex()
+      
+    CASE 'OVERLAP':
+      // Segments overlap
+      IF (mergeMode):
+        mergeOverlappingSegments()
+      ELSE:
+        offsetParallel(2mm)
+      
+    CASE 'TOUCH':
+      // Segments touch at endpoint
+      snapToVertex(intersection.point)
+      weldVertices()
+```
+
+## Contour Modification Operations
+
+### Adding to Existing Contour
+
+```
+appendToContour(existingContour, newPolygon):
+  // Find closest points between contours
+  closestPair = findClosestPoints(existingContour, newPolygon)
+  
+  IF (closestPair.distance < connectionThreshold):
+    // Create bridge segment
+    bridge = createSegment(closestPair.point1, closestPair.point2)
+    
+    // Merge polygons
+    mergedPolygon = {
+      vertices: existingContour.vertices + bridge + newPolygon.vertices,
+      segments: existingContour.segments + bridge + newPolygon.segments
+    }
+    
+    // Check for self-intersections
+    intersections = findSelfIntersections(mergedPolygon)
+    IF (intersections exist):
+      resolveSelfIntersections(intersections)
+    
+    // Update structure
+    structure.replacePolygon(existingContour, mergedPolygon)
+    updateVolume()
+  ELSE:
+    // Add as separate polygon
+    structure.addPolygon(newPolygon)
+```
+
+### Subtracting from Existing Contour
+
+```
+subtractFromContour(existingContour, toolPolygon):
+  // Determine inside/outside relationship
+  relationship = polygonRelationship(existingContour, toolPolygon)
+  
+  SWITCH (relationship):
+    CASE 'TOOL_INSIDE':
+      // Create hole
+      hole = {
+        outerPolygon: existingContour,
+        innerPolygon: reverseWinding(toolPolygon)
+      }
+      structure.addHole(hole)
+      
+    CASE 'PARTIAL_OVERLAP':
+      // Complex boolean operation
+      difference = booleanDifference(existingContour, toolPolygon)
+      FOR each resultPolygon in difference:
+        structure.addPolygon(resultPolygon)
+      structure.removePolygon(existingContour)
+      
+    CASE 'NO_OVERLAP':
+      // No operation needed
+      return
+```
+
+## Real-time Preview System
+
+### Ghost Line Rendering
+
+```
+renderGhostLine():
+  IF (vertices.length > 0 AND not polygonClosed):
+    lastVertex = vertices[vertices.length - 1]
+    currentMousePos = transformToImageSpace(mousePosition)
+    
+    // Apply snapping to preview
+    snapResult = checkForSnapping(currentMousePos)
+    IF (snapResult):
+      previewEndpoint = snapResult.position
+      drawDashedLine(lastVertex.position, previewEndpoint, SNAP_COLOR)
+      renderSnapIndicator(snapResult)
+    ELSE:
+      previewEndpoint = currentMousePos
+      drawDashedLine(lastVertex.position, previewEndpoint, PREVIEW_COLOR)
+    
+    // Show distance/angle measurements
+    distance = calculateDistance(lastVertex.position, previewEndpoint)
+    angle = calculateAngle(lastVertex.position, previewEndpoint)
+    renderMeasurements(distance, angle)
+```
+
+### Dynamic Feedback
+
+```
+updateDynamicFeedback():
+  // Vertex count
+  drawText("Vertices: " + vertices.length, topLeft)
+  
+  // Polygon state
+  IF (canClose()):
+    drawText("Click first vertex to close", topLeft + offset)
+    highlightVertex(vertices[0], HIGHLIGHT_COLOR)
+  
+  // Area preview (if closed)
+  IF (vertices.length >= 3):
+    previewArea = calculatePolygonArea(vertices + currentMousePos)
+    drawText("Area: " + formatArea(previewArea), topLeft + offset*2)
+  
+  // Intersection warnings
+  IF (hasIntersections()):
+    drawText("Warning: Self-intersection detected", topLeft + offset*3, RED)
+```
+
+## Vertex Editing Operations
+
+### Vertex Dragging
+
+```
+dragVertex(vertex, newPosition):
+  // Store original state for undo
+  originalState = {
+    vertex: vertex.clone(),
+    connectedSegments: getConnectedSegments(vertex).clone()
+  }
+  
+  // Apply constraints
+  constrainedPosition = newPosition
+  
+  IF (snapToGrid):
+    constrainedPosition = snapToGrid(constrainedPosition)
+  
+  IF (maintainAngles):
+    constrainedPosition = constrainAngle(vertex, constrainedPosition)
+  
+  IF (boundaryConstraint):
+    constrainedPosition = clampToBoundary(constrainedPosition)
+  
+  // Check for vertex overlap
+  overlapVertex = findVertexAt(constrainedPosition, excludeSelf=true)
+  IF (overlapVertex AND allowMerge):
+    mergeVertices(vertex, overlapVertex)
+    return
+  
+  // Update vertex position
+  vertex.position = constrainedPosition
+  
+  // Update connected segments
+  FOR each segment in vertex.connections:
+    segment.updateGeometry()
+    segment.checkValidity()
+  
+  // Update preview
+  updatePolygonPreview()
+  updateVolumePreview()
+```
+
+### Vertex Insertion
+
+```
+insertVertex(segment, position):
+  // Calculate parametric position on segment
+  t = parameterOnSegment(segment, position)
+  t = clamp(t, 0.1, 0.9)  // Prevent too close to endpoints
+  
+  // Create new vertex
+  newVertex = {
+    id: generateUUID(),
+    position: interpolatePosition(segment.start, segment.end, t),
+    index: segment.startVertex.index + 1,
+    polygonId: segment.polygonId
+  }
+  
+  // Split segment
+  segment1 = {
+    start: segment.startVertex,
+    end: newVertex
+  }
+  
+  segment2 = {
+    start: newVertex,
+    end: segment.endVertex
+  }
+  
+  // Update data structures
+  polygon.insertVertex(newVertex, afterIndex: segment.startVertex.index)
+  polygon.removeSegment(segment)
+  polygon.addSegment(segment1)
+  polygon.addSegment(segment2)
+  
+  // Reindex vertices
+  polygon.reindexVertices()
+  
+  // Select new vertex
+  selectedVertex = newVertex
+  state = EDITING
+```
+
+### Vertex Deletion
+
+```
+deleteVertex(vertex):
+  IF (polygon.vertices.length <= 3):
+    showWarning("Polygon must have at least 3 vertices")
+    return
+  
+  // Find connected segments
+  incomingSegment = findSegmentEndingAt(vertex)
+  outgoingSegment = findSegmentStartingAt(vertex)
+  
+  IF (incomingSegment AND outgoingSegment):
+    // Create new segment bypassing deleted vertex
+    newSegment = {
+      start: incomingSegment.startVertex,
+      end: outgoingSegment.endVertex
+    }
+    
+    // Update polygon
+    polygon.removeVertex(vertex)
+    polygon.removeSegment(incomingSegment)
+    polygon.removeSegment(outgoingSegment)
+    polygon.addSegment(newSegment)
+    
+    // Check validity
+    IF (createsIntersection(newSegment)):
+      showWarning("Deletion would create intersection")
+      undoOperation()
+      return
+  
+  // Reindex remaining vertices
+  polygon.reindexVertices()
+  updateDisplay()
+```
+
+## Polygon Closure Operations
+
+### Auto-Close Detection
+
+```
+checkAutoClose(currentPosition):
+  IF (vertices.length < 3):
+    return false
+  
+  firstVertex = vertices[0]
+  distance = calculateDistance(currentPosition, firstVertex.position)
+  
+  IF (distance < autoCloseRadius):
+    // Visual feedback
+    highlightVertex(firstVertex, CLOSURE_COLOR)
+    drawClosurePreview()
+    
+    // Magnetic effect
+    IF (distance < magneticRadius):
+      return {
+        shouldClose: true,
+        snapToFirst: true,
+        position: firstVertex.position
+      }
+    ELSE:
+      return {
+        shouldClose: true,
+        snapToFirst: false,
+        position: currentPosition
+      }
+  
+  return false
+```
+
+### Manual Closure
+
+```
+closePolygon():
+  IF (vertices.length < 3):
+    showError("Need at least 3 vertices")
+    return
+  
+  lastVertex = vertices[vertices.length - 1]
+  firstVertex = vertices[0]
+  
+  // Check if already closed
+  IF (lastVertex.connections.includes(firstVertex)):
+    return  // Already closed
+  
+  // Create closing segment
+  closingSegment = {
+    start: lastVertex,
+    end: firstVertex,
+    isClosing: true
+  }
+  
+  // Check for intersections
+  intersections = checkNewSegmentIntersections(closingSegment)
+  IF (intersections.length > 0):
+    IF (allowSelfIntersection):
+      handleIntersections(intersections)
+    ELSE:
+      showError("Closing would create intersection")
+      return
+  
+  // Finalize polygon
+  polygon.addSegment(closingSegment)
+  polygon.isClosed = true
+  
+  // Calculate properties
+  polygon.area = calculateArea(polygon)
+  polygon.perimeter = calculatePerimeter(polygon)
+  polygon.centroid = calculateCentroid(polygon)
+  
+  // Add to structure
+  currentStructure.addPolygon(polygon)
+  
+  // Reset tool
+  resetToolState()
+```
+
+## Interpolation System
+
+### Between Slices
+
+```
+interpolateContours(slice1, slice2, numIntermediateSlices):
+  polygon1 = getPolygonOnSlice(slice1)
+  polygon2 = getPolygonOnSlice(slice2)
+  
+  // Establish correspondence
+  correspondence = findVertexCorrespondence(polygon1, polygon2)
+  
+  // Generate intermediate polygons
+  interpolatedPolygons = []
+  
+  FOR i in range(1, numIntermediateSlices + 1):
+    t = i / (numIntermediateSlices + 1)
+    
+    interpolatedVertices = []
+    FOR pair in correspondence:
+      vertex1 = pair.vertex1
+      vertex2 = pair.vertex2
+      
+      // Linear interpolation
+      position = {
+        x: lerp(vertex1.x, vertex2.x, t),
+        y: lerp(vertex1.y, vertex2.y, t),
+        z: lerp(slice1.z, slice2.z, t)
+      }
+      
+      interpolatedVertices.append(position)
+    
+    // Create polygon
+    polygon = createPolygonFromVertices(interpolatedVertices)
+    interpolatedPolygons.append(polygon)
+  
+  return interpolatedPolygons
+```
+
+## Memory and Performance Management
+
+### Vertex Buffer Management
+
+```
+class VertexBuffer:
+  maxVertices = 1000
+  vertices = []
+  dirtyFlag = false
+  
+  addVertex(vertex):
+    IF (vertices.length >= maxVertices):
+      optimizeVertices()
+    
+    vertices.append(vertex)
+    dirtyFlag = true
+  
+  optimizeVertices():
+    // Remove redundant vertices
+    FOR i in range(vertices.length - 1, 0, -1):
+      IF (distance(vertices[i], vertices[i-1]) < epsilon):
+        vertices.removeAt(i)
+    
+    // Simplify if still too many
+    IF (vertices.length > maxVertices * 0.8):
+      vertices = douglasPeucker(vertices, tolerance)
+```
+
+### Render Optimization
+
+```
+updateRenderList():
+  IF (not dirtyFlag):
+    return
+  
+  renderCommands = []
+  
+  // Batch by polygon state
+  openPolygons = polygons.filter(p => !p.isClosed)
+  closedPolygons = polygons.filter(p => p.isClosed)
+  
+  // Render closed polygons first (filled)
+  FOR polygon in closedPolygons:
+    renderCommands.append({
+      type: 'FILL_POLYGON',
+      vertices: polygon.vertices,
+      color: polygon.fillColor,
+      opacity: polygon.opacity
+    })
+  
+  // Render outlines
+  FOR polygon in allPolygons:
+    renderCommands.append({
+      type: 'DRAW_POLYLINE',
+      vertices: polygon.vertices,
+      color: polygon.strokeColor,
+      width: polygon.strokeWidth,
+      closed: polygon.isClosed
+    })
+  
+  // Render vertices
+  IF (showVertices):
+    renderCommands.append({
+      type: 'DRAW_POINTS',
+      positions: allVertices.map(v => v.position),
+      size: vertexSize,
+      color: vertexColor
+    })
+  
+  // Submit to GPU
+  renderer.execute(renderCommands)
+  dirtyFlag = false
+```
+
+## Error Handling and Validation
+
+### Geometry Validation
+
+```
+validatePolygon(polygon):
+  errors = []
+  
+  // Check vertex count
+  IF (polygon.vertices.length < 3):
+    errors.append("Insufficient vertices")
+  
+  // Check for duplicate vertices
+  FOR i in range(polygon.vertices.length):
+    FOR j in range(i + 1, polygon.vertices.length):
+      IF (distance(vertices[i], vertices[j]) < epsilon):
+        errors.append("Duplicate vertices at " + i + ", " + j)
+  
+  // Check for self-intersections
+  FOR i in range(polygon.segments.length):
+    FOR j in range(i + 2, polygon.segments.length):
+      IF (segmentsIntersect(segments[i], segments[j])):
+        errors.append("Self-intersection detected")
+  
+  // Check area
+  area = calculateArea(polygon)
+  IF (area < minimumArea):
+    errors.append("Area too small: " + area)
+  
+  // Check for clockwise winding
+  IF (not isClockwise(polygon)):
+    warnings.append("Counter-clockwise winding")
+  
+  return {valid: errors.length == 0, errors: errors}
+```
+
+This exhaustive documentation provides complete implementation details for every aspect of the pen tool in Eclipse TPS, enabling precise replication of its functionality.​​​​​​​​​​​​​​​​

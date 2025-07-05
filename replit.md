@@ -89,6 +89,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 05, 2025: Eclipse TPS Pen Tool Implementation - COMPLETED
+  - ✅ Implemented comprehensive pen tool following Eclipse Treatment Planning System specification
+  - ✅ Created complete state machine (IDLE → ACTIVE → DRAWING → EDITING → COMPLETE)
+  - ✅ Added vertex placement with mouse tracking and coordinate transformation
+  - ✅ Implemented vertex dragging and editing capabilities 
+  - ✅ Added auto-close detection when cursor near first vertex (3+ vertices)
+  - ✅ Right-click completes polygon following medical software standards
+  - ✅ Ghost line preview shows next segment while drawing
+  - ✅ Vertex snapping system with visual indicators
+  - ✅ First vertex highlighted in purple to indicate closure point
+  - ✅ Proper HFS coordinate transformations for medical imaging accuracy
 - July 05, 2025: Complete Undo/Redo System for RT Structure Operations - COMPLETED
   - ✅ Implemented server-side in-memory storage for RT structure modifications with history tracking
   - ✅ Created API endpoints for undo/redo operations at `/api/rt-structures/:seriesId/undo` and `/redo`
