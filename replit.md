@@ -89,6 +89,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 05, 2025: Complete Undo/Redo System for RT Structure Operations - COMPLETED
+  - ✅ Implemented server-side in-memory storage for RT structure modifications with history tracking
+  - ✅ Created API endpoints for undo/redo operations at `/api/rt-structures/:seriesId/undo` and `/redo`
+  - ✅ Added contour persistence endpoint `/api/rt-structures/:seriesId/contours` for saving brush/pen edits
+  - ✅ All contour operations (brush, pen, grow, boolean, delete) now automatically save to server
+  - ✅ Added undo/redo buttons to contour edit toolbar with visual feedback and loading states
+  - ✅ Fixed payload too large error by increasing Express body parser limit to 50MB
+  - ✅ Implemented history management with proper state restoration for all operations
+  - ✅ Created comprehensive undo/redo functionality matching medical imaging software standards
 - July 04, 2025: Medical-Grade Grow Function with CM Measurements - COMPLETED
   - ✅ Updated brush size slider to display values in centimeters (cm) instead of pixels
   - ✅ Shows conversion: cm value with pixel value in parentheses for reference

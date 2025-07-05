@@ -9,6 +9,21 @@ import { RTStructureParser } from './rt-structure-parser';
 
 const upload = multer({ dest: 'uploads/' });
 
+// In-memory storage for RT structure modifications
+// In production, this would be stored in a database
+const rtStructureModifications = new Map<number, {
+  newStructures: any[],
+  modifiedStructures: Map<number, any>,
+  history: Array<{
+    timestamp: number,
+    action: string,
+    structureId: number,
+    previousState?: any,
+    newState?: any
+  }>,
+  historyIndex: number
+}>();
+
 function isDICOMFile(filePath: string): boolean {
   try {
     const buffer = fs.readFileSync(filePath, { start: 128, end: 132 } as any);
@@ -806,6 +821,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      
+      // Merge with in-memory modifications
+      const modifications = rtStructureModifications.get(seriesId);
+      if (modifications) {
+        // Add new structures
+        if (modifications.newStructures.length > 0) {
+          rtStructureSet.structures.push(...modifications.newStructures);
+        }
+        
+        // Apply modifications to existing structures
+        modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+          const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
+          if (structureIndex >= 0) {
+            rtStructureSet.structures[structureIndex] = {
+              ...rtStructureSet.structures[structureIndex],
+              ...modifiedData
+            };
+          }
+        });
+      }
+      
       res.json(rtStructureSet);
     } catch (error: any) {
       console.error('Error parsing RT structures:', error);
@@ -871,12 +907,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Color must be an RGB array [r, g, b]" });
       }
 
-      // In a real implementation, this would:
-      // 1. Create a new ROI in the RT Structure Set
-      // 2. Assign a unique ROI number
-      // 3. Save to the DICOM file
-      // For now, we'll create a mock structure
+      // Find the RT structure series for this study
+      const series = await storage.getSeriesByStudyId(studyId);
+      const rtSeries = series.find(s => s.modality === 'RTSTRUCT');
       
+      if (!rtSeries) {
+        return res.status(404).json({ message: "No RT Structure Set found for this study" });
+      }
+
       const newStructure = {
         roiNumber: Math.floor(Math.random() * 1000) + 100, // Generate random ROI number
         structureName: structureName,
@@ -884,8 +922,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         contours: [] // Empty contours initially
       };
 
-      // In production, this would persist to the RT Structure Set DICOM file
+      // Initialize modifications storage if not exists
+      if (!rtStructureModifications.has(rtSeries.id)) {
+        rtStructureModifications.set(rtSeries.id, {
+          newStructures: [],
+          modifiedStructures: new Map(),
+          history: [],
+          historyIndex: -1
+        });
+      }
+
+      // Add the new structure to in-memory storage
+      const modifications = rtStructureModifications.get(rtSeries.id)!;
+      modifications.newStructures.push(newStructure);
+
       console.log('Created new RT structure:', newStructure);
+      console.log('Current modifications:', modifications);
       
       res.status(201).json(newStructure);
     } catch (error) {
@@ -926,6 +978,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: "Structure color updated" });
     } catch (error) {
       console.error('Error updating structure color:', error);
+      next(error);
+    }
+  });
+
+  // Update RT structure contours (for brush/pen tool edits)
+  app.put("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const { structures } = req.body;
+      
+      if (!structures || !Array.isArray(structures)) {
+        return res.status(400).json({ message: "Structures array is required" });
+      }
+
+      // Initialize modifications storage if not exists
+      if (!rtStructureModifications.has(seriesId)) {
+        rtStructureModifications.set(seriesId, {
+          newStructures: [],
+          modifiedStructures: new Map(),
+          history: [],
+          historyIndex: -1
+        });
+      }
+
+      const modifications = rtStructureModifications.get(seriesId)!;
+      
+      // Store previous state for undo functionality
+      const previousState = new Map(modifications.modifiedStructures);
+      
+      // Update each structure's contours
+      structures.forEach(structure => {
+        if (structure.roiNumber && structure.contours) {
+          modifications.modifiedStructures.set(structure.roiNumber, {
+            contours: structure.contours
+          });
+        }
+      });
+
+      // Add to history
+      const historyEntry = {
+        timestamp: Date.now(),
+        action: 'update_contours',
+        structureId: -1, // Multiple structures
+        previousState: Array.from(previousState.entries()),
+        newState: Array.from(modifications.modifiedStructures.entries())
+      };
+
+      // Remove any redo entries after current index
+      modifications.history = modifications.history.slice(0, modifications.historyIndex + 1);
+      modifications.history.push(historyEntry);
+      modifications.historyIndex++;
+
+      console.log('Updated contours for series:', seriesId);
+      res.json({ success: true, message: "Contours updated successfully" });
+    } catch (error) {
+      console.error('Error updating contours:', error);
+      next(error);
+    }
+  });
+
+  // Undo operation
+  app.post("/api/rt-structures/:seriesId/undo", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      
+      if (!rtStructureModifications.has(seriesId)) {
+        return res.status(404).json({ message: "No modifications found for this series" });
+      }
+
+      const modifications = rtStructureModifications.get(seriesId)!;
+      
+      if (modifications.historyIndex < 0) {
+        return res.status(400).json({ message: "Nothing to undo" });
+      }
+
+      // Apply undo
+      const historyEntry = modifications.history[modifications.historyIndex];
+      if (historyEntry.previousState) {
+        modifications.modifiedStructures = new Map(historyEntry.previousState);
+      }
+      
+      modifications.historyIndex--;
+      
+      res.json({ success: true, message: "Undo successful" });
+    } catch (error) {
+      console.error('Error during undo:', error);
+      next(error);
+    }
+  });
+
+  // Redo operation
+  app.post("/api/rt-structures/:seriesId/redo", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      
+      if (!rtStructureModifications.has(seriesId)) {
+        return res.status(404).json({ message: "No modifications found for this series" });
+      }
+
+      const modifications = rtStructureModifications.get(seriesId)!;
+      
+      if (modifications.historyIndex >= modifications.history.length - 1) {
+        return res.status(400).json({ message: "Nothing to redo" });
+      }
+
+      // Apply redo
+      modifications.historyIndex++;
+      const historyEntry = modifications.history[modifications.historyIndex];
+      if (historyEntry.newState) {
+        modifications.modifiedStructures = new Map(historyEntry.newState);
+      }
+      
+      res.json({ success: true, message: "Redo successful" });
+    } catch (error) {
+      console.error('Error during redo:', error);
       next(error);
     }
   });

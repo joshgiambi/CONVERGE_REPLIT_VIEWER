@@ -100,11 +100,40 @@ export function WorkingViewer({
     Map<string, { data: Float32Array; width: number; height: number }>
   >(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+
+  // Save contour updates to server
+  const saveContourUpdates = async (updatedStructures: any) => {
+    if (!seriesId || isSaving) return;
+    
+    setIsSaving(true);
+    try {
+      const response = await fetch(`/api/rt-structures/${seriesId}/contours`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          structures: updatedStructures.structures
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to save contour updates');
+      } else {
+        console.log('Contour updates saved successfully');
+      }
+    } catch (error) {
+      console.error('Error saving contour updates:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Handle boolean operations (combine/subtract) between structures
   const handleBooleanOperation = (payload: any) => {
@@ -171,6 +200,10 @@ export function WorkingViewer({
         sourceContour.points = resultPoints;
         sourceContour.numberOfPoints = resultPoints.length / 3;
 
+        // Update local structures and save to server
+        setLocalRTStructures(updatedRTStructures);
+        saveContourUpdates(updatedRTStructures);
+        
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
           onContourUpdate(updatedRTStructures);
@@ -262,6 +295,10 @@ export function WorkingViewer({
       contour.points = updatedPoints;
       contour.numberOfPoints = updatedPoints.length / 3;
 
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures);
+      
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
@@ -381,6 +418,7 @@ export function WorkingViewer({
 
       console.log(`Structure now has ${structure.contours.length} contours`);
       setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures);
     } else if (payload.action === "delete_slice") {
       // Handle slice deletion
       const structure = updatedStructures.structures.find(
@@ -391,6 +429,7 @@ export function WorkingViewer({
           (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 0.5,
         );
         setLocalRTStructures(updatedStructures);
+        saveContourUpdates(updatedStructures);
       }
     } else if (payload.action === "clear_all") {
       // Handle clear all contours
@@ -400,6 +439,7 @@ export function WorkingViewer({
       if (structure) {
         structure.contours = [];
         setLocalRTStructures(updatedStructures);
+        saveContourUpdates(updatedStructures);
       }
     } else if (
       payload.action === "add_pen_stroke" ||
@@ -438,6 +478,8 @@ export function WorkingViewer({
       }
 
       setLocalRTStructures(updatedStructures);
+      // Save contour updates to server
+      saveContourUpdates(updatedStructures);
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(

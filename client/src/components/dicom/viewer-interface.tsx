@@ -512,6 +512,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             // Handle target structure selection for boolean operations
             console.log('Target structure selected:', structureId);
           }}
+          seriesId={selectedSeries?.id}
         />
       )}
 

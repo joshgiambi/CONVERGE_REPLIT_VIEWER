@@ -24,7 +24,9 @@ import {
   Maximize2,
   Minimize2,
   Plus,
-  Minus
+  Minus,
+  Undo,
+  Redo
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -53,6 +55,7 @@ interface ContourEditToolbarProps {
     color: number[];
   }>;
   onTargetStructureSelect?: (structureId: number | null) => void;
+  seriesId?: number;
 }
 
 export function ContourEditToolbar({ 
@@ -65,7 +68,8 @@ export function ContourEditToolbar({
   currentSlicePosition,
   onContourUpdate,
   availableStructures = [],
-  onTargetStructureSelect
+  onTargetStructureSelect,
+  seriesId
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -144,6 +148,54 @@ export function ContourEditToolbar({
     },
     onError: () => {
       toast({ title: "Failed to update structure color", variant: "destructive" });
+    }
+  });
+
+  // Undo mutation
+  const undoMutation = useMutation({
+    mutationFn: async () => {
+      if (!seriesId) throw new Error('No series ID');
+      const response = await fetch(`/api/rt-structures/${seriesId}/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error('Failed to undo');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
+      toast({ title: "Undo successful" });
+      // Trigger UI refresh
+      if (onContourUpdate) {
+        onContourUpdate({ action: 'refresh' });
+      }
+    },
+    onError: () => {
+      toast({ title: "Nothing to undo", variant: "destructive" });
+    }
+  });
+
+  // Redo mutation
+  const redoMutation = useMutation({
+    mutationFn: async () => {
+      if (!seriesId) throw new Error('No series ID');
+      const response = await fetch(`/api/rt-structures/${seriesId}/redo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error('Failed to redo');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
+      toast({ title: "Redo successful" });
+      // Trigger UI refresh
+      if (onContourUpdate) {
+        onContourUpdate({ action: 'refresh' });
+      }
+    },
+    onError: () => {
+      toast({ title: "Nothing to redo", variant: "destructive" });
     }
   });
 
@@ -633,6 +685,31 @@ export function ContourEditToolbar({
 
         {/* Tool Buttons */}
         <div className="flex items-center justify-center space-x-2">
+          {/* Undo/Redo buttons */}
+          <div className="flex items-center space-x-1 mr-2 pr-2 border-r border-gray-600">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => undoMutation.mutate()}
+              disabled={undoMutation.isPending}
+              className="h-9 w-9 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50"
+              title="Undo"
+            >
+              <Undo className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => redoMutation.mutate()}
+              disabled={redoMutation.isPending}
+              className="h-9 w-9 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50"
+              title="Redo"
+            >
+              <Redo className="w-4 h-4" />
+            </Button>
+          </div>
+          
+          {/* Main tool buttons */}
           {mainTools.map((tool) => {
             const IconComponent = tool.icon;
             const isActive = activeTool === tool.id || (tool.id === 'grow' && showSettings === 'grow');

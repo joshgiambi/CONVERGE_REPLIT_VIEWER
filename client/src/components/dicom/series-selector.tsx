@@ -263,6 +263,14 @@ export function SeriesSelector({
       return;
     }
 
+    if (!studyId) {
+      toast({ 
+        title: "No study selected", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
     // Convert hex color to RGB array
     const hexToRgb = (hex: string): [number, number, number] => {
       const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -276,6 +284,12 @@ export function SeriesSelector({
     const rgbColor = hexToRgb(newStructureColor);
 
     try {
+      console.log('Creating structure with:', {
+        studyId,
+        structureName: newStructureName.trim(),
+        color: rgbColor
+      });
+
       // Call API to create new structure
       const response = await fetch('/api/rt-structures', {
         method: 'POST',
@@ -288,18 +302,27 @@ export function SeriesSelector({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create structure');
+        const errorText = await response.text();
+        console.error('Create structure error:', errorText);
+        throw new Error(errorText || 'Failed to create structure');
       }
 
       const newStructure = await response.json();
+      console.log('New structure created:', newStructure);
       
       // Reload RT structures to include the new one
       if (selectedRTSeries && onRTStructureLoad) {
-        const structuresResponse = await fetch(`/api/rt-structures/${selectedRTSeries.id}`);
+        console.log('Reloading RT structures for series:', selectedRTSeries.id);
+        const structuresResponse = await fetch(`/api/rt-structures/${selectedRTSeries.id}/contours`);
         if (structuresResponse.ok) {
           const data = await structuresResponse.json();
+          console.log('Reloaded structures:', data);
           onRTStructureLoad(data);
+        } else {
+          console.error('Failed to reload structures:', structuresResponse.status);
         }
+      } else {
+        console.log('Cannot reload structures - selectedRTSeries:', selectedRTSeries, 'onRTStructureLoad:', !!onRTStructureLoad);
       }
 
       toast({ 

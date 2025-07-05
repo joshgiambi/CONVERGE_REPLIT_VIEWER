@@ -6,8 +6,8 @@ import { registerRoutes } from "./routes";
 const app = express();
 const server = createServer(app);
 
-// Add JSON parsing middleware
-app.use(express.json());
+// Add JSON parsing middleware with increased limit for RT structure contours
+app.use(express.json({ limit: '50mb' }));
 
 async function startServer() {
   // Setup routes first
