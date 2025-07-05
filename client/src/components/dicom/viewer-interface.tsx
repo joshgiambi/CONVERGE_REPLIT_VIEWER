@@ -507,6 +507,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           currentSlicePosition={currentSlicePosition}
           onContourUpdate={handleContourUpdate}
+          availableStructures={rtStructures.structures}
+          onTargetStructureSelect={(structureId) => {
+            // Handle target structure selection for boolean operations
+            console.log('Target structure selected:', structureId);
+          }}
         />
       )}
 

@@ -8,8 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3 } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface SeriesSelectorProps {
   series: DICOMSeries[];
@@ -72,6 +74,10 @@ export function SeriesSelector({
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
   const [contourWidth, setContourWidth] = useState([3]);
   const [contourOpacity, setContourOpacity] = useState([30]);
+  const [showNewStructureDialog, setShowNewStructureDialog] = useState(false);
+  const [newStructureName, setNewStructureName] = useState('');
+  const [newStructureColor, setNewStructureColor] = useState('#FF0000');
+  const { toast } = useToast();
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
@@ -246,6 +252,72 @@ export function SeriesSelector({
   const handleDeleteStructure = (structureId: number) => {
     // Handle structure deletion
     console.log('Delete structure:', structureId);
+  };
+
+  const handleCreateNewStructure = async () => {
+    if (!newStructureName.trim()) {
+      toast({ 
+        title: "Structure name is required", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    // Convert hex color to RGB array
+    const hexToRgb = (hex: string): [number, number, number] => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16)
+      ] : [255, 0, 0];
+    };
+
+    const rgbColor = hexToRgb(newStructureColor);
+
+    try {
+      // Call API to create new structure
+      const response = await fetch('/api/rt-structures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studyId: studyId,
+          structureName: newStructureName.trim(),
+          color: rgbColor
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create structure');
+      }
+
+      const newStructure = await response.json();
+      
+      // Reload RT structures to include the new one
+      if (selectedRTSeries && onRTStructureLoad) {
+        const structuresResponse = await fetch(`/api/rt-structures/${selectedRTSeries.id}`);
+        if (structuresResponse.ok) {
+          const data = await structuresResponse.json();
+          onRTStructureLoad(data);
+        }
+      }
+
+      toast({ 
+        title: `Structure "${newStructureName}" created successfully`,
+        variant: "default" 
+      });
+
+      // Reset form and close dialog
+      setNewStructureName('');
+      setNewStructureColor('#FF0000');
+      setShowNewStructureDialog(false);
+    } catch (error) {
+      console.error('Error creating structure:', error);
+      toast({ 
+        title: "Failed to create structure", 
+        variant: "destructive" 
+      });
+    }
   };
 
   const toggleGroupExpansion = (groupName: string) => {
@@ -497,6 +569,17 @@ export function SeriesSelector({
                           {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                         </Button>
                       )}
+                      
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowNewStructureDialog(true)}
+                        className="bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700 ml-auto"
+                        title="Create new structure"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        New
+                      </Button>
                       
                       <Button
                         variant="outline"
@@ -1041,6 +1124,65 @@ export function SeriesSelector({
           </Accordion>
         </CardContent>
       </Card>
+
+      {/* New Structure Dialog */}
+      <Dialog open={showNewStructureDialog} onOpenChange={setShowNewStructureDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Create New Structure</DialogTitle>
+            <DialogDescription>
+              Add a new anatomical structure to the current RT Structure Set.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="structure-name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="structure-name"
+                value={newStructureName}
+                onChange={(e) => setNewStructureName(e.target.value)}
+                className="col-span-3"
+                placeholder="e.g., LIVER, HEART, PTV"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="structure-color" className="text-right">
+                Color
+              </Label>
+              <div className="col-span-3 flex items-center gap-2">
+                <Input
+                  id="structure-color"
+                  type="color"
+                  value={newStructureColor}
+                  onChange={(e) => setNewStructureColor(e.target.value)}
+                  className="w-20 h-10 p-1 cursor-pointer"
+                />
+                <span className="text-sm text-gray-500">{newStructureColor}</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowNewStructureDialog(false);
+                setNewStructureName('');
+                setNewStructureColor('#FF0000');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleCreateNewStructure}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Create Structure
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

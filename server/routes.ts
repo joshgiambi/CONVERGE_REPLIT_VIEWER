@@ -858,6 +858,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create new RT structure
+  app.post("/api/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { studyId, structureName, color } = req.body;
+      
+      if (!studyId || !structureName || !color) {
+        return res.status(400).json({ message: "Study ID, structure name, and color are required" });
+      }
+
+      if (!Array.isArray(color) || color.length !== 3) {
+        return res.status(400).json({ message: "Color must be an RGB array [r, g, b]" });
+      }
+
+      // In a real implementation, this would:
+      // 1. Create a new ROI in the RT Structure Set
+      // 2. Assign a unique ROI number
+      // 3. Save to the DICOM file
+      // For now, we'll create a mock structure
+      
+      const newStructure = {
+        roiNumber: Math.floor(Math.random() * 1000) + 100, // Generate random ROI number
+        structureName: structureName,
+        color: color,
+        contours: [] // Empty contours initially
+      };
+
+      // In production, this would persist to the RT Structure Set DICOM file
+      console.log('Created new RT structure:', newStructure);
+      
+      res.status(201).json(newStructure);
+    } catch (error) {
+      console.error('Error creating RT structure:', error);
+      next(error);
+    }
+  });
+
   // Update RT structure name
   app.patch("/api/rt-structures/:structureId/name", async (req: Request, res: Response, next: NextFunction) => {
     try {
