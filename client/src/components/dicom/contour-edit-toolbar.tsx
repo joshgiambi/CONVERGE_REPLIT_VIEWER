@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Brush, 
   Pen, 
@@ -14,7 +15,16 @@ import {
   Trash2,
   Layers,
   RotateCcw,
-  ArrowUpFromLine
+  ArrowUpFromLine,
+  ArrowDownFromLine,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Maximize2,
+  Minimize2,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -37,6 +47,12 @@ interface ContourEditToolbarProps {
     autoLocalizeEnabled: boolean;
     zoomFillFactor: number;
   }) => void;
+  availableStructures?: Array<{
+    roiNumber: number;
+    structureName: string;
+    color: number[];
+  }>;
+  onTargetStructureSelect?: (structureId: number | null) => void;
 }
 
 export function ContourEditToolbar({ 
@@ -47,7 +63,9 @@ export function ContourEditToolbar({
   onStructureColorChange,
   onToolChange,
   currentSlicePosition,
-  onContourUpdate
+  onContourUpdate,
+  availableStructures = [],
+  onTargetStructureSelect
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -59,12 +77,16 @@ export function ContourEditToolbar({
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true);
   const [autoLocalizeEnabled, setAutoLocalizeEnabled] = useState(true);
   const [zoomFillFactor, setZoomFillFactor] = useState([40]); // 40% fill factor
+  const [growMode, setGrowMode] = useState<'grow' | 'shrink'>('grow');
+  const [growDirection, setGrowDirection] = useState<'all' | 'anterior' | 'posterior' | 'left' | 'right' | 'superior' | 'inferior'>('all');
+  const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
+  const [targetStructure, setTargetStructure] = useState<number | null>(null);
 
   // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
-    if (toolId === 'grow') {
-      // For grow button, just toggle the settings panel directly
-      setShowSettings(showSettings === 'grow' ? null : 'grow');
+    if (toolId === 'grow' || toolId === 'boolean') {
+      // For grow and boolean buttons, just toggle the settings panel directly
+      setShowSettings(showSettings === toolId ? null : toolId);
       return;
     }
     
@@ -185,7 +207,7 @@ export function ContourEditToolbar({
     toast({ title: `Cleared all contours for ${selectedStructure.structureName}` });
   };
 
-  // Grow contour function
+  // Grow/Shrink contour function
   const handleGrowContour = () => {
     if (!selectedStructure || !growDistance || !currentSlicePosition) return;
     
@@ -196,21 +218,27 @@ export function ContourEditToolbar({
     }
     
     // Convert cm to mm for the grow function
-    const distanceMm = distanceCm * 10;
+    let distanceMm = distanceCm * 10;
     
-    console.log(`Growing contour for structure ${selectedStructure.roiNumber} by ${distanceCm}cm (${distanceMm}mm) at slice ${currentSlicePosition}`);
+    // If shrink mode, make distance negative
+    if (growMode === 'shrink') {
+      distanceMm = -distanceMm;
+    }
+    
+    console.log(`${growMode === 'grow' ? 'Growing' : 'Shrinking'} contour for structure ${selectedStructure.roiNumber} by ${distanceCm}cm (${Math.abs(distanceMm)}mm) in direction: ${growDirection} at slice ${currentSlicePosition}`);
     
     if (onContourUpdate) {
       const updatePayload = {
         action: 'grow_contour',
         structureId: selectedStructure.roiNumber,
         slicePosition: currentSlicePosition,
-        distance: distanceMm // in millimeters
+        distance: distanceMm, // in millimeters (negative for shrink)
+        direction: growDirection // 'all', 'anterior', 'posterior', 'left', 'right', 'superior', 'inferior'
       };
       onContourUpdate(updatePayload);
     }
     
-    toast({ title: `Growing contour by ${distanceCm}cm on current slice` });
+    toast({ title: `${growMode === 'grow' ? 'Growing' : 'Shrinking'} contour by ${distanceCm}cm (${growDirection}) on current slice` });
   };
 
   if (!isVisible || !selectedStructure) return null;
@@ -252,7 +280,8 @@ export function ContourEditToolbar({
     { id: 'brush', icon: Brush, label: 'Brush' },
     { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
-    { id: 'grow', icon: ArrowUpFromLine, label: 'Grow' }
+    { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
+    { id: 'boolean', icon: Layers, label: 'Boolean' }
   ];
 
   const renderSettingsPanel = () => {
@@ -274,8 +303,31 @@ export function ContourEditToolbar({
         
         {showSettings === 'grow' ? (
           <div className="space-y-3 w-full">
+            {/* Grow/Shrink Toggle */}
+            <div className="flex gap-2">
+              <Button
+                variant={growMode === 'grow' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setGrowMode('grow')}
+                className={`flex-1 h-8 ${growMode === 'grow' ? 'bg-green-600 hover:bg-green-700' : ''}`}
+              >
+                <ArrowUpFromLine className="w-4 h-4 mr-1" />
+                Grow
+              </Button>
+              <Button
+                variant={growMode === 'shrink' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setGrowMode('shrink')}
+                className={`flex-1 h-8 ${growMode === 'shrink' ? 'bg-red-600 hover:bg-red-700' : ''}`}
+              >
+                <ArrowDownFromLine className="w-4 h-4 mr-1" />
+                Shrink
+              </Button>
+            </div>
+
+            {/* Distance Slider */}
             <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Grow Distance (cm)</Label>
+              <Label className="text-xs text-gray-300 mb-2 block">Distance (cm)</Label>
               <Slider
                 value={[parseFloat(growDistance) || 0]}
                 onValueChange={(value) => setGrowDistance(value[0].toString())}
@@ -287,8 +339,80 @@ export function ContourEditToolbar({
               <div className="text-xs text-gray-400 mt-1">
                 {parseFloat(growDistance) || 0} cm ({((parseFloat(growDistance) || 0) * 10).toFixed(1)} mm)
               </div>
-              <div className="text-xs text-gray-500 mt-2">
-                Expands the selected contour radially by the specified distance on the current slice.
+            </div>
+
+            {/* Direction Selection */}
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">Direction</Label>
+              <div className="grid grid-cols-4 gap-1">
+                <Button
+                  variant={growDirection === 'all' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('all')}
+                  className="h-8 text-xs col-span-4"
+                >
+                  All Directions
+                </Button>
+                <Button
+                  variant={growDirection === 'anterior' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('anterior')}
+                  className="h-8 text-xs"
+                  title="Anterior (Front)"
+                >
+                  <ArrowUp className="w-3 h-3" />
+                  Ant
+                </Button>
+                <Button
+                  variant={growDirection === 'posterior' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('posterior')}
+                  className="h-8 text-xs"
+                  title="Posterior (Back)"
+                >
+                  <ArrowDown className="w-3 h-3" />
+                  Post
+                </Button>
+                <Button
+                  variant={growDirection === 'left' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('left')}
+                  className="h-8 text-xs"
+                  title="Left"
+                >
+                  <ArrowLeft className="w-3 h-3" />
+                  Left
+                </Button>
+                <Button
+                  variant={growDirection === 'right' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('right')}
+                  className="h-8 text-xs"
+                  title="Right"
+                >
+                  <ArrowRight className="w-3 h-3" />
+                  Right
+                </Button>
+                <Button
+                  variant={growDirection === 'superior' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('superior')}
+                  className="h-8 text-xs col-span-2"
+                  title="Superior (Up)"
+                >
+                  <Maximize2 className="w-3 h-3 mr-1" />
+                  Superior
+                </Button>
+                <Button
+                  variant={growDirection === 'inferior' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGrowDirection('inferior')}
+                  className="h-8 text-xs col-span-2"
+                  title="Inferior (Down)"
+                >
+                  <Minimize2 className="w-3 h-3 mr-1" />
+                  Inferior
+                </Button>
               </div>
             </div>
             
@@ -296,13 +420,115 @@ export function ContourEditToolbar({
               variant="outline"
               size="sm"
               onClick={handleGrowContour}
-              className="w-full h-9 bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300"
+              className={`w-full h-9 ${
+                growMode === 'grow' 
+                  ? 'bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300' 
+                  : 'bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300'
+              }`}
               disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
             >
-              <ArrowUpFromLine className="w-4 h-4 mr-2" />
-              Run Grow
+              {growMode === 'grow' ? (
+                <ArrowUpFromLine className="w-4 h-4 mr-2" />
+              ) : (
+                <ArrowDownFromLine className="w-4 h-4 mr-2" />
+              )}
+              Run {growMode === 'grow' ? 'Grow' : 'Shrink'}
             </Button>
 
+          </div>
+        ) : showSettings === 'boolean' ? (
+          <div className="space-y-3 w-full">
+            {/* Boolean Operation Selection */}
+            <div className="flex gap-2">
+              <Button
+                variant={booleanOperation === 'combine' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setBooleanOperation('combine')}
+                className={`flex-1 h-8 ${booleanOperation === 'combine' ? 'bg-blue-600 hover:bg-blue-700' : ''}`}
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Combine
+              </Button>
+              <Button
+                variant={booleanOperation === 'subtract' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setBooleanOperation('subtract')}
+                className={`flex-1 h-8 ${booleanOperation === 'subtract' ? 'bg-orange-600 hover:bg-orange-700' : ''}`}
+              >
+                <Minus className="w-4 h-4 mr-1" />
+                Subtract
+              </Button>
+            </div>
+
+            {/* Target Structure Selection */}
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">Target Structure</Label>
+              <p className="text-xs text-gray-500 mb-2">
+                Select another structure to {booleanOperation} with {selectedStructure.structureName}
+              </p>
+              <Select
+                value={targetStructure?.toString() || ''}
+                onValueChange={(value) => {
+                  const structureId = value ? parseInt(value) : null;
+                  setTargetStructure(structureId);
+                  if (onTargetStructureSelect) {
+                    onTargetStructureSelect(structureId);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full h-8 bg-gray-800/50 border-gray-600">
+                  <SelectValue placeholder="Choose a structure" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableStructures
+                    .filter(s => s.roiNumber !== selectedStructure.roiNumber)
+                    .map(structure => (
+                      <SelectItem key={structure.roiNumber} value={structure.roiNumber.toString()}>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-sm" 
+                            style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                          />
+                          <span>{structure.structureName}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Handle boolean operation
+                if (!selectedStructure || !targetStructure || !currentSlicePosition) return;
+                
+                console.log(`Performing ${booleanOperation} operation between structures ${selectedStructure.roiNumber} and ${targetStructure}`);
+                
+                if (onContourUpdate) {
+                  const updatePayload = {
+                    action: 'boolean_operation',
+                    operation: booleanOperation, // 'combine' or 'subtract'
+                    sourceStructureId: selectedStructure.roiNumber,
+                    targetStructureId: targetStructure,
+                    slicePosition: currentSlicePosition
+                  };
+                  onContourUpdate(updatePayload);
+                }
+                
+                toast({ title: `${booleanOperation === 'combine' ? 'Combined' : 'Subtracted'} structures on current slice` });
+              }}
+              className={`w-full h-9 ${
+                booleanOperation === 'combine'
+                  ? 'bg-blue-900/20 hover:bg-blue-900/30 border-blue-600/50 text-blue-400 hover:text-blue-300'
+                  : 'bg-orange-900/20 hover:bg-orange-900/30 border-orange-600/50 text-orange-400 hover:text-orange-300'
+              }`}
+              disabled={!targetStructure}
+            >
+              <Layers className="w-4 h-4 mr-2" />
+              {booleanOperation === 'combine' ? 'Combine Structures' : 'Subtract Structure'}
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">

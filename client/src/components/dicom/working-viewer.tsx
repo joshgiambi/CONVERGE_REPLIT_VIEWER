@@ -11,6 +11,8 @@ import {
   addBrushToContour,
   eraseBrushFromContour,
 } from "@/lib/brush-to-polygon";
+import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
+import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -104,6 +106,85 @@ export function WorkingViewer({
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
 
+  // Handle boolean operations (combine/subtract) between structures
+  const handleBooleanOperation = (payload: any) => {
+    if (!rtStructures) {
+      console.error("RT structures not available for boolean operation");
+      return;
+    }
+
+    const { operation, sourceStructureId, targetStructureId, slicePosition } = payload;
+    console.log(
+      `Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`,
+    );
+
+    // Create a deep copy of RT structures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+
+    // Find the source and target structures
+    const sourceStructure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === sourceStructureId,
+    );
+    const targetStructure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === targetStructureId,
+    );
+
+    if (!sourceStructure || !targetStructure) {
+      console.error("Source or target structure not found");
+      return;
+    }
+
+    // Find contours on the specified slice for both structures
+    const sourceContour = sourceStructure.contours?.find(
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+    );
+    const targetContour = targetStructure.contours?.find(
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+    );
+
+    if (!sourceContour || !sourceContour.points || sourceContour.points.length < 9) {
+      console.warn(`No source contour found on slice ${slicePosition}`);
+      return;
+    }
+
+    if (!targetContour || !targetContour.points || targetContour.points.length < 9) {
+      console.warn(`No target contour found on slice ${slicePosition}`);
+      return;
+    }
+
+    try {
+      let resultPoints: number[];
+
+      if (operation === 'combine') {
+        // Combine the two contours
+        resultPoints = combineContours(sourceContour.points, targetContour.points);
+      } else if (operation === 'subtract') {
+        // Subtract target from source
+        resultPoints = subtractContours(sourceContour.points, targetContour.points);
+      } else {
+        console.error(`Unknown boolean operation: ${operation}`);
+        return;
+      }
+
+      if (resultPoints.length >= 9) {
+        // Update the source contour with the result
+        sourceContour.points = resultPoints;
+        sourceContour.numberOfPoints = resultPoints.length / 3;
+
+        // Pass the updated structures up to parent component
+        if (onContourUpdate) {
+          onContourUpdate(updatedRTStructures);
+        }
+
+        console.log(`Successfully performed ${operation} operation`);
+      } else {
+        console.warn("Boolean operation resulted in invalid contour");
+      }
+    } catch (error) {
+      console.error(`Error performing ${operation} operation:`, error);
+    }
+  };
+
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
     if (!rtStructures) {
@@ -111,9 +192,10 @@ export function WorkingViewer({
       return;
     }
 
-    const { structureId, slicePosition, distance } = payload;
+    const { structureId, slicePosition, distance, direction = 'all' } = payload;
+    const isGrowing = distance > 0;
     console.log(
-      `Growing contour for structure ${structureId} by ${distance}mm at slice ${slicePosition}`,
+      `${isGrowing ? 'Growing' : 'Shrinking'} contour for structure ${structureId} by ${Math.abs(distance)}mm ${direction !== 'all' ? `in ${direction} direction` : 'in all directions'} at slice ${slicePosition}`,
     );
 
     // Create a deep copy of RT structures to avoid mutation
@@ -141,30 +223,53 @@ export function WorkingViewer({
     }
 
     try {
-      // Apply contour growing algorithm
-      const grownContour = growContour(
-        {
-          points: contour.points,
-          slicePosition: slicePosition,
-        },
-        distance,
-      );
+      let updatedPoints: number[];
+      
+      if (direction === 'all') {
+        // Use existing radial grow/shrink algorithm
+        const grownContour = growContour(
+          {
+            points: contour.points,
+            slicePosition: slicePosition,
+          },
+          distance,
+        );
+        
+        // Apply smoothing for medical-grade quality
+        const smoothedContour = smoothContour(grownContour, 0.15);
+        updatedPoints = smoothedContour.points;
+      } else {
+        // Use directional grow/shrink
+        updatedPoints = applyDirectionalGrow(
+          contour.points,
+          distance,
+          direction,
+          imageMetadata?.imageOrientation
+        );
+        
+        // Apply smoothing
+        const smoothedContour = smoothContour(
+          {
+            points: updatedPoints,
+            slicePosition: slicePosition,
+          },
+          0.15
+        );
+        updatedPoints = smoothedContour.points;
+      }
 
-      // Apply smoothing for medical-grade quality
-      const smoothedContour = smoothContour(grownContour, 0.15);
-
-      // Update the contour with grown points
-      contour.points = smoothedContour.points;
-      contour.numberOfPoints = smoothedContour.points.length / 3;
+      // Update the contour with grown/shrunk points
+      contour.points = updatedPoints;
+      contour.numberOfPoints = updatedPoints.length / 3;
 
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
 
-      console.log(`Successfully grew contour by ${distance}mm`);
+      console.log(`Successfully ${isGrowing ? 'grew' : 'shrunk'} contour by ${Math.abs(distance)}mm`);
     } catch (error) {
-      console.error("Error growing contour:", error);
+      console.error(`Error ${isGrowing ? 'growing' : 'shrinking'} contour:`, error);
     }
   };
   const [isDragging, setIsDragging] = useState(false);
@@ -373,6 +478,9 @@ export function WorkingViewer({
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
+    } else if (payload.action === "boolean_operation") {
+      // Handle boolean operations (combine/subtract)
+      handleBooleanOperation(payload);
     }
   };
 
