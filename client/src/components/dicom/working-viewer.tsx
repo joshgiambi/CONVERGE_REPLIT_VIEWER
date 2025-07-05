@@ -33,6 +33,7 @@ interface WorkingViewerProps {
     tool: string | null;
     brushSize: number;
     isActive: boolean;
+    predictionEnabled?: boolean;
   };
   selectedForEdit?: number | null;
   onBrushSizeChange?: (size: number) => void;
@@ -916,6 +917,11 @@ export function WorkingViewer({
 
   const preloadAllImages = async (imageList: any[]) => {
     console.log("Starting to preload all images...");
+    if (!imageList || imageList.length === 0) {
+      console.warn("No images to preload");
+      setIsPreloading(false);
+      return;
+    }
     setIsPreloading(true);
     const newCache = new Map();
 
@@ -974,6 +980,10 @@ export function WorkingViewer({
 
     try {
       const currentImage = images[currentIndex];
+      if (!currentImage) {
+        console.error("No image at current index:", currentIndex);
+        throw new Error("No image available at current index");
+      }
       const cacheKey = currentImage.sopInstanceUID;
 
       // Clear canvas

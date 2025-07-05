@@ -38,7 +38,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [brushToolState, setBrushToolState] = useState({
     tool: null as string | null,
     brushSize: 3,
-    isActive: false
+    isActive: false,
+    predictionEnabled: false
   });
   const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
   const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
@@ -503,7 +504,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             // Update structure color
           }}
           onToolChange={(toolState) => {
-            setBrushToolState(toolState);
+            setBrushToolState({
+              ...brushToolState,
+              ...toolState,
+              predictionEnabled: toolState.predictionEnabled ?? brushToolState.predictionEnabled
+            });
           }}
           currentSlicePosition={currentSlicePosition}
           onContourUpdate={handleContourUpdate}
