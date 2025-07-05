@@ -37,13 +37,104 @@ export function brushStrokeToPolygon(
     return [];
   }
   
-  // For a single point, create a perfect circle with exact radius
+  // For a single point, create a perfect circle
   if (brushPoints.length === 1) {
     return createPerfectCircle(brushPoints[0], brushSize);
   }
   
-  // For multiple points, create a smooth stroke outline
-  return createStrokeOutline(brushPoints, brushSize);
+  // Create a smooth capsule shape along the brush stroke
+  const result: number[] = [];
+  const zValue = brushPoints[0][2];
+  
+  // Create left and right edge points along the stroke
+  const leftEdge: number[][] = [];
+  const rightEdge: number[][] = [];
+  
+  for (let i = 0; i < brushPoints.length; i++) {
+    const curr = brushPoints[i];
+    
+    // Calculate direction vector
+    let dx = 0, dy = 0;
+    
+    if (i === 0 && brushPoints.length > 1) {
+      // First point - use direction to next
+      dx = brushPoints[1][0] - curr[0];
+      dy = brushPoints[1][1] - curr[1];
+    } else if (i === brushPoints.length - 1 && i > 0) {
+      // Last point - use direction from previous
+      dx = curr[0] - brushPoints[i-1][0];
+      dy = curr[1] - brushPoints[i-1][1];
+    } else if (i > 0 && i < brushPoints.length - 1) {
+      // Middle points - average direction
+      dx = brushPoints[i+1][0] - brushPoints[i-1][0];
+      dy = brushPoints[i+1][1] - brushPoints[i-1][1];
+    }
+    
+    // Normalize direction
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0.001) {
+      dx /= len;
+      dy /= len;
+    } else {
+      // Default direction if points are too close
+      dx = 1;
+      dy = 0;
+    }
+    
+    // Calculate perpendicular vector (normal)
+    const nx = -dy;
+    const ny = dx;
+    
+    // Add offset points on both sides
+    leftEdge.push([
+      curr[0] + nx * brushSize,
+      curr[1] + ny * brushSize,
+      zValue
+    ]);
+    
+    rightEdge.push([
+      curr[0] - nx * brushSize,
+      curr[1] - ny * brushSize,
+      zValue
+    ]);
+  }
+  
+  // Add semicircle cap at start
+  const startCap = createSemicircle(
+    brushPoints[0], 
+    brushSize, 
+    Math.atan2(rightEdge[0][1] - brushPoints[0][1], rightEdge[0][0] - brushPoints[0][0]),
+    Math.PI
+  );
+  
+  // Add semicircle cap at end
+  const endCap = createSemicircle(
+    brushPoints[brushPoints.length - 1],
+    brushSize,
+    Math.atan2(leftEdge[leftEdge.length - 1][1] - brushPoints[brushPoints.length - 1][1], 
+               leftEdge[leftEdge.length - 1][0] - brushPoints[brushPoints.length - 1][0]),
+    Math.PI
+  );
+  
+  // Combine all points: start cap + left edge + end cap + right edge (reversed)
+  for (const pt of startCap) {
+    result.push(pt.x, pt.y, zValue);
+  }
+  
+  for (const pt of leftEdge) {
+    result.push(pt[0], pt[1], pt[2]);
+  }
+  
+  for (const pt of endCap) {
+    result.push(pt.x, pt.y, zValue);
+  }
+  
+  // Add right edge in reverse order
+  for (let i = rightEdge.length - 1; i >= 0; i--) {
+    result.push(rightEdge[i][0], rightEdge[i][1], rightEdge[i][2]);
+  }
+  
+  return result;
 }
 
 /**

@@ -126,9 +126,11 @@ export function SimpleBrushTool({
 
     const structureColor = getStructureColor();
 
-    // Draw brush cursor
+    // Draw brush cursor - match actual stroke visual size
     if (cursorPosition && !isDrawing) {
       ctx.beginPath();
+      // The stroke has lineWidth = brushSize * 2, which creates a visual radius of brushSize
+      // So cursor should show the same visual size
       ctx.arc(cursorPosition.x, cursorPosition.y, brushSize, 0, 2 * Math.PI);
       ctx.strokeStyle = structureColor;
       ctx.lineWidth = 2;

@@ -806,13 +806,13 @@ export function WorkingViewer({
 
       let imageData = imageCache.get(cacheKey);
 
-      if (!imageData) {
+      if (!imageData || !imageData.data) {
         // Image should be preloaded, but fallback just in case
         console.warn(
-          "Image not in cache, this should not happen after preloading:",
+          "Image not in cache or invalid data, this should not happen after preloading:",
           cacheKey,
         );
-        throw new Error("Image not available in cache");
+        throw new Error("Image not available in cache or invalid image data");
       }
 
       // Keep fixed canvas size for consistent display
