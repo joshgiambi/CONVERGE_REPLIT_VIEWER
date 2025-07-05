@@ -144,7 +144,7 @@ export function SimpleBrushTool({
     // Draw current brush stroke
     if (brushPointsRef.current.length > 0) {
       ctx.strokeStyle = structureColor;
-      ctx.lineWidth = brushSize * 2;
+      ctx.lineWidth = brushSize * 2; // This makes the visible stroke diameter = brushSize * 2
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.globalAlpha = 0.7;

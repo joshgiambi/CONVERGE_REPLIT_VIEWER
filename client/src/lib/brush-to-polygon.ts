@@ -7,8 +7,27 @@ interface Point3D {
 }
 
 /**
- * Convert brush stroke points to a polygon contour
- * Uses a convex hull approach for cleaner medical imaging contours
+ * Create a perfect circle polygon at the given center with exact radius
+ */
+function createPerfectCircle(center: number[], radius: number): number[] {
+  const circleSegments = 32; // More segments for smoother circles
+  const points: number[] = [];
+  
+  for (let i = 0; i < circleSegments; i++) {
+    const angle = (i / circleSegments) * 2 * Math.PI;
+    points.push(
+      center[0] + radius * Math.cos(angle),
+      center[1] + radius * Math.sin(angle),
+      center[2]
+    );
+  }
+  
+  return points;
+}
+
+/**
+ * Convert brush stroke points to perfect circle polygons
+ * Creates exact circles without overlapping borders
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
@@ -18,32 +37,126 @@ export function brushStrokeToPolygon(
     return [];
   }
   
-  // Adjust brush size to match visual preview
-  const adjustedBrushSize = brushSize * 0.9;
-  
-  // Generate circle points around each brush stroke point
-  const allPoints: Point3D[] = [];
-  const circleSegments = 8; // Fewer segments for smoother result
-  
-  for (const point of brushPoints) {
-    // Add circle points around this brush point
-    for (let i = 0; i < circleSegments; i++) {
-      const angle = (i / circleSegments) * 2 * Math.PI;
-      allPoints.push({
-        x: point[0] + adjustedBrushSize * Math.cos(angle),
-        y: point[1] + adjustedBrushSize * Math.sin(angle),
-        z: point[2]
-      });
-    }
+  // For a single point, create a perfect circle with exact radius
+  if (brushPoints.length === 1) {
+    return createPerfectCircle(brushPoints[0], brushSize);
   }
   
-  // If we have very few points, just return a simple polygon
-  if (brushPoints.length <= 2) {
-    return computeConvexHull(allPoints);
-  }
+  // For multiple points, create a smooth stroke outline
+  return createStrokeOutline(brushPoints, brushSize);
+}
 
-  // Create outline using alpha shape approach
-  return createAlphaShape(allPoints, adjustedBrushSize * 2.5);
+/**
+ * Create a stroke outline from brush points
+ * Creates a continuous polygon that naturally merges overlapping areas
+ */
+function createStrokeOutline(brushPoints: number[][], brushSize: number): number[] {
+  if (brushPoints.length === 0) return [];
+  
+  // For a single point, just create a circle
+  if (brushPoints.length === 1) {
+    return createPerfectCircle(brushPoints[0], brushSize);
+  }
+  
+  const zValue = brushPoints[0][2];
+  
+  // Create left and right edge points along the stroke
+  const leftEdge: Array<{x: number, y: number}> = [];
+  const rightEdge: Array<{x: number, y: number}> = [];
+  
+  for (let i = 0; i < brushPoints.length; i++) {
+    const curr = brushPoints[i];
+    
+    // Calculate direction vector
+    let dx = 0, dy = 0;
+    
+    if (i === 0) {
+      // First point - use direction to next point
+      if (brushPoints.length > 1) {
+        dx = brushPoints[1][0] - curr[0];
+        dy = brushPoints[1][1] - curr[1];
+      }
+    } else if (i === brushPoints.length - 1) {
+      // Last point - use direction from previous point
+      dx = curr[0] - brushPoints[i-1][0];
+      dy = curr[1] - brushPoints[i-1][1];
+    } else {
+      // Middle points - average direction
+      dx = brushPoints[i+1][0] - brushPoints[i-1][0];
+      dy = brushPoints[i+1][1] - brushPoints[i-1][1];
+    }
+    
+    // Normalize direction
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+      dx /= len;
+      dy /= len;
+    }
+    
+    // Calculate perpendicular vector (normal)
+    const nx = -dy;
+    const ny = dx;
+    
+    // Add offset points on both sides
+    leftEdge.push({
+      x: curr[0] + nx * brushSize,
+      y: curr[1] + ny * brushSize
+    });
+    
+    rightEdge.push({
+      x: curr[0] - nx * brushSize,
+      y: curr[1] - ny * brushSize
+    });
+  }
+  
+  // Add cap at start
+  const startCap = createSemicircle(brushPoints[0], brushSize, Math.atan2(-rightEdge[0].y + brushPoints[0][1], -rightEdge[0].x + brushPoints[0][0]), Math.PI);
+  
+  // Add cap at end
+  const endCap = createSemicircle(brushPoints[brushPoints.length-1], brushSize, Math.atan2(leftEdge[leftEdge.length-1].y - brushPoints[brushPoints.length-1][1], leftEdge[leftEdge.length-1].x - brushPoints[brushPoints.length-1][0]), Math.PI);
+  
+  // Combine all points into a single polygon
+  const result: number[] = [];
+  
+  // Add start cap
+  for (const point of startCap) {
+    result.push(point.x, point.y, zValue);
+  }
+  
+  // Add left edge
+  for (const point of leftEdge) {
+    result.push(point.x, point.y, zValue);
+  }
+  
+  // Add end cap
+  for (const point of endCap) {
+    result.push(point.x, point.y, zValue);
+  }
+  
+  // Add right edge (reversed)
+  for (let i = rightEdge.length - 1; i >= 0; i--) {
+    result.push(rightEdge[i].x, rightEdge[i].y, zValue);
+  }
+  
+  return result;
+}
+
+/**
+ * Create a semicircle for stroke caps
+ */
+function createSemicircle(center: number[], radius: number, startAngle: number, angleRange: number): Array<{x: number, y: number}> {
+  const points: Array<{x: number, y: number}> = [];
+  const segments = 16;
+  
+  for (let i = 0; i <= segments; i++) {
+    const angle = startAngle + (i / segments) * angleRange;
+    points.push({
+      x: center[0] + radius * Math.cos(angle),
+      y: center[1] + radius * Math.sin(angle)
+    });
+  }
+  
+  return points;
 }
 
 /**

@@ -349,6 +349,20 @@ export function WorkingViewer({
       return;
     }
 
+    // Handle refresh action for undo/redo
+    if (payload.action === "refresh") {
+      console.log("Refreshing RT structures after undo/redo");
+      // Reload RT structures from parent component
+      if (studyId) {
+        // Force reload by temporarily clearing and re-setting
+        setLocalRTStructures(null);
+        setTimeout(() => {
+          setLocalRTStructures(rtStructures);
+        }, 100);
+      }
+      return;
+    }
+
     // Create a deep copy to avoid mutations
     const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
 
