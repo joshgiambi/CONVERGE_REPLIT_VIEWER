@@ -620,6 +620,10 @@ export function WorkingViewer({
           (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 0.5,
         );
         setLocalRTStructures(updatedStructures);
+        // Pass updated structures to parent to maintain state
+        if (onContourUpdate) {
+          onContourUpdate(updatedStructures);
+        }
         saveContourUpdates(updatedStructures);
       }
     } else if (payload.action === "clear_all") {
@@ -630,6 +634,10 @@ export function WorkingViewer({
       if (structure) {
         structure.contours = [];
         setLocalRTStructures(updatedStructures);
+        // Pass updated structures to parent to maintain state
+        if (onContourUpdate) {
+          onContourUpdate(updatedStructures);
+        }
         saveContourUpdates(updatedStructures);
       }
     } else if (

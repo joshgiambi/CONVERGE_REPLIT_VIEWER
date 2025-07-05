@@ -89,6 +89,12 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 05, 2025: Fixed Critical RT Structure Issues - COMPLETED
+  - ✅ Fixed "Error loading DICOM" after contour operations by adding delayed image display
+  - ✅ Added proper error handling to prevent RT structure rendering from crashing image display
+  - ✅ Fixed RT structures disappearing after delete/grow operations by updating parent state
+  - ✅ Fixed pen tool preventing scroll by allowing wheel events to pass through
+  - ✅ Improved state management to prevent unnecessary re-renders during RT structure updates
 - July 05, 2025: Eclipse TPS Pen Tool Implementation - COMPLETED
   - ✅ Implemented comprehensive pen tool following Eclipse Treatment Planning System specification
   - ✅ Created complete state machine (IDLE → ACTIVE → DRAWING → EDITING → COMPLETE)

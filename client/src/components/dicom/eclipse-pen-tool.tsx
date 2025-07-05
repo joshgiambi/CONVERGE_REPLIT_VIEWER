@@ -534,6 +534,10 @@ export function EclipsePenTool({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
+        onWheel={(e) => {
+          // Allow wheel events to pass through for scrolling
+          e.stopPropagation();
+        }}
       />
     </>
   );

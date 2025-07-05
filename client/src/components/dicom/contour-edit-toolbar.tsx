@@ -121,7 +121,8 @@ export function ContourEditToolbar({
       onToolChange({
         tool: newTool,
         brushSize: brushThickness[0],
-        isActive: newTool === 'brush' || newTool === 'pen'
+        isActive: newTool === 'brush' || newTool === 'pen',
+        predictionEnabled: isPredictionEnabled
       });
     }
   };
