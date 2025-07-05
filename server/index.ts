@@ -6,6 +6,9 @@ import { registerRoutes } from "./routes";
 const app = express();
 const server = createServer(app);
 
+// Add JSON parsing middleware
+app.use(express.json());
+
 async function startServer() {
   // Setup routes first
   await registerRoutes(app);
