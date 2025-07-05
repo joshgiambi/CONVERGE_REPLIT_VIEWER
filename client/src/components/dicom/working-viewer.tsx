@@ -78,7 +78,10 @@ export function WorkingViewer({
 
   // Update local structures when external ones change
   useEffect(() => {
-    setLocalRTStructures(externalRTStructures);
+    // Only update if actually changed to prevent unnecessary re-renders
+    if (externalRTStructures && externalRTStructures !== localRTStructures) {
+      setLocalRTStructures(externalRTStructures);
+    }
   }, [externalRTStructures]);
 
   // No longer need to load RT structures here - handled by parent component
@@ -752,12 +755,17 @@ export function WorkingViewer({
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      displayCurrentImage();
-      // Load metadata for current image
-      const currentImage = images[currentIndex];
-      if (currentImage?.id) {
-        loadImageMetadata(currentImage.id);
-      }
+      // Add a small delay to ensure state is stable after contour operations
+      const timeoutId = setTimeout(() => {
+        displayCurrentImage();
+        // Load metadata for current image
+        const currentImage = images[currentIndex];
+        if (currentImage?.id) {
+          loadImageMetadata(currentImage.id);
+        }
+      }, 10);
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
@@ -979,10 +987,13 @@ export function WorkingViewer({
     if (!ctx) return;
 
     try {
-      const currentImage = images[currentIndex];
+      // Ensure currentIndex is valid
+      const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
+      const currentImage = images[safeIndex];
       if (!currentImage) {
-        console.error("No image at current index:", currentIndex);
-        throw new Error("No image available at current index");
+        console.error("No image at current index:", safeIndex, "images length:", images.length);
+        setError("Unable to display image. Please try refreshing.");
+        return;
       }
       const cacheKey = currentImage.sopInstanceUID;
 
@@ -993,12 +1004,35 @@ export function WorkingViewer({
       let imageData = imageCache.get(cacheKey);
 
       if (!imageData || !imageData.data) {
-        // Image should be preloaded, but fallback just in case
+        // Try to reload the image if it's not in cache
         console.warn(
-          "Image not in cache or invalid data, this should not happen after preloading:",
+          "Image not in cache, attempting to reload:",
           cacheKey,
         );
-        throw new Error("Image not available in cache or invalid image data");
+        
+        try {
+          const imageResponse = await fetch(
+            `/api/images/${currentImage.sopInstanceUID}`,
+          );
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to reload image: ${imageResponse.status}`);
+          }
+
+          const arrayBuffer = await imageResponse.arrayBuffer();
+          const reloadedImageData = await parseDicomImage(arrayBuffer);
+
+          if (reloadedImageData) {
+            // Update cache with reloaded image
+            imageCache.set(cacheKey, reloadedImageData);
+            imageData = reloadedImageData;
+            console.log("Successfully reloaded image:", cacheKey);
+          } else {
+            throw new Error("Failed to parse reloaded image");
+          }
+        } catch (reloadError) {
+          console.error("Failed to reload image:", reloadError);
+          throw new Error("Image not available and could not be reloaded");
+        }
       }
 
       // Keep fixed canvas size for consistent display
@@ -1009,13 +1043,18 @@ export function WorkingViewer({
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
 
       // Render RT structure overlays if available
-      if (rtStructures && showStructures) {
-        // Pass currentImage with its metadata attached
-        const imageWithMetadata = {
-          ...currentImage,
-          imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-        };
-        renderRTStructures(ctx, canvas, imageWithMetadata);
+      if (localRTStructures && showStructures) {
+        try {
+          // Pass currentImage with its metadata attached
+          const imageWithMetadata = {
+            ...currentImage,
+            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+          };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
+        } catch (rtError) {
+          console.warn("Error drawing RT structures:", rtError);
+          // Don't let RT structure errors prevent image display
+        }
       }
     } catch (error: any) {
       console.error("Error displaying image:", error);
