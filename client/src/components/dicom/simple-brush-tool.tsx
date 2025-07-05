@@ -16,6 +16,7 @@ interface SimpleBrushToolProps {
   smoothingEnabled?: boolean;
   enableSmartMode?: boolean;
   onBrushModeChange?: (mode: any) => void;
+  predictionEnabled?: boolean;
 }
 
 export function SimpleBrushTool({
@@ -30,6 +31,7 @@ export function SimpleBrushTool({
   panX,
   panY,
   imageMetadata,
+  predictionEnabled = false,
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
   const [isDrawing, setIsDrawing] = useState(false);
@@ -363,6 +365,7 @@ export function SimpleBrushTool({
           pointCount: worldPoints.length,
           points: worldPoints,
           brushSize: brushSize,
+          predictionEnabled: predictionEnabled,
         });
       }
     } catch (error) {

@@ -14,6 +14,7 @@ import {
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
+import { predictNextSliceContour } from "@/lib/contour-prediction";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -527,6 +528,83 @@ export function WorkingViewer({
 
       console.log(`Structure now has ${structure.contours.length} contours`);
       setLocalRTStructures(updatedStructures);
+      
+      // Handle next slice prediction if enabled
+      if (payload.predictionEnabled) {
+        console.log("Next slice prediction is enabled, predicting contours for adjacent slices");
+        
+        // Get the final contour on this slice (either merged or new)
+        let finalContour = mergedWithContour;
+        if (!finalContour) {
+          // Find the contour we just created
+          finalContour = structure.contours[structure.contours.length - 1];
+        }
+        
+        if (finalContour && finalContour.points && finalContour.points.length > 0) {
+          // Calculate next slice positions (assuming 3mm slice spacing as typical)
+          const sliceSpacing = 3; // mm
+          const nextSlicePosition = payload.slicePosition + sliceSpacing;
+          const prevSlicePosition = payload.slicePosition - sliceSpacing;
+          
+          // Predict for next slice
+          const nextPrediction = predictNextSliceContour({
+            currentContour: finalContour.points,
+            currentSlicePosition: payload.slicePosition,
+            targetSlicePosition: nextSlicePosition,
+            anatomicalRegion: 'head', // You could determine this from metadata
+            predictionMode: 'simple',
+            confidenceThreshold: 0.5
+          });
+          
+          // If prediction has good confidence, apply it
+          if (nextPrediction.confidence > 0.5 && nextPrediction.predictedContour.length > 0) {
+            // Check if there's already a contour on the next slice
+            const nextSliceContourIndex = structure.contours.findIndex(
+              (c: any) => Math.abs(c.slicePosition - nextSlicePosition) < 0.5
+            );
+            
+            if (nextSliceContourIndex === -1) {
+              // No existing contour, add the predicted one
+              structure.contours.push({
+                slicePosition: nextSlicePosition,
+                points: nextPrediction.predictedContour,
+                numberOfPoints: nextPrediction.predictedContour.length / 3,
+                isPredicted: true // Mark as predicted
+              });
+              console.log(`Added predicted contour to next slice ${nextSlicePosition} with confidence ${nextPrediction.confidence.toFixed(2)}`);
+            }
+          }
+          
+          // Also predict for previous slice
+          const prevPrediction = predictNextSliceContour({
+            currentContour: finalContour.points,
+            currentSlicePosition: payload.slicePosition,
+            targetSlicePosition: prevSlicePosition,
+            anatomicalRegion: 'head',
+            predictionMode: 'simple',
+            confidenceThreshold: 0.5
+          });
+          
+          if (prevPrediction.confidence > 0.5 && prevPrediction.predictedContour.length > 0) {
+            const prevSliceContourIndex = structure.contours.findIndex(
+              (c: any) => Math.abs(c.slicePosition - prevSlicePosition) < 0.5
+            );
+            
+            if (prevSliceContourIndex === -1) {
+              structure.contours.push({
+                slicePosition: prevSlicePosition,
+                points: prevPrediction.predictedContour,
+                numberOfPoints: prevPrediction.predictedContour.length / 3,
+                isPredicted: true
+              });
+              console.log(`Added predicted contour to previous slice ${prevSlicePosition} with confidence ${prevPrediction.confidence.toFixed(2)}`);
+            }
+          }
+          
+          // Update the structures again with predictions
+          setLocalRTStructures(updatedStructures);
+        }
+      }
       saveContourUpdates(updatedStructures);
     } else if (payload.action === "delete_slice") {
       // Handle slice deletion
@@ -1547,6 +1625,7 @@ export function WorkingViewer({
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
+                predictionEnabled={brushToolState?.predictionEnabled || false}
                 onBrushModeChange={(mode: BrushOperation) => {
                   console.log("Brush mode changed:", mode);
                 }}

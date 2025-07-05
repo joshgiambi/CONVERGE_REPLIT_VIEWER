@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -86,6 +86,23 @@ export function ContourEditToolbar({
   const [growDirection, setGrowDirection] = useState<'all' | 'anterior' | 'posterior' | 'left' | 'right' | 'superior' | 'inferior'>('all');
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
+  const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
+
+  // Keyboard shortcut handling
+  useEffect(() => {
+    if (!isVisible) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Delete key shortcut for deleting current slice
+      if (e.key === 'Delete' || e.key === 'Del') {
+        e.preventDefault();
+        handleDeleteCurrentSlice();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isVisible, selectedStructure, currentSlicePosition]);
 
   // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
@@ -615,7 +632,8 @@ export function ContourEditToolbar({
                       onToolChange({
                         tool: 'brush',
                         brushSize: value[0],
-                        isActive: true
+                        isActive: true,
+                        predictionEnabled: isPredictionEnabled
                       });
                     }
                   }}
@@ -644,6 +662,15 @@ export function ContourEditToolbar({
                   checked={smartBrush}
                   onCheckedChange={setSmartBrush}
                   className="data-[state=checked]:bg-green-500"
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Next Slice Prediction</Label>
+                <Switch
+                  checked={isPredictionEnabled}
+                  onCheckedChange={setIsPredictionEnabled}
+                  className="data-[state=checked]:bg-purple-500"
                 />
               </div>
             </div>
@@ -725,6 +752,20 @@ export function ContourEditToolbar({
               title="Redo"
             >
               <Redo className="w-4 h-4" />
+            </Button>
+          </div>
+          
+          {/* Quick Delete Button */}
+          <div className="mr-2 pr-2 border-r border-gray-600">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeleteCurrentSlice}
+              className="h-9 px-3 bg-black border border-red-600/50 text-red-400 hover:text-red-300 hover:bg-red-900/20"
+              title="Delete Current Slice (Del)"
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              <span className="text-xs">Del Slice</span>
             </Button>
           </div>
           
