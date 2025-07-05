@@ -577,17 +577,6 @@ export function SeriesSelector({
                         className="bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700 ml-auto"
                         title="Create new structure"
                       >
-                        <Plus className="w-4 h-4 mr-1" />
-                        New
-                      </Button>
-                      
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowAddContour(!showAddContour)}
-                        className="bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700"
-                        title="Add New Contour"
-                      >
                         <Plus className="w-4 h-4" />
                       </Button>
                       
