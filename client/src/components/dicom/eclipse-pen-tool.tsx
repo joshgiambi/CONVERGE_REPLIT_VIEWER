@@ -498,6 +498,8 @@ export function EclipsePenTool({
     }
   }, [toolState, vertices, closePolygon]);
   
+  console.log('EclipsePenTool render - isActive:', isActive, 'selectedStructure:', selectedStructure);
+  
   if (!isActive) return null;
   
   return (
@@ -513,8 +515,8 @@ export function EclipsePenTool({
           pointerEvents: 'none',
           zIndex: 9998,
         }}
-        width={512}
-        height={512}
+        width={1024}
+        height={1024}
       />
       <canvas
         ref={overlayCanvasRef}
@@ -528,15 +530,14 @@ export function EclipsePenTool({
           cursor: toolState === ToolState.EDITING ? 'move' : 'crosshair',
           zIndex: 9999,
         }}
-        width={512}
-        height={512}
+        width={1024}
+        height={1024}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
         onWheel={(e) => {
-          // Allow wheel events to pass through for scrolling
-          e.stopPropagation();
+          // Don't prevent wheel events - let them bubble up for scrolling
         }}
       />
     </>

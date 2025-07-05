@@ -79,7 +79,9 @@ export function WorkingViewer({
   // Update local structures when external ones change
   useEffect(() => {
     // Only update if actually changed to prevent unnecessary re-renders
+    console.log("RT Structures update - external:", externalRTStructures);
     if (externalRTStructures && externalRTStructures !== localRTStructures) {
+      console.log("Setting local RT structures:", externalRTStructures);
       setLocalRTStructures(externalRTStructures);
     }
   }, [externalRTStructures]);
@@ -452,14 +454,8 @@ export function WorkingViewer({
     // Handle refresh action for undo/redo
     if (payload.action === "refresh") {
       console.log("Refreshing RT structures after undo/redo");
-      // Reload RT structures from parent component
-      if (studyId) {
-        // Force reload by temporarily clearing and re-setting
-        setLocalRTStructures(null);
-        setTimeout(() => {
-          setLocalRTStructures(rtStructures);
-        }, 100);
-      }
+      // Just update from parent without clearing
+      setLocalRTStructures(rtStructures);
       return;
     }
 
@@ -1172,7 +1168,7 @@ export function WorkingViewer({
     canvas: HTMLCanvasElement,
     currentImage: any,
   ) => {
-    if (!rtStructures || !currentImage) return;
+    if (!localRTStructures || !currentImage) return;
 
     // FIXED: Get current slice position from actual DICOM metadata
     let currentSlicePosition: number = currentIndex + 1; // Default fallback
@@ -1223,16 +1219,18 @@ export function WorkingViewer({
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
     console.log(
       `📋 Available structures:`,
-      rtStructures.structures.map((s: any) => s.structureName),
+      localRTStructures?.structures?.map((s: any) => s.structureName) || [],
     );
 
     // Get all RT structure Z positions to check coordinate space
     const allRTZPositions: number[] = [];
-    rtStructures.structures.forEach((structure: any) => {
-      structure.contours.forEach((contour: any) => {
-        allRTZPositions.push(contour.slicePosition);
+    if (localRTStructures?.structures) {
+      localRTStructures.structures.forEach((structure: any) => {
+        structure.contours.forEach((contour: any) => {
+          allRTZPositions.push(contour.slicePosition);
+        });
       });
-    });
+    }
 
     if (allRTZPositions.length > 0) {
       const rtZMin = Math.min(...allRTZPositions);
@@ -1257,7 +1255,8 @@ export function WorkingViewer({
     // Keep stroke at full opacity - only fill should be affected by opacity setting
     ctx.globalAlpha = 1;
 
-    rtStructures.structures.forEach((structure: any) => {
+    if (localRTStructures?.structures) {
+      localRTStructures.structures.forEach((structure: any) => {
       // Check if this structure is visible or if it's selected for editing
       const isVisible = structureVisibility.get(structure.roiNumber);
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
@@ -1284,6 +1283,7 @@ export function WorkingViewer({
         }
       });
     });
+    }
 
     // Restore context state
     ctx.restore();
