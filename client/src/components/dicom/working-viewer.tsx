@@ -10,6 +10,7 @@ import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
   addBrushToContour,
   eraseBrushFromContour,
+  mergeBrushWithContour,
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
@@ -404,10 +405,10 @@ export function WorkingViewer({
               `Merging brush stroke with existing contour of ${contour.points.length / 3} points`,
             );
             
-            // Simple merge: combine all points
-            const allPoints = [...contour.points, ...brushPolygon];
-            contour.points = allPoints;
-            contour.numberOfPoints = allPoints.length / 3;
+            // Use proper polygon union to merge contours seamlessly
+            const mergedPoints = mergeBrushWithContour(contour.points, brushPolygon);
+            contour.points = mergedPoints;
+            contour.numberOfPoints = mergedPoints.length / 3;
             
             foundIntersection = true;
             mergedWithContour = contour;
