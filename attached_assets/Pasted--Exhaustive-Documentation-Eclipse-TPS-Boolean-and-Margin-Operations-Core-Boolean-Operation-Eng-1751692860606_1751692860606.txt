@@ -1,0 +1,1022 @@
+# Exhaustive Documentation: Eclipse TPS Boolean and Margin Operations
+
+## Core Boolean Operation Engine
+
+### Operation Types and State Machine
+
+```
+OPERATION_STATES:
+  IDLE → SELECTION → PREVIEW → PROCESSING → VALIDATION → COMMIT → UPDATE
+
+OPERATION_TYPES:
+  - MARGIN (Expand/Contract)
+  - SUBTRACT (Boolean Difference)  
+  - UNION (Boolean Combine/Add)
+  - INTERSECTION (Boolean AND)
+  - XOR (Boolean Exclusive OR)
+```
+
+## MARGIN OPERATION (Expand/Contract)
+
+### Margin Tool Initialization
+
+```
+initializeMarginTool():
+  state = {
+    operation: 'MARGIN',
+    selectedStructure: null,
+    marginType: 'UNIFORM',  // UNIFORM, ASYMMETRIC, CUSTOM
+    marginValues: {
+      uniform: 5.0,  // mm
+      superior: 5.0,
+      inferior: 5.0,
+      anterior: 5.0,
+      posterior: 5.0,
+      left: 5.0,
+      right: 5.0
+    },
+    interpolationType: 'LINEAR',  // LINEAR, SMOOTH, DISCRETE
+    cornerHandling: 'ROUND',  // ROUND, MITER, BEVEL
+    miterLimit: 2.0,
+    resolution: 1.0,  // mm between points
+    preview: {
+      enabled: true,
+      opacity: 0.5,
+      color: 'yellow',
+      updateRealtime: true
+    }
+  }
+```
+
+### Margin Calculation Algorithm
+
+```
+calculateMargin(structure, marginParams):
+  expandedContours = []
+  
+  FOR each slice in structure.slices:
+    sliceContours = []
+    
+    FOR each contour in slice.contours:
+      // Extract vertices
+      vertices = contour.vertices
+      
+      // Calculate normals at each vertex
+      normals = []
+      FOR i in range(vertices.length):
+        prev = vertices[(i-1) % vertices.length]
+        curr = vertices[i]
+        next = vertices[(i+1) % vertices.length]
+        
+        // Edge vectors
+        v1 = normalize(curr - prev)
+        v2 = normalize(next - curr)
+        
+        // Average normal (pointing outward)
+        edgeNormal1 = perpendicular(v1)
+        edgeNormal2 = perpendicular(v2)
+        normal = normalize(edgeNormal1 + edgeNormal2)
+        
+        // Check for sharp corners
+        angle = angleBetween(v1, v2)
+        IF (angle < miterThreshold):
+          normal = handleSharpCorner(v1, v2, angle)
+        
+        normals.append(normal)
+      
+      // Apply margin
+      expandedVertices = []
+      FOR i in range(vertices.length):
+        vertex = vertices[i]
+        normal = normals[i]
+        
+        // Get margin distance for this direction
+        marginDist = getMarginDistance(vertex, normal, marginParams)
+        
+        // Offset vertex
+        newVertex = vertex + normal * marginDist
+        expandedVertices.append(newVertex)
+      
+      // Handle self-intersections
+      expandedContour = resolveSelfIntersections(expandedVertices)
+      sliceContours.append(expandedContour)
+    
+    expandedContours.append(sliceContours)
+  
+  return expandedContours
+```
+
+### Asymmetric Margin Handling
+
+```
+getMarginDistance(vertex, normal, params):
+  IF (params.marginType == 'UNIFORM'):
+    return params.uniform
+  
+  ELSE IF (params.marginType == 'ASYMMETRIC'):
+    // Determine anatomical direction
+    direction = worldToAnatomical(normal)
+    
+    // Interpolate between cardinal directions
+    weights = {
+      superior: max(0, dot(direction, SUPERIOR_VECTOR)),
+      inferior: max(0, dot(direction, INFERIOR_VECTOR)),
+      anterior: max(0, dot(direction, ANTERIOR_VECTOR)),
+      posterior: max(0, dot(direction, POSTERIOR_VECTOR)),
+      left: max(0, dot(direction, LEFT_VECTOR)),
+      right: max(0, dot(direction, RIGHT_VECTOR))
+    }
+    
+    // Normalize weights
+    totalWeight = sum(weights.values())
+    FOR key in weights:
+      weights[key] /= totalWeight
+    
+    // Calculate weighted margin
+    margin = 0
+    FOR direction, weight in weights:
+      margin += params[direction] * weight
+    
+    return margin
+```
+
+### Corner Handling Algorithms
+
+```
+handleSharpCorner(v1, v2, angle):
+  SWITCH (cornerHandling):
+    CASE 'ROUND':
+      // Insert arc vertices
+      numVertices = max(3, int(angle / 15))  // One vertex per 15 degrees
+      arcVertices = []
+      
+      FOR i in range(numVertices):
+        t = i / (numVertices - 1)
+        direction = slerp(v1, v2, t)
+        arcVertices.append(direction)
+      
+      return arcVertices
+    
+    CASE 'MITER':
+      // Calculate miter vector
+      bisector = normalize(v1 + v2)
+      miterLength = 1 / sin(angle / 2)
+      
+      IF (miterLength > miterLimit):
+        // Fall back to bevel
+        return handleBevel(v1, v2)
+      
+      return [bisector * miterLength]
+    
+    CASE 'BEVEL':
+      // Simple bevel - two vertices
+      return [v1, v2]
+```
+
+### Self-Intersection Resolution
+
+```
+resolveSelfIntersections(vertices):
+  // Build edge list
+  edges = []
+  FOR i in range(vertices.length):
+    edges.append({
+      start: vertices[i],
+      end: vertices[(i+1) % vertices.length],
+      index: i
+    })
+  
+  // Find all intersections
+  intersections = []
+  FOR i in range(edges.length):
+    FOR j in range(i+2, edges.length):
+      IF (abs(i-j) == edges.length-1):
+        continue  // Adjacent edges at wrap
+      
+      intersection = findIntersection(edges[i], edges[j])
+      IF (intersection):
+        intersections.append({
+          point: intersection,
+          edge1: i,
+          edge2: j,
+          param1: parameterOnEdge(edges[i], intersection),
+          param2: parameterOnEdge(edges[j], intersection)
+        })
+  
+  // Sort intersections
+  intersections.sort(by: edge1, then: param1)
+  
+  // Build new polygon(s)
+  return buildValidPolygons(vertices, edges, intersections)
+```
+
+### 3D Margin Interpolation
+
+```
+interpolateMarginBetweenSlices(slice1Contour, slice2Contour, marginParams):
+  // Establish point correspondence
+  correspondence = establishCorrespondence(slice1Contour, slice2Contour)
+  
+  // Calculate margins for both slices
+  margin1 = calculateMargin(slice1Contour, marginParams)
+  margin2 = calculateMargin(slice2Contour, marginParams)
+  
+  // Interpolate between slices
+  interpolatedSlices = []
+  numSlices = calculateIntermediateSlices(slice1.z, slice2.z)
+  
+  FOR i in range(1, numSlices):
+    t = i / (numSlices + 1)
+    interpolatedContour = []
+    
+    FOR j in range(correspondence.length):
+      // Interpolate position
+      pos1 = margin1.vertices[correspondence[j].index1]
+      pos2 = margin2.vertices[correspondence[j].index2]
+      
+      interpolatedPos = {
+        x: lerp(pos1.x, pos2.x, t),
+        y: lerp(pos1.y, pos2.y, t),
+        z: lerp(slice1.z, slice2.z, t)
+      }
+      
+      interpolatedContour.append(interpolatedPos)
+    
+    // Smooth if needed
+    IF (interpolationType == 'SMOOTH'):
+      interpolatedContour = smoothContour(interpolatedContour)
+    
+    interpolatedSlices.append(interpolatedContour)
+  
+  return interpolatedSlices
+```
+
+## SUBTRACT OPERATION (Boolean Difference)
+
+### Subtract Tool Initialization
+
+```
+initializeSubtractTool():
+  state = {
+    operation: 'SUBTRACT',
+    sourceStructure: null,  // Structure to subtract FROM
+    toolStructure: null,    // Structure to subtract WITH
+    mode: 'FULL',          // FULL, PARTIAL, PROJECTED
+    preserveSource: false,
+    createNewStructure: true,
+    newStructureName: 'Subtracted_',
+    sliceHandling: 'INTERPOLATE',  // INTERPOLATE, NEAREST, EXTEND
+    validation: {
+      checkOverlap: true,
+      minimumOverlap: 0.1,  // mm²
+      warnNoOverlap: true
+    }
+  }
+```
+
+### Boolean Difference Algorithm
+
+```
+performSubtraction(source, tool):
+  resultSlices = []
+  
+  FOR each slice in source.slices:
+    sourceContours = slice.contours
+    toolContours = findToolContoursAtZ(tool, slice.z)
+    
+    IF (toolContours.isEmpty()):
+      IF (sliceHandling == 'EXTEND'):
+        toolContours = nearestToolContours(tool, slice.z)
+      ELSE:
+        // Keep source unchanged
+        resultSlices.append(sourceContours)
+        continue
+    
+    // Perform 2D boolean operations
+    resultContours = []
+    FOR sourceContour in sourceContours:
+      contourResult = sourceContour.copy()
+      
+      FOR toolContour in toolContours:
+        // Check relationship
+        relationship = determineRelationship(contourResult, toolContour)
+        
+        SWITCH (relationship):
+          CASE 'NO_OVERLAP':
+            // No change needed
+            continue
+          
+          CASE 'TOOL_CONTAINS_SOURCE':
+            // Source completely inside tool - remove it
+            contourResult = null
+            break
+          
+          CASE 'SOURCE_CONTAINS_TOOL':
+            // Tool completely inside source - create hole
+            hole = createHole(contourResult, toolContour)
+            contourResult = hole
+          
+          CASE 'PARTIAL_OVERLAP':
+            // Complex intersection
+            difference = computeDifference(contourResult, toolContour)
+            contourResult = difference
+      
+      IF (contourResult != null):
+        resultContours.append(contourResult)
+    
+    resultSlices.append(resultContours)
+  
+  return createStructureFromSlices(resultSlices)
+```
+
+### Polygon Difference Computation
+
+```
+computeDifference(subjectPoly, clipPoly):
+  // Convert to edge representation
+  subjectEdges = polygonToEdges(subjectPoly)
+  clipEdges = polygonToEdges(clipPoly)
+  
+  // Find all intersections
+  intersections = []
+  FOR sEdge in subjectEdges:
+    FOR cEdge in clipEdges:
+      intersection = findIntersection(sEdge, cEdge)
+      IF (intersection):
+        intersections.append({
+          point: intersection,
+          subjectEdge: sEdge,
+          clipEdge: cEdge,
+          entering: determineDirection(sEdge, cEdge)
+        })
+  
+  // Sort intersections along edges
+  sortIntersectionsAlongEdges(intersections)
+  
+  // Build result polygons using winding rules
+  resultPolygons = []
+  visited = Set()
+  
+  // Start from subject vertices outside clip
+  FOR vertex in subjectPoly.vertices:
+    IF (not pointInPolygon(vertex, clipPoly) AND vertex not in visited):
+      polygon = traceDifferenceBoundary(vertex, subjectEdges, clipEdges, 
+                                       intersections, visited)
+      IF (polygon.isValid()):
+        resultPolygons.append(polygon)
+  
+  return resultPolygons
+```
+
+### Boundary Tracing Algorithm
+
+```
+traceDifferenceBoundary(startVertex, subjectEdges, clipEdges, intersections, visited):
+  polygon = []
+  current = startVertex
+  currentEdgeList = subjectEdges
+  onSubject = true
+  
+  WHILE (true):
+    visited.add(current)
+    polygon.append(current)
+    
+    // Find next point
+    IF (onSubject):
+      nextEdge = findEdgeStartingAt(current, subjectEdges)
+      IF (not nextEdge):
+        break
+      
+      // Check for intersections on this edge
+      edgeIntersections = getIntersectionsOnEdge(nextEdge, intersections)
+      
+      IF (edgeIntersections.isEmpty()):
+        // Follow edge to end
+        current = nextEdge.end
+      ELSE:
+        // Go to first intersection
+        firstIntersection = edgeIntersections[0]
+        current = firstIntersection.point
+        
+        // Switch to clip polygon if entering
+        IF (firstIntersection.entering):
+          onSubject = false
+          currentEdgeList = clipEdges
+    
+    ELSE:  // On clip polygon
+      nextEdge = findEdgeStartingAt(current, clipEdges, reverse=true)
+      IF (not nextEdge):
+        break
+      
+      // Check for intersections
+      edgeIntersections = getIntersectionsOnEdge(nextEdge, intersections)
+      
+      IF (edgeIntersections.isEmpty()):
+        current = nextEdge.end
+      ELSE:
+        // Find exit intersection
+        exitIntersection = findExitIntersection(edgeIntersections)
+        current = exitIntersection.point
+        
+        // Switch back to subject
+        onSubject = true
+        currentEdgeList = subjectEdges
+    
+    // Check if we've completed the loop
+    IF (distance(current, startVertex) < epsilon):
+      break
+  
+  return Polygon(polygon)
+```
+
+### Hole Creation
+
+```
+createHole(outerContour, innerContour):
+  // Ensure correct winding
+  IF (sameWinding(outerContour, innerContour)):
+    innerContour = reverseWinding(innerContour)
+  
+  // Find optimal connection point
+  connectionPoint = findOptimalConnection(outerContour, innerContour)
+  
+  // Create bridge
+  bridge = createBridge(
+    outerContour.vertices[connectionPoint.outerIndex],
+    innerContour.vertices[connectionPoint.innerIndex]
+  )
+  
+  // Merge vertices
+  result = []
+  
+  // Add outer vertices up to connection
+  FOR i in range(connectionPoint.outerIndex + 1):
+    result.append(outerContour.vertices[i])
+  
+  // Add bridge
+  result.extend(bridge.vertices)
+  
+  // Add inner vertices (reversed)
+  innerStart = connectionPoint.innerIndex
+  FOR i in range(innerContour.vertices.length):
+    index = (innerStart - i) % innerContour.vertices.length
+    result.append(innerContour.vertices[index])
+  
+  // Add return bridge
+  result.extend(reverse(bridge.vertices))
+  
+  // Complete outer contour
+  FOR i in range(connectionPoint.outerIndex + 1, outerContour.vertices.length):
+    result.append(outerContour.vertices[i])
+  
+  return Polygon(result)
+```
+
+## UNION OPERATION (Boolean Combine)
+
+### Union Tool Initialization
+
+```
+initializeUnionTool():
+  state = {
+    operation: 'UNION',
+    structures: [],  // Multiple structures can be combined
+    mode: 'MERGE_ALL',  // MERGE_ALL, PAIRWISE, HIERARCHICAL
+    mergeOverlapping: true,
+    mergeTolerance: 0.1,  // mm
+    simplifyResult: true,
+    simplifyTolerance: 0.5,  // mm
+    handleIslands: 'KEEP',  // KEEP, REMOVE_SMALL, MERGE_CLOSE
+    islandThreshold: 1.0,  // mm²
+    preview: {
+      showOriginals: true,
+      originalOpacity: 0.3,
+      resultOpacity: 0.7
+    }
+  }
+```
+
+### Multi-Structure Union Algorithm
+
+```
+performUnion(structures):
+  IF (mode == 'MERGE_ALL'):
+    return mergeAllStructures(structures)
+  ELSE IF (mode == 'PAIRWISE'):
+    return pairwiseMerge(structures)
+  ELSE IF (mode == 'HIERARCHICAL'):
+    return hierarchicalMerge(structures)
+
+mergeAllStructures(structures):
+  // Collect all contours by slice
+  sliceMap = {}
+  
+  FOR structure in structures:
+    FOR slice in structure.slices:
+      IF (slice.z not in sliceMap):
+        sliceMap[slice.z] = []
+      sliceMap[slice.z].extend(slice.contours)
+  
+  // Process each slice
+  resultSlices = []
+  FOR z, contours in sliceMap:
+    // Build union of all contours
+    unionResult = computeMultiUnion(contours)
+    
+    // Post-process
+    IF (simplifyResult):
+      unionResult = simplifyContours(unionResult, simplifyTolerance)
+    
+    IF (handleIslands != 'KEEP'):
+      unionResult = processIslands(unionResult)
+    
+    resultSlices.append({z: z, contours: unionResult})
+  
+  return Structure(resultSlices)
+```
+
+### Multi-Polygon Union Computation
+
+```
+computeMultiUnion(polygons):
+  IF (polygons.length == 0):
+    return []
+  IF (polygons.length == 1):
+    return polygons
+  
+  // Build sweep line event queue
+  events = []
+  FOR i, polygon in enumerate(polygons):
+    FOR edge in polygon.edges:
+      events.append({
+        type: 'START',
+        point: edge.start,
+        edge: edge,
+        polygonId: i
+      })
+      events.append({
+        type: 'END',
+        point: edge.end,
+        edge: edge,
+        polygonId: i
+      })
+  
+  // Add intersection events
+  FOR i in range(polygons.length):
+    FOR j in range(i + 1, polygons.length):
+      intersections = findAllIntersections(polygons[i], polygons[j])
+      FOR intersection in intersections:
+        events.append({
+          type: 'INTERSECTION',
+          point: intersection.point,
+          edges: [intersection.edge1, intersection.edge2],
+          polygonIds: [i, j]
+        })
+  
+  // Sort events by Y coordinate (sweep line)
+  events.sort(by: point.y, then: point.x)
+  
+  // Process sweep line
+  activeEdges = SortedSet()  // Sorted by X coordinate
+  outputSegments = []
+  
+  FOR event in events:
+    SWITCH (event.type):
+      CASE 'START':
+        activeEdges.add(event.edge)
+        updateWindingNumbers(activeEdges, event.point)
+        
+      CASE 'END':
+        activeEdges.remove(event.edge)
+        updateWindingNumbers(activeEdges, event.point)
+        
+      CASE 'INTERSECTION':
+        handleIntersection(activeEdges, event)
+        splitEdgesAtIntersection(event)
+    
+    // Extract union segments
+    extractUnionSegments(activeEdges, outputSegments)
+  
+  // Build polygons from segments
+  return buildPolygonsFromSegments(outputSegments)
+```
+
+### Winding Number Calculation
+
+```
+updateWindingNumbers(activeEdges, point):
+  // Calculate winding number from left
+  windingNumber = 0
+  
+  FOR edge in activeEdges:
+    IF (edge.x < point.x):
+      // Edge is to the left of point
+      IF (edge.direction == 'UP'):
+        windingNumber += 1
+      ELSE:
+        windingNumber -= 1
+    
+    // Store winding number on edge
+    edge.windingNumber = windingNumber
+```
+
+### Island Processing
+
+```
+processIslands(contours):
+  // Classify contours
+  islands = []
+  holes = []
+  
+  FOR contour in contours:
+    IF (contour.isClockwise()):
+      islands.append(contour)
+    ELSE:
+      holes.append(contour)
+  
+  // Build containment hierarchy
+  FOR hole in holes:
+    container = findContainingIsland(hole, islands)
+    IF (container):
+      container.addHole(hole)
+  
+  // Process based on settings
+  SWITCH (handleIslands):
+    CASE 'REMOVE_SMALL':
+      islands = islands.filter(island => island.area() > islandThreshold)
+      
+    CASE 'MERGE_CLOSE':
+      merged = []
+      processed = Set()
+      
+      FOR island in islands:
+        IF (island in processed):
+          continue
+        
+        // Find nearby islands
+        nearby = findNearbyIslands(island, islands, islandThreshold)
+        IF (nearby.length > 0):
+          // Create bridge connections
+          mergedIsland = bridgeIslands(island, nearby)
+          merged.append(mergedIsland)
+          processed.update(nearby)
+        ELSE:
+          merged.append(island)
+        
+        processed.add(island)
+      
+      islands = merged
+  
+  // Rebuild contours with holes
+  result = []
+  FOR island in islands:
+    IF (island.holes.length > 0):
+      result.append(createContourWithHoles(island))
+    ELSE:
+      result.append(island)
+  
+  return result
+```
+
+## INTERSECTION OPERATION
+
+### Intersection Algorithm
+
+```
+performIntersection(structures):
+  // Find common Z range
+  zRange = findCommonZRange(structures)
+  resultSlices = []
+  
+  FOR z in zRange:
+    // Get contours at this Z
+    contourSets = []
+    FOR structure in structures:
+      contours = getContoursAtZ(structure, z)
+      IF (contours.isEmpty()):
+        // No contours - intersection is empty
+        resultSlices.append([])
+        continue to next z
+      contourSets.append(contours)
+    
+    // Compute intersection of all contour sets
+    intersection = contourSets[0]
+    FOR i in range(1, contourSets.length):
+      newIntersection = []
+      
+      FOR contour1 in intersection:
+        FOR contour2 in contourSets[i]:
+          result = computeContourIntersection(contour1, contour2)
+          newIntersection.extend(result)
+      
+      intersection = newIntersection
+      
+      IF (intersection.isEmpty()):
+        break
+    
+    resultSlices.append(intersection)
+  
+  return Structure(resultSlices)
+```
+
+### Contour Intersection Computation
+
+```
+computeContourIntersection(contour1, contour2):
+  // Quick bounds check
+  IF (not boundingBoxesOverlap(contour1, contour2)):
+    return []
+  
+  // Classify vertices
+  vertices1 = classifyVertices(contour1.vertices, contour2)
+  vertices2 = classifyVertices(contour2.vertices, contour1)
+  
+  // Find intersections
+  intersections = findAllIntersections(contour1, contour2)
+  
+  // Build intersection polygons
+  result = []
+  visited = Set()
+  
+  // Start from vertices of contour1 that are inside contour2
+  FOR i, vertex in enumerate(vertices1):
+    IF (vertex.inside AND vertex not in visited):
+      polygon = traceIntersection(i, contour1, contour2, 
+                                 vertices1, vertices2, 
+                                 intersections, visited)
+      IF (polygon.isValid()):
+        result.append(polygon)
+  
+  return result
+```
+
+## XOR OPERATION (Exclusive OR)
+
+### XOR Algorithm
+
+```
+performXOR(structure1, structure2):
+  // XOR = (A ∪ B) - (A ∩ B)
+  // Or: XOR = (A - B) ∪ (B - A)
+  
+  union = performUnion([structure1, structure2])
+  intersection = performIntersection([structure1, structure2])
+  
+  result = performSubtraction(union, intersection)
+  return result
+```
+
+## Advanced Features
+
+### Preview System
+
+```
+generatePreview(operation, structures, parameters):
+  previewData = {
+    original: [],
+    result: [],
+    modifications: [],
+    statistics: {}
+  }
+  
+  // Store original contours
+  FOR structure in structures:
+    previewData.original.append({
+      structure: structure,
+      color: structure.color,
+      opacity: 0.3
+    })
+  
+  // Generate result preview
+  SWITCH (operation):
+    CASE 'MARGIN':
+      result = calculateMargin(structures[0], parameters)
+      previewData.modifications = visualizeMarginVectors(structures[0], parameters)
+      
+    CASE 'SUBTRACT':
+      result = performSubtraction(structures[0], structures[1])
+      previewData.modifications = visualizeSubtractionRegions(structures[0], structures[1])
+      
+    CASE 'UNION':
+      result = performUnion(structures)
+      previewData.modifications = visualizeOverlapRegions(structures)
+      
+    CASE 'INTERSECTION':
+      result = performIntersection(structures)
+      previewData.modifications = visualizeIntersectionRegions(structures)
+  
+  previewData.result = {
+    structure: result,
+    color: getPreviewColor(operation),
+    opacity: 0.7
+  }
+  
+  // Calculate statistics
+  previewData.statistics = {
+    originalVolume: sum(s.volume() for s in structures),
+    resultVolume: result.volume(),
+    volumeChange: result.volume() - structures[0].volume(),
+    slicesAffected: result.sliceCount(),
+    contoursCreated: result.contourCount()
+  }
+  
+  return previewData
+```
+
+### Validation System
+
+```
+validateOperation(operation, structures, parameters):
+  errors = []
+  warnings = []
+  
+  // Common validations
+  IF (structures.isEmpty()):
+    errors.append("No structures selected")
+    return {valid: false, errors: errors}
+  
+  // Operation-specific validations
+  SWITCH (operation):
+    CASE 'MARGIN':
+      IF (parameters.uniform < -50 OR parameters.uniform > 50):
+        warnings.append("Large margin value: " + parameters.uniform + "mm")
+      
+      // Check for structure overlap after margin
+      testMargin = calculateMargin(structures[0], parameters)
+      overlaps = findOverlappingStructures(testMargin)
+      IF (overlaps.length > 0):
+        warnings.append("Margin will overlap with: " + overlaps)
+    
+    CASE 'SUBTRACT':
+      IF (structures.length < 2):
+        errors.append("Subtract requires two structures")
+      
+      // Check for overlap
+      overlap = calculateOverlap(structures[0], structures[1])
+      IF (overlap.volume == 0):
+        warnings.append("Structures do not overlap")
+      
+    CASE 'UNION':
+      // Check for identical structures
+      FOR i in range(structures.length):
+        FOR j in range(i + 1, structures.length):
+          IF (structuresIdentical(structures[i], structures[j])):
+            warnings.append("Duplicate structures selected")
+    
+    CASE 'INTERSECTION':
+      // Check common region exists
+      commonVolume = estimateIntersectionVolume(structures)
+      IF (commonVolume == 0):
+        warnings.append("No common region between structures")
+  
+  return {
+    valid: errors.isEmpty(),
+    errors: errors,
+    warnings: warnings
+  }
+```
+
+### Optimization System
+
+```
+optimizeOperation(operation, data):
+  // Pre-process optimization
+  SWITCH (operation):
+    CASE 'MARGIN':
+      // Pre-calculate normal vectors for all vertices
+      data.normals = preCalculateNormals(data.structure)
+      
+      // Build spatial index for self-intersection checks
+      data.spatialIndex = buildRTree(data.structure)
+      
+    CASE 'SUBTRACT', 'UNION', 'INTERSECTION':
+      // Build interval trees for edge intersection
+      FOR structure in data.structures:
+        structure.intervalTree = buildIntervalTree(structure.edges)
+      
+      // Pre-sort vertices for winding number calculations
+      FOR structure in data.structures:
+        structure.sortedVertices = sortVerticesByY(structure.vertices)
+  
+  // Parallelize where possible
+  IF (operation in ['MARGIN', 'UNION'] AND data.sliceCount > 10):
+    result = parallelizeBySlice(operation, data)
+  ELSE:
+    result = sequentialProcess(operation, data)
+  
+  // Post-process optimization
+  result = removeRedundantVertices(result)
+  result = mergeColinearEdges(result)
+  
+  return result
+```
+
+### Error Recovery
+
+```
+handleOperationError(error, operation, state):
+  errorType = classifyError(error)
+  
+  SWITCH (errorType):
+    CASE 'GEOMETRY_INVALID':
+      // Attempt repair
+      repairedGeometry = attemptGeometryRepair(state.currentGeometry)
+      IF (repairedGeometry):
+        logWarning("Geometry repaired automatically")
+        return continueOperation(repairedGeometry)
+      
+    CASE 'MEMORY_OVERFLOW':
+      // Reduce complexity
+      simplified = simplifyGeometry(state.currentGeometry, aggressive=true)
+      return retryOperation(simplified)
+      
+    CASE 'NUMERICAL_PRECISION':
+      // Switch to higher precision
+      enableHighPrecisionMode()
+      return retryOperation(state)
+      
+    CASE 'USER_ABORT':
+      // Clean rollback
+      rollbackToCheckpoint(state.lastCheckpoint)
+      return
+      
+    DEFAULT:
+      // Log and present to user
+      logError(error)
+      showErrorDialog(error, operation)
+      rollbackOperation(state)
+```
+
+### Multi-threaded Processing
+
+```
+parallelizeBySlice(operation, data):
+  numThreads = min(getAvailableCores(), data.sliceCount)
+  threadPool = createThreadPool(numThreads)
+  
+  // Divide slices among threads
+  sliceGroups = divideSlices(data.slices, numThreads)
+  futures = []
+  
+  FOR group in sliceGroups:
+    future = threadPool.submit(() => {
+      results = []
+      FOR slice in group:
+        result = processSlice(operation, slice, data.parameters)
+        results.append(result)
+      return results
+    })
+    futures.append(future)
+  
+  // Collect results
+  allResults = []
+  FOR future in futures:
+    allResults.extend(future.get())
+  
+  // Merge results ensuring consistency at boundaries
+  return mergeSliceResults(allResults)
+```
+
+### Undo/Redo System
+
+```
+class OperationHistory:
+  undoStack = []
+  redoStack = []
+  maxHistorySize = 50
+  
+  recordOperation(operation):
+    snapshot = {
+      type: operation.type,
+      timestamp: currentTime(),
+      structures: deepCopy(operation.affectedStructures),
+      parameters: deepCopy(operation.parameters),
+      result: deepCopy(operation.result),
+      memorySize: calculateMemorySize(operation)
+    }
+    
+    // Manage memory
+    WHILE (undoStack.totalMemory() + snapshot.memorySize > maxMemory):
+      undoStack.removeOldest()
+    
+    undoStack.push(snapshot)
+    redoStack.clear()  // Clear redo on new operation
+    
+  undo():
+    IF (undoStack.isEmpty()):
+      return
+    
+    operation = undoStack.pop()
+    
+    // Restore previous state
+    FOR structure in operation.structures:
+      restoreStructure(structure)
+    
+    redoStack.push(operation)
+    
+  redo():
+    IF (redoStack.isEmpty()):
+      return
+    
+    operation =​​​​​​​​​​​​​​​​
+```

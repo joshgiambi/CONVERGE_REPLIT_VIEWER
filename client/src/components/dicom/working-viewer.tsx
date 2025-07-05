@@ -219,6 +219,100 @@ export function WorkingViewer({
     }
   };
 
+  // Handle Eclipse TPS margin operation
+  const handleMarginOperation = (payload: any) => {
+    if (!rtStructures) {
+      console.error("RT structures not available for margin operation");
+      return;
+    }
+
+    const { structureId, slicePosition, marginParams } = payload;
+    console.log(
+      `Applying ${marginParams.marginType} margin operation to structure ${structureId} at slice ${slicePosition}`,
+    );
+
+    // Create a deep copy of RT structures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+
+    // Find the target structure
+    const structure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
+
+    if (!structure) {
+      console.error(`Structure ${structureId} not found`);
+      return;
+    }
+
+    // Find contour on current slice
+    const tolerance = 1.5;
+    const contour = structure.contours.find(
+      (c: any) => Math.abs(c.slicePosition - slicePosition) <= tolerance,
+    );
+
+    if (!contour || !contour.points || contour.points.length === 0) {
+      console.warn(
+        `No contour found for structure ${structureId} at slice ${slicePosition}`,
+      );
+      return;
+    }
+
+    try {
+      // Convert margin values from mm to pixels using pixel spacing
+      const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875; // Default from HN-ATLAS
+      
+      // Apply margin based on type
+      let marginValueMm = marginParams.marginValues.uniform;
+      
+      if (marginParams.marginType === 'ASYMMETRIC') {
+        // For asymmetric margins, we'll use a weighted average for now
+        // In a full implementation, this would consider anatomical directions
+        const values = marginParams.marginValues;
+        marginValueMm = (values.anterior + values.posterior + values.left + values.right) / 4;
+      }
+      
+      const marginValuePixels = marginValueMm / pixelSpacing;
+      
+      // Use the grow contour function with the margin value
+      const grownContour = growContour(
+        {
+          points: contour.points,
+          slicePosition: slicePosition,
+        },
+        marginValueMm, // growContour expects mm
+      );
+      
+      // Apply smoothing based on interpolation type
+      let smoothingFactor = 0.15;
+      if (marginParams.interpolationType === 'SMOOTH') {
+        smoothingFactor = 0.25;
+      } else if (marginParams.interpolationType === 'DISCRETE') {
+        smoothingFactor = 0.05;
+      }
+      
+      const smoothedContour = smoothContour(grownContour, smoothingFactor);
+      
+      // Update the contour with margin-expanded points
+      contour.points = smoothedContour.points;
+      contour.numberOfPoints = smoothedContour.points.length / 3;
+
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures);
+      
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      console.log(
+        `Successfully applied ${marginParams.marginType} margin of ${marginValueMm}mm to structure ${structureId}`,
+      );
+    } catch (error) {
+      console.error("Error applying margin operation:", error);
+    }
+  };
+
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
     if (!rtStructures) {
@@ -535,6 +629,9 @@ export function WorkingViewer({
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
+    } else if (payload.action === "apply_margin") {
+      // Handle margin operation (Eclipse TPS style)
+      handleMarginOperation(payload);
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       handleBooleanOperation(payload);

@@ -29,6 +29,7 @@ import {
   Redo
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
 import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {
@@ -333,6 +334,7 @@ export function ContourEditToolbar({
     { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
+    { id: 'margin', icon: Maximize2, label: 'Margin' },
     { id: 'boolean', icon: Layers, label: 'Boolean' }
   ];
 
@@ -487,6 +489,23 @@ export function ContourEditToolbar({
               Run {growMode === 'grow' ? 'Grow' : 'Shrink'}
             </Button>
 
+          </div>
+        ) : showSettings === 'margin' ? (
+          <div className="space-y-3 w-full">
+            <MarginOperationPanel 
+              onApplyMargin={(params) => {
+                if (onContourUpdate && currentSlicePosition !== undefined) {
+                  onContourUpdate({
+                    action: 'apply_margin',
+                    structureId: selectedStructure.roiNumber,
+                    slicePosition: currentSlicePosition,
+                    marginParams: params
+                  });
+                  toast({ title: `Applying margin operation...` });
+                }
+              }}
+              structureColor={structureColorRgb}
+            />
           </div>
         ) : showSettings === 'boolean' ? (
           <div className="space-y-3 w-full">
