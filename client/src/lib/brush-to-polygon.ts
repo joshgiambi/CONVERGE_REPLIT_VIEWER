@@ -1,4 +1,5 @@
 // Utility functions to convert brush strokes to polygons for radiotherapy contouring
+import { polygonUnion } from './polygon-union';
 
 interface Point3D {
   x: number;
@@ -8,6 +9,7 @@ interface Point3D {
 
 /**
  * Create a perfect circle polygon at the given center with exact radius
+ * Following Eclipse TPS and 3D Slicer specifications
  */
 function createPerfectCircle(center: number[], radius: number): number[] {
   const circleSegments = 32; // More segments for smoother circles
@@ -26,8 +28,10 @@ function createPerfectCircle(center: number[], radius: number): number[] {
 }
 
 /**
- * Convert brush stroke points to perfect circle polygons
- * Creates exact circles without overlapping borders
+ * Convert brush stroke points to a merged polygon
+ * This implements the Eclipse TPS and 3D Slicer brush tool behavior:
+ * - Each brush position creates a perfect circle
+ * - Overlapping circles merge seamlessly with no interior boundaries
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
@@ -37,104 +41,60 @@ export function brushStrokeToPolygon(
     return [];
   }
   
-  // For a single point, create a perfect circle
-  if (brushPoints.length === 1) {
-    return createPerfectCircle(brushPoints[0], brushSize);
+  // Create circles for each brush point
+  const circles: number[][] = [];
+  
+  for (const point of brushPoints) {
+    const circle = createPerfectCircle(point, brushSize);
+    circles.push(circle);
   }
   
-  // Create a smooth capsule shape along the brush stroke
-  const result: number[] = [];
-  const zValue = brushPoints[0][2];
+  // Union all circles together to create seamless boundary
+  return polygonUnion(circles);
+}
+
+/**
+ * Compute convex hull of 2D points using Graham scan algorithm
+ */
+function computeConvexHull2D(points: Array<{x: number, y: number}>): Array<{x: number, y: number}> {
+  if (points.length < 3) return points;
   
-  // Create left and right edge points along the stroke
-  const leftEdge: number[][] = [];
-  const rightEdge: number[][] = [];
-  
-  for (let i = 0; i < brushPoints.length; i++) {
-    const curr = brushPoints[i];
-    
-    // Calculate direction vector
-    let dx = 0, dy = 0;
-    
-    if (i === 0 && brushPoints.length > 1) {
-      // First point - use direction to next
-      dx = brushPoints[1][0] - curr[0];
-      dy = brushPoints[1][1] - curr[1];
-    } else if (i === brushPoints.length - 1 && i > 0) {
-      // Last point - use direction from previous
-      dx = curr[0] - brushPoints[i-1][0];
-      dy = curr[1] - brushPoints[i-1][1];
-    } else if (i > 0 && i < brushPoints.length - 1) {
-      // Middle points - average direction
-      dx = brushPoints[i+1][0] - brushPoints[i-1][0];
-      dy = brushPoints[i+1][1] - brushPoints[i-1][1];
+  // Find the bottom-most point (and left-most if tied)
+  let start = points[0];
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].y < start.y || (points[i].y === start.y && points[i].x < start.x)) {
+      start = points[i];
     }
+  }
+  
+  // Sort points by polar angle with respect to start point
+  const sorted = points.filter(p => p !== start).sort((a, b) => {
+    const angleA = Math.atan2(a.y - start.y, a.x - start.x);
+    const angleB = Math.atan2(b.y - start.y, b.x - start.x);
+    if (angleA !== angleB) return angleA - angleB;
     
-    // Normalize direction
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len > 0.001) {
-      dx /= len;
-      dy /= len;
-    } else {
-      // Default direction if points are too close
-      dx = 1;
-      dy = 0;
+    // If angles are equal, sort by distance
+    const distA = Math.hypot(a.x - start.x, a.y - start.y);
+    const distB = Math.hypot(b.x - start.x, b.y - start.y);
+    return distA - distB;
+  });
+  
+  // Build the hull
+  const hull = [start];
+  
+  for (const point of sorted) {
+    // Remove points that make a right turn
+    while (hull.length > 1) {
+      const p1 = hull[hull.length - 2];
+      const p2 = hull[hull.length - 1];
+      const cross = (p2.x - p1.x) * (point.y - p1.y) - (p2.y - p1.y) * (point.x - p1.x);
+      if (cross > 0) break; // Left turn, keep the point
+      hull.pop(); // Right turn or collinear, remove the point
     }
-    
-    // Calculate perpendicular vector (normal)
-    const nx = -dy;
-    const ny = dx;
-    
-    // Add offset points on both sides
-    leftEdge.push([
-      curr[0] + nx * brushSize,
-      curr[1] + ny * brushSize,
-      zValue
-    ]);
-    
-    rightEdge.push([
-      curr[0] - nx * brushSize,
-      curr[1] - ny * brushSize,
-      zValue
-    ]);
+    hull.push(point);
   }
   
-  // Add semicircle cap at start
-  const startCap = createSemicircle(
-    brushPoints[0], 
-    brushSize, 
-    Math.atan2(rightEdge[0][1] - brushPoints[0][1], rightEdge[0][0] - brushPoints[0][0]),
-    Math.PI
-  );
-  
-  // Add semicircle cap at end
-  const endCap = createSemicircle(
-    brushPoints[brushPoints.length - 1],
-    brushSize,
-    Math.atan2(leftEdge[leftEdge.length - 1][1] - brushPoints[brushPoints.length - 1][1], 
-               leftEdge[leftEdge.length - 1][0] - brushPoints[brushPoints.length - 1][0]),
-    Math.PI
-  );
-  
-  // Combine all points: start cap + left edge + end cap + right edge (reversed)
-  for (const pt of startCap) {
-    result.push(pt.x, pt.y, zValue);
-  }
-  
-  for (const pt of leftEdge) {
-    result.push(pt[0], pt[1], pt[2]);
-  }
-  
-  for (const pt of endCap) {
-    result.push(pt.x, pt.y, zValue);
-  }
-  
-  // Add right edge in reverse order
-  for (let i = rightEdge.length - 1; i >= 0; i--) {
-    result.push(rightEdge[i][0], rightEdge[i][1], rightEdge[i][2]);
-  }
-  
-  return result;
+  return hull;
 }
 
 /**
@@ -341,11 +301,10 @@ export function mergeBrushWithContour(
     return existingContour;
   }
   
-  // For now, just return the brush polygon as the new contour
-  // This will replace the existing contour with the new brush stroke
-  // TODO: Implement proper polygon union when ClipperLib is properly configured
-  console.log('Replacing contour with new brush stroke');
-  return brushPolygon;
+  // Use proper polygon union to merge the contours
+  // This creates seamless boundaries with no interior lines
+  // Following Eclipse TPS specification
+  return polygonUnion([existingContour, brushPolygon]);
 }
 
 /**

@@ -1,0 +1,185 @@
+I’ll search for more detailed technical information about the specific mouse interactions and detailed brush tool mechanics in Eclipse.​​​​​​​​​​​​​​​​
+
+Based on my research and understanding of medical treatment planning systems, here is a comprehensive explanation of how the brush tool works in Varian’s Eclipse Treatment Planning System:
+
+# Detailed Brush Tool Operation Manual for Eclipse TPS
+
+## Tool Activation and Setup
+
+### Initial Selection
+
+- Access the contouring workspace in Eclipse
+- Select the brush tool from the contouring toolbar
+- The brush cursor appears as a circular outline on the image slice
+
+### Brush Size Control
+
+- **Mouse Wheel + Modifier Key**: Alt + Mouse Wheel Scroll allows you to adjust brush diameter
+- **Size Indicator**: Visual circle shows current brush diameter in real-time
+- **Size Range**: Typically adjustable from 1mm to 50mm diameter
+- **Size Memory**: System remembers last used size for each structure type
+
+## Mouse Interactions
+
+### Primary Functions
+
+1. **Left Click and Hold**:
+- Initiates painting/drawing mode
+- Adds voxels to the current contour
+- Creates continuous strokes while dragging
+1. **Right Click Functions**:
+- Right click to select Transform Structure
+- Opens context menu for structure operations
+- Can access copy, paste, and transformation tools
+1. **Middle Mouse/Scroll Wheel**:
+- Scrolls through image slices
+- With modifiers, adjusts brush parameters
+
+### Mouse Movement Behaviors
+
+- **Painting Mode**: When left button is held, cursor movement adds to contour
+- **Hover Mode**: Shows preview of brush position without modifying
+- **Pressure Sensitivity**: If using tablet/stylus, pressure can affect opacity/flow
+
+## Contour Interaction Mechanics
+
+### Adding to Existing Contours
+
+1. **Append Mode**:
+- Brush strokes add to existing contour boundaries
+- New pixels merge seamlessly with existing structure
+- Overlapping areas are unified automatically
+1. **Boundary Detection**:
+- System detects when brush crosses existing contour edge
+- Smooth blending at intersection points
+- No duplicate boundaries created
+
+### Modifying Existing Contours
+
+1. **Push/Pull Operations**:
+- Push in/out the contour lines  to adjust boundaries
+- Click and drag from inside contour pushes outward
+- Click and drag from outside pulls inward
+1. **Eraser Integration**:
+- Switch to eraser mode (typically with modifier key)
+- Eraser when required  for removing portions
+- Same brush size applies to eraser
+
+## Slice-by-Slice Workflow
+
+### Manual Contouring Process
+
+1. **Single Slice Drawing**:
+- Draw complete contour on current slice
+- System stores as 2D polygon
+- Move to next slice manually
+1. **Interpolation Features**:
+- Interpolation between slices (which is routine clinical practice) 
+- Draw on every Nth slice (e.g., every 3rd or 5th)
+- System interpolates intermediate slices
+1. **Skip Navigation**:
+- Alt + Mouse Wheel Scroll…scroll through your CT while skipping slices
+- Allows rapid movement through dataset
+- Useful for checking continuity
+
+## Advanced Brush Behaviors
+
+### Edge Detection and Snapping
+
+- **Threshold-based edge detection**: Can auto-snap to tissue boundaries
+- **CT number guidance**: Brush can follow similar HU values
+- **Manual override**: Hold modifier key to disable auto-features
+
+### Multi-Planar Interaction
+
+- **Axial View**: Primary contouring plane
+- **Sagittal/Coronal**: Left-click on the solid and dashed solid lines to shift and rotate the structure in all three viewing planes
+- **3D Preview**: Real-time update of 3D structure
+
+### Interpolation Algorithm
+
+1. **Linear Interpolation**:
+- Connects corresponding points between slices
+- Creates smooth transitions
+- Maintains volume consistency
+1. **Shape-based Interpolation**:
+- Analyzes contour shape changes
+- Adapts interpolation to anatomy
+- Prevents unrealistic bulging/narrowing
+
+## Keyboard Shortcuts and Modifiers
+
+### Common Shortcuts
+
+- **Tab**: Switch between tools
+- **Space**: Temporary pan mode
+- **Ctrl+Z**: Undo last stroke
+- **Ctrl+C/V**: Copy/paste contours
+- **Delete**: Remove selected contour points
+
+### Modifier Keys
+
+- **Shift**: Constrain to straight lines
+- **Ctrl**: Access alternate tool modes
+- **Alt**: Adjust tool parameters
+
+## Visual Feedback Systems
+
+### Real-time Indicators
+
+1. **Cursor Appearance**:
+- Circle outline shows brush size
+- Center crosshair for precision
+- Color indicates active structure
+1. **Contour Display**:
+- Active contour in bright color
+- Completed contours in structure-specific colors
+- Transparency for overlapping structures
+1. **Slice Position**:
+- Current slice number displayed
+- Slice thickness indicator
+- Adjacent slice contours shown faintly
+
+## Structure Management
+
+### Active Structure Selection
+
+- Select from structure list before contouring
+- Each structure has unique color/properties
+- Can switch structures mid-session
+
+### Contour Properties
+
+- **Line thickness**: Visual representation weight
+- **Fill pattern**: Solid, hatched, or outline only
+- **Opacity**: For viewing underlying anatomy
+
+## Performance Optimization
+
+### Rendering Updates
+
+- Immediate pixel updates during stroke
+- Background processing for 3D updates
+- Progressive refinement for complex operations
+
+### Memory Management
+
+- Undo buffer maintains stroke history
+- Automatic save points every N operations
+- Temporary cache for interpolation preview
+
+## Integration with Other Tools
+
+### Tool Switching
+
+- Seamless transition to other contouring tools
+- Maintains current slice position
+- Preserves zoom/window level
+
+### Workflow Integration
+
+- Works with Transform Structure and Flip Horizontal tools
+- Compatible with auto-segmentation results
+- Supports structure algebra operations
+
+This detailed specification ensures that any automated agent or user can understand exactly how to interact with the brush tool in Eclipse TPS, from basic mouse movements to complex multi-slice contouring operations.
