@@ -724,6 +724,57 @@ export function WorkingViewer({
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       handleBooleanOperation(payload);
+    } else if (payload.action === "smooth_contours") {
+      // Handle contour smoothing
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Apply smoothing to all contours in the structure
+      structure.contours.forEach((contour: any) => {
+        if (contour.points && contour.points.length >= 9) { // Need at least 3 points
+          // Simple moving average smoothing
+          const smoothedPoints: number[] = [];
+          const numPoints = contour.points.length / 3;
+          
+          for (let i = 0; i < numPoints; i++) {
+            const idx = i * 3;
+            const prevIdx = (i - 1 + numPoints) % numPoints * 3;
+            const nextIdx = (i + 1) % numPoints * 3;
+            
+            // Average with neighboring points
+            const smoothX = (contour.points[prevIdx] + contour.points[idx] + contour.points[nextIdx]) / 3;
+            const smoothY = (contour.points[prevIdx + 1] + contour.points[idx + 1] + contour.points[nextIdx + 1]) / 3;
+            const z = contour.points[idx + 2]; // Keep Z unchanged
+            
+            smoothedPoints.push(smoothX, smoothY, z);
+          }
+          
+          contour.points = smoothedPoints;
+        }
+      });
+
+      setLocalRTStructures(updatedStructures);
+      // Pass updated structures to parent
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+      saveContourUpdates(updatedStructures);
+    } else if (payload.action === "interpolate_contours") {
+      // Handle contour interpolation between slices
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Sort contours by slice position
+      structure.contours.sort((a: any, b: any) => a.slicePosition - b.slicePosition);
+      
+      // TODO: Implement interpolation logic between non-adjacent contours
+      console.log("Interpolation not yet implemented");
+      
+      setLocalRTStructures(updatedStructures);
     }
   };
 
