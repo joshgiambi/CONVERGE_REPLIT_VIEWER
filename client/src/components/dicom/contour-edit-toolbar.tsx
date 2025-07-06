@@ -391,7 +391,7 @@ export function ContourEditToolbar({
 
   return (
     <div 
-      className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-900/95 backdrop-blur rounded-lg shadow-2xl border border-gray-700/50"
+      className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-black/70 backdrop-blur-sm rounded-lg shadow-2xl border border-gray-700/50"
       style={{ maxWidth: '90vw' }}
     >
       <div className="p-4">
@@ -424,7 +424,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleUndo}
-                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                 title="Undo (Ctrl+Z)"
               >
                 <Undo2 className="w-4 h-4" />
@@ -433,7 +433,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleRedo}
-                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                 title="Redo (Ctrl+Y)"
               >
                 <Redo2 className="w-4 h-4" />
@@ -445,7 +445,7 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                     title="Clear Contours"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -495,7 +495,7 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                     title="Delete Every Nth Slice"
                   >
                     <Layers className="w-4 h-4" />
@@ -536,7 +536,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleSmooth}
-                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                 title="Smooth Contours"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -549,7 +549,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleInterpolate}
-                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white rounded-lg"
                 title="Interpolate Between Slices"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -611,7 +611,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('grow')}
-                className={`h-9 w-9 p-0 ${
+                className={`h-9 w-9 p-0 rounded-lg ${
                   showSettings === 'grow'
                     ? 'bg-green-900/30 border-green-600 text-green-400'
                     : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
@@ -625,7 +625,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('shrink')}
-                className={`h-9 w-9 p-0 ${
+                className={`h-9 w-9 p-0 rounded-lg ${
                   showSettings === 'shrink'
                     ? 'bg-orange-900/30 border-orange-600 text-orange-400'
                     : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
@@ -639,7 +639,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('operations')}
-                className={`h-9 w-9 p-0 ${
+                className={`h-9 w-9 p-0 rounded-lg ${
                   showSettings === 'operations'
                     ? 'bg-purple-900/30 border-purple-600 text-purple-400'
                     : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
