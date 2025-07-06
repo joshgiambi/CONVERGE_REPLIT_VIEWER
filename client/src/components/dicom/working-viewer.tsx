@@ -75,6 +75,7 @@ export function WorkingViewer({
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
   const rtStructures = localRTStructures || externalRTStructures;
+  const [rtStructuresState, setRtStructures] = useState(rtStructures);
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
   const [renderTrigger, setRenderTrigger] = useState(0);
@@ -121,7 +122,7 @@ export function WorkingViewer({
   // Save contour updates to server
   const saveContourUpdates = async (updatedStructures: any) => {
     if (!seriesId || isSaving) return;
-    
+
     setIsSaving(true);
     try {
       const response = await fetch(`/api/rt-structures/${seriesId}/contours`, {
@@ -213,12 +214,15 @@ export function WorkingViewer({
 
         // Update local structures and save to server
         setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures);
-        
+        setRtStructures(updatedRTStructures);
+
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
           onContourUpdate(updatedRTStructures);
         }
+
+        // Save to server in background without reloading
+        saveContourUpdates(updatedRTStructures);
 
         console.log(`Successfully performed ${operation} operation`);
       } else {
@@ -270,19 +274,19 @@ export function WorkingViewer({
     try {
       // Convert margin values from mm to pixels using pixel spacing
       const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875; // Default from HN-ATLAS
-      
+
       // Apply margin based on type
       let marginValueMm = marginParams.marginValues.uniform;
-      
+
       if (marginParams.marginType === 'ASYMMETRIC') {
         // For asymmetric margins, we'll use a weighted average for now
         // In a full implementation, this would consider anatomical directions
         const values = marginParams.marginValues;
         marginValueMm = (values.anterior + values.posterior + values.left + values.right) / 4;
       }
-      
+
       const marginValuePixels = marginValueMm / pixelSpacing;
-      
+
       // Use the grow contour function with the margin value
       const grownContour = growContour(
         {
@@ -291,7 +295,7 @@ export function WorkingViewer({
         },
         marginValueMm, // growContour expects mm
       );
-      
+
       // Apply smoothing based on interpolation type
       let smoothingFactor = 0.15;
       if (marginParams.interpolationType === 'SMOOTH') {
@@ -299,21 +303,24 @@ export function WorkingViewer({
       } else if (marginParams.interpolationType === 'DISCRETE') {
         smoothingFactor = 0.05;
       }
-      
+
       const smoothedContour = smoothContour(grownContour, smoothingFactor);
-      
+
       // Update the contour with margin-expanded points
       contour.points = smoothedContour.points;
       contour.numberOfPoints = smoothedContour.points.length / 3;
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures);
-      
+      setRtStructures(updatedRTStructures);
+
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
+
+      // Save to server in background without reloading
+      saveContourUpdates(updatedRTStructures);
 
       console.log(
         `Successfully applied ${marginParams.marginType} margin of ${marginValueMm}mm to structure ${structureId}`,
@@ -362,7 +369,7 @@ export function WorkingViewer({
 
     try {
       let updatedPoints: number[];
-      
+
       if (direction === 'all') {
         // Use existing radial grow/shrink algorithm
         const grownContour = growContour(
@@ -372,7 +379,7 @@ export function WorkingViewer({
           },
           distance,
         );
-        
+
         // Apply smoothing for medical-grade quality
         const smoothedContour = smoothContour(grownContour, 0.15);
         updatedPoints = smoothedContour.points;
@@ -384,7 +391,7 @@ export function WorkingViewer({
           direction,
           imageMetadata?.imageOrientation
         );
-        
+
         // Apply smoothing
         const smoothedContour = smoothContour(
           {
@@ -402,12 +409,15 @@ export function WorkingViewer({
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures);
-      
+      setRtStructures(updatedRTStructures);
+
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
+
+      // Save to server in background without reloading
+      saveContourUpdates(updatedRTStructures);
 
       console.log(`Successfully ${isGrowing ? 'grew' : 'shrunk'} contour by ${Math.abs(distance)}mm`);
     } catch (error) {
@@ -425,26 +435,26 @@ export function WorkingViewer({
     // Check if two polygons intersect by checking if any points are close
     const checkPolygonIntersection = (polygon1: number[], polygon2: number[]) => {
       const threshold = 2.0; // Distance threshold in world coordinates (mm) - reduced for more accurate contours
-      
+
       // Check each point in polygon1 against polygon2
       for (let i = 0; i < polygon1.length; i += 3) {
         const p1x = polygon1[i];
         const p1y = polygon1[i + 1];
-        
+
         for (let j = 0; j < polygon2.length; j += 3) {
           const p2x = polygon2[j];
           const p2y = polygon2[j + 1];
-          
+
           const distance = Math.sqrt(
             Math.pow(p1x - p2x, 2) + Math.pow(p1y - p2y, 2)
           );
-          
+
           if (distance < threshold) {
             return true; // Found intersection
           }
         }
       }
-      
+
       return false; // No intersection found
     };
     console.log("Handling contour update:", payload);
@@ -496,18 +506,18 @@ export function WorkingViewer({
           // Check if brush polygon intersects with this contour
           // For now, use a simple approach: check if any brush point is close to any contour point
           const intersects = checkPolygonIntersection(brushPolygon, contour.points);
-          
+
           if (intersects) {
             // Merge with this contour
             console.log(
               `Merging brush stroke with existing contour of ${contour.points.length / 3} points`,
             );
-            
+
             // Use proper polygon union to merge contours seamlessly
             const mergedPoints = mergeBrushWithContour(contour.points, brushPolygon);
             contour.points = mergedPoints;
             contour.numberOfPoints = mergedPoints.length / 3;
-            
+
             foundIntersection = true;
             mergedWithContour = contour;
             break;
@@ -520,7 +530,7 @@ export function WorkingViewer({
         console.log(
           `Creating new separate contour for brush stroke at slice ${payload.slicePosition}`,
         );
-        
+
         const newContour = {
           slicePosition: payload.slicePosition,
           points: brushPolygon,
@@ -531,24 +541,24 @@ export function WorkingViewer({
 
       console.log(`Structure now has ${structure.contours.length} contours`);
       setLocalRTStructures(updatedStructures);
-      
+
       // Handle next slice prediction if enabled
       if (payload.predictionEnabled) {
         console.log("Next slice prediction is enabled, predicting contours for adjacent slices");
-        
+
         // Get the final contour on this slice (either merged or new)
         let finalContour = mergedWithContour;
         if (!finalContour) {
           // Find the contour we just created
           finalContour = structure.contours[structure.contours.length - 1];
         }
-        
+
         if (finalContour && finalContour.points && finalContour.points.length > 0) {
           // Calculate next slice positions (assuming 3mm slice spacing as typical)
           const sliceSpacing = 3; // mm
           const nextSlicePosition = payload.slicePosition + sliceSpacing;
           const prevSlicePosition = payload.slicePosition - sliceSpacing;
-          
+
           // Predict for next slice
           const nextPrediction = predictNextSliceContour({
             currentContour: finalContour.points,
@@ -558,14 +568,14 @@ export function WorkingViewer({
             predictionMode: 'simple',
             confidenceThreshold: 0.5
           });
-          
+
           // If prediction has good confidence, apply it
           if (nextPrediction.confidence > 0.5 && nextPrediction.predictedContour.length > 0) {
             // Check if there's already a contour on the next slice
             const nextSliceContourIndex = structure.contours.findIndex(
               (c: any) => Math.abs(c.slicePosition - nextSlicePosition) < 0.5
             );
-            
+
             if (nextSliceContourIndex === -1) {
               // No existing contour, add the predicted one
               structure.contours.push({
@@ -577,7 +587,7 @@ export function WorkingViewer({
               console.log(`Added predicted contour to next slice ${nextSlicePosition} with confidence ${nextPrediction.confidence.toFixed(2)}`);
             }
           }
-          
+
           // Also predict for previous slice
           const prevPrediction = predictNextSliceContour({
             currentContour: finalContour.points,
@@ -587,12 +597,12 @@ export function WorkingViewer({
             predictionMode: 'simple',
             confidenceThreshold: 0.5
           });
-          
+
           if (prevPrediction.confidence > 0.5 && prevPrediction.predictedContour.length > 0) {
             const prevSliceContourIndex = structure.contours.findIndex(
               (c: any) => Math.abs(c.slicePosition - prevSlicePosition) < 0.5
             );
-            
+
             if (prevSliceContourIndex === -1) {
               structure.contours.push({
                 slicePosition: prevSlicePosition,
@@ -603,7 +613,7 @@ export function WorkingViewer({
               console.log(`Added predicted contour to previous slice ${prevSlicePosition} with confidence ${prevPrediction.confidence.toFixed(2)}`);
             }
           }
-          
+
           // Update the structures again with predictions
           setLocalRTStructures(updatedStructures);
         }
@@ -737,20 +747,20 @@ export function WorkingViewer({
           // Simple moving average smoothing
           const smoothedPoints: number[] = [];
           const numPoints = contour.points.length / 3;
-          
+
           for (let i = 0; i < numPoints; i++) {
             const idx = i * 3;
             const prevIdx = (i - 1 + numPoints) % numPoints * 3;
             const nextIdx = (i + 1) % numPoints * 3;
-            
+
             // Average with neighboring points
             const smoothX = (contour.points[prevIdx] + contour.points[idx] + contour.points[nextIdx]) / 3;
             const smoothY = (contour.points[prevIdx + 1] + contour.points[idx + 1] + contour.points[nextIdx + 1]) / 3;
             const z = contour.points[idx + 2]; // Keep Z unchanged
-            
+
             smoothedPoints.push(smoothX, smoothY, z);
           }
-          
+
           contour.points = smoothedPoints;
         }
       });
@@ -770,10 +780,10 @@ export function WorkingViewer({
 
       // Sort contours by slice position
       structure.contours.sort((a: any, b: any) => a.slicePosition - b.slicePosition);
-      
+
       // TODO: Implement interpolation logic between non-adjacent contours
       console.log("Interpolation not yet implemented");
-      
+
       setLocalRTStructures(updatedStructures);
     }
   };
@@ -822,7 +832,7 @@ export function WorkingViewer({
           loadImageMetadata(currentImage.id);
         }
       }, 10);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
@@ -1067,7 +1077,7 @@ export function WorkingViewer({
           "Image not in cache, attempting to reload:",
           cacheKey,
         );
-        
+
         try {
           const imageResponse = await fetch(
             `/api/images/${currentImage.sopInstanceUID}`,
@@ -1360,7 +1370,7 @@ export function WorkingViewer({
       console.warn("No image metadata available for contour drawing");
       return;
     }
-    
+
     // Debug: Log first few points of the contour
     if (contour.points.length >= 6) {
       console.log('Drawing contour with metadata:', {
@@ -1388,12 +1398,12 @@ export function WorkingViewer({
     // SIMPLIFIED - NO ZOOM FOR DEBUGGING
     const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
     // For a 512x512 image in 1024x1024 canvas, baseScale = 2
-    
+
     // Just use base scale, ignore zoom completely
     const totalScale = baseScale; // NO ZOOM
     const scaledWidth = imageWidth * totalScale;
     const scaledHeight = imageHeight * totalScale;
-    
+
     // Center the image on canvas with pan offset (same as render16BitImage)
     const imageX = (canvasWidth - scaledWidth) / 2 + panX;
     const imageY = (canvasHeight - scaledHeight) / 2 + panY;
@@ -1407,7 +1417,7 @@ export function WorkingViewer({
       // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
       const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
       const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
-      
+
       // Apply the same transformation as the image
       const canvasX = imageX + (pixelX * totalScale);
       const canvasY = imageY + (pixelY * totalScale);
