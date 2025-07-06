@@ -391,7 +391,7 @@ export function ContourEditToolbar({
 
   return (
     <div 
-      className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-900 rounded-lg shadow-2xl border border-gray-700"
+      className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-900/95 backdrop-blur rounded-lg shadow-2xl border border-gray-700/50"
       style={{ maxWidth: '90vw' }}
     >
       <div className="p-4">
@@ -424,7 +424,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleUndo}
-                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                 title="Undo (Ctrl+Z)"
               >
                 <Undo2 className="w-4 h-4" />
@@ -433,7 +433,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleRedo}
-                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                 title="Redo (Ctrl+Y)"
               >
                 <Redo2 className="w-4 h-4" />
@@ -445,7 +445,7 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                     title="Clear Contours"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -495,7 +495,7 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                    className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                     title="Delete Every Nth Slice"
                   >
                     <Layers className="w-4 h-4" />
@@ -536,7 +536,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleSmooth}
-                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                 title="Smooth Contours"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -549,7 +549,7 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleInterpolate}
-                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white"
                 title="Interpolate Between Slices"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -577,7 +577,7 @@ export function ContourEditToolbar({
                     className={`h-9 w-9 p-0 transition-all duration-200 ${
                       isActive 
                         ? 'border-2 text-white shadow-lg' 
-                        : 'bg-gray-900 border border-gray-600 text-white hover:bg-gray-800'
+                        : 'bg-gray-900/80 border border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
                     }`}
                     style={isActive ? { 
                       borderColor: structureColorRgb,
@@ -614,7 +614,7 @@ export function ContourEditToolbar({
                 className={`h-9 w-9 p-0 ${
                   showSettings === 'grow'
                     ? 'bg-green-900/30 border-green-600 text-green-400'
-                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
+                    : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
                 }`}
                 title="Grow Contour"
               >
@@ -628,7 +628,7 @@ export function ContourEditToolbar({
                 className={`h-9 w-9 p-0 ${
                   showSettings === 'shrink'
                     ? 'bg-orange-900/30 border-orange-600 text-orange-400'
-                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
+                    : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
                 }`}
                 title="Shrink Contour"
               >
@@ -642,7 +642,7 @@ export function ContourEditToolbar({
                 className={`h-9 w-9 p-0 ${
                   showSettings === 'operations'
                     ? 'bg-purple-900/30 border-purple-600 text-purple-400'
-                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
+                    : 'bg-gray-900/80 border-gray-700/50 text-white/90 hover:bg-gray-800/80 hover:text-white'
                 }`}
                 title="Boolean Operations"
               >
@@ -675,33 +675,7 @@ export function ContourEditToolbar({
         )}
       </div>
 
-      {/* Floating Bottom Right Controls */}
-      <div className="fixed bottom-6 right-6 flex flex-col gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
-          title="Keyboard Shortcuts"
-        >
-          <Keyboard className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
-          title="DICOM Metadata"
-        >
-          <FileCode className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
-          title={`Info: ${activeTool || 'No tool'}`}
-        >
-          <Info className="w-4 h-4" />
-        </Button>
-      </div>
+
     </div>
   );
 }

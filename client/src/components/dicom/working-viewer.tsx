@@ -42,6 +42,7 @@ interface WorkingViewerProps {
   autoZoomLevel?: number;
   autoLocalizeTarget?: { x: number; y: number; z: number };
   onSlicePositionChange?: (slicePosition: number) => void;
+  currentView?: 'axial' | 'sagittal' | 'coronal' | '3-view';
 }
 
 export function WorkingViewer({
@@ -62,6 +63,7 @@ export function WorkingViewer({
   autoZoomLevel,
   autoLocalizeTarget,
   onSlicePositionChange,
+  currentView = 'axial',
 }: WorkingViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
