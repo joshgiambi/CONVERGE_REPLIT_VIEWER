@@ -75,7 +75,6 @@ export function WorkingViewer({
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
   const rtStructures = localRTStructures || externalRTStructures;
-  const [rtStructuresState, setRtStructures] = useState(rtStructures);
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
   const [renderTrigger, setRenderTrigger] = useState(0);
@@ -149,7 +148,7 @@ export function WorkingViewer({
 
   // Handle boolean operations (combine/subtract) between structures
   const handleBooleanOperation = (payload: any) => {
-    if (!rtStructures) {
+    if (!localRTStructures) {
       console.error("RT structures not available for boolean operation");
       return;
     }
@@ -160,7 +159,7 @@ export function WorkingViewer({
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the source and target structures
     const sourceStructure = updatedRTStructures.structures?.find(
@@ -214,7 +213,6 @@ export function WorkingViewer({
 
         // Update local structures and save to server
         setLocalRTStructures(updatedRTStructures);
-        setRtStructures(updatedRTStructures);
 
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
@@ -235,7 +233,7 @@ export function WorkingViewer({
 
   // Handle Eclipse TPS margin operation
   const handleMarginOperation = (payload: any) => {
-    if (!rtStructures) {
+    if (!localRTStructures) {
       console.error("RT structures not available for margin operation");
       return;
     }
@@ -246,7 +244,7 @@ export function WorkingViewer({
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(
@@ -312,7 +310,6 @@ export function WorkingViewer({
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      setRtStructures(updatedRTStructures);
 
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -332,7 +329,7 @@ export function WorkingViewer({
 
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
-    if (!rtStructures) {
+    if (!localRTStructures) {
       console.error("RT structures not available for growing");
       return;
     }
@@ -344,7 +341,7 @@ export function WorkingViewer({
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(
@@ -407,9 +404,8 @@ export function WorkingViewer({
       contour.points = updatedPoints;
       contour.numberOfPoints = updatedPoints.length / 3;
 
-      // Update local structures and save to server
+      // Update local structures immediately - this will trigger re-render
       setLocalRTStructures(updatedRTStructures);
-      setRtStructures(updatedRTStructures);
 
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -735,8 +731,14 @@ export function WorkingViewer({
       // Handle boolean operations (combine/subtract)
       handleBooleanOperation(payload);
     } else if (payload.action === "smooth_contours") {
-      // Handle contour smoothing
-      const structure = updatedStructures.structures.find(
+      // Handle contour smoothing using the existing smooth contour function
+      if (!localRTStructures) {
+        console.error("RT structures not available for smoothing");
+        return;
+      }
+
+      const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+      const structure = updatedRTStructures.structures.find(
         (s: any) => s.roiNumber === payload.structureId,
       );
       if (!structure) return;
@@ -744,33 +746,25 @@ export function WorkingViewer({
       // Apply smoothing to all contours in the structure
       structure.contours.forEach((contour: any) => {
         if (contour.points && contour.points.length >= 9) { // Need at least 3 points
-          // Simple moving average smoothing
-          const smoothedPoints: number[] = [];
-          const numPoints = contour.points.length / 3;
-
-          for (let i = 0; i < numPoints; i++) {
-            const idx = i * 3;
-            const prevIdx = (i - 1 + numPoints) % numPoints * 3;
-            const nextIdx = (i + 1) % numPoints * 3;
-
-            // Average with neighboring points
-            const smoothX = (contour.points[prevIdx] + contour.points[idx] + contour.points[nextIdx]) / 3;
-            const smoothY = (contour.points[prevIdx + 1] + contour.points[idx + 1] + contour.points[nextIdx + 1]) / 3;
-            const z = contour.points[idx + 2]; // Keep Z unchanged
-
-            smoothedPoints.push(smoothX, smoothY, z);
-          }
-
-          contour.points = smoothedPoints;
+          // Use the existing smoothContour function for better quality
+          const smoothedContour = smoothContour(
+            {
+              points: contour.points,
+              slicePosition: contour.slicePosition,
+            },
+            0.25 // Higher smoothing factor for explicit smoothing operation
+          );
+          contour.points = smoothedContour.points;
+          contour.numberOfPoints = smoothedContour.points.length / 3;
         }
       });
 
-      setLocalRTStructures(updatedStructures);
+      setLocalRTStructures(updatedRTStructures);
       // Pass updated structures to parent
       if (onContourUpdate) {
-        onContourUpdate(updatedStructures);
+        onContourUpdate(updatedRTStructures);
       }
-      saveContourUpdates(updatedStructures);
+      saveContourUpdates(updatedRTStructures);
     } else if (payload.action === "interpolate_contours") {
       // Handle contour interpolation between slices
       const structure = updatedStructures.structures.find(
