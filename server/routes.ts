@@ -201,14 +201,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function createHNAtlasDemo() {
     try {
       // Check if HN-ATLAS patient already exists
-      try {
-        const hnPatient = await storage.getPatientByID('HN-ATLAS-84');
-        if (hnPatient) {
-          console.log('HN-ATLAS patient already exists');
-          return;
-        }
-      } catch (error) {
-        // Patient doesn't exist, create new one
+      const hnPatient = await storage.getPatientByID('HN-ATLAS-84');
+      if (hnPatient) {
+        console.log('HN-ATLAS patient already exists');
+        return;
       }
 
       // Create HN-ATLAS patient
