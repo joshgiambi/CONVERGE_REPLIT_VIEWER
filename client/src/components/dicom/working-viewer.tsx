@@ -904,7 +904,7 @@ export function WorkingViewer({
         }
 
         // Secondary: z-position from image position
-        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
+        if (a.parsedZPosition !== null && b.parsedZPosition !== null){
           return a.parsedZPosition - b.parsedZPosition;
         }
 
@@ -1377,13 +1377,15 @@ export function WorkingViewer({
       });
     }
 
-    // Parse DICOM metadata
-    const imagePosition = imgMetadata.imagePosition
-      ?.split("\\")
-      .map(Number) || [-300, -300, 0];
-    const pixelSpacing = imgMetadata.pixelSpacing
-      ?.split("\\")
-      .map(Number) || [1.171875, 1.171875];
+    // Parse metadata for coordinate transformation
+    const imagePosition = imgMetadata.imagePosition?.split('\\').map(Number) || [0, 0, 0];
+    const pixelSpacing = imgMetadata.pixelSpacing?.split('\\').map(Number) || [1, 1];
+
+    // Get image dimensions with fallbacks
+    const rows = imgMetadata.rows || parseInt(imgMetadata.rows as any) || canvasHeight || 512;
+    const columns = imgMetadata.columns || parseInt(imgMetadata.columns as any) || canvasWidth || 512;
+
+    console.log("Using image dimensions for contour drawing:", { rows, columns, canvasWidth, canvasHeight });
 
     // Image dimensions
     const imageWidth = 512;

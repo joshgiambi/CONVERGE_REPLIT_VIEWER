@@ -689,14 +689,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
 
+      const getNumber = (tag: string) => {
+        try {
+          const value = getString(tag);
+          return value ? parseInt(value, 10) : null;
+        } catch {
+          return null;
+        }
+      };
+
       const metadata = {
         imagePosition: getArray('x00200032')?.join('\\') || null, // Image Position Patient
         imageOrientation: getArray('x00200037')?.join('\\') || null, // Image Orientation Patient  
         pixelSpacing: getArray('x00280030')?.join('\\') || null, // Pixel Spacing
         sliceLocation: getString('x00201041'), // Slice Location
         frameOfReferenceUID: getString('x00200052'), // Frame of Reference UID
-        rows: getString('x00280010'), // Rows  
-        columns: getString('x00280011'), // Columns
+        rows: getNumber('x00280010'), // Rows  
+        columns: getNumber('x00280011'), // Columns
         sopClassUID: getString('x00080016'), // SOP Class UID
         sopInstanceUID: getString('x00080018'), // SOP Instance UID
         windowCenter: getString('x00281050'), // Window Center
