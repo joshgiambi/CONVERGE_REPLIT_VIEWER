@@ -15,6 +15,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
+import { MultiPlanarViewer } from "./multi-planar-viewer";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -1581,12 +1582,32 @@ export function WorkingViewer({
     );
   }
 
+  // Render multi-planar view if 3-view mode is selected
+  if (currentView === '3-view' && images.length > 0) {
+    return (
+      <Card className="h-full bg-black border-indigo-800">
+        <MultiPlanarViewer
+          images={images}
+          currentIndex={currentIndex}
+          windowLevel={currentWindowLevel}
+          rtStructures={rtStructures}
+          structureVisibility={structureVisibility}
+          contourSettings={contourSettings}
+        />
+      </Card>
+    );
+  }
+
+  // Default single view rendering (axial, sagittal, or coronal)
   return (
     <Card className="h-full bg-black border-indigo-800">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-indigo-700">
         <div className="flex items-center space-x-2">
-          <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
+          <Badge className="bg-indigo-900 text-indigo-200">
+            {currentView === 'sagittal' ? 'Sagittal View' : 
+             currentView === 'coronal' ? 'Coronal View' : 'CT Scan'}
+          </Badge>
           {images.length > 0 && (
             <Badge
               variant="outline"
