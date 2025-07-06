@@ -89,6 +89,11 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 06, 2025: Brush Tool Width Calibration - COMPLETED
+  - ✅ Fixed brush tool output being wider than brush diameter
+  - ✅ Changed brush stroke generation to use brushSize/2 as offset on each side
+  - ✅ Updated circle creation to use diameter instead of radius internally
+  - ✅ Brush tool now produces exact line width matching the brush size slider value
 - July 05, 2025: Fixed Critical RT Structure Issues - COMPLETED
   - ✅ Fixed "Error loading DICOM" after contour operations by adding delayed image display
   - ✅ Added proper error handling to prevent RT structure rendering from crashing image display

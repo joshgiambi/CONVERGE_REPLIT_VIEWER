@@ -11,9 +11,11 @@ interface Point3D {
  * Create a perfect circle polygon at the given center with exact radius
  * Following Eclipse TPS and 3D Slicer specifications
  */
-function createPerfectCircle(center: number[], radius: number): number[] {
+function createPerfectCircle(center: number[], diameter: number): number[] {
   const circleSegments = 32; // More segments for smoother circles
   const points: number[] = [];
+  // Use diameter/2 as radius to make circle diameter = brushSize
+  const radius = diameter / 2;
   
   for (let i = 0; i < circleSegments; i++) {
     const angle = (i / circleSegments) * 2 * Math.PI;
@@ -149,14 +151,16 @@ function createStrokeOutline(brushPoints: number[][], brushSize: number): number
     const ny = dx;
     
     // Add offset points on both sides
+    // Use brushSize/2 as the offset to make total width = brushSize
+    const halfSize = brushSize / 2;
     leftEdge.push({
-      x: curr[0] + nx * brushSize,
-      y: curr[1] + ny * brushSize
+      x: curr[0] + nx * halfSize,
+      y: curr[1] + ny * halfSize
     });
     
     rightEdge.push({
-      x: curr[0] - nx * brushSize,
-      y: curr[1] - ny * brushSize
+      x: curr[0] - nx * halfSize,
+      y: curr[1] - ny * halfSize
     });
   }
   
