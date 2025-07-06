@@ -419,24 +419,24 @@ export function ContourEditToolbar({
             </div>
 
             {/* Control Buttons */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-6 gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleUndo}
-                className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                title="Undo (Ctrl+Z)"
               >
-                <Undo2 className="w-4 h-4 mr-1" />
-                Undo
+                <Undo2 className="w-4 h-4" />
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleRedo}
-                className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                title="Redo (Ctrl+Y)"
               >
-                <Redo2 className="w-4 h-4 mr-1" />
-                Redo
+                <Redo2 className="w-4 h-4" />
               </Button>
 
               {/* Clear with popover */}
@@ -445,9 +445,10 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                    className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                    title="Clear Contours"
                   >
-                    Clear
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-40 p-2 bg-gray-900 border-gray-700">
@@ -494,9 +495,10 @@ export function ContourEditToolbar({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                    className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                    title="Delete Every Nth Slice"
                   >
-                    Nth Slice
+                    <Layers className="w-4 h-4" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-40 p-2 bg-gray-900 border-gray-700">
@@ -534,17 +536,28 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleSmooth}
-                className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                title="Smooth Contours"
               >
-                Smooth
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12C3 7 7 3 12 3s9 4 9 9-4 9-9 9" />
+                  <path d="M3 12h18" />
+                  <path d="M12 3a9 9 0 0 1 0 18" />
+                </svg>
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleInterpolate}
-                className="h-8 px-3 bg-black border-gray-600 text-white hover:bg-gray-800"
+                className="h-8 w-8 p-0 bg-gray-900 border-gray-600 text-white hover:bg-gray-800"
+                title="Interpolate Between Slices"
               >
-                Interpolate
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="5" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="12" cy="19" r="2" />
+                  <path d="M12 7v3M12 14v3" strokeDasharray="2 2" />
+                </svg>
               </Button>
             </div>
           </div>
@@ -561,19 +574,19 @@ export function ContourEditToolbar({
                     variant="outline"
                     size="sm"
                     onClick={() => handleToolActivation(tool.id)}
-                    className={`h-9 px-3 transition-all duration-200 ${
+                    className={`h-9 w-9 p-0 transition-all duration-200 ${
                       isActive 
                         ? 'border-2 text-white shadow-lg' 
-                        : 'bg-black border border-gray-500 text-white hover:bg-gray-800'
+                        : 'bg-gray-900 border border-gray-600 text-white hover:bg-gray-800'
                     }`}
                     style={isActive ? { 
                       borderColor: structureColorRgb,
                       backgroundColor: `${structureColorRgb}20`,
                       boxShadow: `0 0 8px ${structureColorRgb}40`
                     } : {}}
+                    title={tool.label}
                   >
-                    <IconComponent className="w-4 h-4 mr-2" />
-                    <span className="text-sm">{tool.label}</span>
+                    <IconComponent className="w-4 h-4" />
                   </Button>
                   
                   {isActive && tool.id === 'brush' && (
@@ -598,42 +611,46 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('grow')}
-                className={`h-9 px-3 ${
+                className={`h-9 w-9 p-0 ${
                   showSettings === 'grow'
                     ? 'bg-green-900/30 border-green-600 text-green-400'
-                    : 'bg-black border-gray-500 text-white hover:bg-gray-800'
+                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
                 }`}
+                title="Grow Contour"
               >
-                <Plus className="w-4 h-4 mr-2" />
-                Grow
+                <Plus className="w-4 h-4" />
               </Button>
               
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('shrink')}
-                className={`h-9 px-3 ${
+                className={`h-9 w-9 p-0 ${
                   showSettings === 'shrink'
                     ? 'bg-orange-900/30 border-orange-600 text-orange-400'
-                    : 'bg-black border-gray-500 text-white hover:bg-gray-800'
+                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
                 }`}
+                title="Shrink Contour"
               >
-                <Minus className="w-4 h-4 mr-2" />
-                Shrink
+                <Minus className="w-4 h-4" />
               </Button>
 
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handleToolActivation('operations')}
-                className={`h-9 px-3 ${
+                className={`h-9 w-9 p-0 ${
                   showSettings === 'operations'
                     ? 'bg-purple-900/30 border-purple-600 text-purple-400'
-                    : 'bg-black border-gray-500 text-white hover:bg-gray-800'
+                    : 'bg-gray-900 border-gray-600 text-white hover:bg-gray-800'
                 }`}
+                title="Boolean Operations"
               >
-                <Layers className="w-4 h-4 mr-2" />
-                Boolean
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="10" cy="10" r="6" />
+                  <circle cx="14" cy="14" r="6" />
+                  <path d="M14 10a6 6 0 0 0-4 4" />
+                </svg>
               </Button>
             </div>
           </div>
