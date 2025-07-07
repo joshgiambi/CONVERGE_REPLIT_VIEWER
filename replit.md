@@ -89,14 +89,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 07, 2025: Eclipse Pen Tool UI/UX Fixes - COMPLETED
-  - ✅ Fixed z-index issues - pen tool no longer draws over toolbar (changed from 9999 to z-index 6)
-  - ✅ Added both Eclipse and Original pen tools to toolbar for testing comparison
-  - ✅ Fixed coordinate transformation from string format to proper parsing
-  - ✅ Eclipse pen tool vertices now visible and clickable after coordinate fix
-  - ✅ Wheel events now pass through properly for slice scrolling when pen tool active
-  - ✅ Updated pointer events to allow toolbar access when pen tool is active
-  - ✅ Tool switching no longer blocked when Eclipse pen tool is selected
+- July 07, 2025: Eclipse TPS-Compliant Pen Tool Implementation - COMPLETED
+  - ✅ Completely rebuilt Eclipse pen tool following exact Eclipse TPS specification
+  - ✅ Implemented proper state machine: IDLE → ACTIVE → DRAWING → EDITING → COMPLETE
+  - ✅ Fixed mouse interaction model: left-click places/selects vertices, right-click shows context menu
+  - ✅ Added vertex editing capability: click existing vertices to enter EDITING state and drag
+  - ✅ Implemented Eclipse TPS context menu system for polygon operations
+  - ✅ Added auto-close detection when cursor near first vertex (with visual feedback)
+  - ✅ Added ghost line preview from last vertex to cursor position
+  - ✅ Proper polygon closure via context menu "Close Polygon" option (not right-click!)
+  - ✅ Added vertex snapping system with visual indicators
+  - ✅ Implemented proper coordinate transformations and world space calculations
 - July 06, 2025: Brush Tool Width Calibration - COMPLETED
   - ✅ Fixed brush tool output being wider than brush diameter
   - ✅ Changed brush stroke generation to use brushSize/2 as offset on each side

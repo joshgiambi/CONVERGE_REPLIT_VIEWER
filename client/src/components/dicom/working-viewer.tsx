@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
-import { EclipsePenTool } from "./eclipse-pen-tool";
+import { EclipsePenToolFixed } from "./eclipse-pen-tool-fixed";
 import { PenTool } from "./pen-tool";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
@@ -1700,7 +1700,7 @@ export function WorkingViewer({
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
-              <EclipsePenTool
+              <EclipsePenToolFixed
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
