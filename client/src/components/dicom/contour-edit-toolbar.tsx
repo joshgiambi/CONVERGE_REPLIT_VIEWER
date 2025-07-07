@@ -106,6 +106,8 @@ export function ContourEditToolbar({
 
   // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
+    console.log('TOOLBAR: Tool activated:', toolId);
+    
     if (toolId === 'grow' || toolId === 'boolean') {
       // For grow and boolean buttons, just toggle the settings panel directly
       setShowSettings(showSettings === toolId ? null : toolId);
@@ -116,14 +118,18 @@ export function ContourEditToolbar({
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
     
+    console.log('TOOLBAR: Setting tool to:', newTool, 'isActive:', newTool !== null);
+    
     // Pass tool state to parent
     if (onToolChange) {
-      onToolChange({
+      const toolState = {
         tool: newTool,
         brushSize: brushThickness[0],
         isActive: newTool !== null,
         predictionEnabled: isPredictionEnabled
-      });
+      };
+      console.log('TOOLBAR: Sending tool state to parent:', toolState);
+      onToolChange(toolState);
     }
     
     // Auto-expand settings for the active tool  
