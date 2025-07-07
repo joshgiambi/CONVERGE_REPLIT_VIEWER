@@ -100,35 +100,20 @@ export function EclipsePenTool({
   const screenToWorld = useCallback((screenX: number, screenY: number): [number, number, number] => {
     if (!imageMetadata) return [0, 0, 0];
     
-    // Parse metadata strings properly
-    const imagePosition = imageMetadata.imagePosition?.split?.('\\')?.map?.(Number) || [-300, -300, 0];
-    const pixelSpacing = imageMetadata.pixelSpacing?.split?.('\\')?.map?.(Number) || [1.171875, 1.171875];
-    const imageOrientation = imageMetadata.imageOrientation?.split?.('\\')?.map?.(Number) || [1, 0, 0, 0, 1, 0];
+    // Transform from screen space to image space
+    const canvasX = (screenX - panX) / zoom;
+    const canvasY = (screenY - panY) / zoom;
     
-    // Calculate proper canvas position (matching working viewer coordinate system)
-    const canvasWidth = 1024;
-    const canvasHeight = 1024;
-    const imageWidth = 512;
-    const imageHeight = 512;
+    // Apply HFS transformation
+    const worldX = imageMetadata.imagePosition[0] + 
+                   canvasX * imageMetadata.pixelSpacing[0] * imageMetadata.imageOrientation[0] +
+                   canvasY * imageMetadata.pixelSpacing[1] * imageMetadata.imageOrientation[3];
     
-    // Scale calculations
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    const totalScale = baseScale; // Simple for now
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
+    const worldY = imageMetadata.imagePosition[1] + 
+                   canvasX * imageMetadata.pixelSpacing[0] * imageMetadata.imageOrientation[1] +
+                   canvasY * imageMetadata.pixelSpacing[1] * imageMetadata.imageOrientation[4];
     
-    // Center image on canvas
-    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
-    
-    // Convert screen to pixel coordinates
-    const pixelX = (screenX - imageX) / totalScale;
-    const pixelY = (screenY - imageY) / totalScale;
-    
-    // Convert pixel to world coordinates (DICOM standard)
-    const worldX = imagePosition[0] + pixelX * pixelSpacing[1]; // column spacing
-    const worldY = imagePosition[1] + pixelY * pixelSpacing[0]; // row spacing  
-    const worldZ = imagePosition[2];
+    const worldZ = imageMetadata.imagePosition[2];
     
     return [worldX, worldY, worldZ];
   }, [imageMetadata, zoom, panX, panY]);
@@ -136,31 +121,19 @@ export function EclipsePenTool({
   const worldToScreen = useCallback((world: [number, number, number]): [number, number] => {
     if (!imageMetadata) return [0, 0];
     
-    // Parse metadata strings properly
-    const imagePosition = imageMetadata.imagePosition?.split?.('\\')?.map?.(Number) || [-300, -300, 0];
-    const pixelSpacing = imageMetadata.pixelSpacing?.split?.('\\')?.map?.(Number) || [1.171875, 1.171875];
+    // Transform from world to image coordinates
+    const deltaX = world[0] - imageMetadata.imagePosition[0];
+    const deltaY = world[1] - imageMetadata.imagePosition[1];
     
-    // Calculate canvas positioning (inverse of screenToWorld)
-    const canvasWidth = 1024;
-    const canvasHeight = 1024;
-    const imageWidth = 512;
-    const imageHeight = 512;
+    const canvasX = (deltaX * imageMetadata.imageOrientation[0] + 
+                     deltaY * imageMetadata.imageOrientation[1]) / imageMetadata.pixelSpacing[0];
     
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    const totalScale = baseScale;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
+    const canvasY = (deltaX * imageMetadata.imageOrientation[3] + 
+                     deltaY * imageMetadata.imageOrientation[4]) / imageMetadata.pixelSpacing[1];
     
-    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
-    
-    // Convert world to pixel coordinates
-    const pixelX = (world[0] - imagePosition[0]) / pixelSpacing[1];
-    const pixelY = (world[1] - imagePosition[1]) / pixelSpacing[0];
-    
-    // Convert pixel to screen coordinates
-    const screenX = imageX + pixelX * totalScale;
-    const screenY = imageY + pixelY * totalScale;
+    // Apply zoom and pan
+    const screenX = canvasX * zoom + panX;
+    const screenY = canvasY * zoom + panY;
     
     return [screenX, screenY];
   }, [imageMetadata, zoom, panX, panY]);
@@ -310,45 +283,20 @@ export function EclipsePenTool({
   
   // Mouse event handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    console.log('🖱️ PEN TOOL MOUSE DOWN:', {
-      isActive,
-      hasImageMetadata: !!imageMetadata,
-      hasSelectedStructure: !!selectedStructure,
-      button: e.button,
-      toolState
-    });
-    
-    if (!isActive || !imageMetadata || !selectedStructure) {
-      console.log('❌ Pen tool click blocked:', {
-        isActive,
-        imageMetadata: !!imageMetadata,
-        selectedStructure: !!selectedStructure
-      });
-      return;
-    }
+    if (!isActive || !imageMetadata || !selectedStructure) return;
     
     const rect = penCanvasRef.current?.getBoundingClientRect();
-    if (!rect) {
-      console.log('❌ No canvas rect found');
-      return;
-    }
+    if (!rect) return;
     
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    console.log('📍 Click position:', { screenX, screenY });
-    
     const worldPos = screenToWorld(screenX, screenY);
-    console.log('🌍 World position:', worldPos);
     
     // Check for snapping
     const snap = checkForSnapping(worldPos);
     const targetPos = snap ? snap.position : worldPos;
-    console.log('🎯 Target position:', targetPos, snap ? 'with snap' : 'no snap');
     
     if (e.button === 0) { // Left click
-      e.preventDefault();
-      e.stopPropagation();
-      
       // Check if clicking on existing vertex
       const clickedVertex = vertices.find(v => {
         const vertexScreen = worldToScreen(v.position);
@@ -543,20 +491,10 @@ export function EclipsePenTool({
   // Handle context menu (prevent default)
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    e.stopPropagation();
-    
-    console.log('🖱️ PEN TOOL RIGHT CLICK:', {
-      toolState,
-      vertexCount: vertices.length,
-      canClose: toolState === ToolState.DRAWING && vertices.length >= 3
-    });
     
     // Right click completes polygon in DRAWING state
     if (toolState === ToolState.DRAWING && vertices.length >= 3) {
-      console.log('🔐 Closing polygon with', vertices.length, 'vertices');
       closePolygon();
-    } else if (vertices.length < 3) {
-      console.log('❌ Need at least 3 vertices to close polygon');
     }
   }, [toolState, vertices, closePolygon]);
   
@@ -599,8 +537,7 @@ export function EclipsePenTool({
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
         onWheel={(e) => {
-          // Allow wheel events to bubble up for scrolling when pen tool is active
-          e.stopPropagation();
+          // Don't prevent wheel events - let them bubble up for scrolling
         }}
       />
     </>

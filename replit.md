@@ -89,17 +89,6 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 06, 2025: Contour Toolbar Styling Update - COMPLETED
-  - ✅ Updated background from `bg-gray-900/95` to `bg-black/70` to match bottom toolbar
-  - ✅ Applied consistent `backdrop-blur-sm` effect for visual consistency
-  - ✅ Added `rounded-lg` to all buttons for more rounded corners
-  - ✅ Maintained same opacity and blur effects across all toolbars
-- July 06, 2025: Contour Toolbar Reorganization - COMPLETED
-  - ✅ Defined new 3-section layout: Left (name/color + controls), Middle (tools + operations), Right (info panel)
-  - ✅ Added floating buttons for shortcuts, DICOM metadata, and info on bottom right
-  - ✅ Implemented popover menus for Clear and Nth slice buttons
-  - ✅ Added missing handler functions (smooth, interpolate, delete nth slice)
-  - ✅ Updated toolbar to icon-only design with tooltips matching bottom toolbar style
 - July 06, 2025: Brush Tool Width Calibration - COMPLETED
   - ✅ Fixed brush tool output being wider than brush diameter
   - ✅ Changed brush stroke generation to use brushSize/2 as offset on each side

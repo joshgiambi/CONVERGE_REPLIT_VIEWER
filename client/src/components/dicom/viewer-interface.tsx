@@ -4,7 +4,6 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
-import { FloatingUIControls } from './floating-ui-controls';
 
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -45,7 +44,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
   const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
-  const [currentView, setCurrentView] = useState<'axial' | 'sagittal' | 'coronal' | '3-view'>('axial');
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -430,7 +428,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 contourSettings={contourSettings}
                 autoZoomLevel={autoZoomLevel}
                 autoLocalizeTarget={autoLocalizeTarget}
-                currentView={currentView}
               />
               
               {/* Structure Tags on Right Side */}
@@ -484,21 +481,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourSettings={() => {
             // Open contour settings dialog
           }}
-          onViewChange={setCurrentView}
-          currentView={currentView}
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
         />
       )}
-
-      {/* Floating UI Controls - Part of General UI */}
-      <FloatingUIControls
-        currentSlicePosition={currentSlicePosition}
-        activeTool={brushToolState.tool}
-        brushSize={brushToolState.brushSize}
-      />
 
       {/* Contour Edit Toolbar */}
       {selectedForEdit && rtStructures && rtStructures.structures && (

@@ -38,22 +38,22 @@ export interface IStorage {
   getImage(id: number): Promise<DicomImage | undefined>;
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
-
+  
   // PACS operations
   createPacsConnection(connection: InsertPacsConnection): Promise<PacsConnection>;
   getPacsConnection(id: number): Promise<PacsConnection | undefined>;
   getAllPacsConnections(): Promise<PacsConnection[]>;
   updatePacsConnection(id: number, updates: Partial<InsertPacsConnection>): Promise<PacsConnection>;
   deletePacsConnection(id: number): Promise<void>;
-
+  
   // Update operations
   updateSeriesImageCount(seriesId: number, count: number): Promise<void>;
   updateStudyCounts(studyId: number, seriesCount: number, imageCount: number): Promise<void>;
-
+  
   // RT Structure operations
   updateRTStructureName(structureId: number, name: string): Promise<void>;
   updateRTStructureColor(structureId: number, color: number[]): Promise<void>;
-
+  
   // Clear all data
   clearAll(): void;
 }
@@ -62,57 +62,17 @@ export class MemStorage implements IStorage {
   private studies: Map<number, Study>;
   private series: Map<number, Series>;
   private images: Map<number, DicomImage>;
-  private patients: Map<number, Patient>;
   private currentStudyId: number;
   private currentSeriesId: number;
   private currentImageId: number;
-  private currentPatientId: number;
 
   constructor() {
     this.studies = new Map();
     this.series = new Map();
     this.images = new Map();
-    this.patients = new Map();
     this.currentStudyId = 1;
     this.currentSeriesId = 1;
     this.currentImageId = 1;
-    this.currentPatientId = 1;
-  }
-
-  // Patient operations
-  async createPatient(insertPatient: InsertPatient): Promise<Patient> {
-    const id = this.currentPatientId++;
-    const patient: Patient = {
-      id,
-      patientID: insertPatient.patientID,
-      patientName: insertPatient.patientName || null,
-      patientSex: insertPatient.patientSex || null,
-      patientAge: insertPatient.patientAge || null,
-      dateOfBirth: insertPatient.dateOfBirth || null,
-      createdAt: new Date(),
-    };
-    this.patients.set(id, patient);
-    return patient;
-  }
-
-  async getPatient(id: number): Promise<Patient | undefined> {
-    return this.patients.get(id);
-  }
-
-  async getPatientByID(patientID: string): Promise<Patient | undefined> {
-    return Array.from(this.patients.values()).find(
-      (patient) => patient.patientID === patientID
-    );
-  }
-
-  async getAllPatients(): Promise<Patient[]> {
-    return Array.from(this.patients.values());
-  }
-
-  async getStudiesByPatient(patientId: number): Promise<Study[]> {
-    return Array.from(this.studies.values()).filter(
-      (study) => study.patientId === patientId
-    );
   }
 
   async createStudy(insertStudy: InsertStudy): Promise<Study> {
