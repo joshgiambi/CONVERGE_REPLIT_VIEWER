@@ -391,7 +391,7 @@ export function ContourEditToolbar({
 
   return (
     <div 
-      className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 bg-black/70 backdrop-blur-sm rounded-lg shadow-2xl border border-gray-700/50"
+      className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 bg-black/70 backdrop-blur-sm rounded-lg shadow-2xl border border-gray-700/50"
       style={{ maxWidth: '90vw' }}
     >
       <div className="p-4">

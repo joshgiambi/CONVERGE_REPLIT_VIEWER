@@ -208,7 +208,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create HN-ATLAS patient
-      const hnPatient = await storage.createPatient({
+      const createdPatient = await storage.createPatient({
         patientID: 'HN-ATLAS-84',
         patientName: 'HN-ATLAS^84',
         patientSex: 'M',
@@ -238,7 +238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create CT study
       const ctStudy = await storage.createStudy({
         studyInstanceUID: generateUID(),
-        patientId: hnPatient.id,
+        patientId: createdPatient.id,
         patientName: 'HN-ATLAS^84',
         patientID: 'HN-ATLAS-84',
         studyDate: '20200615',
@@ -318,7 +318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Create RT Structure Study
           const rtStudy = await storage.createStudy({
             studyInstanceUID: generateUID(),
-            patientId: hnPatient.id,
+            patientId: createdPatient.id,
             patientName: 'HN-ATLAS^84',
             patientID: 'HN-ATLAS-84',
             studyDate: '20200615',

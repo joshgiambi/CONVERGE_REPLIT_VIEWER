@@ -1655,6 +1655,56 @@ export function WorkingViewer({
     );
   }
 
+  // Render single sagittal view
+  if (currentView === 'sagittal' && images.length > 0) {
+    return (
+      <Card className="h-full bg-black border-indigo-800">
+        <div className="flex items-center justify-between p-4 border-b border-indigo-700">
+          <div className="flex items-center space-x-2">
+            <Badge className="bg-indigo-900 text-indigo-200">
+              Sagittal View
+            </Badge>
+            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+              X: {Math.round(currentIndex * 1.171875)}mm
+            </Badge>
+          </div>
+        </div>
+        <div className="flex-1 p-4 flex items-center justify-center">
+          <div className="text-center text-gray-400">
+            <p className="text-lg mb-2">Sagittal View</p>
+            <p className="text-sm">Single sagittal view implementation in progress</p>
+            <p className="text-xs mt-2">Use 3-View mode for multi-planar visualization</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  // Render single coronal view
+  if (currentView === 'coronal' && images.length > 0) {
+    return (
+      <Card className="h-full bg-black border-indigo-800">
+        <div className="flex items-center justify-between p-4 border-b border-indigo-700">
+          <div className="flex items-center space-x-2">
+            <Badge className="bg-indigo-900 text-indigo-200">
+              Coronal View
+            </Badge>
+            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+              Y: {Math.round(currentIndex * 1.171875)}mm
+            </Badge>
+          </div>
+        </div>
+        <div className="flex-1 p-4 flex items-center justify-center">
+          <div className="text-center text-gray-400">
+            <p className="text-lg mb-2">Coronal View</p>
+            <p className="text-sm">Single coronal view implementation in progress</p>
+            <p className="text-xs mt-2">Use 3-View mode for multi-planar visualization</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   // Default single view rendering (axial, sagittal, or coronal)
   return (
     <Card className="h-full bg-black border-indigo-800">
