@@ -89,17 +89,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 07, 2025: Eclipse TPS-Compliant Pen Tool Implementation - COMPLETED
-  - ✅ Completely rebuilt Eclipse pen tool following exact Eclipse TPS specification
-  - ✅ Implemented proper state machine: IDLE → ACTIVE → DRAWING → EDITING → COMPLETE
-  - ✅ Fixed mouse interaction model: left-click places/selects vertices, right-click shows context menu
-  - ✅ Added vertex editing capability: click existing vertices to enter EDITING state and drag
-  - ✅ Implemented Eclipse TPS context menu system for polygon operations
-  - ✅ Added auto-close detection when cursor near first vertex (with visual feedback)
-  - ✅ Added ghost line preview from last vertex to cursor position
-  - ✅ Proper polygon closure via context menu "Close Polygon" option (not right-click!)
-  - ✅ Added vertex snapping system with visual indicators
-  - ✅ Implemented proper coordinate transformations and world space calculations
+- July 07, 2025: ITK-SNAP Style Pen Tool Implementation - COMPLETED
+  - ✅ Rebuilt pen tool to match ITK-SNAP polygon tool behavior (medical imaging standard)
+  - ✅ Simplified state machine: IDLE → DRAWING → PREVIEW (removed complex states)
+  - ✅ ITK-SNAP workflow: click to place vertices, click near first vertex or right-click to close
+  - ✅ Preview mode with green rectangle boundary (ITK-SNAP visual style)
+  - ✅ Accept/Cancel buttons appear in preview mode for polygon finalization
+  - ✅ Vertex editing via selection box - draw box around vertices to select and drag
+  - ✅ Paste functionality - copies last accepted polygon to current slice
+  - ✅ Keyboard shortcuts: Escape (cancel), Enter (accept), Ctrl+V (paste)
+  - ✅ Medical-grade coordinate transformations and proper HFS handling
+  - ✅ Removed complex context menus for simplified medical workflow
 - July 06, 2025: Brush Tool Width Calibration - COMPLETED
   - ✅ Fixed brush tool output being wider than brush diameter
   - ✅ Changed brush stroke generation to use brushSize/2 as offset on each side

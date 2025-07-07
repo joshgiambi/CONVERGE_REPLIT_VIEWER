@@ -1,47 +1,28 @@
 // Eclipse TPS-compliant Pen Tool Implementation
-// Following the exact specification from Eclipse Treatment Planning System
+// Fixed to match ITK-SNAP polygon tool behavior
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PenTool as PenIcon } from 'lucide-react';
 
-// Eclipse TPS Tool States - EXACT as specified
+// Simplified Tool States - matching ITK-SNAP behavior
 enum ToolState {
-  IDLE = 'IDLE',           // Tool selected but not engaged
-  ACTIVE = 'ACTIVE',       // First click registered
-  DRAWING = 'DRAWING',     // One or more vertices placed
-  EDITING = 'EDITING',     // Existing vertex selected
-  COMPLETE = 'COMPLETE'    // Polygon closed or finalized
+  IDLE = 'IDLE',           // Tool selected, not drawing
+  DRAWING = 'DRAWING',     // Actively placing vertices
+  PREVIEW = 'PREVIEW',     // Polygon complete, preview before accept
 }
 
 interface Vertex {
   id: string;
   position: [number, number, number]; // World coordinates [x, y, z]
+  screenPosition: [number, number];   // Store screen position for editing
   index: number;
-  polygonId: string;
-  connections: string[];
-  isFirst: boolean;
-  isLast: boolean;
 }
 
-interface Segment {
+interface Polygon {
   id: string;
-  startVertex: string;
-  endVertex: string;
-  polygonId: string;
-  isClosing?: boolean;
-}
-
-interface SnapTarget {
-  type: 'vertex' | 'edge' | 'grid';
-  target?: any;
-  distance: number;
-  position: [number, number, number];
-}
-
-interface ContextMenuItem {
-  label: string;
-  action: () => void;
-  enabled: boolean;
+  vertices: Vertex[];
+  isClosed: boolean;
+  sliceIndex: number;
 }
 
 interface EclipsePenToolProps {
@@ -72,48 +53,41 @@ export function EclipsePenToolFixed({
   panY = 0
 }: EclipsePenToolProps) {
   
-  // Eclipse TPS State Machine
+  // Tool state
   const [toolState, setToolState] = useState<ToolState>(ToolState.IDLE);
-  const [vertices, setVertices] = useState<Vertex[]>([]);
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [currentPolygonId, setCurrentPolygonId] = useState<string>('');
+  const [currentPolygon, setCurrentPolygon] = useState<Polygon | null>(null);
+  const [lastAcceptedPolygon, setLastAcceptedPolygon] = useState<Polygon | null>(null); // For paste functionality
   
   // Editing state
-  const [selectedVertex, setSelectedVertex] = useState<Vertex | null>(null);
+  const [selectedVertices, setSelectedVertices] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartPos, setDragStartPos] = useState<[number, number] | null>(null);
-  const [dragThreshold] = useState(3); // pixels
+  const [selectionBox, setSelectionBox] = useState<{
+    start: [number, number];
+    end: [number, number];
+  } | null>(null);
   
   // Mouse tracking
   const [mousePosition, setMousePosition] = useState<[number, number]>([0, 0]);
-  const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
-  
-  // Context menu
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    position: [number, number];
-    items: ContextMenuItem[];
-  }>({ visible: false, position: [0, 0], items: [] });
   
   // Canvas refs
   const penCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   
-  // Eclipse TPS Configuration
-  const VERTEX_SNAP_RADIUS = 10; // pixels
-  const EDGE_SNAP_RADIUS = 8; // pixels 
-  const AUTO_CLOSE_THRESHOLD = 15; // pixels
-  const MAGNETIC_RADIUS = 8; // pixels
+  // Configuration
+  const VERTEX_RADIUS = 5;
+  const VERTEX_SELECT_RADIUS = 10;
+  const CLOSE_THRESHOLD = 15; // pixels
+  const MIN_VERTICES = 3;
   
-  // Initialize tool state when activated
+  // Initialize when activated
   useEffect(() => {
-    if (isActive && toolState === ToolState.IDLE) {
-      console.log('ECLIPSE PEN: Tool activated, entering IDLE state');
-      setCurrentPolygonId(generateUUID());
-      // Stay in IDLE until first click
-    } else if (!isActive) {
-      console.log('ECLIPSE PEN: Tool deactivated, resetting state');
-      resetToolState();
+    if (isActive) {
+      console.log('PEN TOOL: Activated');
+      // Tool is ready but not drawing yet
+    } else {
+      console.log('PEN TOOL: Deactivated');
+      resetTool();
     }
   }, [isActive]);
   
@@ -122,17 +96,14 @@ export function EclipsePenToolFixed({
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
   
-  // Reset tool to IDLE state
-  const resetToolState = useCallback(() => {
+  // Reset tool state
+  const resetTool = useCallback(() => {
     setToolState(ToolState.IDLE);
-    setVertices([]);
-    setSegments([]);
-    setSelectedVertex(null);
+    setCurrentPolygon(null);
+    setSelectedVertices(new Set());
     setIsDragging(false);
     setDragStartPos(null);
-    setSnapTarget(null);
-    setContextMenu({ visible: false, position: [0, 0], items: [] });
-    setCurrentPolygonId(generateUUID());
+    setSelectionBox(null);
   }, []);
   
   // Coordinate transformation functions
@@ -200,149 +171,68 @@ export function EclipsePenToolFixed({
     return Math.sqrt(Math.pow(p2[0] - p1[0], 2) + Math.pow(p2[1] - p1[1], 2));
   };
   
-  // Find vertex at screen position
-  const findVertexAtPosition = useCallback((screenPos: [number, number]): Vertex | null => {
-    for (const vertex of vertices) {
-      const vertexScreen = worldToScreen(vertex.position);
-      const dist = distance2D(screenPos, vertexScreen);
-      if (dist <= VERTEX_SNAP_RADIUS) {
-        return vertex;
-      }
-    }
-    return null;
-  }, [vertices, worldToScreen]);
-  
-  // Check for snapping
-  const checkForSnapping = useCallback((position: [number, number, number]): SnapTarget | null => {
-    const screenPos = worldToScreen(position);
-    const snapTargets: SnapTarget[] = [];
+  // Add vertex to polygon
+  const addVertex = useCallback((screenX: number, screenY: number) => {
+    const worldPos = screenToWorld(screenX, screenY);
     
-    // Check vertex snapping
-    vertices.forEach(vertex => {
-      const vertexScreenPos = worldToScreen(vertex.position);
-      const dist = distance2D(screenPos, vertexScreenPos);
-      
-      if (dist < VERTEX_SNAP_RADIUS) {
-        snapTargets.push({
-          type: 'vertex',
-          target: vertex,
-          distance: dist,
-          position: vertex.position
-        });
-      }
-    });
-    
-    // Return closest snap target
-    if (snapTargets.length > 0) {
-      return snapTargets.sort((a, b) => a.distance - b.distance)[0];
-    }
-    
-    return null;
-  }, [vertices, worldToScreen]);
-  
-  // Eclipse TPS: Place first vertex (IDLE → ACTIVE → DRAWING)
-  const placeFirstVertex = useCallback((position: [number, number, number]) => {
     const vertex: Vertex = {
       id: generateUUID(),
-      position: position,
-      index: 0,
-      polygonId: currentPolygonId,
-      connections: [],
-      isFirst: true,
-      isLast: true
+      position: worldPos,
+      screenPosition: [screenX, screenY],
+      index: currentPolygon?.vertices.length || 0
     };
     
-    console.log('ECLIPSE PEN: Placing first vertex, IDLE → ACTIVE → DRAWING');
-    setVertices([vertex]);
-    setToolState(ToolState.DRAWING);
-    
-    return vertex;
-  }, [currentPolygonId]);
-  
-  // Eclipse TPS: Place subsequent vertex
-  const placeVertex = useCallback((position: [number, number, number]) => {
-    if (vertices.length === 0) {
-      return placeFirstVertex(position);
-    }
-    
-    // Check proximity to first vertex for auto-close
-    if (vertices.length >= 3) {
-      const firstVertexScreen = worldToScreen(vertices[0].position);
-      const currentScreen = worldToScreen(position);
-      const distToFirst = distance2D(firstVertexScreen, currentScreen);
-      
-      if (distToFirst < AUTO_CLOSE_THRESHOLD) {
-        console.log('ECLIPSE PEN: Near first vertex, highlighting for auto-close');
-        // Visual feedback handled in render
-        if (distToFirst < MAGNETIC_RADIUS) {
-          // Snap to first vertex and close
-          closePolygon();
+    if (!currentPolygon) {
+      // Start new polygon
+      const newPolygon: Polygon = {
+        id: generateUUID(),
+        vertices: [vertex],
+        isClosed: false,
+        sliceIndex: currentSlicePosition
+      };
+      setCurrentPolygon(newPolygon);
+      setToolState(ToolState.DRAWING);
+      console.log('Started new polygon');
+    } else {
+      // Check if clicking near first vertex to close
+      if (currentPolygon.vertices.length >= MIN_VERTICES) {
+        const firstVertex = currentPolygon.vertices[0];
+        const [firstX, firstY] = worldToScreen(firstVertex.position);
+        const dist = distance2D([screenX, screenY], [firstX, firstY]);
+        
+        if (dist < CLOSE_THRESHOLD) {
+          // Close polygon
+          setCurrentPolygon(prev => ({
+            ...prev!,
+            isClosed: true
+          }));
+          setToolState(ToolState.PREVIEW);
+          console.log('Polygon closed');
           return;
         }
       }
+      
+      // Add vertex
+      setCurrentPolygon(prev => ({
+        ...prev!,
+        vertices: [...prev!.vertices, vertex]
+      }));
     }
-    
-    const lastVertex = vertices[vertices.length - 1];
-    
-    const vertex: Vertex = {
-      id: generateUUID(),
-      position: position, // Could apply snapping here
-      index: vertices.length,
-      polygonId: currentPolygonId,
-      connections: [lastVertex.id],
-      isFirst: false,
-      isLast: true
-    };
-    
-    // Update previous last vertex
-    const updatedVertices = vertices.map(v => 
-      v.id === lastVertex.id ? { ...v, isLast: false, connections: [...v.connections, vertex.id] } : v
-    );
-    
-    // Create line segment
-    const segment: Segment = {
-      id: generateUUID(),
-      startVertex: lastVertex.id,
-      endVertex: vertex.id,
-      polygonId: currentPolygonId
-    };
-    
-    console.log('ECLIPSE PEN: Placing subsequent vertex');
-    setVertices([...updatedVertices, vertex]);
-    setSegments(prev => [...prev, segment]);
-    
-  }, [vertices, currentPolygonId, worldToScreen, placeFirstVertex]);
+  }, [currentPolygon, screenToWorld, worldToScreen, currentSlicePosition]);
   
-  // Eclipse TPS: Close polygon
-  const closePolygon = useCallback(() => {
-    if (vertices.length < 3) {
-      console.log('ECLIPSE PEN: Cannot close polygon - need at least 3 vertices');
-      return;
-    }
+  // Accept polygon (like ITK-SNAP)
+  const acceptPolygon = useCallback(() => {
+    if (!currentPolygon || !currentPolygon.isClosed) return;
     
-    const lastVertex = vertices[vertices.length - 1];
-    const firstVertex = vertices[0];
+    console.log('Accepting polygon');
     
-    // Create closing segment
-    const closingSegment: Segment = {
-      id: generateUUID(),
-      startVertex: lastVertex.id,
-      endVertex: firstVertex.id,
-      polygonId: currentPolygonId,
-      isClosing: true
-    };
-    
-    console.log('ECLIPSE PEN: Closing polygon, DRAWING → COMPLETE');
-    setSegments(prev => [...prev, closingSegment]);
-    setToolState(ToolState.COMPLETE);
-    
-    // Convert to contour and send update
+    // Convert to contour points
     const contourPoints: number[] = [];
-    vertices.forEach(vertex => {
+    currentPolygon.vertices.forEach(vertex => {
       contourPoints.push(vertex.position[0], vertex.position[1], vertex.position[2]);
     });
     
-    // Send contour update
+    // Send update
     const payload = {
       action: 'add_contour',
       structureIndex: selectedStructure,
@@ -352,97 +242,66 @@ export function EclipsePenToolFixed({
     
     onContourUpdate(payload);
     
+    // Save for paste functionality
+    setLastAcceptedPolygon(currentPolygon);
+    
     // Reset for next polygon
-    setTimeout(() => {
-      resetToolState();
-    }, 100);
-    
-  }, [vertices, currentPolygonId, selectedStructure, currentSlicePosition, onContourUpdate, resetToolState]);
+    resetTool();
+  }, [currentPolygon, selectedStructure, currentSlicePosition, onContourUpdate, resetTool]);
   
-  // Generate context menu items based on Eclipse TPS spec
-  const generateContextMenu = useCallback((screenPos: [number, number], worldPos: [number, number, number]) => {
-    const items: ContextMenuItem[] = [];
-    const clickedVertex = findVertexAtPosition(screenPos);
+  // Cancel current polygon
+  const cancelPolygon = useCallback(() => {
+    console.log('Cancelling polygon');
+    resetTool();
+  }, [resetTool]);
+  
+  // Paste last polygon (ITK-SNAP feature)
+  const pasteLastPolygon = useCallback(() => {
+    if (!lastAcceptedPolygon) return;
     
-    if (clickedVertex) {
-      // Vertex context menu
-      items.push({
-        label: "Delete Vertex",
-        action: () => {
-          // TODO: Implement vertex deletion
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: vertices.length > 3
-      });
-      
-      items.push({
-        label: "Set as Start Point",
-        action: () => {
-          // TODO: Implement start point change
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: !clickedVertex.isFirst
-      });
-      
-      if (clickedVertex.isFirst && toolState === ToolState.DRAWING) {
-        items.push({
-          label: "Close Polygon Here",
-          action: () => {
-            closePolygon();
-            setContextMenu({ visible: false, position: [0, 0], items: [] });
-          },
-          enabled: vertices.length >= 3
-        });
+    console.log('Pasting last polygon');
+    
+    // Create new polygon with same shape but at current slice
+    const newVertices = lastAcceptedPolygon.vertices.map((v, index) => ({
+      id: generateUUID(),
+      position: [v.position[0], v.position[1], parseFloat(imageMetadata.imagePosition.split("\\")[2])] as [number, number, number],
+      screenPosition: worldToScreen([v.position[0], v.position[1], parseFloat(imageMetadata.imagePosition.split("\\")[2])]),
+      index: index
+    }));
+    
+    setCurrentPolygon({
+      id: generateUUID(),
+      vertices: newVertices,
+      isClosed: true,
+      sliceIndex: currentSlicePosition
+    });
+    setToolState(ToolState.PREVIEW);
+  }, [lastAcceptedPolygon, imageMetadata, worldToScreen, currentSlicePosition]);
+  
+  // Select vertices in box
+  const selectVerticesInBox = useCallback((box: {
+    start: [number, number];
+    end: [number, number];
+  }) => {
+    if (!currentPolygon) return;
+    
+    const minX = Math.min(box.start[0], box.end[0]);
+    const maxX = Math.max(box.start[0], box.end[0]);
+    const minY = Math.min(box.start[1], box.end[1]);
+    const maxY = Math.max(box.start[1], box.end[1]);
+    
+    const selected = new Set<string>();
+    currentPolygon.vertices.forEach(vertex => {
+      const [x, y] = worldToScreen(vertex.position);
+      if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+        selected.add(vertex.id);
       }
-    } else if (toolState === ToolState.DRAWING) {
-      // Active polygon context menu
-      items.push({
-        label: "Close Polygon",
-        action: () => {
-          closePolygon();
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: vertices.length >= 3
-      });
-      
-      items.push({
-        label: "Cancel Polygon",
-        action: () => {
-          resetToolState();
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: true
-      });
-      
-      items.push({
-        label: "Delete Last Vertex",
-        action: () => {
-          if (vertices.length > 1) {
-            setVertices(prev => prev.slice(0, -1));
-            setSegments(prev => prev.slice(0, -1));
-          } else {
-            resetToolState();
-          }
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: vertices.length > 0
-      });
-    } else {
-      // Empty area context menu
-      items.push({
-        label: "Start New Polygon",
-        action: () => {
-          placeFirstVertex(worldPos);
-          setContextMenu({ visible: false, position: [0, 0], items: [] });
-        },
-        enabled: true
-      });
-    }
+    });
     
-    return items;
-  }, [findVertexAtPosition, vertices, toolState, closePolygon, resetToolState, placeFirstVertex]);
+    setSelectedVertices(selected);
+  }, [currentPolygon, worldToScreen]);
   
-  // Eclipse TPS Mouse Event Handlers
+  // Mouse event handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!isActive) return;
     
@@ -451,43 +310,34 @@ export function EclipsePenToolFixed({
     
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    const worldPos = screenToWorld(screenX, screenY);
     
-    console.log('ECLIPSE PEN: Mouse down at', screenX, screenY, 'button:', e.button);
-    
-    if (e.button === 0) { // Left mouse button
-      const clickedVertex = findVertexAtPosition([screenX, screenY]);
-      
-      if (clickedVertex) {
-        // Eclipse TPS: Clicked on existing vertex → Enter EDITING state
-        if (clickedVertex.polygonId === currentPolygonId) {
-          console.log('ECLIPSE PEN: Clicked own vertex, entering EDITING state');
-          setToolState(ToolState.EDITING);
-          setSelectedVertex(clickedVertex);
-          setDragStartPos([screenX, screenY]);
-          setIsDragging(false);
-        }
-      } else {
-        // Eclipse TPS: Empty space → Place vertex or start new polygon
-        if (toolState === ToolState.IDLE) {
-          console.log('ECLIPSE PEN: First click, IDLE → ACTIVE → DRAWING');
-          placeFirstVertex(worldPos);
-        } else if (toolState === ToolState.DRAWING) {
-          console.log('ECLIPSE PEN: Placing subsequent vertex');
-          placeVertex(worldPos);
-        }
+    if (e.button === 0) { // Left click
+      if (toolState === ToolState.IDLE || toolState === ToolState.DRAWING) {
+        // Add vertex
+        addVertex(screenX, screenY);
+      } else if (toolState === ToolState.PREVIEW) {
+        // Start selection box for editing
+        setDragStartPos([screenX, screenY]);
+        setSelectionBox({
+          start: [screenX, screenY],
+          end: [screenX, screenY]
+        });
       }
-    } else if (e.button === 2) { // Right mouse button
-      // Eclipse TPS: Show context menu (NOT immediate close!)
+    } else if (e.button === 2) { // Right click
       e.preventDefault();
-      const menuItems = generateContextMenu([screenX, screenY], worldPos);
-      setContextMenu({
-        visible: true,
-        position: [screenX, screenY],
-        items: menuItems
-      });
+      if (toolState === ToolState.PREVIEW) {
+        // Right-click to accept (ITK-SNAP behavior)
+        acceptPolygon();
+      } else if (toolState === ToolState.DRAWING && currentPolygon && currentPolygon.vertices.length >= MIN_VERTICES) {
+        // Right-click to close polygon
+        setCurrentPolygon(prev => ({
+          ...prev!,
+          isClosed: true
+        }));
+        setToolState(ToolState.PREVIEW);
+      }
     }
-  }, [isActive, screenToWorld, findVertexAtPosition, currentPolygonId, toolState, placeFirstVertex, placeVertex, generateContextMenu]);
+  }, [isActive, toolState, addVertex, acceptPolygon, currentPolygon]);
   
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isActive) return;
@@ -497,62 +347,83 @@ export function EclipsePenToolFixed({
     
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    const worldPos = screenToWorld(screenX, screenY);
     
     setMousePosition([screenX, screenY]);
     
-    // Check for snapping
-    const snap = checkForSnapping(worldPos);
-    setSnapTarget(snap);
-    
-    // Handle vertex dragging in EDITING state
-    if (toolState === ToolState.EDITING && selectedVertex && dragStartPos) {
-      const deltaX = screenX - dragStartPos[0];
-      const deltaY = screenY - dragStartPos[1];
-      
-      if (!isDragging && Math.sqrt(deltaX * deltaX + deltaY * deltaY) > dragThreshold) {
-        console.log('ECLIPSE PEN: Started dragging vertex');
-        setIsDragging(true);
-      }
-      
-      if (isDragging) {
-        // Update vertex position
-        const newWorldPos = snap ? snap.position : worldPos;
-        setVertices(prev => prev.map(v => 
-          v.id === selectedVertex.id ? { ...v, position: newWorldPos } : v
-        ));
-      }
+    // Update selection box
+    if (dragStartPos && toolState === ToolState.PREVIEW) {
+      setSelectionBox({
+        start: dragStartPos,
+        end: [screenX, screenY]
+      });
     }
-  }, [isActive, screenToWorld, checkForSnapping, toolState, selectedVertex, dragStartPos, isDragging, dragThreshold]);
+    
+    // Drag selected vertices
+    if (isDragging && selectedVertices.size > 0 && currentPolygon) {
+      const deltaX = screenX - dragStartPos![0];
+      const deltaY = screenY - dragStartPos![1];
+      
+      setCurrentPolygon(prev => ({
+        ...prev!,
+        vertices: prev!.vertices.map(v => {
+          if (selectedVertices.has(v.id)) {
+            const newScreenPos: [number, number] = [
+              v.screenPosition[0] + deltaX,
+              v.screenPosition[1] + deltaY
+            ];
+            return {
+              ...v,
+              screenPosition: newScreenPos,
+              position: screenToWorld(newScreenPos[0], newScreenPos[1])
+            };
+          }
+          return v;
+        })
+      }));
+      
+      setDragStartPos([screenX, screenY]);
+    }
+  }, [isActive, dragStartPos, toolState, isDragging, selectedVertices, currentPolygon, screenToWorld]);
   
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (!isActive) return;
     
-    if (e.button === 0 && toolState === ToolState.EDITING) {
-      console.log('ECLIPSE PEN: Mouse up in EDITING state');
-      
-      if (isDragging) {
-        console.log('ECLIPSE PEN: Finalized vertex drag');
-        // Vertex drag completed
-      } else {
-        console.log('ECLIPSE PEN: Just selected vertex (no drag)');
-        // Was just a click, vertex already selected
+    if (e.button === 0 && toolState === ToolState.PREVIEW) {
+      if (selectionBox && !isDragging) {
+        // Complete selection
+        selectVerticesInBox(selectionBox);
+        setSelectionBox(null);
+      } else if (selectedVertices.size > 0) {
+        // Start dragging
+        setIsDragging(true);
       }
-      
-      // Return to previous state
-      setToolState(ToolState.DRAWING);
-      setSelectedVertex(null);
-      setIsDragging(false);
-      setDragStartPos(null);
     }
-  }, [isActive, toolState, isDragging]);
+    
+    if (isDragging) {
+      setIsDragging(false);
+    }
+  }, [isActive, toolState, selectionBox, isDragging, selectedVertices, selectVerticesInBox]);
   
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent browser context menu
-  }, []);
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!isActive) return;
+    
+    if (e.key === 'Escape') {
+      cancelPolygon();
+    } else if (e.key === 'Enter' && toolState === ToolState.PREVIEW) {
+      acceptPolygon();
+    } else if (e.ctrlKey && e.key === 'v') {
+      pasteLastPolygon();
+    }
+  }, [isActive, toolState, cancelPolygon, acceptPolygon, pasteLastPolygon]);
+  
+  // Add keyboard listener
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
   
   // Render function
-  const renderPenTool = useCallback(() => {
+  const renderTool = useCallback(() => {
     const canvas = penCanvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!ctx || !isActive) return;
@@ -560,114 +431,106 @@ export function EclipsePenToolFixed({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Get selected structure for color
+    // Get structure color
     const selectedStructureData = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
     const structureColor = selectedStructureData?.color || [0, 255, 0];
     
-    // Draw line segments
-    ctx.strokeStyle = `rgb(${structureColor.join(',')})`;
-    ctx.lineWidth = 2;
-    
-    segments.forEach(segment => {
-      const startVertex = vertices.find(v => v.id === segment.startVertex);
-      const endVertex = vertices.find(v => v.id === segment.endVertex);
-      
-      if (startVertex && endVertex) {
-        const [startX, startY] = worldToScreen(startVertex.position);
-        const [endX, endY] = worldToScreen(endVertex.position);
-        
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-      }
-    });
-    
-    // Draw ghost line in DRAWING state
-    if (toolState === ToolState.DRAWING && vertices.length > 0) {
-      const lastVertex = vertices[vertices.length - 1];
-      const [lastX, lastY] = worldToScreen(lastVertex.position);
-      const [mouseX, mouseY] = mousePosition;
-      
-      ctx.strokeStyle = snapTarget ? '#ff00ff' : `rgba(${structureColor.join(',')}, 0.7)`;
-      ctx.setLineDash([5, 5]);
+    if (currentPolygon) {
+      // Draw polygon edges
+      ctx.strokeStyle = toolState === ToolState.PREVIEW ? '#00ff00' : `rgb(${structureColor.join(',')})`;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(lastX, lastY);
       
-      if (snapTarget) {
-        const [snapX, snapY] = worldToScreen(snapTarget.position);
-        ctx.lineTo(snapX, snapY);
-      } else {
-        ctx.lineTo(mouseX, mouseY);
+      currentPolygon.vertices.forEach((vertex, index) => {
+        const [x, y] = worldToScreen(vertex.position);
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      
+      if (currentPolygon.isClosed) {
+        ctx.closePath();
+      } else if (toolState === ToolState.DRAWING) {
+        // Draw ghost line to mouse
+        ctx.lineTo(mousePosition[0], mousePosition[1]);
       }
       
       ctx.stroke();
+      
+      // Draw vertices
+      currentPolygon.vertices.forEach((vertex, index) => {
+        const [x, y] = worldToScreen(vertex.position);
+        const isSelected = selectedVertices.has(vertex.id);
+        
+        // Highlight first vertex when close to closing
+        if (index === 0 && !currentPolygon.isClosed && 
+            currentPolygon.vertices.length >= MIN_VERTICES) {
+          const dist = distance2D(mousePosition, [x, y]);
+          if (dist < CLOSE_THRESHOLD) {
+            ctx.fillStyle = '#ff00ff';
+            ctx.beginPath();
+            ctx.arc(x, y, VERTEX_RADIUS + 3, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+        }
+        
+        // Draw vertex
+        ctx.fillStyle = isSelected ? '#ffff00' : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, VERTEX_RADIUS, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        ctx.strokeStyle = isSelected ? '#ffff00' : `rgb(${structureColor.join(',')})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, VERTEX_RADIUS, 0, 2 * Math.PI);
+        ctx.stroke();
+      });
+      
+      // Show green rectangle if in preview mode (ITK-SNAP style)
+      if (toolState === ToolState.PREVIEW && !selectedVertices.size) {
+        const bounds = currentPolygon.vertices.reduce((acc, v) => {
+          const [x, y] = worldToScreen(v.position);
+          return {
+            minX: Math.min(acc.minX, x),
+            maxX: Math.max(acc.maxX, x),
+            minY: Math.min(acc.minY, y),
+            maxY: Math.max(acc.maxY, y)
+          };
+        }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+        
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(
+          bounds.minX - 5,
+          bounds.minY - 5,
+          bounds.maxX - bounds.minX + 10,
+          bounds.maxY - bounds.minY + 10
+        );
+      }
+    }
+    
+    // Draw selection box
+    if (selectionBox) {
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(
+        selectionBox.start[0],
+        selectionBox.start[1],
+        selectionBox.end[0] - selectionBox.start[0],
+        selectionBox.end[1] - selectionBox.start[1]
+      );
       ctx.setLineDash([]);
     }
-    
-    // Draw vertices
-    vertices.forEach((vertex, i) => {
-      const [x, y] = worldToScreen(vertex.position);
-      const radius = vertex.isFirst && vertices.length >= 3 ? 10 : 7;
-      
-      // Check for auto-close highlight
-      const isAutoCloseHighlight = vertex.isFirst && vertices.length >= 3 && toolState === ToolState.DRAWING;
-      const nearFirstVertex = isAutoCloseHighlight && vertices.length >= 3;
-      
-      if (nearFirstVertex) {
-        const currentScreen = mousePosition;
-        const firstScreen = worldToScreen(vertices[0].position);
-        const distToFirst = distance2D(currentScreen, firstScreen);
-        
-        if (distToFirst < AUTO_CLOSE_THRESHOLD) {
-          // Highlight first vertex for auto-close
-          ctx.fillStyle = '#ff00ff';
-          ctx.beginPath();
-          ctx.arc(x, y, radius + 4, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-      }
-      
-      // Draw white border for visibility
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Draw colored center
-      ctx.fillStyle = vertex.isFirst ? '#ff00ff' : `rgb(${structureColor.join(',')})`;
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Highlight selected vertex
-      if (selectedVertex && selectedVertex.id === vertex.id) {
-        ctx.strokeStyle = '#ffff00';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(x, y, radius + 5, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-    });
-    
-    // Draw snap indicator
-    if (snapTarget && toolState === ToolState.DRAWING) {
-      const [snapX, snapY] = worldToScreen(snapTarget.position);
-      ctx.strokeStyle = '#ff00ff';
-      ctx.lineWidth = 2;
-      
-      if (snapTarget.type === 'vertex') {
-        ctx.beginPath();
-        ctx.arc(snapX, snapY, 12, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-    }
-  }, [isActive, rtStructures, selectedStructure, segments, vertices, worldToScreen, toolState, mousePosition, snapTarget, selectedVertex]);
+  }, [isActive, currentPolygon, worldToScreen, rtStructures, selectedStructure, toolState, mousePosition, selectedVertices, selectionBox]);
   
-  // Update render on state changes
+  // Update render
   useEffect(() => {
-    renderPenTool();
-  }, [renderPenTool]);
+    renderTool();
+  }, [renderTool]);
   
   // Handle canvas sizing
   useEffect(() => {
@@ -680,16 +543,11 @@ export function EclipsePenToolFixed({
     // Match main canvas size
     penCanvas.width = mainCanvas.offsetWidth;
     penCanvas.height = mainCanvas.offsetHeight;
-    penCanvas.style.width = '100%';
-    penCanvas.style.height = '100%';
-    
     overlayCanvas.width = mainCanvas.offsetWidth;
     overlayCanvas.height = mainCanvas.offsetHeight;
-    overlayCanvas.style.width = '100%';
-    overlayCanvas.style.height = '100%';
   }, [canvasRef, zoom, panX, panY]);
   
-  console.log('ECLIPSE PEN: Render - isActive:', isActive, 'toolState:', toolState, 'vertices:', vertices.length);
+  console.log('PEN TOOL: Render - isActive:', isActive, 'toolState:', toolState, 'polygonVertices:', currentPolygon?.vertices.length || 0);
   
   if (!isActive) return null;
   
@@ -721,81 +579,67 @@ export function EclipsePenToolFixed({
           width: '100%',
           height: '100%',
           pointerEvents: isActive ? 'auto' : 'none',
-          cursor: toolState === ToolState.EDITING ? 'move' : 'crosshair',
+          cursor: toolState === ToolState.PREVIEW ? 'move' : 'crosshair',
           zIndex: 6,
         }}
-        width={1024}
-        height={1024}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onContextMenu={handleContextMenu}
-        onWheel={(e) => {
-          // Allow wheel events to pass through for scrolling
-        }}
+        onContextMenu={(e) => e.preventDefault()}
       />
       
-      {/* Context Menu */}
-      {contextMenu.visible && (
-        <div
-          style={{
-            position: 'fixed',
-            left: contextMenu.position[0],
-            top: contextMenu.position[1],
-            zIndex: 1000,
-            backgroundColor: '#1a1a1a',
-            border: '1px solid #444',
-            borderRadius: '4px',
-            padding: '4px 0',
-            minWidth: '150px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {contextMenu.items.map((item, index) => (
-            <div
-              key={index}
+      {/* UI Buttons (ITK-SNAP style) */}
+      {toolState === ToolState.PREVIEW && (
+        <div style={{
+          position: 'absolute',
+          bottom: '10px',
+          left: '10px',
+          display: 'flex',
+          gap: '10px',
+          zIndex: 10
+        }}>
+          <button 
+            onClick={acceptPolygon}
+            style={{
+              padding: '5px 15px',
+              backgroundColor: '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Accept
+          </button>
+          <button 
+            onClick={cancelPolygon}
+            style={{
+              padding: '5px 15px',
+              backgroundColor: '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          {lastAcceptedPolygon && (
+            <button 
+              onClick={pasteLastPolygon}
               style={{
-                padding: '8px 16px',
-                cursor: item.enabled ? 'pointer' : 'not-allowed',
-                color: item.enabled ? '#ffffff' : '#666666',
-                fontSize: '14px',
-                backgroundColor: 'transparent',
-                borderBottom: index < contextMenu.items.length - 1 ? '1px solid #333' : 'none'
-              }}
-              onMouseEnter={(e) => {
-                if (item.enabled) {
-                  e.currentTarget.style.backgroundColor = '#333333';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-              onClick={() => {
-                if (item.enabled) {
-                  item.action();
-                }
+                padding: '5px 15px',
+                backgroundColor: '#2196F3',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
               }}
             >
-              {item.label}
-            </div>
-          ))}
+              Paste Last
+            </button>
+          )}
         </div>
-      )}
-      
-      {/* Click outside to close context menu */}
-      {contextMenu.visible && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 999,
-          }}
-          onClick={() => setContextMenu({ visible: false, position: [0, 0], items: [] })}
-        />
       )}
     </>
   );
