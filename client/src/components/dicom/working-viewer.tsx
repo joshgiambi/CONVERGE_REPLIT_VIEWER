@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
 import { EclipsePenTool } from "./eclipse-pen-tool";
+import { PenTool } from "./pen-tool";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -1634,9 +1635,9 @@ export function WorkingViewer({
             ref={canvasRef}
             width={1024}
             height={1024}
-            onMouseDown={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseDown}
-            onMouseMove={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseMove}
-            onMouseUp={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseUp}
+            onMouseDown={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseDown}
+            onMouseMove={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseMove}
+            onMouseUp={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseUp}
             onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
               handleCanvasWheel(e);
@@ -1645,7 +1646,7 @@ export function WorkingViewer({
             className={`max-w-full max-h-full object-contain rounded ${
               brushToolState?.isActive && brushToolState?.tool === "brush"
                 ? ""
-                : brushToolState?.isActive && brushToolState?.tool === "pen"
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
                 ? ""
                 : "cursor-move"
             }`}
@@ -1653,7 +1654,7 @@ export function WorkingViewer({
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
-              pointerEvents: brushToolState?.isActive && brushToolState?.tool === "pen" ? "none" : "auto",
+              pointerEvents: brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? "none" : "auto",
             }}
           />
 
@@ -1695,11 +1696,37 @@ export function WorkingViewer({
               />
             )}
 
-          {/* Pen Tool overlay */}
+          {/* Eclipse Pen Tool overlay */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
               <EclipsePenTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+              />
+            )}
+
+          {/* Original Pen Tool overlay */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "pen-original" &&
+            selectedForEdit && (
+              <PenTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
