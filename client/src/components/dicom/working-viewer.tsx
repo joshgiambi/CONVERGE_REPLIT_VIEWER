@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
 import { EclipsePenToolFixed } from "./eclipse-pen-tool-fixed";
+import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
@@ -1654,7 +1655,7 @@ export function WorkingViewer({
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
-              pointerEvents: brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? "none" : "auto",
+              pointerEvents: brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original" || brushToolState?.tool === "planar-contour") ? "none" : "auto",
             }}
           />
 
@@ -1701,6 +1702,32 @@ export function WorkingViewer({
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
               <EclipsePenToolFixed
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+              />
+            )}
+
+          {/* Eclipse Planar Contour Tool overlay */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "planar-contour" &&
+            selectedForEdit && (
+              <EclipsePlanarContourTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}

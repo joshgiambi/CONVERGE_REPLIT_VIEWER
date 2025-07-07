@@ -1,0 +1,41 @@
+
+You can use the Draw Planar Contour tool to define contours and segments on the active image plane with the mouse either by clicking them point by point, or by drawing a continuous line. Contours and segments on one plane can also be modified and optimized with the tool.
+
+If you copy-paste contours by using the tool, note that the copy-paste is independent between images. Different image size, orientation, registration, rotation, etc. is not taken into account, and only the shape of the contour is preserved. When you paste the contour on an image, the contour may be pasted to the viewed plane of the same or different 3D image. Only the position from the top left corner of the source image and the size of the contour is maintained. In addition to segments drawn with the tool, you can define rectangular and elliptical contours and segments.
+
+
+1.  In the structure list, select the desired structure. 
+2.  Select the desired plane. 
+3.  Click Draw Planar Contour  in the Drawing Tools pane.
+
+Note: If you have selected a structure and rotated the image in any view as you click the tool, you will be prompted to confirm that the view is aligned to the structure. Upon confirmation, the image aligns to the closest 90° angle (0, 90, 180, 270) of the structure.  
+4.  Define the tool settings.
+To define the deformation, select the value in percentage with the slider or press and hold the right mouse button in an image view and move the mouse in a horizontal direction while holding the right mouse button down. 
+To use automatic interpolation or extrapolation, set the appropriate check box. 
+ 
+
+Drawing options for Draw Planar Contour
+
+Action Description 
+Hold Ctrl Adds a segment to a structure. 
+Hold Shift Removes a segment from a structure. 
+Press Del
+ Erases all contours. 
+Press Ctrl+X, Ctrl+C, Ctrl+V Cut, copy and paste contours. 
+
+
+1.  Larger segment. 
+2.  Smaller segment overlapping the larger segment. 
+3.  If these areas together are larger than area 4, segment 2 is added to segment 1. 
+4.  If this area is larger than areas 3 together, segment 2 is removed from segment 1 causing segment 1 to be divided in two. 
+5.  Segment 2 is added to segment 1. 
+6.  Segment 2 is removed from segment 1. 
+
+
+Smart Mode
+
+1.  Manually drawn contours that contain intersecting lines. 
+2.  The same contours interpreted by the application. 
+
+
+Intersecting Lines Interpreted by the Application

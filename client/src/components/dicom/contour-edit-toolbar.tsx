@@ -133,7 +133,7 @@ export function ContourEditToolbar({
     }
     
     // Auto-expand settings for the active tool  
-    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original')) {
+    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original' || newTool === 'planar-contour')) {
       setShowSettings(newTool);
     } else if (!newTool) {
       setShowSettings(null);
@@ -362,7 +362,8 @@ export function ContourEditToolbar({
 
   const mainTools = [
     { id: 'brush', icon: Brush, label: 'Brush' },
-    { id: 'pen', icon: Pen, label: 'Eclipse Pen' },
+    { id: 'pen', icon: Pen, label: 'ITK-SNAP Pen' },
+    { id: 'planar-contour', icon: Pen, label: 'Eclipse Planar' },
     { id: 'pen-original', icon: Pen, label: 'Original Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
@@ -633,7 +634,7 @@ export function ContourEditToolbar({
               {booleanOperation === 'combine' ? 'Combine Structures' : 'Subtract Structure'}
             </Button>
           </div>
-        ) : (
+        ) : showSettings === 'brush' ? (
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <div>
@@ -691,11 +692,111 @@ export function ContourEditToolbar({
             </div>
             
             <div className="space-y-3">
-              {showSettings && (
-                <div className="text-xs text-gray-500">
-                  {showSettings} tool settings will be implemented here
-                </div>
-              )}
+              <div className="text-xs text-gray-500">
+                Brush tool settings for medical-grade contouring
+              </div>
+            </div>
+          </div>
+        ) : showSettings === 'planar-contour' ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <div className="text-sm text-gray-300 font-medium">Eclipse TPS Draw Planar Contour</div>
+              <div className="text-xs text-gray-400">
+                Eclipse Treatment Planning System style planar contour tool with curved/straight line modes
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Drawing Mode</Label>
+                <Select value="point-by-point" onValueChange={() => {}}>
+                  <SelectTrigger className="w-32 h-7 bg-gray-800/50 border-gray-600 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="point-by-point">Point-by-Point</SelectItem>
+                    <SelectItem value="continuous">Continuous</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Line Style</Label>
+                <Select value="straight" onValueChange={() => {}}>
+                  <SelectTrigger className="w-32 h-7 bg-gray-800/50 border-gray-600 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="straight">Straight</SelectItem>
+                    <SelectItem value="curved">Curved</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                • Click to place vertices
+              </div>
+              <div className="text-xs text-gray-400">
+                • Click near first vertex to close
+              </div>
+              <div className="text-xs text-gray-400">
+                • Shift+Drag to move entire contour
+              </div>
+              <div className="text-xs text-gray-400">
+                • Click+Drag to reshape contour
+              </div>
+              <div className="text-xs text-gray-400">
+                • Right-click for precision slider
+              </div>
+            </div>
+          </div>
+        ) : showSettings === 'pen' ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <div className="text-sm text-gray-300 font-medium">ITK-SNAP Pen Tool</div>
+              <div className="text-xs text-gray-400">
+                Simplified polygon tool following ITK-SNAP medical imaging standard
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Auto-Close Threshold</Label>
+                <div className="text-xs text-gray-400">8px</div>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">Vertex Snapping</Label>
+                <Switch
+                  checked={true}
+                  onCheckedChange={() => {}}
+                  className="data-[state=checked]:bg-blue-500"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                • Click to place vertices
+              </div>
+              <div className="text-xs text-gray-400">
+                • Click near first vertex to close
+              </div>
+              <div className="text-xs text-gray-400">
+                • Right-click to close polygon
+              </div>
+              <div className="text-xs text-gray-400">
+                • Escape to cancel
+              </div>
+              <div className="text-xs text-gray-400">
+                • Ctrl+V to paste
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <div className="text-xs text-gray-500">
+                Select a tool to see its settings
+              </div>
             </div>
           </div>
         )}

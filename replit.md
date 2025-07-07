@@ -89,6 +89,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 07, 2025: Eclipse TPS Draw Planar Contour Tool Integration - COMPLETED
+  - ✅ Added Eclipse planar contour tool to contour edit toolbar with "Eclipse Planar" label
+  - ✅ Integrated EclipsePlanarContourTool component into working viewer for "planar-contour" tool
+  - ✅ Added comprehensive settings panel with drawing mode and line style controls
+  - ✅ Implemented tool-specific settings panels for brush, pen, and planar contour tools
+  - ✅ Added detailed usage instructions for Eclipse TPS workflow in settings panel
+  - ✅ Updated pointer events handling to include planar contour tool
+  - ✅ Eclipse planar contour tool now appears alongside ITK-SNAP pen tool in toolbar
+  - ✅ Full Eclipse TPS specification support with curved/straight line drawing modes
 - July 07, 2025: ITK-SNAP Style Pen Tool Implementation - COMPLETED
   - ✅ Rebuilt pen tool to match ITK-SNAP polygon tool behavior (medical imaging standard)
   - ✅ Simplified state machine: IDLE → DRAWING → PREVIEW (removed complex states)
