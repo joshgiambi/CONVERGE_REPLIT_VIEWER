@@ -1634,9 +1634,9 @@ export function WorkingViewer({
             ref={canvasRef}
             width={1024}
             height={1024}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
+            onMouseDown={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseDown}
+            onMouseMove={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseMove}
+            onMouseUp={brushToolState?.isActive && brushToolState?.tool === "pen" ? undefined : handleCanvasMouseUp}
             onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
               handleCanvasWheel(e);
@@ -1645,12 +1645,15 @@ export function WorkingViewer({
             className={`max-w-full max-h-full object-contain rounded ${
               brushToolState?.isActive && brushToolState?.tool === "brush"
                 ? ""
+                : brushToolState?.isActive && brushToolState?.tool === "pen"
+                ? ""
                 : "cursor-move"
             }`}
             style={{
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
+              pointerEvents: brushToolState?.isActive && brushToolState?.tool === "pen" ? "none" : "auto",
             }}
           />
 
