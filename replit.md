@@ -89,6 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 07, 2025: Eclipse Pen Tool UI/UX Fixes - COMPLETED
+  - ✅ Fixed z-index issues - pen tool no longer draws over toolbar (changed from 9999 to z-index 6)
+  - ✅ Added both Eclipse and Original pen tools to toolbar for testing comparison
+  - ✅ Fixed coordinate transformation from string format to proper parsing
+  - ✅ Eclipse pen tool vertices now visible and clickable after coordinate fix
+  - ✅ Wheel events now pass through properly for slice scrolling when pen tool active
+  - ✅ Updated pointer events to allow toolbar access when pen tool is active
+  - ✅ Tool switching no longer blocked when Eclipse pen tool is selected
 - July 06, 2025: Brush Tool Width Calibration - COMPLETED
   - ✅ Fixed brush tool output being wider than brush diameter
   - ✅ Changed brush stroke generation to use brushSize/2 as offset on each side

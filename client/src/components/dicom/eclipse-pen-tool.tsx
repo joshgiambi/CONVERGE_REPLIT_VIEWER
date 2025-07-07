@@ -584,7 +584,7 @@ export function EclipsePenTool({
           width: '100%',
           height: '100%',
           pointerEvents: 'none',
-          zIndex: 9998,
+          zIndex: 5,
         }}
         width={1024}
         height={1024}
@@ -599,7 +599,7 @@ export function EclipsePenTool({
           height: '100%',
           pointerEvents: isActive ? 'auto' : 'none',
           cursor: toolState === ToolState.EDITING ? 'move' : 'crosshair',
-          zIndex: 9999,
+          zIndex: 6,
         }}
         width={1024}
         height={1024}
@@ -608,8 +608,8 @@ export function EclipsePenTool({
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
         onWheel={(e) => {
-          // Allow wheel events to pass through for CT slice scrolling
-          // The main canvas will handle the wheel events
+          // Allow wheel events to pass through for scrolling
+          // Don't call preventDefault or stopPropagation to allow scrolling
         }}
       />
     </>
