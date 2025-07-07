@@ -459,24 +459,37 @@ export function EclipsePenTool({
       }
     }
     
-    // Draw vertices
+    // Draw vertices with enhanced visibility
     vertices.forEach((vertex, i) => {
       const [x, y] = worldToScreen(vertex.position);
-      const radius = vertex.isFirst && vertices.length >= 3 ? 8 : 5;
+      const radius = vertex.isFirst && vertices.length >= 3 ? 10 : 7;
       
-      ctx.fillStyle = vertex.isFirst ? '#ff00ff' : selectedStructure?.color || '#00ff00';
+      // Draw white border for visibility
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Draw colored center
+      ctx.fillStyle = vertex.isFirst ? '#ff00ff' : (
+        selectedStructure?.color ? 
+        `rgb(${selectedStructure.color.join(',')})` : 
+        '#00ff00'
+      );
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
       ctx.fill();
       
       // Highlight selected vertex
       if (selectedVertex && selectedVertex.id === vertex.id) {
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
+        ctx.arc(x, y, radius + 5, 0, 2 * Math.PI);
         ctx.stroke();
       }
+      
+      console.log(`PEN TOOL: Rendered vertex ${i} at screen coords (${x}, ${y})`);
     });
     
     // Draw snap indicator
@@ -549,6 +562,10 @@ export function EclipsePenTool({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
+        onWheel={(e) => {
+          // Allow wheel events to pass through for CT slice scrolling
+          // The main canvas will handle the wheel events
+        }}
       />
     </>
   );
