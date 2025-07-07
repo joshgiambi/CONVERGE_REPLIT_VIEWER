@@ -322,7 +322,7 @@ export function WorkingViewer({
 
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
-    if (!rtStructures) {
+    if (!localRTStructures) {
       console.error("RT structures not available for growing");
       return;
     }
@@ -334,7 +334,7 @@ export function WorkingViewer({
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(

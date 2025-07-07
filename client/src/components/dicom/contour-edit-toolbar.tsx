@@ -121,9 +121,16 @@ export function ContourEditToolbar({
       onToolChange({
         tool: newTool,
         brushSize: brushThickness[0],
-        isActive: newTool === 'brush' || newTool === 'pen',
+        isActive: newTool !== null,
         predictionEnabled: isPredictionEnabled
       });
+    }
+    
+    // Auto-expand settings for the active tool  
+    if (newTool && (newTool === 'brush' || newTool === 'pen')) {
+      setShowSettings(newTool);
+    } else if (!newTool) {
+      setShowSettings(null);
     }
   };
 

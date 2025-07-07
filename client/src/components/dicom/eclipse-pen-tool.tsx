@@ -538,6 +538,7 @@ export function EclipsePenTool({
         onContextMenu={handleContextMenu}
         onWheel={(e) => {
           // Don't prevent wheel events - let them bubble up for scrolling
+          // Don't call preventDefault or stopPropagation
         }}
       />
     </>
