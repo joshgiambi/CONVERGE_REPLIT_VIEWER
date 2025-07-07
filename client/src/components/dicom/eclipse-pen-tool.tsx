@@ -283,14 +283,19 @@ export function EclipsePenTool({
   
   // Mouse event handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
     if (!isActive || !imageMetadata || !selectedStructure) return;
     
-    const rect = penCanvasRef.current?.getBoundingClientRect();
+    const rect = overlayCanvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     const worldPos = screenToWorld(screenX, screenY);
+    
+    console.log('PEN TOOL: Mouse down at screen coords:', screenX, screenY, 'button:', e.button);
     
     // Check for snapping
     const snap = checkForSnapping(worldPos);
@@ -306,6 +311,7 @@ export function EclipsePenTool({
       if (clickedVertex) {
         // Check if it's the first vertex and we can close
         if (clickedVertex.isFirst && vertices.length >= 3) {
+          console.log('PEN TOOL: Closing polygon by clicking first vertex');
           closePolygon();
         } else {
           // Start editing mode
@@ -317,16 +323,21 @@ export function EclipsePenTool({
       } else {
         // Place new vertex
         if (toolState === ToolState.IDLE) {
+          console.log('PEN TOOL: Starting new polygon');
           setCurrentPolygonId(generateUUID());
           setToolState(ToolState.ACTIVE);
           placeFirstVertex(targetPos);
         } else if (toolState === ToolState.DRAWING) {
+          console.log('PEN TOOL: Placing vertex');
           placeVertex(targetPos);
         }
       }
     } else if (e.button === 2) { // Right click
+      e.preventDefault();
+      console.log('PEN TOOL: Right click - toolState:', toolState, 'vertices:', vertices.length);
       // Right click to complete polygon
       if (toolState === ToolState.DRAWING && vertices.length >= 3) {
+        console.log('PEN TOOL: Completing polygon with right click');
         closePolygon();
       }
     }
@@ -334,7 +345,7 @@ export function EclipsePenTool({
       worldToScreen, checkForSnapping, placeFirstVertex, placeVertex, closePolygon]);
   
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = penCanvasRef.current?.getBoundingClientRect();
+    const rect = overlayCanvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     
     const screenX = e.clientX - rect.left;
@@ -491,9 +502,11 @@ export function EclipsePenTool({
   // Handle context menu (prevent default)
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    console.log('Right click detected - toolState:', toolState, 'vertices:', vertices.length);
     
     // Right click completes polygon in DRAWING state
     if (toolState === ToolState.DRAWING && vertices.length >= 3) {
+      console.log('Completing polygon with right click');
       closePolygon();
     }
   }, [toolState, vertices, closePolygon]);
@@ -536,10 +549,6 @@ export function EclipsePenTool({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
-        onWheel={(e) => {
-          // Don't prevent wheel events - let them bubble up for scrolling
-          // Don't call preventDefault or stopPropagation
-        }}
       />
     </>
   );

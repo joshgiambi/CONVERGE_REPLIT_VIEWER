@@ -1637,7 +1637,10 @@ export function WorkingViewer({
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
-            onWheel={handleCanvasWheel}
+            onWheel={(e) => {
+              // Always handle wheel events for scrolling, even when pen tool is active
+              handleCanvasWheel(e);
+            }}
             onContextMenu={(e) => e.preventDefault()}
             className={`max-w-full max-h-full object-contain rounded ${
               brushToolState?.isActive && brushToolState?.tool === "brush"
