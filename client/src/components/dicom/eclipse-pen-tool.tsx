@@ -98,42 +98,87 @@ export function EclipsePenTool({
   
   // Coordinate transformation functions
   const screenToWorld = useCallback((screenX: number, screenY: number): [number, number, number] => {
-    if (!imageMetadata) return [0, 0, 0];
+    if (!imageMetadata) {
+      console.log('PEN TOOL: No imageMetadata available for screenToWorld');
+      return [0, 0, 0];
+    }
+    
+    // Parse imagePosition from string format
+    const imagePositionStr = imageMetadata.imagePosition || "0\\0\\0";
+    const imagePosition = imagePositionStr.split("\\").map(parseFloat);
+    
+    // Parse pixelSpacing from string format  
+    const pixelSpacingStr = imageMetadata.pixelSpacing || "1\\1";
+    const pixelSpacing = pixelSpacingStr.split("\\").map(parseFloat);
+    
+    // Parse imageOrientation from string format
+    const imageOrientationStr = imageMetadata.imageOrientation || "1\\0\\0\\0\\1\\0";
+    const imageOrientation = imageOrientationStr.split("\\").map(parseFloat);
     
     // Transform from screen space to image space
     const canvasX = (screenX - panX) / zoom;
     const canvasY = (screenY - panY) / zoom;
     
+    console.log('PEN TOOL: ScreenToWorld transform:', {
+      screenX, screenY, canvasX, canvasY, imagePosition, pixelSpacing, imageOrientation
+    });
+    
     // Apply HFS transformation
-    const worldX = imageMetadata.imagePosition[0] + 
-                   canvasX * imageMetadata.pixelSpacing[0] * imageMetadata.imageOrientation[0] +
-                   canvasY * imageMetadata.pixelSpacing[1] * imageMetadata.imageOrientation[3];
+    const worldX = imagePosition[0] + 
+                   canvasX * pixelSpacing[0] * imageOrientation[0] +
+                   canvasY * pixelSpacing[1] * imageOrientation[3];
     
-    const worldY = imageMetadata.imagePosition[1] + 
-                   canvasX * imageMetadata.pixelSpacing[0] * imageMetadata.imageOrientation[1] +
-                   canvasY * imageMetadata.pixelSpacing[1] * imageMetadata.imageOrientation[4];
+    const worldY = imagePosition[1] + 
+                   canvasX * pixelSpacing[0] * imageOrientation[1] +
+                   canvasY * pixelSpacing[1] * imageOrientation[4];
     
-    const worldZ = imageMetadata.imagePosition[2];
+    const worldZ = imagePosition[2];
+    
+    console.log('PEN TOOL: World coordinates:', { worldX, worldY, worldZ });
     
     return [worldX, worldY, worldZ];
   }, [imageMetadata, zoom, panX, panY]);
   
   const worldToScreen = useCallback((world: [number, number, number]): [number, number] => {
-    if (!imageMetadata) return [0, 0];
+    if (!imageMetadata) {
+      console.log('PEN TOOL: No imageMetadata available for worldToScreen');
+      return [0, 0];
+    }
+    
+    // Parse imagePosition from string format
+    const imagePositionStr = imageMetadata.imagePosition || "0\\0\\0";
+    const imagePosition = imagePositionStr.split("\\").map(parseFloat);
+    
+    // Parse pixelSpacing from string format  
+    const pixelSpacingStr = imageMetadata.pixelSpacing || "1\\1";
+    const pixelSpacing = pixelSpacingStr.split("\\").map(parseFloat);
+    
+    // Parse imageOrientation from string format
+    const imageOrientationStr = imageMetadata.imageOrientation || "1\\0\\0\\0\\1\\0";
+    const imageOrientation = imageOrientationStr.split("\\").map(parseFloat);
+    
+    console.log('PEN TOOL: WorldToScreen transform:', {
+      world,
+      imagePosition,
+      pixelSpacing,
+      imageOrientation
+    });
     
     // Transform from world to image coordinates
-    const deltaX = world[0] - imageMetadata.imagePosition[0];
-    const deltaY = world[1] - imageMetadata.imagePosition[1];
+    const deltaX = world[0] - imagePosition[0];
+    const deltaY = world[1] - imagePosition[1];
     
-    const canvasX = (deltaX * imageMetadata.imageOrientation[0] + 
-                     deltaY * imageMetadata.imageOrientation[1]) / imageMetadata.pixelSpacing[0];
+    const canvasX = (deltaX * imageOrientation[0] + 
+                     deltaY * imageOrientation[1]) / pixelSpacing[0];
     
-    const canvasY = (deltaX * imageMetadata.imageOrientation[3] + 
-                     deltaY * imageMetadata.imageOrientation[4]) / imageMetadata.pixelSpacing[1];
+    const canvasY = (deltaX * imageOrientation[3] + 
+                     deltaY * imageOrientation[4]) / pixelSpacing[1];
     
     // Apply zoom and pan
     const screenX = canvasX * zoom + panX;
     const screenY = canvasY * zoom + panY;
+    
+    console.log('PEN TOOL: Screen coordinates:', { screenX, screenY });
     
     return [screenX, screenY];
   }, [imageMetadata, zoom, panX, panY]);
