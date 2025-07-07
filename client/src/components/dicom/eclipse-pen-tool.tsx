@@ -283,18 +283,40 @@ export function EclipsePenTool({
   
   // Mouse event handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!isActive || !imageMetadata || !selectedStructure) return;
+    console.log('🖱️ PEN TOOL MOUSE DOWN:', {
+      isActive,
+      hasImageMetadata: !!imageMetadata,
+      hasSelectedStructure: !!selectedStructure,
+      button: e.button,
+      toolState
+    });
+    
+    if (!isActive || !imageMetadata || !selectedStructure) {
+      console.log('❌ Pen tool click blocked:', {
+        isActive,
+        imageMetadata: !!imageMetadata,
+        selectedStructure: !!selectedStructure
+      });
+      return;
+    }
     
     const rect = penCanvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect) {
+      console.log('❌ No canvas rect found');
+      return;
+    }
     
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
+    console.log('📍 Click position:', { screenX, screenY });
+    
     const worldPos = screenToWorld(screenX, screenY);
+    console.log('🌍 World position:', worldPos);
     
     // Check for snapping
     const snap = checkForSnapping(worldPos);
     const targetPos = snap ? snap.position : worldPos;
+    console.log('🎯 Target position:', targetPos, snap ? 'with snap' : 'no snap');
     
     if (e.button === 0) { // Left click
       // Check if clicking on existing vertex
