@@ -77,6 +77,8 @@ export function WorkingViewer({
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
   const [renderTrigger, setRenderTrigger] = useState(0);
+  const [animationTime, setAnimationTime] = useState(0);
+  const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1281,7 +1283,7 @@ export function WorkingViewer({
           console.log(
             `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
           );
-          drawContour(ctx, contour, canvas.width, canvas.height, currentImage);
+          drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
         }
       });
     });
@@ -1297,6 +1299,7 @@ export function WorkingViewer({
     canvasWidth: number,
     canvasHeight: number,
     currentImage: any,
+    animationTime?: number,
   ) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
 
@@ -1346,6 +1349,20 @@ export function WorkingViewer({
     const imageX = (canvasWidth - scaledWidth) / 2 + panX;
     const imageY = (canvasHeight - scaledHeight) / 2 + panY;
 
+    // Set up animated dashed line for predicted contours
+    if (contour.isPredicted && animationTime !== undefined) {
+      const dashLength = 8;
+      const gapLength = 6;
+      const animationSpeed = 0.002; // Adjust for speed
+      const offset = (animationTime * animationSpeed) % (dashLength + gapLength);
+      ctx.setLineDash([dashLength, gapLength]);
+      ctx.lineDashOffset = -offset;
+    } else {
+      // Solid line for confirmed contours
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+
     // Convert DICOM world coordinates to canvas coordinates
     for (let i = 0; i < contour.points.length; i += 3) {
       const worldX = contour.points[i]; // DICOM X coordinate
@@ -1370,9 +1387,21 @@ export function WorkingViewer({
     // Close the contour
     ctx.closePath();
 
-    // Fill and stroke the contour
-    ctx.fill();
+    // Fill with reduced opacity for predictions
+    if (contour.isPredicted) {
+      const originalAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
+      ctx.fill();
+      ctx.globalAlpha = originalAlpha;
+    } else {
+      ctx.fill();
+    }
+    
     ctx.stroke();
+
+    // Reset line dash for subsequent drawing operations
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
   };
 
   const loadDicomParser = (): Promise<void> => {
@@ -1552,6 +1581,39 @@ export function WorkingViewer({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [currentIndex, images]);
+
+  // Animation loop for dashed borders on predicted contours
+  useEffect(() => {
+    let animationFrameId: number;
+    
+    const animate = (timestamp: number) => {
+      setAnimationTime(timestamp);
+      
+      // Check if we need to keep animating (if there are predicted contours)
+      const hasPredictedContours = rtStructures?.structures?.some((structure: any) =>
+        structure.contours?.some((contour: any) => contour.isPredicted)
+      );
+      
+      if (hasPredictedContours) {
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    };
+    
+    // Start animation if there are predicted contours
+    const hasPredictedContours = rtStructures?.structures?.some((structure: any) =>
+      structure.contours?.some((contour: any) => contour.isPredicted)
+    );
+    
+    if (hasPredictedContours) {
+      animationFrameId = requestAnimationFrame(animate);
+    }
+    
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [rtStructures]); // Re-run when RT structures change
 
   if (isLoading) {
     return (

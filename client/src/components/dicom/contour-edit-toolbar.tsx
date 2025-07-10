@@ -682,13 +682,38 @@ export function ContourEditToolbar({
               </div>
               
               <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Next Slice Prediction</Label>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-gray-300">Next Slice Prediction</Label>
+                  {isPredictionEnabled && (
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                      <span className="text-xs text-purple-400 font-medium">ACTIVE</span>
+                    </div>
+                  )}
+                </div>
                 <Switch
                   checked={isPredictionEnabled}
-                  onCheckedChange={setIsPredictionEnabled}
+                  onCheckedChange={(enabled) => {
+                    setIsPredictionEnabled(enabled);
+                    // Update tool state immediately when prediction toggle changes
+                    if (onToolChange && activeTool === 'brush') {
+                      onToolChange({
+                        tool: 'brush',
+                        brushSize: brushThickness[0],
+                        isActive: true,
+                        predictionEnabled: enabled
+                      });
+                    }
+                  }}
                   className="data-[state=checked]:bg-purple-500"
                 />
               </div>
+              
+              {isPredictionEnabled && (
+                <div className="text-xs text-purple-400 bg-purple-900/20 border border-purple-600/30 rounded p-2">
+                  When enabled, contour changes will generate predicted contours on adjacent slices with animated dashed borders.
+                </div>
+              )}
             </div>
             
             <div className="space-y-3">

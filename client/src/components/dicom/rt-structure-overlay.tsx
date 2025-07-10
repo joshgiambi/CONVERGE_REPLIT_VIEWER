@@ -4,6 +4,8 @@ export interface RTContour {
   slicePosition: number;
   points: number[];
   numberOfPoints: number;
+  isPredicted?: boolean; // Marks contours as predictions
+  predictionConfidence?: number; // 0-1 confidence level
 }
 
 export interface RTStructure {
@@ -116,7 +118,8 @@ function renderRTStructures(
   panX: number,
   panY: number,
   contourWidth: number = 2,
-  contourOpacity: number = 80
+  contourOpacity: number = 80,
+  animationTime?: number // For animated dashed borders
 ) {
   // Save current context state
   ctx.save();
@@ -158,7 +161,7 @@ function renderRTStructures(
       
       // Check if this contour is on the current slice
       if (Math.abs(sliceZ - currentSlicePosition) <= tolerance) {
-        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity);
+        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime);
       }
     });
   });
@@ -200,7 +203,8 @@ function drawContour(
   imageWidth: number,
   imageHeight: number,
   contourWidth: number = 2,
-  contourOpacity: number = 80
+  contourOpacity: number = 80,
+  animationTime?: number
 ) {
   if (contour.points.length < 6) return;
 
@@ -213,6 +217,23 @@ function drawContour(
   // Apply global contour width and opacity settings
   ctx.lineWidth = contourWidth;
   ctx.globalAlpha = contourOpacity / 100;
+
+  // Set up animated dashed line for predicted contours
+  if (contour.isPredicted && animationTime !== undefined) {
+    const dashLength = 8;
+    const gapLength = 6;
+    const animationSpeed = 0.002; // Adjust for speed
+    const offset = (animationTime * animationSpeed) % (dashLength + gapLength);
+    ctx.setLineDash([dashLength, gapLength]);
+    ctx.lineDashOffset = -offset;
+    
+    // Reduce opacity for predictions to make them more subtle
+    ctx.globalAlpha = Math.min(contourOpacity / 100, 0.7);
+  } else {
+    // Solid line for confirmed contours
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+  }
 
   ctx.beginPath();
 
@@ -239,9 +260,21 @@ function drawContour(
   }
 
   ctx.closePath();
-  ctx.fill();
+  
+  // Fill with reduced opacity for predictions
+  if (contour.isPredicted) {
+    const originalAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
+    ctx.fill();
+    ctx.globalAlpha = originalAlpha;
+  } else {
+    ctx.fill();
+  }
+  
   ctx.stroke();
   
-  // Reset alpha for subsequent drawing operations
+  // Reset line dash and alpha for subsequent drawing operations
+  ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
   ctx.globalAlpha = 1.0;
 }
