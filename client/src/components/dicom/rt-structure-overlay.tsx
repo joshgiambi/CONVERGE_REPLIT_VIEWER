@@ -32,6 +32,9 @@ interface RTStructureOverlayProps {
   panY: number;
   contourWidth?: number;
   contourOpacity?: number;
+  onPredictionConfirm?: (structureId: number, slicePosition: number) => void;
+  animationTime?: number;
+  rtStructures?: any; // Pass in RT structures for better control
 }
 
 export function RTStructureOverlay({
@@ -44,13 +47,23 @@ export function RTStructureOverlay({
   panX,
   panY,
   contourWidth = 3,
-  contourOpacity = 30
+  contourOpacity = 30,
+  onPredictionConfirm,
+  animationTime,
+  rtStructures: externalRTStructures
 }: RTStructureOverlayProps) {
-  const [rtStructures, setRTStructures] = useState<RTStructureSet | null>(null);
+  const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Use external RT structures if provided, otherwise load our own
+  const rtStructures = externalRTStructures || localRTStructures;
 
-  // Load RT structures for the study
+  // Load RT structures for the study (only if external structures not provided)
   useEffect(() => {
+    if (externalRTStructures) {
+      return; // Skip loading if external structures are provided
+    }
+    
     const loadRTStructures = async () => {
       try {
         setIsLoading(true);
@@ -76,7 +89,7 @@ export function RTStructureOverlay({
         }
 
         const rtStructData = await contourResponse.json();
-        setRTStructures(rtStructData);
+        setLocalRTStructures(rtStructData);
         console.log(`Loaded RT structures with ${rtStructData.structures.length} ROIs`);
         
       } catch (error) {
@@ -89,7 +102,47 @@ export function RTStructureOverlay({
     if (studyId) {
       loadRTStructures();
     }
-  }, [studyId]);
+  }, [studyId, externalRTStructures]);
+
+  // Handle right-click on predicted contours to confirm them
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    
+    const handleRightClick = (e: MouseEvent) => {
+      e.preventDefault();
+      
+      if (!rtStructures) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+      
+      // Check if click is on a predicted contour
+      const tolerance = 10; // pixel tolerance
+      
+      rtStructures.structures.forEach(structure => {
+        structure.contours.forEach(contour => {
+          if (contour.isPredicted && Math.abs(contour.slicePosition - currentSlicePosition) <= 1.5) {
+            // Check if click is near this contour
+            const isNearContour = isPointNearContour(canvasX, canvasY, contour, canvas.width, canvas.height, imageWidth, imageHeight, tolerance);
+            
+            if (isNearContour && onPredictionConfirm) {
+              console.log(`✅ Confirmed predicted contour for structure ${structure.roiNumber} at slice ${contour.slicePosition}`);
+              onPredictionConfirm(structure.roiNumber, contour.slicePosition);
+            }
+          }
+        });
+      });
+    };
+    
+    canvas.addEventListener('contextmenu', handleRightClick);
+    
+    return () => {
+      canvas.removeEventListener('contextmenu', handleRightClick);
+    };
+  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, onPredictionConfirm]);
 
   // Render RT structure overlays on canvas
   useEffect(() => {
@@ -99,10 +152,10 @@ export function RTStructureOverlay({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear any existing overlays (we'll redraw them)
-    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity);
+    // Clear any existing overlays (we'll redraw them) - pass animation time for dashed borders
+    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime);
 
-  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity]);
+  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime]);
 
   return null; // This component only draws on the existing canvas
 }
@@ -277,4 +330,98 @@ function drawContour(
   ctx.setLineDash([]);
   ctx.lineDashOffset = 0;
   ctx.globalAlpha = 1.0;
+}
+
+// Helper function to check if a point is near a contour
+function isPointNearContour(
+  canvasX: number,
+  canvasY: number,
+  contour: RTContour,
+  canvasWidth: number,
+  canvasHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+  tolerance: number = 10
+): boolean {
+  if (contour.points.length < 6) return false;
+
+  const imagePositionPatient: [number, number, number] = [-300, -300, 35];
+  const pixelSpacing: [number, number] = [1.171875, 1.171875];
+  const dicomImageWidth = 512;
+  const dicomImageHeight = 512;
+
+  // Convert contour points to canvas coordinates
+  const canvasPoints: [number, number][] = [];
+  
+  for (let i = 0; i < contour.points.length; i += 3) {
+    const worldX = contour.points[i];
+    const worldY = contour.points[i + 1];
+    
+    const [x, y] = worldToCanvas(
+      worldX,
+      worldY,
+      imagePositionPatient,
+      pixelSpacing,
+      canvasWidth,
+      canvasHeight,
+      dicomImageWidth,
+      dicomImageHeight
+    );
+    
+    canvasPoints.push([x, y]);
+  }
+
+  // Check if point is near any edge of the contour
+  for (let i = 0; i < canvasPoints.length; i++) {
+    const [x1, y1] = canvasPoints[i];
+    const [x2, y2] = canvasPoints[(i + 1) % canvasPoints.length];
+    
+    // Calculate distance from point to line segment
+    const distance = distanceToLineSegment(canvasX, canvasY, x1, y1, x2, y2);
+    
+    if (distance <= tolerance) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Helper function to calculate distance from point to line segment
+function distanceToLineSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number {
+  const A = px - x1;
+  const B = py - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  
+  if (lenSq === 0) {
+    // Point is a zero-length line segment
+    return Math.sqrt(A * A + B * B);
+  }
+  
+  let param = dot / lenSq;
+
+  if (param < 0) {
+    param = 0;
+  } else if (param > 1) {
+    param = 1;
+  }
+
+  const xx = x1 + param * C;
+  const yy = y1 + param * D;
+
+  const dx = px - xx;
+  const dy = py - yy;
+  
+  return Math.sqrt(dx * dx + dy * dy);
 }

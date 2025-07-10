@@ -7,6 +7,7 @@ import { SimpleBrushTool } from "./simple-brush-tool";
 import { EclipsePenToolFixed } from "./eclipse-pen-tool-fixed";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
+import { RTStructureOverlay } from "./rt-structure-overlay";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -79,6 +80,7 @@ export function WorkingViewer({
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
+  const [testPredictionAdded, setTestPredictionAdded] = useState(false);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1615,6 +1617,114 @@ export function WorkingViewer({
     };
   }, [rtStructures]); // Re-run when RT structures change
 
+  // Test function to add a predicted contour for demonstration
+  const addTestPredictedContour = () => {
+    if (!rtStructures || !rtStructures.structures || testPredictionAdded) return;
+    
+    console.log("🎯 Adding test predicted contour to demonstrate animated dashed borders");
+    
+    // Find the TEST structure (roiNumber 943)
+    const testStructure = rtStructures.structures.find((s: any) => s.roiNumber === 943);
+    if (!testStructure) {
+      console.log("TEST structure not found, skipping prediction demo");
+      return;
+    }
+    
+    // Create a simple circular predicted contour on a different slice
+    const currentSlice = images.length > 0 && images[currentIndex] 
+      ? (images[currentIndex].parsedSliceLocation || images[currentIndex].parsedZPosition || currentIndex)
+      : -115;
+    
+    const predictedSlice = currentSlice + 3; // 3mm away
+    
+    // Create a circular contour in world coordinates
+    const centerX = -50; // World coordinates
+    const centerY = 50;
+    const radius = 20;
+    const points: number[] = [];
+    
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * 2 * Math.PI;
+      const x = centerX + radius * Math.cos(angle);
+      const y = centerY + radius * Math.sin(angle);
+      points.push(x, y, predictedSlice);
+    }
+    
+    // Add the predicted contour
+    const predictedContour = {
+      slicePosition: predictedSlice,
+      points: points,
+      numberOfPoints: points.length / 3,
+      isPredicted: true,
+      predictionConfidence: 0.85
+    };
+    
+    // Deep copy and add the predicted contour
+    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedTestStructure = updatedStructures.structures.find((s: any) => s.roiNumber === 943);
+    if (updatedTestStructure) {
+      updatedTestStructure.contours.push(predictedContour);
+      setLocalRTStructures(updatedStructures);
+      setTestPredictionAdded(true);
+      
+      console.log(`✅ Added predicted contour to slice ${predictedSlice} with animated dashed border`);
+      console.log(`Navigate to slice ${predictedSlice} to see the animated prediction!`);
+    }
+  };
+
+  // Add test predicted contour when RT structures are loaded
+  useEffect(() => {
+    if (rtStructures && !testPredictionAdded) {
+      // Add a small delay to ensure everything is loaded
+      setTimeout(() => {
+        addTestPredictedContour();
+      }, 1000);
+    }
+  }, [rtStructures, testPredictionAdded]);
+
+  // Handle prediction confirmation - convert dashed predicted contours to solid confirmed contours
+  const handlePredictionConfirm = (structureId: number, slicePosition: number) => {
+    if (!rtStructures) return;
+    
+    console.log(`🔄 Confirming prediction for structure ${structureId} at slice ${slicePosition}`);
+    
+    // Deep copy the structures
+    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    
+    // Find the structure and contour to confirm
+    const structure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) {
+      console.error(`Structure ${structureId} not found`);
+      return;
+    }
+    
+    const contour = structure.contours.find((c: any) => 
+      c.isPredicted && Math.abs(c.slicePosition - slicePosition) <= 1.5
+    );
+    
+    if (!contour) {
+      console.error(`Predicted contour not found for structure ${structureId} at slice ${slicePosition}`);
+      return;
+    }
+    
+    // Convert predicted contour to confirmed contour
+    contour.isPredicted = false;
+    delete contour.predictionConfidence;
+    
+    console.log(`✅ Confirmed contour for structure ${structureId} - changed from dashed to solid border`);
+    
+    // Update local state
+    setLocalRTStructures(updatedStructures);
+    
+    // Save to server
+    saveContourUpdates(updatedStructures);
+    
+    // Notify parent component
+    if (onContourUpdate) {
+      onContourUpdate(updatedStructures);
+    }
+  };
+
   if (isLoading) {
     return (
       <Card className="h-full bg-black border-indigo-800 flex items-center justify-center">
@@ -1836,6 +1946,31 @@ export function WorkingViewer({
                 imageMetadata={imageMetadata}
               />
             )}
+
+          {/* RT Structure Overlay with prediction confirmation */}
+          {rtStructures && showStructures && studyId && (
+            <RTStructureOverlay
+              canvasRef={canvasRef}
+              studyId={studyId}
+              currentSlicePosition={
+                images.length > 0 && images[currentIndex]
+                  ? (images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex)
+                  : 0
+              }
+              imageWidth={1024}
+              imageHeight={1024}
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+              contourWidth={contourSettings?.width || 3}
+              contourOpacity={contourSettings?.opacity || 30}
+              onPredictionConfirm={handlePredictionConfirm}
+              animationTime={animationTime}
+              rtStructures={rtStructures}
+            />
+          )}
 
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
