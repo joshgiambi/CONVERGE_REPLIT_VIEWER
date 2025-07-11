@@ -249,12 +249,16 @@ export function SimpleBrushTool({
         const deltaX = e.clientX - sizeAdjustStart.x;
         const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
         const sizeChangePixels = deltaX * 0.5; // Sensitivity factor
-        const newSizePixels = Math.max(1, sizeAdjustStart.size + sizeChangePixels);
+        const newSizePixels = Math.max(1, Math.min(100, sizeAdjustStart.size + sizeChangePixels));  // Clamp between 1 and 100
         
         setAdjustedBrushSize(Math.round(newSizePixels));
         
         // Update slider overlay but keep position fixed at start position
-        updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y, newSizePixels, pixelSpacing);
+        try {
+          updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y, newSizePixels, pixelSpacing);
+        } catch (error) {
+          console.error('Error updating slider overlay:', error);
+        }
         return;
       }
 
@@ -290,12 +294,17 @@ export function SimpleBrushTool({
         // Right click - start diameter adjustment
         e.preventDefault();
         e.stopPropagation();
+        console.log('Right-click detected, starting diameter adjustment');
         setIsAdjustingSize(true);
         setSizeAdjustStart({ x: e.clientX, y: e.clientY, size: brushSize });
         setAdjustedBrushSize(brushSize);
         
         // Create slider overlay
-        createSliderOverlay(e.clientX, e.clientY);
+        try {
+          createSliderOverlay(e.clientX, e.clientY);
+        } catch (error) {
+          console.error('Error creating slider overlay:', error);
+        }
       }
     };
 
@@ -351,6 +360,8 @@ export function SimpleBrushTool({
     canvas.addEventListener("contextmenu", handleContextMenu, { passive: false });
     // Also listen for mouseup on window to catch when mouse is released outside canvas
     window.addEventListener("mouseup", handleMouseUp);
+    // Also listen for mousemove on window for size adjustment
+    window.addEventListener("mousemove", handleMouseMove);
 
     return () => {
       canvas.removeEventListener("mousemove", handleMouseMove);
@@ -360,8 +371,9 @@ export function SimpleBrushTool({
       canvas.removeEventListener("contextmenu", handleContextMenu);
       canvas.removeEventListener("wheel", handleWheel);
       window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
     };
-  }, [isActive, isDrawing, brushSize, selectedStructure, isAdjustingSize, adjustedBrushSize, onBrushSizeChange, imageMetadata]);
+  }, [isActive, isDrawing, brushSize, selectedStructure, isAdjustingSize, adjustedBrushSize, onBrushSizeChange, imageMetadata, sizeAdjustStart]);
 
   const addBrushPoint = (x: number, y: number) => {
     if (!selectedStructure || !rtStructures?.structures || !imageMetadata) return;
@@ -455,20 +467,29 @@ export function SimpleBrushTool({
 
   // Create slider overlay for diameter adjustment
   const createSliderOverlay = (x: number, y: number) => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      console.error('Canvas ref not available for slider overlay');
+      return;
+    }
+    
+    // Remove any existing overlay first
+    if (sliderOverlayRef.current && sliderOverlayRef.current.parentElement) {
+      sliderOverlayRef.current.parentElement.removeChild(sliderOverlayRef.current);
+      sliderOverlayRef.current = null;
+    }
     
     const mainCanvas = canvasRef.current;
     const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
     
     // Create overlay div
     const overlay = document.createElement("div");
-    overlay.style.position = "absolute";
+    overlay.style.position = "fixed";  // Use fixed positioning for viewport-relative placement
     overlay.style.left = `${x}px`;
-    overlay.style.top = `${y - 40}px`;
+    overlay.style.top = `${y - 60}px`;  // Adjust slightly higher
     overlay.style.width = "300px";
-    overlay.style.height = "50px";
+    overlay.style.height = "80px";  // Make taller for better visibility
     overlay.style.pointerEvents = "none";
-    overlay.style.zIndex = "1000";
+    overlay.style.zIndex = "10000";  // Higher z-index
     overlay.style.transform = "translateX(-150px)";
     
     // Create inner content
@@ -492,6 +513,7 @@ export function SimpleBrushTool({
       <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${brushSize} px)</div>
     `;
     sizeText.style.marginBottom = "8px";
+    sizeText.style.userSelect = "none";
     content.appendChild(sizeText);
     
     // Slider bar
@@ -521,6 +543,7 @@ export function SimpleBrushTool({
     
     document.body.appendChild(overlay);
     sliderOverlayRef.current = overlay;
+    console.log('Slider overlay created successfully');
   };
   
   // Update slider overlay
