@@ -256,10 +256,21 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const handleContourUpdate = (updatedRTStructures: any) => {
-    console.log('Contour update received:', updatedRTStructures);
-    // Update the RT structures state with the modified contours
-    setRTStructures(updatedRTStructures);
+  const handleContourUpdate = (payload: any) => {
+    console.log('Contour update received:', payload);
+    
+    // Check if this is an action payload from ContourEditToolbar or full structures from WorkingViewer
+    if (payload && payload.action) {
+      // This is an action payload from ContourEditToolbar
+      // The WorkingViewer will handle it and call us back with the full updated structures
+      console.log(`Received action: ${payload.action} for structure ${payload.structureId}`);
+      return;
+    }
+    
+    // This is the full updated RT structures from WorkingViewer after processing
+    if (payload && payload.structures) {
+      setRTStructures(payload);
+    }
   };
 
   // Auto-zoom functionality based on structure bounds

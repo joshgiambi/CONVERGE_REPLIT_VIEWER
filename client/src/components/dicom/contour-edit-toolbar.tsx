@@ -194,12 +194,12 @@ export function ContourEditToolbar({
       if (!response.ok) throw new Error('Failed to undo');
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Undo successful" });
-      // Trigger UI refresh
-      if (onContourUpdate) {
-        onContourUpdate({ action: 'refresh' });
+      // Pass the actual RT structures data instead of just refresh action
+      if (onContourUpdate && data) {
+        onContourUpdate(data);
       }
     },
     onError: () => {
@@ -218,12 +218,12 @@ export function ContourEditToolbar({
       if (!response.ok) throw new Error('Failed to redo');
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Redo successful" });
-      // Trigger UI refresh
-      if (onContourUpdate) {
-        onContourUpdate({ action: 'refresh' });
+      // Pass the actual RT structures data instead of just refresh action
+      if (onContourUpdate && data) {
+        onContourUpdate(data);
       }
     },
     onError: () => {
@@ -832,12 +832,13 @@ export function ContourEditToolbar({
   return (
     <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
       <div 
-        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-lg p-3 shadow-2xl w-auto"
+        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-2xl p-4 shadow-2xl w-auto"
         style={{ borderColor: `${structureColorRgb}60` }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-3">
+            {/* Structure info and controls */}
             <div 
               className="w-4 h-4 rounded border border-gray-400"
               style={{ backgroundColor: structureColorRgb }}
@@ -846,7 +847,7 @@ export function ContourEditToolbar({
             <Input
               value={selectedStructure.structureName || ''}
               onChange={(e) => handleNameChange(e.target.value)}
-              className="w-32 h-7 bg-gray-800/70 border-gray-600 text-white text-sm"
+              className="w-32 h-7 bg-gray-800/70 border-gray-600 text-white text-sm rounded-lg"
               disabled={updateNameMutation.isPending}
             />
             <span className="text-gray-300 text-sm">Color:</span>
@@ -857,12 +858,53 @@ export function ContourEditToolbar({
               className="w-7 h-7 rounded border border-gray-600 bg-gray-800 cursor-pointer"
               disabled={updateColorMutation.isPending}
             />
+            
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-600 mx-2" />
+            
+            {/* Undo/Redo buttons */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => undoMutation.mutate()}
+              disabled={undoMutation.isPending}
+              className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => redoMutation.mutate()}
+              disabled={redoMutation.isPending}
+              className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo className="w-3 h-3" />
+            </Button>
+            
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-600 mx-2" />
+            
+            {/* Delete button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeleteCurrentSlice}
+              className="h-7 px-2 bg-black border border-red-600/50 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg"
+              title="Delete Current Slice (Del)"
+            >
+              <Trash2 className="w-3 h-3 mr-1" />
+              <span className="text-xs">Del Slice</span>
+            </Button>
           </div>
+          
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-gray-400 hover:text-white hover:bg-gray-700 h-7 w-7 p-0"
+            className="text-gray-400 hover:text-white hover:bg-gray-700 h-7 w-7 p-0 rounded-lg"
           >
             <X size={14} />
           </Button>
@@ -872,44 +914,6 @@ export function ContourEditToolbar({
 
         {/* Tool Buttons */}
         <div className="flex items-center justify-center space-x-2">
-          {/* Undo/Redo buttons */}
-          <div className="flex items-center space-x-1 mr-2 pr-2 border-r border-gray-600">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => undoMutation.mutate()}
-              disabled={undoMutation.isPending}
-              className="h-9 w-9 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50"
-              title="Undo"
-            >
-              <Undo className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => redoMutation.mutate()}
-              disabled={redoMutation.isPending}
-              className="h-9 w-9 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50"
-              title="Redo"
-            >
-              <Redo className="w-4 h-4" />
-            </Button>
-          </div>
-          
-          {/* Quick Delete Button */}
-          <div className="mr-2 pr-2 border-r border-gray-600">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDeleteCurrentSlice}
-              className="h-9 px-3 bg-black border border-red-600/50 text-red-400 hover:text-red-300 hover:bg-red-900/20"
-              title="Delete Current Slice (Del)"
-            >
-              <Trash2 className="w-4 h-4 mr-1" />
-              <span className="text-xs">Del Slice</span>
-            </Button>
-          </div>
-          
           {/* Main tool buttons */}
           {mainTools.map((tool) => {
             const IconComponent = tool.icon;
@@ -921,7 +925,7 @@ export function ContourEditToolbar({
                   variant="outline"
                   size="sm"
                   onClick={() => handleToolActivation(tool.id)}
-                  className={`h-9 px-3 transition-all duration-200 ${
+                  className={`h-9 px-3 transition-all duration-200 rounded-xl ${
                     isActive 
                       ? 'border-2 text-white shadow-lg' 
                       : 'bg-black border border-gray-500 text-white hover:bg-gray-800'
@@ -942,7 +946,7 @@ export function ContourEditToolbar({
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowSettings(hasSettings ? null : tool.id)}
-                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700 transition-all duration-200 ${
+                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700 transition-all duration-200 rounded-lg ${
                       hasSettings ? 'bg-gray-700 text-white' : ''
                     }`}
                   >

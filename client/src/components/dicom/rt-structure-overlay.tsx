@@ -122,19 +122,21 @@ export function RTStructureOverlay({
       // Check if click is on a predicted contour
       const tolerance = 10; // pixel tolerance
       
-      rtStructures.structures.forEach(structure => {
-        structure.contours.forEach(contour => {
-          if (contour.isPredicted && Math.abs(contour.slicePosition - currentSlicePosition) <= 1.5) {
-            // Check if click is near this contour
-            const isNearContour = isPointNearContour(canvasX, canvasY, contour, canvas.width, canvas.height, imageWidth, imageHeight, tolerance);
-            
-            if (isNearContour && onPredictionConfirm) {
-              console.log(`✅ Confirmed predicted contour for structure ${structure.roiNumber} at slice ${contour.slicePosition}`);
-              onPredictionConfirm(structure.roiNumber, contour.slicePosition);
+      if (rtStructures?.structures) {
+        rtStructures.structures.forEach(structure => {
+          structure.contours.forEach(contour => {
+            if (contour.isPredicted && Math.abs(contour.slicePosition - currentSlicePosition) <= 1.5) {
+              // Check if click is near this contour
+              const isNearContour = isPointNearContour(canvasX, canvasY, contour, canvas.width, canvas.height, imageWidth, imageHeight, tolerance);
+              
+              if (isNearContour && onPredictionConfirm) {
+                console.log(`✅ Confirmed predicted contour for structure ${structure.roiNumber} at slice ${contour.slicePosition}`);
+                onPredictionConfirm(structure.roiNumber, contour.slicePosition);
+              }
             }
-          }
+          });
         });
-      });
+      }
     };
     
     canvas.addEventListener('contextmenu', handleRightClick);
@@ -191,6 +193,11 @@ function renderRTStructures(
   // No transformation needed - just use the actual Z positions from the contours
   
   const tolerance = 1.5; // mm tolerance for slice matching (half slice thickness typical for CT)
+  
+  // Check if rtStructures has the expected structure
+  if (!rtStructures?.structures) {
+    return; // Early return if no structures to render
+  }
   
   // Count how many contours match the current slice
   let contoursOnSlice = 0;

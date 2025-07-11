@@ -612,36 +612,6 @@ export function WorkingViewer({
         }
       }
       saveContourUpdates(updatedStructures);
-    } else if (payload.action === "delete_slice") {
-      // Handle slice deletion
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (structure) {
-        structure.contours = structure.contours.filter(
-          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 0.5,
-        );
-        setLocalRTStructures(updatedStructures);
-        // Pass updated structures to parent to maintain state
-        if (onContourUpdate) {
-          onContourUpdate(updatedStructures);
-        }
-        saveContourUpdates(updatedStructures);
-      }
-    } else if (payload.action === "clear_all") {
-      // Handle clear all contours
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (structure) {
-        structure.contours = [];
-        setLocalRTStructures(updatedStructures);
-        // Pass updated structures to parent to maintain state
-        if (onContourUpdate) {
-          onContourUpdate(updatedStructures);
-        }
-        saveContourUpdates(updatedStructures);
-      }
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
@@ -727,6 +697,57 @@ export function WorkingViewer({
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       handleBooleanOperation(payload);
+    } else if (payload.action === "delete_slice") {
+      // Handle delete slice action - only delete the contour for the selected structure
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) {
+        console.warn(`Structure ${payload.structureId} not found for delete operation`);
+        return;
+      }
+
+      // Log current state before deletion
+      console.log(`Before delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
+      
+      // Remove contour at specified slice position for this structure only
+      const tolerance = 1.5;
+      const originalLength = structure.contours.length;
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+      );
+
+      const deletedCount = originalLength - structure.contours.length;
+      console.log(`Deleted ${deletedCount} contour(s) for structure ${payload.structureId} (${structure.structureName}) at slice ${payload.slicePosition}`);
+      console.log(`After delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
+      
+      // Log all structures to verify others are not affected
+      console.log("All structures after delete:", updatedStructures.structures.map((s: any) => ({
+        id: s.roiNumber,
+        name: s.structureName,
+        contourCount: s.contours.length
+      })));
+      
+      setLocalRTStructures(updatedStructures);
+      // Pass the full updated structures to parent
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+      saveContourUpdates(updatedStructures);
+    } else if (payload.action === "clear_all") {
+      // Handle clear all slices action
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Clear all contours for this structure
+      structure.contours = [];
+
+      console.log(`Cleared all contours for structure ${payload.structureId}`);
+      
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures);
     }
   };
 
