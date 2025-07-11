@@ -24,6 +24,9 @@ const rtStructureModifications = new Map<number, {
   historyIndex: number
 }>();
 
+// Cache for parsed RT structure sets to improve performance
+const rtStructureCache = new Map<string, any>();
+
 function isDICOMFile(filePath: string): boolean {
   try {
     const buffer = fs.readFileSync(filePath, { start: 128, end: 132 } as any);
@@ -820,7 +823,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "RT Structure file not found" });
       }
 
-      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      // Use cached parsed structure set or parse and cache it
+      let rtStructureSet;
+      if (rtStructureCache.has(rtStructPath)) {
+        rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
+      } else {
+        rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+        rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
+      }
       
       // Merge with in-memory modifications
       const modifications = rtStructureModifications.get(seriesId);
@@ -986,7 +996,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const seriesId = parseInt(req.params.seriesId);
-      const { structures } = req.body;
+      const { structures, action } = req.body;
       
       if (!structures || !Array.isArray(structures)) {
         return res.status(400).json({ message: "Structures array is required" });
@@ -1007,20 +1017,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store previous state for undo functionality
       const previousState = new Map(modifications.modifiedStructures);
       
-      // Update each structure's contours
+      // Parse the original RT structure to get baseline contour counts
+      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      let originalStructures: any = {};
+      if (fs.existsSync(rtStructPath)) {
+        if (rtStructureCache.has(rtStructPath)) {
+          const cached = rtStructureCache.get(rtStructPath);
+          cached.structures.forEach((s: any) => {
+            originalStructures[s.roiNumber] = s.contours?.length || 0;
+          });
+        }
+      }
+      
+      // Detect the action type if not provided
+      let detectedAction = action || 'update_contours';
+      let affectedStructureId = -1;
+      
+      // Update each structure's contours and detect deletions
       structures.forEach(structure => {
-        if (structure.roiNumber && structure.contours) {
+        if (structure.roiNumber && structure.contours !== undefined) {
+          const previousMod = modifications.modifiedStructures.get(structure.roiNumber);
+          const previousCount = previousMod?.contours?.length || originalStructures[structure.roiNumber] || 0;
+          const newCount = structure.contours.length;
+          
+          // Detect if this is a delete operation
+          if (newCount < previousCount) {
+            if (newCount === 0) {
+              detectedAction = 'clear_all';
+            } else {
+              detectedAction = 'delete_slice';
+            }
+            affectedStructureId = structure.roiNumber;
+          }
+          
           modifications.modifiedStructures.set(structure.roiNumber, {
             contours: structure.contours
           });
         }
       });
 
-      // Add to history
+      // Add to history with detected action
       const historyEntry = {
         timestamp: Date.now(),
-        action: 'update_contours',
-        structureId: -1, // Multiple structures
+        action: detectedAction,
+        structureId: affectedStructureId,
         previousState: Array.from(previousState.entries()),
         newState: Array.from(modifications.modifiedStructures.entries())
       };
@@ -1030,8 +1070,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       modifications.history.push(historyEntry);
       modifications.historyIndex++;
 
-      console.log('Updated contours for series:', seriesId);
-      res.json({ success: true, message: "Contours updated successfully" });
+      console.log(`Updated contours for series ${seriesId} - Action: ${detectedAction}`);
+      res.json({ success: true, message: "Contours updated successfully", action: detectedAction });
     } catch (error) {
       console.error('Error updating contours:', error);
       next(error);
@@ -1061,14 +1101,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       modifications.historyIndex--;
       
-      // Now return the full RT structure data like the contours endpoint does
-      // Parse the RT structure file from the HN-ATLAS dataset
+      // Now return the full RT structure data using cache for performance
       const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
       if (!fs.existsSync(rtStructPath)) {
         return res.status(404).json({ error: "RT Structure file not found" });
       }
 
-      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      // Use cached parsed structure set or parse and cache it
+      let rtStructureSet;
+      if (rtStructureCache.has(rtStructPath)) {
+        rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
+      } else {
+        rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+        rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
+      }
       
       // Apply modifications from current state
       if (modifications.newStructures.length > 0) {
@@ -1114,14 +1160,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         modifications.modifiedStructures = new Map(historyEntry.newState);
       }
       
-      // Now return the full RT structure data like the contours endpoint does
-      // Parse the RT structure file from the HN-ATLAS dataset
+      // Now return the full RT structure data using cache for performance
       const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
       if (!fs.existsSync(rtStructPath)) {
         return res.status(404).json({ error: "RT Structure file not found" });
       }
 
-      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      // Use cached parsed structure set or parse and cache it
+      let rtStructureSet;
+      if (rtStructureCache.has(rtStructPath)) {
+        rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
+      } else {
+        rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+        rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
+      }
       
       // Apply modifications from current state
       if (modifications.newStructures.length > 0) {

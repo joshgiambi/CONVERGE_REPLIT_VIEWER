@@ -121,13 +121,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
 
-  // Expose handleContourUpdate method to parent component
-  useImperativeHandle(ref, () => ({
-    handleContourUpdate: (payload: any) => handleContourUpdate(payload)
-  }), []);
+
 
   // Save contour updates to server
-  const saveContourUpdates = async (updatedStructures: any) => {
+  const saveContourUpdates = async (updatedStructures: any, action?: string) => {
     if (!seriesId || isSaving) return;
     
     setIsSaving(true);
@@ -138,7 +135,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          structures: updatedStructures.structures
+          structures: updatedStructures.structures,
+          action: action || 'update_contours'
         })
       });
 
@@ -221,7 +219,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
         // Update local structures and save to server
         setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures);
+        saveContourUpdates(updatedRTStructures, 'boolean_operation');
         
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
@@ -316,7 +314,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'apply_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -410,7 +408,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'grow_contour');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -616,7 +614,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
           setLocalRTStructures(updatedStructures);
         }
       }
-      saveContourUpdates(updatedStructures);
+      saveContourUpdates(updatedStructures, 'add_brush_stroke');
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
@@ -655,7 +653,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
       setLocalRTStructures(updatedStructures);
       // Save contour updates to server
-      saveContourUpdates(updatedStructures);
+      saveContourUpdates(updatedStructures, payload.action);
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
@@ -738,7 +736,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-      saveContourUpdates(updatedStructures);
+      saveContourUpdates(updatedStructures, 'delete_slice');
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(
@@ -752,9 +750,14 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       console.log(`Cleared all contours for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures);
+      saveContourUpdates(updatedStructures, 'clear_all');
     }
   };
+
+  // Expose handleContourUpdate method to parent component
+  useImperativeHandle(ref, () => ({
+    handleContourUpdate
+  }), [rtStructures]);
 
   // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
   /*

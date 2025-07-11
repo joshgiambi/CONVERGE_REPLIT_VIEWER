@@ -89,6 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 11, 2025: Fixed Undo/Redo for All Contour Operations - COMPLETED
+  - ✅ Updated server endpoint to track specific action types in history (delete_slice, clear_all, etc.)
+  - ✅ Modified all saveContourUpdates calls to include action metadata for proper undo/redo tracking
+  - ✅ Added server-side RT structure caching to improve undo/redo performance
+  - ✅ Fixed data flow between ContourEditToolbar and WorkingViewer using forwardRef/useImperativeHandle
+  - ✅ All contour operations now properly tracked: delete slice, clear all, brush, pen, grow, boolean, margin
+  - ✅ Server detects delete operations automatically by comparing contour counts
+  - ✅ Undo/redo now restores exact state for all operation types including deletions
 - July 07, 2025: Eclipse TPS Draw Planar Contour Tool Integration - COMPLETED
   - ✅ Added Eclipse planar contour tool to contour edit toolbar with "Eclipse Planar" label
   - ✅ Integrated EclipsePlanarContourTool component into working viewer for "planar-contour" tool
