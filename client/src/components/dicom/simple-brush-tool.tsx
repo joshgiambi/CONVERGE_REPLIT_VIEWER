@@ -255,7 +255,10 @@ export function SimpleBrushTool({
         
         // Update slider overlay but keep position fixed at start position
         try {
-          updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y, newSizePixels, pixelSpacing);
+          // Keep the same offset as initial creation
+          const brushDiameter = sizeAdjustStart.size * 2;
+          const offsetY = Math.max(40, brushDiameter / 2);
+          updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y - offsetY, newSizePixels, pixelSpacing);
         } catch (error) {
           console.error('Error updating slider overlay:', error);
         }
@@ -299,9 +302,12 @@ export function SimpleBrushTool({
         setSizeAdjustStart({ x: e.clientX, y: e.clientY, size: brushSize });
         setAdjustedBrushSize(brushSize);
         
-        // Create slider overlay
+        // Create slider overlay - add offset to ensure it's above cursor
         try {
-          createSliderOverlay(e.clientX, e.clientY);
+          // Get brush cursor size to add appropriate offset
+          const brushDiameter = brushSize * 2; // Canvas scale factor
+          const offsetY = Math.max(40, brushDiameter / 2); // At least 40px offset, or half brush diameter
+          createSliderOverlay(e.clientX, e.clientY - offsetY);
         } catch (error) {
           console.error('Error creating slider overlay:', error);
         }
@@ -485,7 +491,7 @@ export function SimpleBrushTool({
     const overlay = document.createElement("div");
     overlay.style.position = "fixed";  // Use fixed positioning for viewport-relative placement
     overlay.style.left = `${x}px`;
-    overlay.style.top = `${y - 60}px`;  // Adjust slightly higher
+    overlay.style.top = `${y - 120}px`;  // Position well above cursor (120px offset)
     overlay.style.width = "300px";
     overlay.style.height = "80px";  // Make taller for better visibility
     overlay.style.pointerEvents = "none";
