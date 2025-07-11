@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
 
 interface SimpleBrushToolProps {
@@ -17,6 +17,7 @@ interface SimpleBrushToolProps {
   enableSmartMode?: boolean;
   onBrushModeChange?: (mode: any) => void;
   predictionEnabled?: boolean;
+  onBrushSizeChange?: (size: number) => void;
 }
 
 export function SimpleBrushTool({
@@ -32,6 +33,7 @@ export function SimpleBrushTool({
   panY,
   imageMetadata,
   predictionEnabled = false,
+  onBrushSizeChange,
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
   const [isDrawing, setIsDrawing] = useState(false);
@@ -42,6 +44,21 @@ export function SimpleBrushTool({
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
   const animationFrameRef = useRef<number | null>(null);
+  
+  // Right-click diameter adjustment state
+  const [isAdjustingSize, setIsAdjustingSize] = useState(false);
+  const [sizeAdjustStart, setSizeAdjustStart] = useState<{ x: number; y: number; size: number } | null>(null);
+  const [adjustedBrushSize, setAdjustedBrushSize] = useState(brushSize);
+  const sliderOverlayRef = useRef<HTMLDivElement | null>(null);
+  
+  // Performance optimization: throttle mouse move events
+  const lastUpdateTime = useRef(0);
+  const updateThrottle = 16; // ~60fps
+
+  // Update adjusted brush size when prop changes
+  useEffect(() => {
+    setAdjustedBrushSize(brushSize);
+  }, [brushSize]);
 
   // Create overlay canvas for cursor and brush strokes
   useEffect(() => {
@@ -52,6 +69,13 @@ export function SimpleBrushTool({
           overlayCanvasRef.current,
         );
         overlayCanvasRef.current = null;
+      }
+      // Clean up slider overlay
+      if (sliderOverlayRef.current && sliderOverlayRef.current.parentElement) {
+        sliderOverlayRef.current.parentElement.removeChild(
+          sliderOverlayRef.current,
+        );
+        sliderOverlayRef.current = null;
       }
       return;
     }
@@ -133,7 +157,8 @@ export function SimpleBrushTool({
       ctx.beginPath();
       // The stroke has lineWidth = brushSize * 2, which creates a visual radius of brushSize
       // So cursor should show the same visual size
-      ctx.arc(cursorPosition.x, cursorPosition.y, brushSize, 0, 2 * Math.PI);
+      const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
+      ctx.arc(cursorPosition.x, cursorPosition.y, currentBrushSize, 0, 2 * Math.PI);
       ctx.strokeStyle = structureColor;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -148,7 +173,8 @@ export function SimpleBrushTool({
     // Draw current brush stroke
     if (brushPointsRef.current.length > 0) {
       ctx.strokeStyle = structureColor;
-      ctx.lineWidth = brushSize * 2; // This makes the visible stroke diameter = brushSize * 2
+      const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
+      ctx.lineWidth = currentBrushSize * 2; // This makes the visible stroke diameter = brushSize * 2
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.globalAlpha = 0.7;
@@ -189,6 +215,8 @@ export function SimpleBrushTool({
     selectedStructure,
     rtStructures,
     isDrawing,
+    isAdjustingSize,
+    adjustedBrushSize,
   ]);
 
   // Handle mouse events
@@ -205,9 +233,33 @@ export function SimpleBrushTool({
     };
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Performance optimization: throttle mouse move events
+      const now = Date.now();
+      if (now - lastUpdateTime.current < updateThrottle && !isAdjustingSize && !isDrawing) {
+        return;
+      }
+      lastUpdateTime.current = now;
+
+      // Handle right-click diameter adjustment
+      if (isAdjustingSize && sizeAdjustStart) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Calculate new size based on horizontal mouse movement
+        const deltaX = e.clientX - sizeAdjustStart.x;
+        const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
+        const sizeChangePixels = deltaX * 0.5; // Sensitivity factor
+        const newSizePixels = Math.max(1, sizeAdjustStart.size + sizeChangePixels);
+        
+        setAdjustedBrushSize(Math.round(newSizePixels));
+        
+        // Update slider overlay but keep position fixed at start position
+        updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y, newSizePixels, pixelSpacing);
+        return;
+      }
+
       const coords = getCanvasCoords(e);
       setCursorPosition(coords);
-      console.log('Mouse move:', coords, 'isActive:', isActive);
 
       if (isDrawing && selectedStructure) {
         e.preventDefault();
@@ -226,7 +278,7 @@ export function SimpleBrushTool({
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      if (e.button === 0 && selectedStructure) {
+      if (e.button === 0 && selectedStructure && !isAdjustingSize) {
         // Left click and structure selected
         e.preventDefault();
         e.stopPropagation();
@@ -234,14 +286,39 @@ export function SimpleBrushTool({
         const coords = getCanvasCoords(e);
         brushPointsRef.current = [coords];
         addBrushPoint(coords.x, coords.y);
+      } else if (e.button === 2) {
+        // Right click - start diameter adjustment
+        e.preventDefault();
+        e.stopPropagation();
+        setIsAdjustingSize(true);
+        setSizeAdjustStart({ x: e.clientX, y: e.clientY, size: brushSize });
+        setAdjustedBrushSize(brushSize);
+        
+        // Create slider overlay
+        createSliderOverlay(e.clientX, e.clientY);
       }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawing) {
         finalizeBrushStroke();
+        setIsDrawing(false);
       }
-      setIsDrawing(false);
+      
+      if (isAdjustingSize) {
+        // Apply the new brush size
+        if (onBrushSizeChange && adjustedBrushSize !== brushSize) {
+          onBrushSizeChange(adjustedBrushSize);
+        }
+        setIsAdjustingSize(false);
+        setSizeAdjustStart(null);
+        
+        // Remove slider overlay
+        if (sliderOverlayRef.current && sliderOverlayRef.current.parentElement) {
+          sliderOverlayRef.current.parentElement.removeChild(sliderOverlayRef.current);
+          sliderOverlayRef.current = null;
+        }
+      }
     };
 
     const handleMouseLeave = () => {
@@ -284,7 +361,7 @@ export function SimpleBrushTool({
       canvas.removeEventListener("wheel", handleWheel);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isActive, isDrawing, brushSize, selectedStructure]);
+  }, [isActive, isDrawing, brushSize, selectedStructure, isAdjustingSize, adjustedBrushSize, onBrushSizeChange, imageMetadata]);
 
   const addBrushPoint = (x: number, y: number) => {
     if (!selectedStructure || !rtStructures?.structures || !imageMetadata) return;
@@ -373,6 +450,101 @@ export function SimpleBrushTool({
     } finally {
       // Always clear brush points
       brushPointsRef.current = [];
+    }
+  };
+
+  // Create slider overlay for diameter adjustment
+  const createSliderOverlay = (x: number, y: number) => {
+    if (!canvasRef.current) return;
+    
+    const mainCanvas = canvasRef.current;
+    const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
+    
+    // Create overlay div
+    const overlay = document.createElement("div");
+    overlay.style.position = "absolute";
+    overlay.style.left = `${x}px`;
+    overlay.style.top = `${y - 40}px`;
+    overlay.style.width = "300px";
+    overlay.style.height = "50px";
+    overlay.style.pointerEvents = "none";
+    overlay.style.zIndex = "1000";
+    overlay.style.transform = "translateX(-150px)";
+    
+    // Create inner content
+    const content = document.createElement("div");
+    content.style.backgroundColor = "rgba(0, 0, 0, 0.9)";
+    content.style.color = "white";
+    content.style.padding = "10px 16px";
+    content.style.borderRadius = "6px";
+    content.style.fontSize = "14px";
+    content.style.fontFamily = "Arial, sans-serif";
+    content.style.textAlign = "center";
+    content.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+    content.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.5)";
+    
+    // Size text - show both cm and px like settings panel
+    const sizeText = document.createElement("div");
+    const sizeCm = (brushSize * pixelSpacing) / 10; // Convert pixels to cm
+    sizeText.innerHTML = `
+      <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+      <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
+      <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${brushSize} px)</div>
+    `;
+    sizeText.style.marginBottom = "8px";
+    content.appendChild(sizeText);
+    
+    // Slider bar
+    const sliderBar = document.createElement("div");
+    sliderBar.style.width = "100%";
+    sliderBar.style.height = "6px"; // Slightly thicker to match settings
+    sliderBar.style.backgroundColor = "rgba(255, 255, 255, 0.2)";
+    sliderBar.style.borderRadius = "3px";
+    sliderBar.style.position = "relative";
+    sliderBar.style.overflow = "hidden";
+    
+    const sliderFill = document.createElement("div");
+    sliderFill.style.height = "100%";
+    sliderFill.style.width = "50%";
+    sliderFill.style.backgroundColor = "#fbbf24"; // Yellow/amber to match settings panel
+    sliderFill.style.borderRadius = "2px";
+    sliderBar.appendChild(sliderFill);
+    
+    content.appendChild(sliderBar);
+    overlay.appendChild(content);
+    
+    // Store references
+    overlay.dataset.sizeText = "";
+    overlay.dataset.sliderFill = "";
+    sizeText.id = "brush-size-text";
+    sliderFill.id = "brush-slider-fill";
+    
+    document.body.appendChild(overlay);
+    sliderOverlayRef.current = overlay;
+  };
+  
+  // Update slider overlay
+  const updateSliderOverlay = (x: number, y: number, sizePixels: number, pixelSpacing: number) => {
+    if (!sliderOverlayRef.current) return;
+    
+    const sizeText = sliderOverlayRef.current.querySelector("#brush-size-text") as HTMLElement;
+    const sliderFill = sliderOverlayRef.current.querySelector("#brush-slider-fill") as HTMLElement;
+    
+    if (sizeText) {
+      const sizeCm = (sizePixels * pixelSpacing) / 10;
+      sizeText.innerHTML = `
+        <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+        <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
+        <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(sizePixels)} px)</div>
+      `;
+    }
+    
+    if (sliderFill) {
+      // Map size to slider width (0-100%)
+      const minSize = 1;
+      const maxSize = 100;
+      const percentage = ((sizePixels - minSize) / (maxSize - minSize)) * 100;
+      sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
     }
   };
 
