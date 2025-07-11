@@ -1867,7 +1867,9 @@ export function WorkingViewer({
                   console.log("Brush mode changed:", mode);
                 }}
                 onBrushSizeChange={(newSize: number) => {
-                  setBrushToolState(prev => ({ ...prev, brushSize: newSize }));
+                  if (onBrushSizeChange) {
+                    onBrushSizeChange(newSize);
+                  }
                 }}
               />
             )}
