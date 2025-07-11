@@ -1061,7 +1061,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       modifications.historyIndex--;
       
-      res.json({ success: true, message: "Undo successful" });
+      // Now return the full RT structure data like the contours endpoint does
+      // Parse the RT structure file from the HN-ATLAS dataset
+      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      if (!fs.existsSync(rtStructPath)) {
+        return res.status(404).json({ error: "RT Structure file not found" });
+      }
+
+      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      
+      // Apply modifications from current state
+      if (modifications.newStructures.length > 0) {
+        rtStructureSet.structures.push(...modifications.newStructures);
+      }
+      
+      modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+        const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
+        if (structureIndex >= 0) {
+          rtStructureSet.structures[structureIndex] = {
+            ...rtStructureSet.structures[structureIndex],
+            ...modifiedData
+          };
+        }
+      });
+      
+      res.json(rtStructureSet);
     } catch (error) {
       console.error('Error during undo:', error);
       next(error);
@@ -1090,7 +1114,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         modifications.modifiedStructures = new Map(historyEntry.newState);
       }
       
-      res.json({ success: true, message: "Redo successful" });
+      // Now return the full RT structure data like the contours endpoint does
+      // Parse the RT structure file from the HN-ATLAS dataset
+      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      if (!fs.existsSync(rtStructPath)) {
+        return res.status(404).json({ error: "RT Structure file not found" });
+      }
+
+      const rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      
+      // Apply modifications from current state
+      if (modifications.newStructures.length > 0) {
+        rtStructureSet.structures.push(...modifications.newStructures);
+      }
+      
+      modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+        const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
+        if (structureIndex >= 0) {
+          rtStructureSet.structures[structureIndex] = {
+            ...rtStructureSet.structures[structureIndex],
+            ...modifiedData
+          };
+        }
+      });
+      
+      res.json(rtStructureSet);
     } catch (error) {
       console.error('Error during redo:', error);
       next(error);

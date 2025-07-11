@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ interface WorkingViewerProps {
   onSlicePositionChange?: (slicePosition: number) => void;
 }
 
-export function WorkingViewer({
+export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   seriesId,
   studyId,
   windowLevel: externalWindowLevel,
@@ -65,7 +65,7 @@ export function WorkingViewer({
   autoZoomLevel,
   autoLocalizeTarget,
   onSlicePositionChange,
-}: WorkingViewerProps) {
+}, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -120,6 +120,11 @@ export function WorkingViewer({
   const zoom = 1; // Fixed zoom for debugging
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+
+  // Expose handleContourUpdate method to parent component
+  useImperativeHandle(ref, () => ({
+    handleContourUpdate: (payload: any) => handleContourUpdate(payload)
+  }), []);
 
   // Save contour updates to server
   const saveContourUpdates = async (updatedStructures: any) => {
@@ -2022,7 +2027,7 @@ export function WorkingViewer({
       </div>
     </Card>
   );
-}
+});
 
 declare global {
   interface Window {

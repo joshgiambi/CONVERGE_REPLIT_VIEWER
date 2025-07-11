@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
@@ -44,6 +44,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
   const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
+  const workingViewerRef = useRef<any>(null);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -262,8 +263,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     // Check if this is an action payload from ContourEditToolbar or full structures from WorkingViewer
     if (payload && payload.action) {
       // This is an action payload from ContourEditToolbar
-      // The WorkingViewer will handle it and call us back with the full updated structures
+      // Pass it directly to WorkingViewer's handleContourUpdate
       console.log(`Received action: ${payload.action} for structure ${payload.structureId}`);
+      if (workingViewerRef.current && workingViewerRef.current.handleContourUpdate) {
+        workingViewerRef.current.handleContourUpdate(payload);
+      }
       return;
     }
     
@@ -425,6 +429,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               
               {/* Main Viewer */}
               <WorkingViewer 
+                ref={workingViewerRef}
                 seriesId={selectedSeries.id}
                 studyId={studyData.studies[0]?.id}
                 windowLevel={windowLevel}
