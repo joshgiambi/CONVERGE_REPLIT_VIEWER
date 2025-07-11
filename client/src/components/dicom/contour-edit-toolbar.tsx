@@ -26,7 +26,11 @@ import {
   Plus,
   Minus,
   Undo,
-  Redo
+  Redo,
+  GitBranch,
+  Grid3x3,
+  Eraser,
+  ChevronDown
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
@@ -87,6 +91,8 @@ export function ContourEditToolbar({
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
+  const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
+  const [showClearMenu, setShowClearMenu] = useState(false);
 
   // Keyboard shortcut handling
   useEffect(() => {
@@ -289,6 +295,76 @@ export function ContourEditToolbar({
     }
     
     toast({ title: `Cleared all contours for ${selectedStructure.structureName}` });
+  };
+  
+  const handleInterpolate = () => {
+    if (!selectedStructure) return;
+    
+    console.log(`Interpolating missing slices for structure ${selectedStructure.roiNumber}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'interpolate',
+        structureId: selectedStructure.roiNumber
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Interpolating missing slices for ${selectedStructure.structureName}` });
+  };
+  
+  const handleDeleteEveryNthSlice = (n: number) => {
+    if (!selectedStructure) return;
+    
+    console.log(`Deleting every ${n} slice for structure ${selectedStructure.roiNumber}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'delete_nth_slice',
+        structureId: selectedStructure.roiNumber,
+        nth: n
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Deleted every ${n === 2 ? '2nd' : n === 3 ? '3rd' : '4th'} slice for ${selectedStructure.structureName}` });
+    setShowNthSliceMenu(false);
+  };
+  
+  const handleClearBelowSlice = () => {
+    if (!selectedStructure || !currentSlicePosition) return;
+    
+    console.log(`Clearing all contours below slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'clear_below',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: currentSlicePosition
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Cleared contours below slice ${currentSlicePosition} for ${selectedStructure.structureName}` });
+    setShowClearMenu(false);
+  };
+  
+  const handleClearAboveSlice = () => {
+    if (!selectedStructure || !currentSlicePosition) return;
+    
+    console.log(`Clearing all contours above slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`);
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'clear_above',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: currentSlicePosition
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ title: `Cleared contours above slice ${currentSlicePosition} for ${selectedStructure.structureName}` });
+    setShowClearMenu(false);
   };
 
   // Grow/Shrink contour function
@@ -898,6 +974,106 @@ export function ContourEditToolbar({
               <Trash2 className="w-3 h-3 mr-1" />
               <span className="text-xs">Del Slice</span>
             </Button>
+            
+            {/* Interpolate button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleInterpolate}
+              className="h-7 px-2 bg-black border border-blue-600/50 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20 rounded-lg"
+              title="Interpolate missing slices"
+            >
+              <GitBranch className="w-3 h-3 mr-1" />
+              <span className="text-xs">Interpolate</span>
+            </Button>
+            
+            {/* Nth Slice Delete button with hover menu */}
+            <div className="relative" onMouseLeave={() => setShowNthSliceMenu(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onMouseEnter={() => setShowNthSliceMenu(true)}
+                className="h-7 px-2 bg-black border border-orange-600/50 text-orange-400 hover:text-orange-300 hover:bg-orange-900/20 rounded-lg"
+                title="Delete every nth slice"
+              >
+                <Grid3x3 className="w-3 h-3 mr-1" />
+                <span className="text-xs">Nth Slice</span>
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+              
+              {showNthSliceMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[140px]">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteEveryNthSlice(2)}
+                    className="w-full justify-start h-7 px-2 text-xs text-orange-400 hover:bg-orange-900/20"
+                  >
+                    Every 2nd slice
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteEveryNthSlice(3)}
+                    className="w-full justify-start h-7 px-2 text-xs text-orange-400 hover:bg-orange-900/20"
+                  >
+                    Every 3rd slice
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteEveryNthSlice(4)}
+                    className="w-full justify-start h-7 px-2 text-xs text-orange-400 hover:bg-orange-900/20"
+                  >
+                    Every 4th slice
+                  </Button>
+                </div>
+              )}
+            </div>
+            
+            {/* Clear button with hover menu */}
+            <div className="relative" onMouseLeave={() => setShowClearMenu(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onMouseEnter={() => setShowClearMenu(true)}
+                className="h-7 px-2 bg-black border border-red-700/50 text-red-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg"
+                title="Clear contours"
+              >
+                <Eraser className="w-3 h-3 mr-1" />
+                <span className="text-xs">Clear</span>
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+              
+              {showClearMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[160px]">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearAllSlices}
+                    className="w-full justify-start h-7 px-2 text-xs text-red-500 hover:bg-red-950/20"
+                  >
+                    Delete all slices
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearBelowSlice}
+                    className="w-full justify-start h-7 px-2 text-xs text-red-500 hover:bg-red-950/20"
+                  >
+                    Delete below current
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearAboveSlice}
+                    className="w-full justify-start h-7 px-2 text-xs text-red-500 hover:bg-red-950/20"
+                  >
+                    Delete above current
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
           
           <Button

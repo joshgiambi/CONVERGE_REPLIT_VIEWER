@@ -751,6 +751,130 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'clear_all');
+    } else if (payload.action === "interpolate") {
+      // Handle interpolate missing slices
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure || !structure.contours || structure.contours.length < 2) {
+        console.log("Not enough contours to interpolate");
+        return;
+      }
+
+      // Sort contours by slice position
+      const sortedContours = [...structure.contours].sort((a: any, b: any) => a.slicePosition - b.slicePosition);
+      
+      // Find gaps and interpolate
+      const newContours = [];
+      for (let i = 0; i < sortedContours.length - 1; i++) {
+        const currentContour = sortedContours[i];
+        const nextContour = sortedContours[i + 1];
+        
+        // Add current contour
+        newContours.push(currentContour);
+        
+        // Check for gap
+        const sliceGap = nextContour.slicePosition - currentContour.slicePosition;
+        if (sliceGap > 1.5) { // If there's a gap of more than 1 slice
+          // Linear interpolation between contours
+          const numSlicesToInterpolate = Math.floor(sliceGap - 1);
+          
+          for (let j = 1; j <= numSlicesToInterpolate; j++) {
+            const ratio = j / (numSlicesToInterpolate + 1);
+            const interpolatedSlicePosition = currentContour.slicePosition + (sliceGap * ratio);
+            
+            // Interpolate points
+            const interpolatedPoints = [];
+            const minPointCount = Math.min(currentContour.points.length, nextContour.points.length);
+            
+            for (let k = 0; k < minPointCount; k += 3) {
+              const x1 = currentContour.points[k];
+              const y1 = currentContour.points[k + 1];
+              const z1 = currentContour.points[k + 2];
+              
+              const x2 = nextContour.points[k];
+              const y2 = nextContour.points[k + 1];
+              const z2 = nextContour.points[k + 2];
+              
+              // Linear interpolation
+              interpolatedPoints.push(x1 + (x2 - x1) * ratio);
+              interpolatedPoints.push(y1 + (y2 - y1) * ratio);
+              interpolatedPoints.push(z1 + (z2 - z1) * ratio);
+            }
+            
+            newContours.push({
+              slicePosition: interpolatedSlicePosition,
+              points: interpolatedPoints,
+              numberOfPoints: interpolatedPoints.length / 3,
+            });
+          }
+        }
+      }
+      
+      // Add last contour
+      newContours.push(sortedContours[sortedContours.length - 1]);
+      
+      structure.contours = newContours;
+      console.log(`Interpolated missing slices for structure ${payload.structureId}`);
+      
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'interpolate');
+    } else if (payload.action === "delete_nth_slice") {
+      // Handle delete every nth slice
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Sort contours by slice position
+      const sortedContours = [...structure.contours].sort((a: any, b: any) => a.slicePosition - b.slicePosition);
+      
+      // Keep only contours that are not at nth positions
+      const filteredContours = sortedContours.filter((_, index) => {
+        // Keep the first contour (index 0), delete every nth after that
+        return index === 0 || (index % payload.nth) !== 0;
+      });
+      
+      structure.contours = filteredContours;
+      const deletedCount = sortedContours.length - filteredContours.length;
+      console.log(`Deleted ${deletedCount} contours (every ${payload.nth} slice) for structure ${payload.structureId}`);
+      
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'delete_nth_slice');
+    } else if (payload.action === "clear_below") {
+      // Handle clear below current slice
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      const originalCount = structure.contours.length;
+      structure.contours = structure.contours.filter(
+        (c: any) => c.slicePosition >= payload.slicePosition
+      );
+      
+      const deletedCount = originalCount - structure.contours.length;
+      console.log(`Cleared ${deletedCount} contours below slice ${payload.slicePosition} for structure ${payload.structureId}`);
+      
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'clear_below');
+    } else if (payload.action === "clear_above") {
+      // Handle clear above current slice
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      const originalCount = structure.contours.length;
+      structure.contours = structure.contours.filter(
+        (c: any) => c.slicePosition <= payload.slicePosition
+      );
+      
+      const deletedCount = originalCount - structure.contours.length;
+      console.log(`Cleared ${deletedCount} contours above slice ${payload.slicePosition} for structure ${payload.structureId}`);
+      
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'clear_above');
     }
   };
 

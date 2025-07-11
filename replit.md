@@ -89,6 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 11, 2025: Added Advanced Contour Editing Operations - COMPLETED
+  - ✅ Added Interpolate button to fill missing slices between existing contours using linear interpolation
+  - ✅ Added Nth Slice Delete button with hover menu to delete every 2nd, 3rd, or 4th slice
+  - ✅ Added Clear button with hover options: delete all slices, delete below current, delete above current
+  - ✅ All new operations work only on the selected contour structure
+  - ✅ Full undo/redo support for all new operations (interpolate, delete_nth_slice, clear_below, clear_above)
+  - ✅ Hover menus provide easy access to batch operations without cluttering the interface
+  - ✅ Server automatically tracks all new action types in history for proper undo/redo
 - July 11, 2025: Fixed Undo/Redo for All Contour Operations - COMPLETED
   - ✅ Updated server endpoint to track specific action types in history (delete_slice, clear_all, etc.)
   - ✅ Modified all saveContourUpdates calls to include action metadata for proper undo/redo tracking
