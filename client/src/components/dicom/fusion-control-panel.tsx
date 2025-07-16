@@ -39,7 +39,7 @@ export function FusionControlPanel({
   });
   
   // Filter for MR series only
-  const mrSeries = availableSeries?.filter((s: any) => s.modality === 'MR') || [];
+  const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
   
   // Auto-select first MR series when available
   useEffect(() => {
@@ -218,26 +218,26 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 1219, center: -414 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 300, center: 200 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  Auto
+                  Dark
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 800, center: -600 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 400, center: 350 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  T1
+                  Normal
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 1000, center: -500 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 600, center: 500 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  T1+C
+                  Bright
                 </Button>
               </div>
             </div>

@@ -128,7 +128,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
-  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 1219, center: -414 }); // Default for MRI with -1024 offset
+  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 300, center: 200 }); // Default for darker MRI
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -961,7 +961,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         
         // Preload secondary images
         const newCache = new Map();
-        await Promise.all(sortedImages.map(async (image) => {
+        await Promise.all(sortedImages.map(async (image: any) => {
           try {
             const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
             if (!imageResponse.ok) return;
@@ -1432,6 +1432,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     
     if (!closestSecondaryImage) return;
     
+    console.log(`Fusion alignment - Primary slice: ${primarySlicePosition}, Matched MRI slice: ${closestSecondaryImage.sliceLocation || closestSecondaryImage.instanceNumber}, Distance: ${minDistance}`);
+    
     // Get the secondary image data from cache
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
     if (!secondaryImageData) return;
@@ -1468,7 +1470,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     // Auto-normalize for MRI - use percentage of actual data range
     const dataRange = maxPixelValue - minPixelValue;
     const autoCenter = minPixelValue + dataRange * 0.5;
-    const autoWidth = dataRange * 0.7; // Use 70% of range for better contrast
+    const autoWidth = dataRange * 0.3; // Use 30% of range for much darker MRI
     
     // Use manual window/level if set (width > 0), otherwise use auto values
     const center = mriWindowLevel.width > 0 ? mriWindowLevel.center : autoCenter;
@@ -1531,7 +1533,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     // Draw secondary image with fusion opacity and proper blending
     ctx.save();
     ctx.globalAlpha = fusionOpacity;
-    ctx.globalCompositeOperation = 'normal'; // Use normal blending to avoid black overlay
+    ctx.globalCompositeOperation = 'source-over'; // Use normal blending to avoid black overlay
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
