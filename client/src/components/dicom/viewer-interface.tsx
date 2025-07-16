@@ -4,7 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
-import { FusionPanel } from './fusion-panel';
+import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
@@ -513,19 +513,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Fusion Panel */}
-      {selectedSeries && (
-        <FusionPanel
-          isOpen={showFusionPanel}
-          onClose={() => setShowFusionPanel(false)}
-          primarySeriesId={selectedSeries.id}
-          studyId={studyData.studies[0]?.id}
-          currentSlicePosition={currentSlicePosition}
-          onSecondarySeriesSelect={setSecondarySeriesId}
-          opacity={fusionOpacity}
-          onOpacityChange={setFusionOpacity}
-        />
-      )}
+      {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
 
       {/* Contour Edit Toolbar */}
       {selectedForEdit && rtStructures && rtStructures.structures && (
@@ -574,20 +562,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }}
         error={error || { title: '', message: '' }}
       />
-      
-      {/* Fusion Panel */}
-      {selectedSeries && (
-        <FusionPanel
-          isOpen={showFusionPanel}
-          onClose={() => setShowFusionPanel(false)}
-          primarySeriesId={selectedSeries.id}
-          studyId={studyData.studies[0]?.id}
-          currentSlicePosition={currentSlicePosition}
-          onSecondarySeriesSelect={setSecondarySeriesId}
-          opacity={fusionOpacity}
-          onOpacityChange={setFusionOpacity}
-        />
-      )}
     </div>
   );
 }

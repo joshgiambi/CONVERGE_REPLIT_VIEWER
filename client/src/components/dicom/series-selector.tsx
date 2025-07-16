@@ -569,7 +569,14 @@ export function SeriesSelector({
                                     <div
                                       key={mrS.id}
                                       className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg hover:bg-purple-600/20 cursor-pointer"
-                                      title="MR series available for fusion"
+                                      title="Click to load this MR series for fusion"
+                                      onClick={() => {
+                                        // This will be handled by the fusion control panel auto-selection
+                                        toast({
+                                          title: "MR Series Selected",
+                                          description: `${mrS.seriesDescription || 'MR Series'} is now loading for fusion...`,
+                                        });
+                                      }}
                                     >
                                       <div className="flex items-center space-x-2">
                                         <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">

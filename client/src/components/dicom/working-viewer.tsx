@@ -8,6 +8,7 @@ import { EclipsePenToolFixed } from "./eclipse-pen-tool-fixed";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import { RTStructureOverlay } from "./rt-structure-overlay";
+import { FusionControlPanel } from "./fusion-control-panel";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -67,8 +68,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   autoZoomLevel,
   autoLocalizeTarget,
   onSlicePositionChange,
-  secondarySeriesId,
-  fusionOpacity = 0.5,
+  secondarySeriesId: externalSecondarySeriesId,
+  fusionOpacity: externalFusionOpacity = 0.5,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -125,6 +126,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   const [secondaryImageCache, setSecondaryImageCache] = useState<
     Map<string, { data: Float32Array; width: number; height: number }>
   >(new Map());
+  const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
+  const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -975,6 +978,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         
         setSecondaryImageCache(newCache);
         console.log(`Preloaded ${newCache.size} secondary images`);
+        
+        // Trigger re-render to show fusion overlay
+        if (newCache.size > 0) {
+          displayCurrentImage();
+        }
       } catch (err) {
         console.error("Error loading secondary images:", err);
       }
@@ -1273,8 +1281,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
-      if (secondarySeriesId && secondaryImages.length > 0) {
-        renderFusionOverlay(ctx, currentImage);
+      if (secondarySeriesId && secondaryImages.length > 0 && fusionOpacity > 0) {
+        await renderFusionOverlay(ctx, currentImage);
       }
 
       // Render RT structure overlays if available
@@ -1426,6 +1434,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
     if (!secondaryImageData) return;
     
+    // Get primary image metadata for registration alignment
+    const primaryImageData = imageCache.get(primaryImage.sopInstanceUID);
+    if (!primaryImageData) return;
+    
     // Create a temporary canvas for the secondary image
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = secondaryImageData.width;
@@ -1438,7 +1450,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     const data = imageData.data;
     
     // Apply window/level to secondary image (MRI typically needs different settings)
-    const mriWindow = { width: 200, center: 100 }; // Default MRI settings
+    // Use window/level from secondary image metadata if available
+    const mriWindow = { 
+      width: closestSecondaryImage.windowWidth ? parseFloat(closestSecondaryImage.windowWidth) : 1069, 
+      center: closestSecondaryImage.windowCenter ? parseFloat(closestSecondaryImage.windowCenter) : 615 
+    };
     const center = mriWindow.center;
     const width = mriWindow.width;
     const min = center - width / 2;
@@ -1458,29 +1474,50 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       const gray = Math.max(0, Math.min(255, normalizedValue));
       const pixelIndex = i * 4;
       
-      // Colorize MRI in green tint for fusion visualization
-      data[pixelIndex] = gray * 0.3;     // R
-      data[pixelIndex + 1] = gray;       // G
-      data[pixelIndex + 2] = gray * 0.3; // B
+      // Colorize MRI in purple tint for fusion visualization
+      data[pixelIndex] = gray * 0.7;     // R
+      data[pixelIndex + 1] = gray * 0.3; // G
+      data[pixelIndex + 2] = gray * 0.8; // B
       data[pixelIndex + 3] = 255;        // A
     }
     
     tempCtx.putImageData(imageData, 0, 0);
     
-    // Calculate scaling to match primary image display
+    // Calculate proper scaling and alignment
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
-    const baseScale = Math.min(canvasWidth / secondaryImageData.width, canvasHeight / secondaryImageData.height);
-    const scaledWidth = secondaryImageData.width * baseScale;
-    const scaledHeight = secondaryImageData.height * baseScale;
+    
+    // Get pixel spacing for both images
+    const primarySpacing = parseFloat(primaryImage.pixelSpacing?.split('\\')[0]) || 1;
+    const secondarySpacing = parseFloat(closestSecondaryImage.pixelSpacing?.split('\\')[0]) || 0.5;
+    
+    // Calculate the scale ratio between images based on pixel spacing
+    const spacingRatio = secondarySpacing / primarySpacing;
+    
+    // Calculate display scale for primary image
+    const primaryBaseScale = Math.min(canvasWidth / primaryImageData.width, canvasHeight / primaryImageData.height);
+    
+    // Apply spacing ratio to match physical dimensions
+    const secondaryBaseScale = primaryBaseScale * spacingRatio;
+    
+    // Calculate scaled dimensions for secondary image
+    const scaledWidth = secondaryImageData.width * secondaryBaseScale;
+    const scaledHeight = secondaryImageData.height * secondaryBaseScale;
+    
+    // Center the secondary image on canvas with pan offset
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
-    // Draw secondary image with fusion opacity
+    // Draw secondary image with fusion opacity and proper blending
     ctx.save();
     ctx.globalAlpha = fusionOpacity;
+    ctx.globalCompositeOperation = 'multiply'; // Better blending mode for CT/MRI fusion
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     ctx.restore();
+    
+    console.log(`Rendered fusion overlay: opacity=${fusionOpacity}, pos=(${x},${y}), size=${scaledWidth}x${scaledHeight}`);
   };
 
   const renderRTStructures = (
@@ -2081,6 +2118,13 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
               {currentIndex + 1} / {images.length}
             </Badge>
           )}
+          {secondarySeriesId && secondaryImages.length > 0 && (
+            <Badge className="bg-purple-900 text-purple-200 flex items-center gap-1">
+              <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+              MRI Fusion
+              <span className="text-purple-300">({Math.round(fusionOpacity * 100)}%)</span>
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center space-x-2">
@@ -2311,6 +2355,18 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
               </div>
             )}
           </div>
+          
+          {/* Fusion Control Panel - Visible when study has MR series available */}
+          {studyId && (
+            <FusionControlPanel
+              primarySeriesId={seriesId}
+              studyId={studyId}
+              onSecondarySeriesSelect={(id) => setSecondarySeriesId(id)}
+              opacity={fusionOpacity}
+              onOpacityChange={setFusionOpacity}
+              isVisible={true}
+            />
+          )}
         </div>
       </div>
     </Card>
