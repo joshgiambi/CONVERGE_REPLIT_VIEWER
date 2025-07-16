@@ -1451,12 +1451,16 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     
     // Apply window/level to secondary image (MRI typically needs different settings)
     // Use window/level from secondary image metadata if available
+    // MRI values vary significantly: AX T1 (257-684 center, 446-1189 width), AX T1 FS+C (220-917 center, 383-1593 width)
     const mriWindow = { 
-      width: closestSecondaryImage.windowWidth ? parseFloat(closestSecondaryImage.windowWidth) : 1069, 
-      center: closestSecondaryImage.windowCenter ? parseFloat(closestSecondaryImage.windowCenter) : 615 
+      width: closestSecondaryImage.windowWidth ? parseFloat(closestSecondaryImage.windowWidth) : 800, 
+      center: closestSecondaryImage.windowCenter ? parseFloat(closestSecondaryImage.windowCenter) : 400 
     };
     const center = mriWindow.center;
     const width = mriWindow.width;
+    
+    console.log(`MRI Window/Level - Center: ${center}, Width: ${width}, Series: ${closestSecondaryImage.seriesDescription || 'Unknown'}`);
+    
     const min = center - width / 2;
     
     for (let i = 0; i < secondaryImageData.data.length; i++) {

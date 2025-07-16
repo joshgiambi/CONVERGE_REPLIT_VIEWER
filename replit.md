@@ -89,6 +89,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 16, 2025: Database Cleanup and DICOM Metadata Integration - COMPLETED
+  - ✅ Deleted older fusion patient and all associated data
+  - ✅ Updated patient names to use real DICOM metadata (SKXivnJzBjPxssVj) instead of made-up names
+  - ✅ Fixed patient IDs to match between patients and studies tables for proper viewer button functionality
+  - ✅ Updated MRI window/level default values from hardcoded 1069/615 to more appropriate 400/800
+  - ✅ Added logging for MRI window/level values showing actual DICOM metadata values
+  - ✅ Verified fusion dataset contains: CT (200 images), MR "AX T1 FS+C" (60 images), MR "AX T1" (60 images), RT structures, and image registration
+  - Note: MRI window/level values vary significantly: AX T1 (257-684 center, 446-1189 width), AX T1 FS+C (220-917 center, 383-1593 width)
 - July 16, 2025: Enhanced Medical Image Fusion System - COMPLETED
   - ✅ Implemented automatic RT structure loading for fusion dataset patient
   - ✅ Fixed MRI fusion overlay black square issue by using grayscale rendering
@@ -98,8 +106,7 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
   - ✅ Fixed auto-selection of first MR series when fusion panel opens
   - ✅ Enhanced fusion control panel with purple-themed UI and better layout
   - ✅ Fusion opacity slider shows CT/MR balance with labeled endpoints
-  - Note: The dataset contains only 1 MRI series (AX T1 FS+C, 60 images)
-  - Note: Fusion button in bottom toolbar opens fusion panel when MR series available
+  - Note: Fusion dataset now contains 2 MRI series (AX T1 FS+C and AX T1, 60 images each)
 - July 11, 2025: Added Advanced Contour Editing Operations - COMPLETED
   - ✅ Added Interpolate button to fill missing slices between existing contours using linear interpolation
   - ✅ Added Nth Slice Delete button with hover menu to delete every 2nd, 3rd, or 4th slice
