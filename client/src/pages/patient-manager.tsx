@@ -471,33 +471,9 @@ export default function PatientManager() {
                       </div>
                       <div className="flex gap-2 mt-4">
                         <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => {
-                            // Filter studies for this patient and prioritize CT studies
-                            const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                            if (patientStudies.length > 0) {
-                              // Prioritize CT studies over RT structure sets
-                              const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                              const targetStudy = ctStudy || patientStudies[0];
-                              window.location.href = `/dicom-viewer?studyId=${targetStudy.id}`;
-                            } else {
-                              toast({
-                                title: "No studies found",
-                                description: `No studies found for patient ${patient.patientName}`,
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          Viewer
-                        </Button>
-                        <Button
                           variant="default"
                           size="sm"
-                          className="flex-1 bg-green-600 hover:bg-green-700"
+                          className="w-full bg-green-600 hover:bg-green-700"
                           onClick={() => {
                             // Filter studies for this patient and prioritize CT studies
                             const patientStudies = studies.filter(study => study.patientID === patient.patientID);
@@ -515,8 +491,8 @@ export default function PatientManager() {
                             }
                           }}
                         >
-                          <Activity className="h-4 w-4 mr-1" />
-                          Enhanced
+                          <Eye className="h-4 w-4 mr-1" />
+                          View Images
                         </Button>
                       </div>
                     </CardContent>
