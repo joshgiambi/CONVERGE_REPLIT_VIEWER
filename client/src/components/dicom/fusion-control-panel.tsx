@@ -218,7 +218,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 800, center: 400 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 1219, center: -414 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   Auto
@@ -226,7 +226,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 600, center: 300 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 800, center: -600 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   T1
@@ -234,7 +234,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 1200, center: 600 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 1000, center: -500 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   T1+C

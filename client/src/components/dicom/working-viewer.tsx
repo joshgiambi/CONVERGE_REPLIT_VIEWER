@@ -128,7 +128,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
-  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 800, center: 400 });
+  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 1219, center: -414 }); // Default for MRI with -1024 offset
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1132,9 +1132,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       const cols = dataSet.uint16("x00280011") || 512;
       const bitsAllocated = dataSet.uint16("x00280100") || 16;
 
-      // Get rescale parameters for Hounsfield Units
+      // Get rescale parameters - default to 0 intercept for MRI
+      const modality = dataSet.string("x00080060") || "CT";
       const rescaleSlope = dataSet.floatString("x00281053") || 1;
-      const rescaleIntercept = dataSet.floatString("x00281052") || -1024;
+      const rescaleIntercept = dataSet.floatString("x00281052") || (modality === "MR" ? 0 : -1024);
 
       if (bitsAllocated === 16) {
         const rawPixelArray = new Uint16Array(
@@ -1451,13 +1452,32 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     const data = imageData.data;
     
     // Apply window/level to secondary image (MRI typically needs different settings)
-    // Use controlled MRI window/level values from state
-    const center = mriWindowLevel.center;
-    const width = mriWindowLevel.width;
+    // For MRI, first find the actual data range as MRI doesn't use Hounsfield Units
+    let minPixelValue = Infinity;
+    let maxPixelValue = -Infinity;
+    
+    // Find actual min/max values in the MRI data
+    for (let i = 0; i < secondaryImageData.data.length; i++) {
+      const value = secondaryImageData.data[i];
+      if (value < minPixelValue) minPixelValue = value;
+      if (value > maxPixelValue) maxPixelValue = value;
+    }
+    
+    console.log(`MRI data range: min=${minPixelValue}, max=${maxPixelValue}`);
+    
+    // Auto-normalize for MRI - use percentage of actual data range
+    const dataRange = maxPixelValue - minPixelValue;
+    const autoCenter = minPixelValue + dataRange * 0.5;
+    const autoWidth = dataRange * 0.7; // Use 70% of range for better contrast
+    
+    // Use manual window/level if set (width > 0), otherwise use auto values
+    const center = mriWindowLevel.width > 0 ? mriWindowLevel.center : autoCenter;
+    const width = mriWindowLevel.width > 0 ? mriWindowLevel.width : autoWidth;
     
     console.log(`MRI Window/Level - Center: ${center}, Width: ${width}, Series: ${closestSecondaryImage.seriesDescription || 'Unknown'}`);
     
     const min = center - width / 2;
+    const max = center + width / 2;
     
     for (let i = 0; i < secondaryImageData.data.length; i++) {
       const pixelValue = secondaryImageData.data[i];
@@ -1465,7 +1485,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       
       if (pixelValue <= min) {
         normalizedValue = 0;
-      } else if (pixelValue >= min + width) {
+      } else if (pixelValue >= max) {
         normalizedValue = 255;
       } else {
         normalizedValue = ((pixelValue - min) / width) * 255;
