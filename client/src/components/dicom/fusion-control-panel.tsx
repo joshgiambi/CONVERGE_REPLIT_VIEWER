@@ -218,7 +218,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 300, center: 200 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 200, center: 100 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   Dark
@@ -226,7 +226,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 400, center: 350 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 300, center: 200 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   Normal
@@ -234,7 +234,7 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 600, center: 500 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 450, center: 350 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
                   Bright

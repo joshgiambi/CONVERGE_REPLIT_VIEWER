@@ -128,7 +128,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
-  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 300, center: 200 }); // Default for darker MRI
+  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 200, center: 100 }); // Default for very dark MRI
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1284,6 +1284,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0 && fusionOpacity > 0) {
+        console.log(`Rendering fusion for CT slice ${currentIndex}`);
         await renderFusionOverlay(ctx, currentImage);
       }
 
@@ -1413,26 +1414,22 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
                                parseFloat(primaryImage.sliceLocation) || 
                                currentIndex;
     
-    // Find the closest secondary image by slice position
-    let closestSecondaryImage = null;
-    let minDistance = Infinity;
+    // Find the closest secondary image by index mapping
+    // Since CT and MRI use different coordinate systems, we need to map by relative position
+    const primaryIndex = currentIndex;
+    const primaryRatio = primaryIndex / (images.length - 1); // 0 to 1 ratio
     
-    for (const secImage of secondaryImages) {
-      const secSlicePos = parseFloat(secImage.sliceLocation) || 
-                          secImage.parsedSliceLocation || 
-                          secImage.parsedZPosition || 
-                          secImage.instanceNumber;
-      
-      const distance = Math.abs(primarySlicePosition - secSlicePos);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestSecondaryImage = secImage;
-      }
-    }
+    // Map to secondary image index
+    const secondaryIndex = Math.round(primaryRatio * (secondaryImages.length - 1));
+    const closestSecondaryImage = secondaryImages[secondaryIndex];
+    
+    // For debugging
+    const minDistance = 0;
     
     if (!closestSecondaryImage) return;
     
-    console.log(`Fusion alignment - Primary slice: ${primarySlicePosition}, Matched MRI slice: ${closestSecondaryImage.sliceLocation || closestSecondaryImage.instanceNumber}, Distance: ${minDistance}`);
+    console.log(`Fusion alignment - CT index: ${primaryIndex}/${images.length-1}, MRI index: ${secondaryIndex}/${secondaryImages.length-1}, Ratio: ${primaryRatio.toFixed(2)}`);
+    console.log(`MRI slice selected: ${closestSecondaryImage.sopInstanceUID}`);
     
     // Get the secondary image data from cache
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
@@ -1470,7 +1467,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     // Auto-normalize for MRI - use percentage of actual data range
     const dataRange = maxPixelValue - minPixelValue;
     const autoCenter = minPixelValue + dataRange * 0.5;
-    const autoWidth = dataRange * 0.3; // Use 30% of range for much darker MRI
+    const autoWidth = dataRange * 0.2; // Use 20% of range for very dark MRI
     
     // Use manual window/level if set (width > 0), otherwise use auto values
     const center = mriWindowLevel.width > 0 ? mriWindowLevel.center : autoCenter;
