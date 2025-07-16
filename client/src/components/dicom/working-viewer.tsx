@@ -45,6 +45,8 @@ interface WorkingViewerProps {
   autoZoomLevel?: number;
   autoLocalizeTarget?: { x: number; y: number; z: number };
   onSlicePositionChange?: (slicePosition: number) => void;
+  secondarySeriesId?: number | null;
+  fusionOpacity?: number;
 }
 
 export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
@@ -65,6 +67,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   autoZoomLevel,
   autoLocalizeTarget,
   onSlicePositionChange,
+  secondarySeriesId,
+  fusionOpacity = 0.5,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -115,6 +119,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Secondary series state for fusion
+  const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
+  const [secondaryImageCache, setSecondaryImageCache] = useState<
+    Map<string, { data: Float32Array; width: number; height: number }>
+  >(new Map());
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -915,6 +925,63 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   useEffect(() => {
     loadImages();
   }, [seriesId]);
+  
+  // Load secondary series images for fusion
+  useEffect(() => {
+    const loadSecondaryImages = async () => {
+      if (!secondarySeriesId) {
+        setSecondaryImages([]);
+        setSecondaryImageCache(new Map());
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/series/${secondarySeriesId}/images`);
+        if (!response.ok) {
+          throw new Error(`Failed to load secondary images: ${response.statusText}`);
+        }
+
+        const imageList = await response.json();
+        const sortedImages = imageList.sort((a: any, b: any) => {
+          if (a.instanceNumber !== null && b.instanceNumber !== null) {
+            return a.instanceNumber - b.instanceNumber;
+          }
+          if (a.sliceLocation !== null && b.sliceLocation !== null) {
+            return parseFloat(a.sliceLocation) - parseFloat(b.sliceLocation);
+          }
+          return a.id - b.id;
+        });
+
+        setSecondaryImages(sortedImages);
+        console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
+        
+        // Preload secondary images
+        const newCache = new Map();
+        await Promise.all(sortedImages.map(async (image) => {
+          try {
+            const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+            if (!imageResponse.ok) return;
+            
+            const arrayBuffer = await imageResponse.arrayBuffer();
+            const imageData = await parseDicomImage(arrayBuffer);
+            
+            if (imageData) {
+              newCache.set(image.sopInstanceUID, imageData);
+            }
+          } catch (error) {
+            console.warn(`Failed to preload secondary image:`, error);
+          }
+        }));
+        
+        setSecondaryImageCache(newCache);
+        console.log(`Preloaded ${newCache.size} secondary images`);
+      } catch (err) {
+        console.error("Error loading secondary images:", err);
+      }
+    };
+
+    loadSecondaryImages();
+  }, [secondarySeriesId]);
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
@@ -1204,6 +1271,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      
+      // Render secondary image overlay for fusion if available
+      if (secondarySeriesId && secondaryImages.length > 0) {
+        renderFusionOverlay(ctx, currentImage);
+      }
 
       // Render RT structure overlays if available
       if (localRTStructures && showStructures) {
@@ -1320,6 +1392,95 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     }
 
     ctx.putImageData(imageData, 0, 0);
+  };
+  
+  const renderFusionOverlay = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    if (!secondaryImages.length || !secondarySeriesId) return;
+    
+    // Get the current slice position from primary image
+    let primarySlicePosition = primaryImage.parsedSliceLocation || 
+                               primaryImage.parsedZPosition || 
+                               parseFloat(primaryImage.sliceLocation) || 
+                               currentIndex;
+    
+    // Find the closest secondary image by slice position
+    let closestSecondaryImage = null;
+    let minDistance = Infinity;
+    
+    for (const secImage of secondaryImages) {
+      const secSlicePos = parseFloat(secImage.sliceLocation) || 
+                          secImage.parsedSliceLocation || 
+                          secImage.parsedZPosition || 
+                          secImage.instanceNumber;
+      
+      const distance = Math.abs(primarySlicePosition - secSlicePos);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestSecondaryImage = secImage;
+      }
+    }
+    
+    if (!closestSecondaryImage) return;
+    
+    // Get the secondary image data from cache
+    const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
+    if (!secondaryImageData) return;
+    
+    // Create a temporary canvas for the secondary image
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = secondaryImageData.width;
+    tempCanvas.height = secondaryImageData.height;
+    const tempCtx = tempCanvas.getContext("2d");
+    if (!tempCtx) return;
+    
+    // Render secondary image to temp canvas
+    const imageData = tempCtx.createImageData(secondaryImageData.width, secondaryImageData.height);
+    const data = imageData.data;
+    
+    // Apply window/level to secondary image (MRI typically needs different settings)
+    const mriWindow = { width: 200, center: 100 }; // Default MRI settings
+    const center = mriWindow.center;
+    const width = mriWindow.width;
+    const min = center - width / 2;
+    
+    for (let i = 0; i < secondaryImageData.data.length; i++) {
+      const pixelValue = secondaryImageData.data[i];
+      let normalizedValue;
+      
+      if (pixelValue <= min) {
+        normalizedValue = 0;
+      } else if (pixelValue >= min + width) {
+        normalizedValue = 255;
+      } else {
+        normalizedValue = ((pixelValue - min) / width) * 255;
+      }
+      
+      const gray = Math.max(0, Math.min(255, normalizedValue));
+      const pixelIndex = i * 4;
+      
+      // Colorize MRI in green tint for fusion visualization
+      data[pixelIndex] = gray * 0.3;     // R
+      data[pixelIndex + 1] = gray;       // G
+      data[pixelIndex + 2] = gray * 0.3; // B
+      data[pixelIndex + 3] = 255;        // A
+    }
+    
+    tempCtx.putImageData(imageData, 0, 0);
+    
+    // Calculate scaling to match primary image display
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
+    const baseScale = Math.min(canvasWidth / secondaryImageData.width, canvasHeight / secondaryImageData.height);
+    const scaledWidth = secondaryImageData.width * baseScale;
+    const scaledHeight = secondaryImageData.height * baseScale;
+    const x = (canvasWidth - scaledWidth) / 2 + panX;
+    const y = (canvasHeight - scaledHeight) / 2 + panY;
+    
+    // Draw secondary image with fusion opacity
+    ctx.save();
+    ctx.globalAlpha = fusionOpacity;
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+    ctx.restore();
   };
 
   const renderRTStructures = (

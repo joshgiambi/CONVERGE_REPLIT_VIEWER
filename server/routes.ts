@@ -807,6 +807,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get registration information for a study
+  app.get("/api/studies/:studyId/registration", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const seriesList = await storage.getSeriesByStudyId(studyId);
+      
+      // Find registration series
+      const regSeries = seriesList.find(s => s.modality === 'REG');
+      
+      if (!regSeries) {
+        return res.json(null);
+      }
+      
+      // Get registration images
+      const regImages = await storage.getImagesBySeriesId(regSeries.id);
+      
+      if (regImages.length === 0) {
+        return res.json(null);
+      }
+      
+      // Try to parse registration file for details
+      const regImage = regImages[0];
+      let registrationInfo = {
+        seriesId: regSeries.id,
+        description: regSeries.seriesDescription || 'Image Registration',
+        hasTransformationMatrix: true,
+        sourceModality: 'MR',
+        targetModality: 'CT',
+        registered: true
+      };
+      
+      try {
+        if (regImage.filePath && fs.existsSync(regImage.filePath)) {
+          const buffer = fs.readFileSync(regImage.filePath);
+          const byteArray = new Uint8Array(buffer);
+          const dataSet = dicomParser.parseDicom(byteArray);
+          
+          // Extract additional registration details if available
+          const registrationDesc = dataSet.string('x00080016') || '';
+          if (registrationDesc) {
+            registrationInfo.description = registrationDesc;
+          }
+        }
+      } catch (parseError) {
+        console.log('Could not parse registration file details:', parseError);
+      }
+      
+      res.json(registrationInfo);
+    } catch (error: any) {
+      console.error('Error fetching registration:', error);
+      res.status(500).json({ error: 'Failed to fetch registration information', details: error.message });
+    }
+  });
+
   // Parse and return RT structure contours
   app.get("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -1,0 +1,24 @@
+{
+  "patient_name": "pkDPXXoafjbSJFsb",
+  "patient_id": "eGxOwa0vElJ9I98DElZly59D5",
+  "series": [
+    {
+      "series_uid": "1.2.246.352.221.496852523188964609911001396652665546125",
+      "modality": "CT",
+      "description": "Head_Neck C+  2.0  Br38  3Dental fillings iMAR",
+      "num_images": 200
+    },
+    {
+      "series_uid": "1.2.246.352.221.573934384950102026110639861237174790274",
+      "modality": "MR",
+      "description": "AX T1 FS+C",
+      "num_images": 60
+    },
+    {
+      "series_uid": "1.2.246.352.221.49064268337835281255260721810741713066",
+      "modality": "RTSTRUCT",
+      "description": "ARIA RadOnc Structure Sets",
+      "num_images": 0
+    }
+  ]
+}

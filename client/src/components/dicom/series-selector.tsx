@@ -531,6 +531,49 @@ export function SeriesSelector({
                           ))}
                         </div>
                       )}
+                      
+                      {/* Registration and MR Series nested under CT */}
+                      {selectedSeries?.id === seriesItem.id && series.some(s => s.modality === 'REG' || s.modality === 'MR') && (
+                        <div className="ml-2 mt-1 space-y-1 border-l-2 border-purple-500/30 pl-2">
+                          {/* Registration objects */}
+                          {series.filter(s => s.modality === 'REG').map((regS) => (
+                            <div
+                              key={regS.id}
+                              className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                  REG
+                                </Badge>
+                                <span className="truncate text-xs">
+                                  {regS.seriesDescription || 'Registration'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                          
+                          {/* MR Series that can be fused */}
+                          {series.filter(s => s.modality === 'MR').map((mrS) => (
+                            <div
+                              key={mrS.id}
+                              className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg hover:bg-purple-600/20 cursor-pointer"
+                              title="MR series available for fusion"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                  MR
+                                </Badge>
+                                <span className="truncate text-xs">
+                                  {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                </span>
+                                <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
+                                  Fusion Ready
+                                </Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

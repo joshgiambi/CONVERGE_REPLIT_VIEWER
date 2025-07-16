@@ -4,7 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
-
+import { FusionPanel } from './fusion-panel';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
@@ -45,6 +45,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
+  
+  // Fusion state
+  const [showFusionPanel, setShowFusionPanel] = useState(false);
+  const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
+  const [fusionOpacity, setFusionOpacity] = useState(0.5);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -444,6 +449,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 contourSettings={contourSettings}
                 autoZoomLevel={autoZoomLevel}
                 autoLocalizeTarget={autoLocalizeTarget}
+                secondarySeriesId={secondarySeriesId}
+                fusionOpacity={fusionOpacity}
               />
               
               {/* Structure Tags on Right Side */}
@@ -497,10 +504,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourSettings={() => {
             // Open contour settings dialog
           }}
+          onFusion={() => setShowFusionPanel(!showFusionPanel)}
           currentSlice={1}
           totalSlices={selectedSeries.imageCount}
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
+          showFusionButton={series.some(s => s.modality === 'MR')}
         />
       )}
 
@@ -551,6 +560,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }}
         error={error || { title: '', message: '' }}
       />
+      
+      {/* Fusion Panel */}
+      {selectedSeries && (
+        <FusionPanel
+          isOpen={showFusionPanel}
+          onClose={() => setShowFusionPanel(false)}
+          primarySeriesId={selectedSeries.id}
+          studyId={studyData.studies[0]?.id}
+          currentSlicePosition={currentSlicePosition}
+          onSecondarySeriesSelect={setSecondarySeriesId}
+          opacity={fusionOpacity}
+          onOpacityChange={setFusionOpacity}
+        />
+      )}
     </div>
   );
 }

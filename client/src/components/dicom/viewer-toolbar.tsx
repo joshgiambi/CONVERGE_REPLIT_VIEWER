@@ -12,7 +12,8 @@ import {
   Settings,
   Info,
   HelpCircle,
-  Keyboard
+  Keyboard,
+  Layers
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -24,10 +25,12 @@ interface ViewerToolbarProps {
   onAnnotateTool: () => void;
   onContourEdit: () => void;
   onContourSettings: () => void;
+  onFusion?: () => void;
   currentSlice?: number;
   totalSlices?: number;
   windowLevel?: { window: number; level: number };
   isContourEditActive?: boolean;
+  showFusionButton?: boolean;
 }
 
 export function ViewerToolbar({
@@ -39,10 +42,12 @@ export function ViewerToolbar({
   onAnnotateTool,
   onContourEdit,
   onContourSettings,
+  onFusion,
   currentSlice,
   totalSlices,
   windowLevel,
-  isContourEditActive
+  isContourEditActive,
+  showFusionButton
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -62,6 +67,10 @@ export function ViewerToolbar({
     { id: 'separator' },
     { id: 'contour-edit', icon: Edit3, label: 'Contour Edit', action: onContourEdit },
     { id: 'contour-settings', icon: Settings, label: 'Contour Settings', action: onContourSettings },
+    ...(showFusionButton && onFusion ? [
+      { id: 'separator' },
+      { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
+    ] : []),
     { id: 'separator' },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
     { id: 'help', icon: HelpCircle, label: 'Interaction Guide', action: () => setTipsDialogOpen(!tipsDialogOpen) },
