@@ -871,10 +871,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "RT Structure Set not found" });
       }
 
-      // Parse the RT structure file from the HN-ATLAS dataset
-      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      // Check if this is the fusion dataset RT structure
+      let rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      
+      // For fusion dataset (study ID 7), use the fusion RT structure file
+      try {
+        const images = await db.select()
+          .from(imagesTable)
+          .where(eq(imagesTable.seriesId, seriesId))
+          .limit(1);
+        
+        if (images.length > 0 && images[0].filePath) {
+          // Use the actual RT structure file from the fusion dataset
+          if (images[0].filePath.includes('fusion-dataset')) {
+            rtStructPath = images[0].filePath;
+            console.log('Using fusion dataset RT structure:', rtStructPath);
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching RT structure image:', e);
+      }
+      
       if (!fs.existsSync(rtStructPath)) {
-        return res.status(404).json({ error: "RT Structure file not found" });
+        return res.status(404).json({ error: "RT Structure file not found at: " + rtStructPath });
       }
 
       // Use cached parsed structure set or parse and cache it

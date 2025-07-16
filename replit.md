@@ -4,6 +4,13 @@
 
 Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine) medical imaging application built with React, Express.js, and PostgreSQL. The system allows users to upload, manage, and view medical images with proper DICOM metadata handling. It includes a complete PACS-like interface for medical imaging workflows with advanced contour editing capabilities.
 
+**CRITICAL: Fusion Registration Requirements**
+- Multi-modal fusion (CT/MRI) MUST use DICOM registration transformation matrices
+- Registration files contain 4x4 rigid transformation matrices for spatial alignment
+- NEVER use simple linear slice mapping for fusion - always apply registration matrix
+- Registration matrix transforms CT coordinates to MRI space for proper alignment
+- The system stores registration matrices in the database registrations table
+
 ## System Architecture
 
 ### Frontend Architecture
@@ -86,6 +93,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 - **Modules**: nodejs-20, web, postgresql-16, python-3.11
 - **Port Configuration**: Internal port 5000, external port 80
 - **Auto-scaling**: Configured for autoscale deployment target
+
+## Critical Implementation Notes
+
+### Fusion Registration System
+- **Registration Matrix**: The fusion viewer MUST use the 4x4 transformation matrix from DICOM registration files
+- **Matrix Application**: Transform CT z-coordinates to MRI z-coordinates using: `mriZ = R[2][2] * ctZ + T[2]`
+- **Database Storage**: Registration matrices are stored in the registrations table with transformation_matrix as JSON array
+- **API Endpoint**: `/api/registrations/:studyId` returns the transformation matrix for fusion alignment
+- **Fallback Behavior**: Only use linear mapping if registration matrix is unavailable (with console warning)
 
 ## Changelog
 

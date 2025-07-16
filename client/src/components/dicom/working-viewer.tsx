@@ -930,6 +930,27 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   useEffect(() => {
     loadImages();
   }, [seriesId]);
+
+  // Load registration matrix when study changes
+  useEffect(() => {
+    if (studyId) {
+      fetch(`/api/registrations/${studyId}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.transformationMatrix) {
+            console.log(`Loaded registration matrix for study ${studyId}:`, data);
+            setRegistrationMatrix(data.transformationMatrix);
+          } else {
+            console.log(`No registration found for study ${studyId}`);
+            setRegistrationMatrix(null);
+          }
+        })
+        .catch(error => {
+          console.error('Error loading registration:', error);
+          setRegistrationMatrix(null);
+        });
+    }
+  }, [studyId]);
   
   // Load secondary series images for fusion
   useEffect(() => {
@@ -1423,67 +1444,91 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   const renderFusionOverlay = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
     if (!secondaryImages.length || !secondarySeriesId) return;
     
-    // Get the current slice position from primary image
-    let primarySlicePosition = primaryImage.parsedSliceLocation || 
-                               primaryImage.parsedZPosition || 
-                               parseFloat(primaryImage.sliceLocation) || 
-                               currentIndex;
+    // Get the current CT slice position
+    let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
     
-    // Find the closest secondary image by position mapping
-    // Get CT slice position range - handle null slice locations
-    let ctMinPos = parseFloat(images[0].sliceLocation);
-    let ctMaxPos = parseFloat(images[images.length - 1].sliceLocation);
+    // Find the matching MRI slice using registration transformation
+    let closestSecondaryImage;
+    let minDistance = Infinity;
     
-    // If slice locations are null, calculate from current position and total images
-    if (isNaN(ctMinPos) || isNaN(ctMaxPos)) {
-      // Use actual CT range from database
-      ctMinPos = 325.5; // First CT slice
-      ctMaxPos = 723.5; // Last CT slice  
-      console.log(`Using verified CT range: ${ctMinPos} to ${ctMaxPos}`);
-    }
-    
-    const ctRange = ctMaxPos - ctMinPos;
-    
-    // Get MRI slice position range  
-    const mriMinPos = parseFloat(secondaryImages[0].sliceLocation);
-    const mriMaxPos = parseFloat(secondaryImages[secondaryImages.length - 1].sliceLocation);
-    const mriRange = Math.abs(mriMaxPos - mriMinPos);
-    
-    // Calculate position ratio in CT space
-    const ctPos = parseFloat(primaryImage.sliceLocation);
-    const ctRatio = (ctPos - ctMinPos) / ctRange;
-    
-    // Map to MRI space - handle descending MRI slices
-    let mriTargetPos;
-    if (mriMinPos > mriMaxPos) {
-      // MRI slices are descending
-      mriTargetPos = mriMinPos - (ctRatio * mriRange);
+    if (registrationMatrix && registrationMatrix.length === 16) {
+      // Use registration matrix to transform CT position to MRI space
+      // Extract transformation components from 4x4 matrix
+      const R = [
+        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2]],
+        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6]],
+        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10]]
+      ];
+      const T = [registrationMatrix[3], registrationMatrix[7], registrationMatrix[11]];
+      
+      // For z-coordinate (slice position), apply the full 3D transformation
+      // The registration matrix transforms points from CT space to MRI space
+      // For a point [x, y, z, 1] in CT space, the transformed point is:
+      // [x', y', z', 1] = [x, y, z, 1] * Matrix
+      
+      // Since we only care about z-coordinate matching, we need to consider
+      // the image position patient (IPP) of both CT and MRI
+      const ctIPP = primaryImage.imagePositionPatient || [0, 0, ctSlicePosition];
+      const ctX = parseFloat(ctIPP[0]) || 0;
+      const ctY = parseFloat(ctIPP[1]) || 0;
+      const ctZ = ctSlicePosition;
+      
+      // Apply the transformation: P' = R * P + T
+      const mriX = R[0][0] * ctX + R[0][1] * ctY + R[0][2] * ctZ + T[0];
+      const mriY = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
+      const mriZ = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
+      
+      console.log(`Registration transform: CT z=${ctZ.toFixed(1)}mm -> MRI z=${mriZ.toFixed(1)}mm`);
+      
+      // Find the closest MRI slice to the transformed position
+      for (const secondaryImage of secondaryImages) {
+        const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
+        const distance = Math.abs(mriSlicePos - mriZ);
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestSecondaryImage = secondaryImage;
+        }
+      }
+      
+      console.log(`Found MRI slice at ${closestSecondaryImage?.sliceLocation}mm (distance: ${minDistance.toFixed(1)}mm)`);
     } else {
-      // MRI slices are ascending
-      mriTargetPos = mriMinPos + (ctRatio * mriRange);
-    }
-    
-    // Find closest MRI slice by position
-    let closestSecondaryImage = secondaryImages[0];
-    let minPosDiff = Math.abs(parseFloat(closestSecondaryImage.sliceLocation) - mriTargetPos);
-    
-    for (let i = 1; i < secondaryImages.length; i++) {
-      const posDiff = Math.abs(parseFloat(secondaryImages[i].sliceLocation) - mriTargetPos);
-      if (posDiff < minPosDiff) {
-        minPosDiff = posDiff;
-        closestSecondaryImage = secondaryImages[i];
+      // Fallback: simple linear mapping if no registration available
+      console.warn("No registration matrix available, using linear mapping");
+      
+      const ctMinPos = 325.5;
+      const ctMaxPos = 723.5;
+      const ctRange = ctMaxPos - ctMinPos;
+      
+      const mriMinPos = parseFloat(secondaryImages[0].sliceLocation);
+      const mriMaxPos = parseFloat(secondaryImages[secondaryImages.length - 1].sliceLocation);
+      const mriRange = Math.abs(mriMaxPos - mriMinPos);
+      
+      const ctRatio = (ctSlicePosition - ctMinPos) / ctRange;
+      let mriTargetPos = mriMinPos > mriMaxPos 
+        ? mriMinPos - (ctRatio * mriRange)
+        : mriMinPos + (ctRatio * mriRange);
+      
+      for (const secondaryImage of secondaryImages) {
+        const distance = Math.abs(parseFloat(secondaryImage.sliceLocation) - mriTargetPos);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestSecondaryImage = secondaryImage;
+        }
       }
     }
     
-    const secondaryIndex = secondaryImages.indexOf(closestSecondaryImage);
-    
-    // For debugging
-    const minDistance = 0;
-    
     if (!closestSecondaryImage) return;
     
-    console.log(`Fusion alignment - CT pos: ${ctPos.toFixed(1)} (${ctRatio.toFixed(2)}), MRI target: ${mriTargetPos.toFixed(1)}, MRI actual: ${closestSecondaryImage.sliceLocation}`);
-    console.log(`CT index: ${currentIndex}, MRI index: ${secondaryIndex}, MRI instance: ${closestSecondaryImage.instanceNumber}`);
+    const secondaryIndex = secondaryImages.indexOf(closestSecondaryImage);
+    console.log(`Rendering fusion: CT slice ${currentIndex} (${ctSlicePosition.toFixed(1)}mm) -> MRI slice ${secondaryIndex} (${closestSecondaryImage.sliceLocation}mm)`);
+    
+    // Verify we're using registration matrix
+    if (registrationMatrix) {
+      console.log(`✓ Using DICOM registration matrix for fusion alignment`);
+    } else {
+      console.error(`✗ WARNING: No registration matrix - using fallback linear mapping!`);
+    }
     
     // Get the secondary image data from cache
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
@@ -1901,7 +1946,15 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         const newWidth = Math.max(1, startWindow + deltaX * 2);
         const newCenter = startCenter - deltaY * 1.5;
 
-        updateWindowLevel({ width: newWidth, center: newCenter });
+        // Check if we're in fusion mode with MRI overlay
+        if (secondarySeriesId && fusionOpacity > 0) {
+          // Adjust MRI window/level when in fusion mode
+          setMriWindowLevel({ width: newWidth, center: newCenter });
+          console.log(`MRI Window/Level adjusted via drag: Center=${newCenter}, Width=${newWidth}`);
+        } else {
+          // Adjust CT window/level normally
+          updateWindowLevel({ width: newWidth, center: newCenter });
+        }
       };
 
       const handleWindowLevelEnd = (endEvent: MouseEvent) => {

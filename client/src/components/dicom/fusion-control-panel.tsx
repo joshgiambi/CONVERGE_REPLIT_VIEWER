@@ -248,7 +248,7 @@ export function FusionControlPanel({
             <div className="mt-3 p-2 bg-purple-900/20 rounded-lg border border-purple-500/30">
               <div className="flex items-center gap-2 text-xs text-purple-300">
                 <Settings2 className="h-3 w-3" />
-                <span>Tip: Use Right-click + drag to adjust MR window/level</span>
+                <span>Tip: Right-click + drag adjusts MR window/level in fusion mode</span>
               </div>
             </div>
           )}
