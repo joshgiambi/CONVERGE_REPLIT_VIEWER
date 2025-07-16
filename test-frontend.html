@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend</title>
+</head>
+<body>
+    <h1>Testing Frontend Access</h1>
+    <script>
+        // Test API endpoints
+        async function testAPIs() {
+            try {
+                const patients = await fetch('/api/patients').then(r => r.json());
+                console.log('Patients:', patients);
+                document.body.innerHTML += '<p>Patients loaded: ' + patients.length + '</p>';
+                
+                const studies = await fetch('/api/studies').then(r => r.json());
+                console.log('Studies:', studies);
+                document.body.innerHTML += '<p>Studies loaded: ' + studies.length + '</p>';
+            } catch (error) {
+                console.error('API Error:', error);
+                document.body.innerHTML += '<p style="color:red">Error: ' + error.message + '</p>';
+            }
+        }
+        
+        testAPIs();
+    </script>
+</body>
+</html>
