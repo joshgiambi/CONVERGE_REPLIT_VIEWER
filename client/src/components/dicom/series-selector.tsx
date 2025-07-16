@@ -466,116 +466,173 @@ export function SeriesSelector({
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-6 pb-4">
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {series.filter(s => s.modality !== 'RTSTRUCT').map((seriesItem) => (
-                    <div key={seriesItem.id}>
-                      <div
-                        className={`
-                          p-2 rounded-lg border cursor-pointer transition-all duration-200
-                          ${selectedSeries?.id === seriesItem.id
-                            ? 'bg-blue-500/20 border-blue-500 shadow-lg'
-                            : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
-                          }
-                        `}
-                        onClick={() => onSeriesSelect(seriesItem)}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <Badge 
-                            variant="outline" 
-                            className={`
-                              text-xs font-semibold
-                              ${selectedSeries?.id === seriesItem.id
-                                ? 'border-blue-400 text-blue-400'
-                                : 'border-blue-500 text-blue-500'
-                              }
-                            `}
-                          >
-                            {seriesItem.modality}
-                          </Badge>
-                          <span className="text-xs text-gray-400">
-                            {seriesItem.imageCount} images
-                          </span>
-                        </div>
-                        
-                        <h4 className={`
-                          text-sm font-medium truncate
-                          ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
-                        `}>
-                          {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
-                        </h4>
-                      </div>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {/* Organize series hierarchically with CT as primary */}
+                  {(() => {
+                    const ctSeries = series.filter(s => s.modality === 'CT');
+                    const mrSeries = series.filter(s => s.modality === 'MR');
+                    const regSeries = series.filter(s => s.modality === 'REG');
+                    const otherSeries = series.filter(s => !['CT', 'MR', 'REG', 'RTSTRUCT'].includes(s.modality));
+                    
+                    return (
+                      <>
+                        {/* CT Series as Primary */}
+                        {ctSeries.map((seriesItem) => (
+                          <div key={seriesItem.id}>
+                            <div
+                              className={`
+                                p-2 rounded-lg border cursor-pointer transition-all duration-200
+                                ${selectedSeries?.id === seriesItem.id
+                                  ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                                  : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
+                                }
+                              `}
+                              onClick={() => onSeriesSelect(seriesItem)}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`
+                                    text-xs font-semibold
+                                    ${selectedSeries?.id === seriesItem.id
+                                      ? 'border-blue-400 text-blue-400'
+                                      : 'border-blue-500 text-blue-500'
+                                    }
+                                  `}
+                                >
+                                  {seriesItem.modality}
+                                </Badge>
+                                <span className="text-xs text-gray-400">
+                                  {seriesItem.imageCount} images
+                                </span>
+                              </div>
+                              
+                              <h4 className={`
+                                text-sm font-medium truncate
+                                ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
+                              `}>
+                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                              </h4>
+                            </div>
 
-                      {/* RT Structure Series nested under CT */}
-                      {selectedSeries?.id === seriesItem.id && rtSeries.length > 0 && (
-                        <div className="ml-2 mt-1 space-y-1 border-l-2 border-green-500/30 pl-2">
-                          {rtSeries.map((rtS) => (
-                            <Button
-                              key={rtS.id}
-                              variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
-                              className={`w-full p-2 h-auto text-left justify-start text-xs ${
-                                selectedRTSeries?.id === rtS.id 
-                                  ? 'bg-green-600 text-white border-green-500' 
-                                  : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
-                              } border rounded-lg`}
-                              onClick={() => handleRTSeriesSelect(rtS)}
-                            >
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
-                                  RT
-                                </Badge>
-                                <span className="truncate text-xs">
-                                  {rtS.seriesDescription || 'Structure Set'}
-                                </span>
-                              </div>
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {/* Registration and MR Series nested under CT */}
-                      {selectedSeries?.id === seriesItem.id && series.some(s => s.modality === 'REG' || s.modality === 'MR') && (
-                        <div className="ml-2 mt-1 space-y-1 border-l-2 border-purple-500/30 pl-2">
-                          {/* Registration objects */}
-                          {series.filter(s => s.modality === 'REG').map((regS) => (
-                            <div
-                              key={regS.id}
-                              className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg"
-                            >
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                  REG
-                                </Badge>
-                                <span className="truncate text-xs">
-                                  {regS.seriesDescription || 'Registration'}
-                                </span>
-                              </div>
+                            {/* Always show nested items under CT series */}
+                            <div className="ml-4 mt-2 space-y-1">
+                              {/* RT Structure Series nested under CT */}
+                              {rtSeries.length > 0 && (
+                                <div className="space-y-1 border-l-2 border-green-500/30 pl-3">
+                                  {rtSeries.map((rtS) => (
+                                    <Button
+                                      key={rtS.id}
+                                      variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
+                                      className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                                        selectedRTSeries?.id === rtS.id 
+                                          ? 'bg-green-600 text-white border-green-500' 
+                                          : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
+                                      } border rounded-lg`}
+                                      onClick={() => handleRTSeriesSelect(rtS)}
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
+                                          RT
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {rtS.seriesDescription || 'Structure Set'}
+                                        </span>
+                                      </div>
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {/* Registration and MR Series nested under CT */}
+                              {(regSeries.length > 0 || mrSeries.length > 0) && (
+                                <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
+                                  {/* Registration objects */}
+                                  {regSeries.map((regS) => (
+                                    <div
+                                      key={regS.id}
+                                      className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg"
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                          REG
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {regS.seriesDescription || 'Registration'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  
+                                  {/* MR Series that can be fused */}
+                                  {mrSeries.map((mrS) => (
+                                    <div
+                                      key={mrS.id}
+                                      className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg hover:bg-purple-600/20 cursor-pointer"
+                                      title="MR series available for fusion"
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                          MR
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                        </span>
+                                        <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
+                                          Fusion Ready
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          ))}
-                          
-                          {/* MR Series that can be fused */}
-                          {series.filter(s => s.modality === 'MR').map((mrS) => (
+                          </div>
+                        ))}
+                        
+                        {/* Other modalities (if any) */}
+                        {otherSeries.map((seriesItem) => (
+                          <div key={seriesItem.id}>
                             <div
-                              key={mrS.id}
-                              className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg hover:bg-purple-600/20 cursor-pointer"
-                              title="MR series available for fusion"
+                              className={`
+                                p-2 rounded-lg border cursor-pointer transition-all duration-200
+                                ${selectedSeries?.id === seriesItem.id
+                                  ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                                  : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
+                                }
+                              `}
+                              onClick={() => onSeriesSelect(seriesItem)}
                             >
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                  MR
+                              <div className="flex items-center justify-between mb-1">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`
+                                    text-xs font-semibold
+                                    ${selectedSeries?.id === seriesItem.id
+                                      ? 'border-blue-400 text-blue-400'
+                                      : 'border-blue-500 text-blue-500'
+                                    }
+                                  `}
+                                >
+                                  {seriesItem.modality}
                                 </Badge>
-                                <span className="truncate text-xs">
-                                  {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                <span className="text-xs text-gray-400">
+                                  {seriesItem.imageCount} images
                                 </span>
-                                <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
-                                  Fusion Ready
-                                </Badge>
                               </div>
+                              
+                              <h4 className={`
+                                text-sm font-medium truncate
+                                ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
+                              `}>
+                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                              </h4>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
               </AccordionContent>
             </AccordionItem>

@@ -513,6 +513,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
+      {/* Fusion Panel */}
+      {selectedSeries && (
+        <FusionPanel
+          isOpen={showFusionPanel}
+          onClose={() => setShowFusionPanel(false)}
+          primarySeriesId={selectedSeries.id}
+          studyId={studyData.studies[0]?.id}
+          currentSlicePosition={currentSlicePosition}
+          onSecondarySeriesSelect={setSecondarySeriesId}
+          opacity={fusionOpacity}
+          onOpacityChange={setFusionOpacity}
+        />
+      )}
+
       {/* Contour Edit Toolbar */}
       {selectedForEdit && rtStructures && rtStructures.structures && (
         <ContourEditToolbar
