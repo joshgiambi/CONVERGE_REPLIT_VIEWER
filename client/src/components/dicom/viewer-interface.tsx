@@ -80,9 +80,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
       
-      // Auto-select first series only once when data loads
-      if (seriesData.length > 0 && !selectedSeries) {
-        handleSeriesSelect(seriesData[0]);
+      // Auto-select CT series as primary, fallback to first series
+      // IMPORTANT: Always load CT as primary for fusion dataset
+      if (!selectedSeries) {
+        const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
+        if (ctSeries) {
+          console.log('Auto-selecting CT series as primary:', ctSeries);
+          handleSeriesSelect(ctSeries);
+        } else if (seriesData.length > 0) {
+          console.log('No CT series found, selecting first series:', seriesData[0]);
+          handleSeriesSelect(seriesData[0]);
+        }
       }
       
       // Auto-load RT structures if available
