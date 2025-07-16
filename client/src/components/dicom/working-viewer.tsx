@@ -1474,11 +1474,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       const gray = Math.max(0, Math.min(255, normalizedValue));
       const pixelIndex = i * 4;
       
-      // Colorize MRI in purple tint for fusion visualization
-      data[pixelIndex] = gray * 0.7;     // R
-      data[pixelIndex + 1] = gray * 0.3; // G
-      data[pixelIndex + 2] = gray * 0.8; // B
-      data[pixelIndex + 3] = 255;        // A
+      // Use grayscale for MRI to avoid black overlay issue
+      data[pixelIndex] = gray;        // R
+      data[pixelIndex + 1] = gray;    // G
+      data[pixelIndex + 2] = gray;    // B
+      data[pixelIndex + 3] = 255;     // A
     }
     
     tempCtx.putImageData(imageData, 0, 0);
@@ -1511,7 +1511,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     // Draw secondary image with fusion opacity and proper blending
     ctx.save();
     ctx.globalAlpha = fusionOpacity;
-    ctx.globalCompositeOperation = 'multiply'; // Better blending mode for CT/MRI fusion
+    ctx.globalCompositeOperation = 'normal'; // Use normal blending to avoid black overlay
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);

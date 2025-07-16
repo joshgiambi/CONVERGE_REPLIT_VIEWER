@@ -84,6 +84,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       if (seriesData.length > 0 && !selectedSeries) {
         handleSeriesSelect(seriesData[0]);
       }
+      
+      // Auto-load RT structures if available
+      const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
+      if (rtSeries && !rtStructures) {
+        handleRTSeriesSelect(rtSeries);
+      }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 
@@ -222,6 +228,24 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       visibilityMap.set(structure.roiNumber, true);
     });
     setStructureVisibility(visibilityMap);
+  };
+  
+  const handleRTSeriesSelect = async (rtSeries: any) => {
+    try {
+      console.log('Auto-loading RT structures for series:', rtSeries.id);
+      
+      // Load RT structure contours
+      const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
+      if (response.ok) {
+        const rtStructData = await response.json();
+        console.log('RT structures loaded successfully:', rtStructData);
+        handleRTStructureLoad(rtStructData);
+      } else {
+        console.error('Failed to load RT structures:', response.status);
+      }
+    } catch (error) {
+      console.error('Error loading RT structure contours:', error);
+    }
   };
 
   const handleStructureSelection = (structureId: number, selected: boolean) => {

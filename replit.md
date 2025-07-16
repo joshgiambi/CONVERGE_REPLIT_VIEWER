@@ -89,6 +89,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 16, 2025: Enhanced Medical Image Fusion System - COMPLETED
+  - ✅ Implemented automatic RT structure loading for fusion dataset patient
+  - ✅ Fixed MRI fusion overlay black square issue by using grayscale rendering
+  - ✅ Replaced dropdown with thumbnail grid for secondary series selection
+  - ✅ Added visual thumbnails with selection indicators for faster MRI switching
+  - ✅ Added window/level adjustment tip for MRI series (right-click + drag)
+  - ✅ Fixed auto-selection of first MR series when fusion panel opens
+  - ✅ Enhanced fusion control panel with purple-themed UI and better layout
+  - ✅ Fusion opacity slider shows CT/MR balance with labeled endpoints
+  - Note: The dataset contains only 1 MRI series (AX T1 FS+C, 60 images)
+  - Note: Fusion button in bottom toolbar opens fusion panel when MR series available
 - July 11, 2025: Added Advanced Contour Editing Operations - COMPLETED
   - ✅ Added Interpolate button to fill missing slices between existing contours using linear interpolation
   - ✅ Added Nth Slice Delete button with hover menu to delete every 2nd, 3rd, or 4th slice

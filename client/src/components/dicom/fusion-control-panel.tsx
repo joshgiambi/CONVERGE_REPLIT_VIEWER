@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Minimize2, Maximize2, Layers } from 'lucide-react';
+import { Minimize2, Maximize2, Layers, Settings2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { Badge } from '@/components/ui/badge';
 
 interface FusionControlPanelProps {
   primarySeriesId: number; // CT series
@@ -90,10 +91,10 @@ export function FusionControlPanel({
     );
   }
   
-  // Expanded view
+  // Expanded view with thumbnails
   return (
     <div className="fixed bottom-4 right-4 z-50">
-      <Card className="bg-black/90 backdrop-blur-sm border-purple-500/50 p-4 w-80">
+      <Card className="bg-black/90 backdrop-blur-sm border-purple-500/50 p-4 w-96">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -110,30 +111,67 @@ export function FusionControlPanel({
           </Button>
         </div>
         
-        {/* MR Series Selector */}
+        {/* Thumbnail MR Series Selector */}
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label className="text-xs text-gray-300">MR Series</Label>
-            <Select value={selectedSecondaryId?.toString() || 'none'} onValueChange={handleSecondarySelect}>
-              <SelectTrigger className="h-8 bg-black/50 border-purple-500/30 text-sm">
-                <SelectValue placeholder="Select MR series" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {mrSeries.map((series: any) => (
-                  <SelectItem key={series.id} value={series.id.toString()}>
-                    <div className="flex items-center justify-between w-full">
-                      <span className="truncate max-w-[200px]">
-                        {series.seriesDescription || 'MR Series'}
-                      </span>
-                      <span className="text-xs text-gray-400 ml-2">
-                        ({series.imageCount})
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-gray-300">Available Fusion Series</Label>
+              <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
+                {mrSeries.length} MR series
+              </Badge>
+            </div>
+            
+            {/* Thumbnail Grid */}
+            <div className="grid grid-cols-3 gap-2">
+              {mrSeries.map((series: any, index: number) => (
+                <button
+                  key={series.id}
+                  onClick={() => handleSecondarySelect(series.id.toString())}
+                  className={`
+                    relative p-1 rounded-lg border-2 transition-all
+                    ${selectedSecondaryId === series.id
+                      ? 'border-purple-400 bg-purple-500/20 scale-105 shadow-lg shadow-purple-500/20'
+                      : 'border-purple-600/30 bg-purple-900/10 hover:border-purple-500/50 hover:bg-purple-500/10'
+                    }
+                  `}
+                >
+                  {/* Placeholder thumbnail */}
+                  <div className="w-full aspect-square bg-gradient-to-br from-purple-900/20 to-purple-800/20 rounded flex items-center justify-center">
+                    <Layers className="w-8 h-8 text-purple-500/50" />
+                  </div>
+                  <div className="mt-1 px-1">
+                    <p className="text-xs text-purple-200 truncate font-medium">
+                      MR {index + 1}
+                    </p>
+                    <p className="text-xs text-purple-400">
+                      {series.imageCount} imgs
+                    </p>
+                  </div>
+                  {selectedSecondaryId === series.id && (
+                    <div className="absolute top-1 right-1 w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                  )}
+                </button>
+              ))}
+              
+              {/* No fusion option */}
+              <button
+                onClick={() => handleSecondarySelect('none')}
+                className={`
+                  relative p-1 rounded-lg border-2 transition-all
+                  ${selectedSecondaryId === null
+                    ? 'border-gray-400 bg-gray-500/20'
+                    : 'border-gray-600/30 bg-gray-900/10 hover:border-gray-500/50 hover:bg-gray-500/10'
+                  }
+                `}
+              >
+                <div className="w-full aspect-square bg-gray-900/20 rounded flex items-center justify-center">
+                  <X className="w-8 h-8 text-gray-500/50" />
+                </div>
+                <div className="mt-1 px-1">
+                  <p className="text-xs text-gray-400 font-medium">No Fusion</p>
+                </div>
+              </button>
+            </div>
           </div>
           
           {/* Quick swap buttons for multiple MR series */}
@@ -178,6 +216,16 @@ export function FusionControlPanel({
                 <span>CT</span>
                 <span>50/50</span>
                 <span>MR</span>
+              </div>
+            </div>
+          )}
+          
+          {/* Window/Level Note */}
+          {selectedSecondaryId && (
+            <div className="mt-3 p-2 bg-purple-900/20 rounded-lg border border-purple-500/30">
+              <div className="flex items-center gap-2 text-xs text-purple-300">
+                <Settings2 className="h-3 w-3" />
+                <span>Tip: Use Right-click + drag to adjust MR window/level</span>
               </div>
             </div>
           )}
