@@ -128,6 +128,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
+  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 800, center: 400 });
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1450,14 +1451,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     const data = imageData.data;
     
     // Apply window/level to secondary image (MRI typically needs different settings)
-    // Use window/level from secondary image metadata if available
-    // MRI values vary significantly: AX T1 (257-684 center, 446-1189 width), AX T1 FS+C (220-917 center, 383-1593 width)
-    const mriWindow = { 
-      width: closestSecondaryImage.windowWidth ? parseFloat(closestSecondaryImage.windowWidth) : 800, 
-      center: closestSecondaryImage.windowCenter ? parseFloat(closestSecondaryImage.windowCenter) : 400 
-    };
-    const center = mriWindow.center;
-    const width = mriWindow.width;
+    // Use controlled MRI window/level values from state
+    const center = mriWindowLevel.center;
+    const width = mriWindowLevel.width;
     
     console.log(`MRI Window/Level - Center: ${center}, Width: ${width}, Series: ${closestSecondaryImage.seriesDescription || 'Unknown'}`);
     
@@ -2369,6 +2365,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
               opacity={fusionOpacity}
               onOpacityChange={setFusionOpacity}
               isVisible={true}
+              mriWindowLevel={mriWindowLevel}
+              onMriWindowLevelChange={setMriWindowLevel}
             />
           )}
         </div>

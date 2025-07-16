@@ -15,6 +15,8 @@ interface FusionControlPanelProps {
   opacity: number;
   onOpacityChange: (opacity: number) => void;
   isVisible: boolean;
+  mriWindowLevel?: { width: number; center: number };
+  onMriWindowLevelChange?: (windowLevel: { width: number; center: number }) => void;
 }
 
 export function FusionControlPanel({
@@ -23,7 +25,9 @@ export function FusionControlPanel({
   onSecondarySeriesSelect,
   opacity,
   onOpacityChange,
-  isVisible
+  isVisible,
+  mriWindowLevel = { width: 800, center: 400 },
+  onMriWindowLevelChange
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
   const [selectedSecondaryId, setSelectedSecondaryId] = useState<number | null>(null);
@@ -174,26 +178,7 @@ export function FusionControlPanel({
             </div>
           </div>
           
-          {/* Quick swap buttons for multiple MR series */}
-          {mrSeries.length > 1 && selectedSecondaryId && (
-            <div className="flex gap-2">
-              {mrSeries.map((series: any, index: number) => (
-                <Button
-                  key={series.id}
-                  variant={selectedSecondaryId === series.id ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleSecondarySelect(series.id.toString())}
-                  className={`flex-1 text-xs h-7 ${
-                    selectedSecondaryId === series.id 
-                      ? 'bg-purple-600 border-purple-500' 
-                      : 'bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30'
-                  }`}
-                >
-                  MR{index + 1}
-                </Button>
-              ))}
-            </div>
-          )}
+
           
           {/* Opacity Control */}
           {selectedSecondaryId && (
@@ -216,6 +201,44 @@ export function FusionControlPanel({
                 <span>CT</span>
                 <span>50/50</span>
                 <span>MR</span>
+              </div>
+            </div>
+          )}
+          
+          {/* MRI Window/Level Controls */}
+          {selectedSecondaryId && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-gray-300">MRI Window/Level</Label>
+                <span className="text-xs text-purple-300">
+                  W: {Math.round(mriWindowLevel.width)} C: {Math.round(mriWindowLevel.center)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMriWindowLevelChange?.({ width: 800, center: 400 })}
+                  className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
+                >
+                  Auto
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMriWindowLevelChange?.({ width: 600, center: 300 })}
+                  className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
+                >
+                  T1
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMriWindowLevelChange?.({ width: 1200, center: 600 })}
+                  className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
+                >
+                  T1+C
+                </Button>
               </div>
             </div>
           )}

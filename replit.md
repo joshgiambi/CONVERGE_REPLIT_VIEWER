@@ -89,6 +89,13 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 16, 2025: MRI Window/Level Controls and UI Refinements - COMPLETED
+  - ✅ Removed redundant MR tab buttons from fusion control panel since thumbnails provide same functionality
+  - ✅ Added dedicated MRI window/level controls to fusion panel with preset buttons (Auto, T1, T1+C)
+  - ✅ Fixed MRI rendering using controlled window/level state instead of hardcoded values
+  - ✅ Added live window/level display showing current width and center values for MRI
+  - ✅ MRI window/level can now be adjusted independently from CT window/level controls
+  - Note: Right-click drag still only adjusts CT window/level, MRI must be adjusted via fusion panel buttons
 - July 16, 2025: Database Cleanup and DICOM Metadata Integration - COMPLETED
   - ✅ Deleted older fusion patient and all associated data
   - ✅ Updated patient names to use real DICOM metadata (SKXivnJzBjPxssVj) instead of made-up names
