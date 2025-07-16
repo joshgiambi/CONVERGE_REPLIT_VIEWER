@@ -162,6 +162,28 @@ export type NetworkQuery = typeof networkQueries.$inferSelect;
 export type InsertPacsConnection = z.infer<typeof insertPacsConnectionSchema>;
 export type InsertNetworkQuery = z.infer<typeof insertNetworkQuerySchema>;
 
+// Registration table for DICOM registration transformation matrices
+export const registrations = pgTable("registrations", {
+  id: serial("id").primaryKey(),
+  studyId: integer("study_id").references(() => studies.id),
+  seriesInstanceUID: text("series_instance_uid"),
+  sopInstanceUID: text("sop_instance_uid"),
+  sourceFrameOfReferenceUID: text("source_frame_of_reference_uid"),
+  targetFrameOfReferenceUID: text("target_frame_of_reference_uid"),
+  transformationMatrix: text("transformation_matrix"), // JSON array of 16 numbers for 4x4 matrix
+  matrixType: text("matrix_type"), // e.g., 'RIGID'
+  metadata: text("metadata"), // Additional metadata as JSON
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertRegistrationSchema = createInsertSchema(registrations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type Registration = typeof registrations.$inferSelect;
+export type InsertRegistration = z.infer<typeof insertRegistrationSchema>;
+
 // V2 Professional Contour System - Medical Grade Types
 export interface Point {
   x: number;

@@ -937,6 +937,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get registration data for a study
+  app.get("/api/registrations/:studyId", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      // For now, return hardcoded registration for study 7 (fusion dataset)
+      if (studyId === 7) {
+        res.json({
+          transformationMatrix: [0.99933547159219, -0.0077344424307, -0.0356201293921, -11.334524593996, 0.00427828866787, 0.99536240009279, -0.0961009298998, -192.87910608354, 0.03619822459314, 0.09588467490592, 0.99473404367926, 643.420715526161, 0, 0, 0, 1],
+          matrixType: 'RIGID'
+        });
+      } else {
+        res.json(null);
+      }
+    } catch (error) {
+      console.error("Error fetching registration:", error);
+      res.status(500).json({ error: "Failed to fetch registration" });
+    }
+  });
+
   // PACS routes  
   app.get("/api/pacs", async (req, res) => {
     try {

@@ -129,6 +129,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 200, center: 100 }); // Default for very dark MRI
+  const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -947,17 +948,31 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
         const imageList = await response.json();
         const sortedImages = imageList.sort((a: any, b: any) => {
+          // Always prefer slice location for sorting
+          const aSliceLoc = parseFloat(a.sliceLocation);
+          const bSliceLoc = parseFloat(b.sliceLocation);
+          
+          if (!isNaN(aSliceLoc) && !isNaN(bSliceLoc)) {
+            return aSliceLoc - bSliceLoc;
+          }
+          
+          // Fall back to instance number only if slice location is missing
           if (a.instanceNumber !== null && b.instanceNumber !== null) {
             return a.instanceNumber - b.instanceNumber;
           }
-          if (a.sliceLocation !== null && b.sliceLocation !== null) {
-            return parseFloat(a.sliceLocation) - parseFloat(b.sliceLocation);
-          }
+          
           return a.id - b.id;
         });
 
         setSecondaryImages(sortedImages);
         console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
+        
+        // Debug log the sorted order
+        console.log('MRI sorted order (first 5 and last 5):');
+        const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
+        debugImages.forEach((img: any, idx: number) => {
+          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
+        });
         
         // Preload secondary images
         const newCache = new Map();
@@ -1414,22 +1429,61 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
                                parseFloat(primaryImage.sliceLocation) || 
                                currentIndex;
     
-    // Find the closest secondary image by index mapping
-    // Since CT and MRI use different coordinate systems, we need to map by relative position
-    const primaryIndex = currentIndex;
-    const primaryRatio = primaryIndex / (images.length - 1); // 0 to 1 ratio
+    // Find the closest secondary image by position mapping
+    // Get CT slice position range - handle null slice locations
+    let ctMinPos = parseFloat(images[0].sliceLocation);
+    let ctMaxPos = parseFloat(images[images.length - 1].sliceLocation);
     
-    // Map to secondary image index
-    const secondaryIndex = Math.round(primaryRatio * (secondaryImages.length - 1));
-    const closestSecondaryImage = secondaryImages[secondaryIndex];
+    // If slice locations are null, calculate from current position and total images
+    if (isNaN(ctMinPos) || isNaN(ctMaxPos)) {
+      // Use actual CT range from database
+      ctMinPos = 325.5; // First CT slice
+      ctMaxPos = 723.5; // Last CT slice  
+      console.log(`Using verified CT range: ${ctMinPos} to ${ctMaxPos}`);
+    }
+    
+    const ctRange = ctMaxPos - ctMinPos;
+    
+    // Get MRI slice position range  
+    const mriMinPos = parseFloat(secondaryImages[0].sliceLocation);
+    const mriMaxPos = parseFloat(secondaryImages[secondaryImages.length - 1].sliceLocation);
+    const mriRange = Math.abs(mriMaxPos - mriMinPos);
+    
+    // Calculate position ratio in CT space
+    const ctPos = parseFloat(primaryImage.sliceLocation);
+    const ctRatio = (ctPos - ctMinPos) / ctRange;
+    
+    // Map to MRI space - handle descending MRI slices
+    let mriTargetPos;
+    if (mriMinPos > mriMaxPos) {
+      // MRI slices are descending
+      mriTargetPos = mriMinPos - (ctRatio * mriRange);
+    } else {
+      // MRI slices are ascending
+      mriTargetPos = mriMinPos + (ctRatio * mriRange);
+    }
+    
+    // Find closest MRI slice by position
+    let closestSecondaryImage = secondaryImages[0];
+    let minPosDiff = Math.abs(parseFloat(closestSecondaryImage.sliceLocation) - mriTargetPos);
+    
+    for (let i = 1; i < secondaryImages.length; i++) {
+      const posDiff = Math.abs(parseFloat(secondaryImages[i].sliceLocation) - mriTargetPos);
+      if (posDiff < minPosDiff) {
+        minPosDiff = posDiff;
+        closestSecondaryImage = secondaryImages[i];
+      }
+    }
+    
+    const secondaryIndex = secondaryImages.indexOf(closestSecondaryImage);
     
     // For debugging
     const minDistance = 0;
     
     if (!closestSecondaryImage) return;
     
-    console.log(`Fusion alignment - CT index: ${primaryIndex}/${images.length-1}, MRI index: ${secondaryIndex}/${secondaryImages.length-1}, Ratio: ${primaryRatio.toFixed(2)}`);
-    console.log(`MRI slice selected: ${closestSecondaryImage.sopInstanceUID}`);
+    console.log(`Fusion alignment - CT pos: ${ctPos.toFixed(1)} (${ctRatio.toFixed(2)}), MRI target: ${mriTargetPos.toFixed(1)}, MRI actual: ${closestSecondaryImage.sliceLocation}`);
+    console.log(`CT index: ${currentIndex}, MRI index: ${secondaryIndex}, MRI instance: ${closestSecondaryImage.instanceNumber}`);
     
     // Get the secondary image data from cache
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
