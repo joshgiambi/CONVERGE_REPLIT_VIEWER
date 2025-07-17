@@ -41,12 +41,19 @@ export function FusionControlPanel({
   // Filter for MR series only
   const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
   
-  // Auto-select first MR series when available
+  // Auto-select first MR series with valid slice locations
   useEffect(() => {
     if (mrSeries.length > 0 && !selectedSecondaryId) {
-      const firstMRSeries = mrSeries[0];
-      setSelectedSecondaryId(firstMRSeries.id);
-      onSecondarySeriesSelect(firstMRSeries.id);
+      // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
+      const preferredSeries = mrSeries.find((s: any) => 
+        s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
+      );
+      
+      const seriestoSelect = preferredSeries || mrSeries[0];
+      console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
+      
+      setSelectedSecondaryId(seriestoSelect.id);
+      onSecondarySeriesSelect(seriestoSelect.id);
     }
   }, [mrSeries, selectedSecondaryId]);
   
