@@ -1917,8 +1917,16 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     const canvasHeight = ctx.canvas.height;
     
     // Get pixel spacing for both images
-    const primarySpacing = parseFloat(primaryImage.pixelSpacing?.split('\\')[0]) || 1;
-    const secondarySpacing = parseFloat(closestSecondaryImage.pixelSpacing?.split('\\')[0]) || 0.5;
+    const primarySpacing = primaryImage.pixelSpacing 
+      ? (typeof primaryImage.pixelSpacing === 'string' 
+        ? parseFloat(primaryImage.pixelSpacing.split('\\')[0])
+        : parseFloat(primaryImage.pixelSpacing[0]))
+      : 1;
+    const secondarySpacing = closestSecondaryImage.pixelSpacing 
+      ? (typeof closestSecondaryImage.pixelSpacing === 'string'
+        ? parseFloat(closestSecondaryImage.pixelSpacing.split('\\')[0])
+        : parseFloat(closestSecondaryImage.pixelSpacing[0]))
+      : 0.5;
     
     // Calculate the scale ratio between images based on pixel spacing
     const spacingRatio = secondarySpacing / primarySpacing;
@@ -1979,6 +1987,17 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       // Apply the offset to center the MRI on the CT
       const adjustedX = x + (pixelOffsetX * secondaryBaseScale);
       const adjustedY = y + (pixelOffsetY * secondaryBaseScale);
+      
+      // Debug: Log where the image will be drawn
+      console.log(`MRI draw position: x=${adjustedX.toFixed(1)}, y=${adjustedY.toFixed(1)}, width=${scaledWidth.toFixed(1)}, height=${scaledHeight.toFixed(1)}`);
+      console.log(`Canvas dimensions: ${canvasWidth}x${canvasHeight}`);
+      console.log(`MRI visible bounds: [${adjustedX.toFixed(1)}, ${adjustedY.toFixed(1)}, ${(adjustedX + scaledWidth).toFixed(1)}, ${(adjustedY + scaledHeight).toFixed(1)}]`);
+      
+      // Check if MRI is off-screen
+      if (adjustedX + scaledWidth < 0 || adjustedX > canvasWidth || 
+          adjustedY + scaledHeight < 0 || adjustedY > canvasHeight) {
+        console.warn(`MRI image is completely off-screen!`);
+      }
       
       ctx.drawImage(tempCanvas, adjustedX, adjustedY, scaledWidth, scaledHeight);
       
