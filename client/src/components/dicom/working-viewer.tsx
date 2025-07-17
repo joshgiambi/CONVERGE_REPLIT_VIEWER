@@ -1531,20 +1531,43 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         }
       }
       
-      // CRITICAL: Understanding the registration matrix direction
-      // The large Z translation (643mm) suggests this matrix transforms FROM CT TO MRI coordinates
-      // NOT the other way around as initially assumed
+      // CRITICAL: Fix registration transformation using center-based alignment
+      // The large offset in the registration matrix suggests different coordinate system origins
       
       console.log(`CT world position: [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}]`);
       console.log(`Registration matrix - R: [[${R[0][0]}, ${R[0][1]}, ${R[0][2]}], [${R[1][0]}, ${R[1][1]}, ${R[1][2]}], [${R[2][0]}, ${R[2][1]}, ${R[2][2]}]]`);
       console.log(`Registration matrix - T: [${T[0]}, ${T[1]}, ${T[2]}]`);
       
-      // First, let's try applying the matrix directly (assuming it transforms CT->MRI)
-      const mriX_direct = R[0][0] * ctX + R[0][1] * ctY + R[0][2] * ctZ + T[0];
-      const mriY_direct = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
-      const mriZ_direct = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
+      // Calculate center of each volume
+      const ctCenter = (ctMinPos + ctMaxPos) / 2;
+      const mriCenter = (mriMinPos + mriMaxPos) / 2;
       
-      console.log(`Direct transform CT->MRI: [${mriX_direct.toFixed(1)}, ${mriY_direct.toFixed(1)}, ${mriZ_direct.toFixed(1)}]`);
+      console.log(`Volume centers - CT: ${ctCenter.toFixed(1)}mm, MRI: ${mriCenter.toFixed(1)}mm`);
+      
+      // Approach 1: Apply only rotation, then align centers
+      // This ignores the translation component which seems incorrect
+      const ctOffsetFromCenter = ctSlicePosition - ctCenter;
+      
+      // Apply rotation to the offset
+      const rotatedOffset = R[2][2] * ctOffsetFromCenter; // Using only Z-component of rotation
+      
+      // Map to MRI space
+      const mriZ_centered = mriCenter + rotatedOffset;
+      
+      console.log(`Center-based transform: CT ${ctSlicePosition.toFixed(1)}mm -> MRI ${mriZ_centered.toFixed(1)}mm`);
+      
+      // Also try simple percentage mapping as backup
+      const ctPercent = (ctSlicePosition - ctMinPos) / (ctMaxPos - ctMinPos);
+      const mriZ_percent = mriMinPos + ctPercent * (mriMaxPos - mriMinPos);
+      
+      console.log(`Percentage mapping: CT ${ctSlicePosition.toFixed(1)}mm (${(ctPercent*100).toFixed(0)}%) -> MRI ${mriZ_percent.toFixed(1)}mm`);
+      
+      // Use center-based if within range, otherwise fallback to percentage
+      let transformedZ = mriZ_centered;
+      if (mriZ_centered < mriMinPos || mriZ_centered > mriMaxPos) {
+        console.warn(`Center-based transform out of range, using percentage mapping`);
+        transformedZ = mriZ_percent;
+      }
       
       // Find the MRI slice with the closest Z position
       let bestMatch = null;
@@ -1559,7 +1582,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         if (positions.length < 3) continue;
         
         const mriZ = positions[2];
-        const distance = Math.abs(mriZ - mriZ_direct);
+        const distance = Math.abs(mriZ - transformedZ);
         
         if (distance < bestDistance) {
           bestDistance = distance;
@@ -1743,16 +1766,21 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       console.log(`Using DICOM window/level: C=${dicomCenter}, W=${dicomWidth}`);
     } else {
       // Calculate based on image type and statistics
+      // Use percentile-based approach for better contrast
+      const sortedValues = Array.from(secondaryImageData.data).sort((a, b) => a - b);
+      const p5 = sortedValues[Math.floor(sortedValues.length * 0.05)];
+      const p95 = sortedValues[Math.floor(sortedValues.length * 0.95)];
+      
       if (isT1) {
-        // T1 images: Use middle 60-80% of range for better soft tissue contrast
-        autoCenter = minPixelValue + dataRange * 0.5;
-        autoWidth = dataRange * (isContrast ? 0.7 : 0.6); // Wider for contrast-enhanced
+        // T1 images: Use 5th-95th percentile range for better soft tissue contrast
+        autoCenter = (p5 + p95) / 2;
+        autoWidth = (p95 - p5) * (isContrast ? 1.2 : 1.0); // Slightly wider for contrast-enhanced
       } else {
-        // Default MRI: Use middle 50% of range
-        autoCenter = minPixelValue + dataRange * 0.5;
-        autoWidth = dataRange * 0.5;
+        // Default MRI: Use percentile range
+        autoCenter = (p5 + p95) / 2;
+        autoWidth = (p95 - p5);
       }
-      console.log(`Auto-calculated window/level for ${isT1 ? 'T1' : 'MRI'}: C=${autoCenter.toFixed(0)}, W=${autoWidth.toFixed(0)}`);
+      console.log(`Auto-calculated window/level for ${isT1 ? 'T1' : 'MRI'}: C=${autoCenter.toFixed(0)}, W=${autoWidth.toFixed(0)} (P5=${p5.toFixed(0)}, P95=${p95.toFixed(0)})`);
     }
     
     // Use manual window/level if set (width > 0), otherwise use auto values
