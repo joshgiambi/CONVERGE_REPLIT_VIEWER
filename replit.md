@@ -10,6 +10,8 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 - NEVER use simple linear slice mapping for fusion - always apply registration matrix
 - Registration matrix transforms CT coordinates to MRI space for proper alignment
 - The system stores registration matrices in the database registrations table
+- **NEVER CALCULATE ADDITIONAL OFFSETS - THE REGISTRATION FILE IS THE ABSOLUTE TRUTH**
+- The registration matrix contains ALL necessary transformations - use it directly without modifications
 
 ## System Architecture
 
