@@ -1476,12 +1476,31 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       }
       
       // The registration transforms from CT coordinate system to MRI coordinate system
-      // For slice matching, we transform the CT z-coordinate
-      const ctZ = ctSlicePosition;
+      // We need to get the CT image center point and transform it to MRI space
       
-      // Apply the transformation: z' = R[2][2] * z + T[2]
-      // For the fusion dataset, the registration matrix transforms CT to MRI space
-      const mriZ = R[2][2] * ctZ + T[2];
+      // Get CT image position (center point in patient coordinates)
+      const ctImagePosition = primaryImage.imagePosition || primaryImage.parsedImagePosition;
+      let ctX = -249.51171875, ctY = -465.51171875, ctZ = ctSlicePosition; // Default CT position
+      
+      if (ctImagePosition) {
+        const positions = ctImagePosition.split('\\').map((p: string) => parseFloat(p));
+        if (positions.length >= 3) {
+          ctX = positions[0];
+          ctY = positions[1];
+          ctZ = positions[2];
+        }
+      }
+      
+      console.log(`CT Image Position: [${ctX}, ${ctY}, ${ctZ}]`);
+      console.log(`Primary image metadata:`, primaryImage);
+      
+      // Apply full 4x4 matrix transformation: [x', y', z'] = [x, y, z] * R + T
+      const mriX = R[0][0] * ctX + R[0][1] * ctY + R[0][2] * ctZ + T[0];
+      const mriY = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
+      const mriZ = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
+      
+      console.log(`Registration transform: CT [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}] -> MRI [${mriX.toFixed(1)}, ${mriY.toFixed(1)}, ${mriZ.toFixed(1)}]`);
+      console.log(`MRI bounds: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
       
       // Check if the transformation result is within MRI bounds
       const mriMinPos = -74.441441121391;
@@ -1489,28 +1508,39 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       
       if (mriZ < mriMinPos || mriZ > mriMaxPos) {
         console.warn(`Transformed MRI z=${mriZ.toFixed(1)}mm is outside MRI bounds [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
-        // Use linear mapping as fallback
-        const ctMinPos = 325.5;
-        const ctMaxPos = 723.5;
-        const ctRange = ctMaxPos - ctMinPos;
-        const mriRange = mriMaxPos - mriMinPos;
-        const ctRatio = (ctZ - ctMinPos) / ctRange;
-        const linearMriZ = mriMinPos + (ctRatio * mriRange);
-        console.log(`Using linear mapping: CT ${ctZ.toFixed(1)}mm -> MRI ${linearMriZ.toFixed(1)}mm`);
         
-        // Find closest MRI slice to linear mapped position
-        for (const secondaryImage of secondaryImages) {
-          const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
-          const distance = Math.abs(mriSlicePos - linearMriZ);
+        // MRI focuses on nasal cavity region - map CT range to MRI range
+        // CT range is approximately 325.5 to 723.5 (head/neck)
+        // MRI range is -74.4 to 161.6 (nasal cavity region)
+        
+        // Map CT anatomical regions to MRI regions
+        const ctHeadStart = 500; // Approximate head start in CT
+        const ctHeadEnd = 650;   // Approximate head end in CT
+        
+        if (ctZ >= ctHeadStart && ctZ <= ctHeadEnd) {
+          // This is the head region in CT - map to MRI range
+          const ctRatio = (ctZ - ctHeadStart) / (ctHeadEnd - ctHeadStart);
+          const targetMriZ = mriMinPos + ctRatio * (mriMaxPos - mriMinPos);
           
-          if (distance < minDistance) {
-            minDistance = distance;
-            closestSecondaryImage = secondaryImage;
+          console.log(`Anatomical mapping: CT ${ctZ.toFixed(1)}mm (head region) -> MRI target ${targetMriZ.toFixed(1)}mm`);
+          
+          // Find closest MRI slice
+          for (const secondaryImage of secondaryImages) {
+            const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
+            const distance = Math.abs(mriSlicePos - targetMriZ);
+            
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestSecondaryImage = secondaryImage;
+            }
           }
+        } else {
+          // Outside head region - no MRI correspondence
+          console.log(`CT slice ${ctZ.toFixed(1)}mm is outside head region - no MRI overlay`);
+          return;
         }
         
         console.log(`Found MRI slice at ${closestSecondaryImage?.sliceLocation}mm (distance: ${minDistance.toFixed(1)}mm)`);
-        return;
       }
       
       console.log(`Registration transform: CT z=${ctZ.toFixed(1)}mm -> MRI z=${mriZ.toFixed(1)}mm`);
@@ -1553,7 +1583,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       }
     }
     
-    if (!closestSecondaryImage) return;
+    if (!closestSecondaryImage) {
+      console.error("No matching MRI slice found for fusion");
+      return;
+    }
     
     const secondaryIndex = secondaryImages.indexOf(closestSecondaryImage);
     console.log(`Rendering fusion: CT slice ${currentIndex} (${ctSlicePosition.toFixed(1)}mm) -> MRI slice ${secondaryIndex} (${closestSecondaryImage.sliceLocation}mm)`);
@@ -1567,7 +1600,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     
     // Get the secondary image data from cache
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
-    if (!secondaryImageData) return;
+    if (!secondaryImageData) {
+      console.error(`Secondary image not found in cache: ${closestSecondaryImage.sopInstanceUID}`);
+      return;
+    }
     
     // Get primary image metadata for registration alignment
     const primaryImageData = imageCache.get(primaryImage.sopInstanceUID);
