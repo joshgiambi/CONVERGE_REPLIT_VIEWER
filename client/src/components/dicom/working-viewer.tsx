@@ -999,24 +999,33 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         
         // Preload secondary images
         const newCache = new Map();
-        await Promise.all(sortedImages.map(async (image: any) => {
+        await Promise.all(sortedImages.map(async (image: any, index: number) => {
           try {
             const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-            if (!imageResponse.ok) return;
+            if (!imageResponse.ok) {
+              console.error(`Failed to fetch secondary image ${index}:`, imageResponse.status);
+              return;
+            }
             
             const arrayBuffer = await imageResponse.arrayBuffer();
             const imageData = await parseDicomImage(arrayBuffer);
             
             if (imageData) {
               newCache.set(image.sopInstanceUID, imageData);
+              if (index < 3) {
+                console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
+              }
+            } else {
+              console.error(`Failed to parse secondary image ${index}`);
             }
           } catch (error) {
-            console.warn(`Failed to preload secondary image:`, error);
+            console.warn(`Failed to preload secondary image ${index}:`, error);
           }
         }));
         
         setSecondaryImageCache(newCache);
         console.log(`Preloaded ${newCache.size} secondary images`);
+        console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
         
         // Trigger re-render to show fusion overlay
         if (newCache.size > 0) {
@@ -1325,8 +1334,15 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
           await renderFusionOverlay(ctx, currentImage);
-        } catch (fusionError) {
+        } catch (fusionError: any) {
           console.error("Error rendering fusion overlay:", fusionError);
+          console.error("Fusion error details:", {
+            message: fusionError.message,
+            stack: fusionError.stack,
+            secondarySeriesId,
+            secondaryImagesCount: secondaryImages.length,
+            fusionOpacity
+          });
           // Continue without fusion rather than failing entire image display
         }
       }
@@ -1455,6 +1471,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       return;
     }
     
+    console.log("Starting fusion overlay render...");
+    console.log("Secondary cache size:", secondaryImageCache.size);
+    console.log("Fusion opacity:", fusionOpacity);
+    
     // Get the current CT slice position
     let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
     
@@ -1510,12 +1530,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       const mriY = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
       const mriZ = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
       
-      console.log(`Registration transform: CT [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}] -> MRI [${mriX.toFixed(1)}, ${mriY.toFixed(1)}, ${mriZ.toFixed(1)}]`);
-      console.log(`MRI bounds: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
-      
-      // Check if the transformation result is within MRI bounds
+      // Define MRI bounds first
       const mriMinPos = -74.441441121391;
       const mriMaxPos = 161.558552445182;
+      
+      console.log(`Registration transform: CT [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}] -> MRI [${mriX.toFixed(1)}, ${mriY.toFixed(1)}, ${mriZ.toFixed(1)}]`);
+      console.log(`MRI bounds: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
       
       if (mriZ < mriMinPos || mriZ > mriMaxPos) {
         console.warn(`Transformed MRI z=${mriZ.toFixed(1)}mm is outside MRI bounds [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
@@ -1593,6 +1613,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     
     const secondaryIndex = secondaryImages.indexOf(closestSecondaryImage);
     console.log(`Rendering fusion: CT slice ${currentIndex} (${ctSlicePosition.toFixed(1)}mm) -> MRI slice ${secondaryIndex} (${closestSecondaryImage.sliceLocation}mm)`);
+    console.log(`Secondary image SOP UID: ${closestSecondaryImage.sopInstanceUID}`);
     
     // Verify we're using registration matrix
     if (registrationMatrix) {
@@ -1605,12 +1626,17 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     const secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
     if (!secondaryImageData) {
       console.error(`Secondary image not found in cache: ${closestSecondaryImage.sopInstanceUID}`);
+      console.error("Secondary cache contents:", Array.from(secondaryImageCache.keys()).slice(0, 5));
+      console.error("Looking for:", closestSecondaryImage);
       return;
     }
     
     // Get primary image metadata for registration alignment
     const primaryImageData = imageCache.get(primaryImage.sopInstanceUID);
-    if (!primaryImageData) return;
+    if (!primaryImageData) {
+      console.error("Primary image not found in cache for fusion");
+      return;
+    }
     
     // Create a temporary canvas for the secondary image
     const tempCanvas = document.createElement("canvas");
