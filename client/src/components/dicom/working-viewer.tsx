@@ -1622,11 +1622,21 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       // For the current CT slice, we already have patient coordinates
       const ctPatientCoords = [ctX, ctY, ctZ, 1];
       
+      console.log(`\n=== Starting DICOM Registration Fusion ===`);
+      console.log(`CT slice location: ${primaryImage.sliceLocation}mm`);
       console.log(`CT patient coordinates: [${ctPatientCoords.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
-      console.log(`Registration matrix applied...`);
+      console.log(`Number of MRI images available: ${secondaryImages.length}`);
+      
+      // Convert flat array to 4x4 matrix
+      const regMatrix4x4 = [
+        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
+        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
+        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
+        [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
+      ];
       
       // Apply registration transformation: CT patient coords -> registered MRI patient coords
-      const registeredCoords = multiplyMatrixVector(matrix, ctPatientCoords);
+      const registeredCoords = multiplyMatrixVector(regMatrix4x4, ctPatientCoords);
       
       console.log(`Registered coordinates: [${registeredCoords.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
       
@@ -1637,34 +1647,34 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       let bestMatch = null;
       let bestDistance = Infinity;
       
-      // Build MRI image-to-patient transform for first MRI image to get orientation
-      const mriImageToPatient = (() => {
-        const firstMri = secondaryImages[0];
-        if (!firstMri) return null;
-        
-        const imagePosition = firstMri.imagePosition ? 
-          firstMri.imagePosition.split('\\').map((p: string) => parseFloat(p)) : [0, 0, 0];
-        const imageOrientation = firstMri.imageOrientation ? 
-          firstMri.imageOrientation.split('\\').map((p: string) => parseFloat(p)) : [1, 0, 0, 0, 1, 0];
-        const pixelSpacing = firstMri.pixelSpacing ? 
-          firstMri.pixelSpacing.split('\\').map((p: string) => parseFloat(p)) : [1, 1];
-        
-        const rowVector = imageOrientation.slice(0, 3);
-        const colVector = imageOrientation.slice(3, 6);
-        const sliceVector = [
-          rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
-          rowVector[2] * colVector[0] - rowVector[0] * colVector[2],
-          rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
-        ];
-        
-        return {
-          rowVector,
-          colVector,
-          sliceVector,
-          pixelSpacing
-        };
-      })();
+      // Try both registration directions since DICOM registration can be ambiguous
+      // First try: registration transforms CT to MRI
+      let bestMatchDirect = null;
+      let bestDistanceDirect = Infinity;
       
+      // Second try: registration transforms MRI to CT (need inverse)
+      let bestMatchInverse = null;
+      let bestDistanceInverse = Infinity;
+      
+      // Compute inverse of registration matrix
+      const regMatrixInverse = invertMatrix4x4(regMatrix4x4);
+      
+      // Debug: Log first few MRI positions to understand the coordinate space
+      if (secondaryImages.length > 0) {
+        console.log(`\nMRI metadata check:`);
+        console.log(`First MRI:`, {
+          imagePosition: secondaryImages[0].imagePosition,
+          sliceLocation: secondaryImages[0].sliceLocation,
+          instanceNumber: secondaryImages[0].instanceNumber
+        });
+        console.log(`Last MRI:`, {
+          imagePosition: secondaryImages[secondaryImages.length-1].imagePosition,
+          sliceLocation: secondaryImages[secondaryImages.length-1].sliceLocation,
+          instanceNumber: secondaryImages[secondaryImages.length-1].instanceNumber
+        });
+      }
+      
+      // Try both directions of registration
       for (let i = 0; i < secondaryImages.length; i++) {
         const mriImage = secondaryImages[i];
         const mriPos = mriImage.imagePosition;
@@ -1673,24 +1683,67 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         const mriPatientPosition = mriPos.split('\\').map((p: string) => parseFloat(p));
         if (mriPatientPosition.length < 3) continue;
         
-        // Calculate 3D distance in patient space
-        const dx = mriPatientPosition[0] - registeredCoords[0];
-        const dy = mriPatientPosition[1] - registeredCoords[1];
-        const dz = mriPatientPosition[2] - registeredCoords[2];
-        const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        // Debug log first few iterations
+        if (i < 3) {
+          console.log(`MRI[${i}] patient position: [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}]`);
+        }
         
-        // For axial slices, we mainly care about Z distance
-        const zDistance = Math.abs(dz);
+        // Direction 1: Registration transforms CT to MRI
+        const dx1 = mriPatientPosition[0] - registeredCoords[0];
+        const dy1 = mriPatientPosition[1] - registeredCoords[1];
+        const dz1 = mriPatientPosition[2] - registeredCoords[2];
+        const distance1 = Math.sqrt(dx1*dx1 + dy1*dy1 + dz1*dz1);
+        const zDistance1 = Math.abs(dz1);
         
-        if (zDistance < bestDistance) {
-          bestDistance = zDistance;
-          bestMatch = mriImage;
+        if (zDistance1 < bestDistanceDirect) {
+          bestDistanceDirect = zDistance1;
+          bestMatchDirect = mriImage;
           
-          // Log close matches for debugging
-          if (zDistance < 10) {
-            console.log(`  Close match: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance.toFixed(1)}mm`);
+          if (zDistance1 < 10) {
+            console.log(`  Direction 1 - Close match: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance1.toFixed(1)}mm`);
           }
         }
+        
+        // Direction 2: Registration transforms MRI to CT (use inverse)
+        const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
+        const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
+        
+        const dx2 = ctX - mriTransformed[0];
+        const dy2 = ctY - mriTransformed[1];
+        const dz2 = ctZ - mriTransformed[2];
+        const distance2 = Math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2);
+        const zDistance2 = Math.abs(dz2);
+        
+        // Debug first few iterations
+        if (i < 3) {
+          console.log(`  MRI->CT: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}] -> [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
+          console.log(`  Distance to CT [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}]: ${distance2.toFixed(1)}mm`);
+        }
+        
+        if (zDistance2 < bestDistanceInverse) {
+          bestDistanceInverse = zDistance2;
+          bestMatchInverse = mriImage;
+          
+          if (zDistance2 < 10) {
+            console.log(`  Direction 2 - Close match: MRI transforms to CT at [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance2.toFixed(1)}mm`);
+          }
+        }
+      }
+      
+      // Choose the direction with the best match
+      console.log(`Direction 1 (CT->MRI) best distance: ${bestDistanceDirect.toFixed(1)}mm`);
+      console.log(`Direction 2 (MRI->CT) best distance: ${bestDistanceInverse.toFixed(1)}mm`);
+      
+      if (bestDistanceDirect < bestDistanceInverse && bestDistanceDirect < 50) {
+        bestMatch = bestMatchDirect;
+        bestDistance = bestDistanceDirect;
+        console.log(`✓ Using Direction 1: Registration transforms CT to MRI`);
+      } else if (bestDistanceInverse < 50) {
+        bestMatch = bestMatchInverse;
+        bestDistance = bestDistanceInverse;
+        console.log(`✓ Using Direction 2: Registration transforms MRI to CT`);
+      } else {
+        bestDistance = Math.min(bestDistanceDirect, bestDistanceInverse);
       }
       
       console.log(`Best match Z-distance: ${bestDistance.toFixed(1)}mm`);
@@ -1701,9 +1754,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         console.log(`✓ Found MRI slice using registration: ${bestMatch.sliceLocation}mm (distance: ${bestDistance.toFixed(1)}mm)`);
       } else {
         console.warn(`Registration matrix produces out-of-range coordinates. Best distance: ${bestDistance?.toFixed(1)}mm`);
-        console.log(`MRI Z range: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}], Transformed Z: ${mriZ_direct.toFixed(1)}`);
+        console.log(`MRI Z range: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}], Transformed Z: ${transformedZ.toFixed(1)}`);
+        console.log(`CRITICAL ERROR: User requires registration-based alignment only. No fallback to linear mapping allowed.`);
+        console.error(`Unable to find matching MRI slice using registration. Check registration matrix validity.`);
+        return; // Don't render fusion if registration fails
         
-        // The registration matrix might have incorrect values or different convention
+        // NOTE: The code below is disabled per user requirements - ONLY use registration matrix
         // Use anatomical correspondence as fallback
         const ctPercent = (ctZ - ctMinPos) / (ctMaxPos - ctMinPos);
         

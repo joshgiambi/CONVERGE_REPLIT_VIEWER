@@ -42,10 +42,49 @@ async function fixMRISliceLocations() {
           // Get slice location from DICOM header
           const sliceLocation = dataSet.floatString('x00201041');
           
-          if (sliceLocation) {
-            // Update the image record
+          // Get image position patient
+          let imagePosition = null;
+          const imagePositionPatient = dataSet.elements.x00200032;
+          if (imagePositionPatient) {
+            const pos = [];
+            for (let i = 0; i < 3; i++) {
+              pos.push(dataSet.floatString('x00200032', i));
+            }
+            imagePosition = pos.join('\\');
+          }
+          
+          // Get image orientation patient
+          let imageOrientation = null;
+          const imageOrientationPatient = dataSet.elements.x00200037;
+          if (imageOrientationPatient) {
+            const orient = [];
+            for (let i = 0; i < 6; i++) {
+              orient.push(dataSet.floatString('x00200037', i));
+            }
+            imageOrientation = orient.join('\\');
+          }
+          
+          // Get pixel spacing
+          let pixelSpacing = null;
+          const pixelSpacingElement = dataSet.elements.x00280030;
+          if (pixelSpacingElement) {
+            const spacing = [];
+            for (let i = 0; i < 2; i++) {
+              spacing.push(dataSet.floatString('x00280030', i));
+            }
+            pixelSpacing = spacing.join('\\');
+          }
+          
+          // Update the image record with all metadata
+          const updateData = {};
+          if (sliceLocation) updateData.sliceLocation = sliceLocation.toString();
+          if (imagePosition) updateData.imagePosition = imagePosition;
+          if (imageOrientation) updateData.imageOrientation = imageOrientation;
+          if (pixelSpacing) updateData.pixelSpacing = pixelSpacing;
+          
+          if (Object.keys(updateData).length > 0) {
             await db.update(images)
-              .set({ sliceLocation: sliceLocation.toString() })
+              .set(updateData)
               .where(eq(images.id, img.id))
               .execute();
             
