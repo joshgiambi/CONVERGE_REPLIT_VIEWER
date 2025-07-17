@@ -128,7 +128,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   >(new Map());
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
   const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
-  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 200, center: 100 }); // Default for very dark MRI
+  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
@@ -1531,84 +1531,79 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         }
       }
       
-      // The registration matrix transforms coordinates between CT and MRI spaces
-      // Based on the large Z translation (643mm), this appears to be a coordinate system offset
+      // CRITICAL: Understanding the registration matrix direction
+      // The large Z translation (643mm) suggests this matrix transforms FROM CT TO MRI coordinates
+      // NOT the other way around as initially assumed
       
       console.log(`CT world position: [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}]`);
+      console.log(`Registration matrix - R: [[${R[0][0]}, ${R[0][1]}, ${R[0][2]}], [${R[1][0]}, ${R[1][1]}, ${R[1][2]}], [${R[2][0]}, ${R[2][1]}, ${R[2][2]}]]`);
+      console.log(`Registration matrix - T: [${T[0]}, ${T[1]}, ${T[2]}]`);
       
-      // Debug: Show first few MRI positions to understand the coordinate system
-      console.log("Sample MRI positions:");
-      for (let i = 0; i < Math.min(3, secondaryImages.length); i++) {
-        const mriPos = secondaryImages[i].imagePosition;
-        if (mriPos) {
-          const positions = mriPos.split('\\').map((p: string) => parseFloat(p));
-          if (positions.length >= 3) {
-            console.log(`  MRI[${i}]: [${positions[0].toFixed(1)}, ${positions[1].toFixed(1)}, ${positions[2].toFixed(1)}]`);
+      // First, let's try applying the matrix directly (assuming it transforms CT->MRI)
+      const mriX_direct = R[0][0] * ctX + R[0][1] * ctY + R[0][2] * ctZ + T[0];
+      const mriY_direct = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
+      const mriZ_direct = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
+      
+      console.log(`Direct transform CT->MRI: [${mriX_direct.toFixed(1)}, ${mriY_direct.toFixed(1)}, ${mriZ_direct.toFixed(1)}]`);
+      
+      // Find the MRI slice with the closest Z position
+      let bestMatch = null;
+      let bestDistance = Infinity;
+      
+      for (let i = 0; i < secondaryImages.length; i++) {
+        const mriImage = secondaryImages[i];
+        const mriPos = mriImage.imagePosition;
+        if (!mriPos) continue;
+        
+        const positions = mriPos.split('\\').map((p: string) => parseFloat(p));
+        if (positions.length < 3) continue;
+        
+        const mriZ = positions[2];
+        const distance = Math.abs(mriZ - mriZ_direct);
+        
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestMatch = mriImage;
+          
+          // Log close matches for debugging
+          if (distance < 10) {
+            console.log(`  Close match: MRI slice at ${mriZ}mm, distance: ${distance.toFixed(1)}mm`);
           }
         }
       }
       
-      // Since the MRI slice locations are in a different range (-74 to 161) than CT (325 to 723),
-      // and there's a large Z offset in the registration matrix (643mm), 
-      // we need to map based on anatomical correspondence
-      
-      // The registration matrix appears to map between different coordinate systems
-      // but the actual slice correspondence is based on anatomical alignment
-      
-      // For head/neck imaging, use anatomical landmarks for mapping
-      const ctIndex = images.findIndex((img: any) => 
-        Math.abs(parseFloat(img.sliceLocation) - ctZ) < 0.1
-      );
-      
-      if (ctIndex >= 0) {
-        // Map based on anatomical position within the scan
-        // Head/neck scans typically align at key anatomical landmarks
+      if (bestMatch && bestDistance < 20) { // Tighter tolerance for good registration
+        closestSecondaryImage = bestMatch;
+        minDistance = bestDistance;
+        console.log(`✓ Found MRI slice using registration: ${bestMatch.sliceLocation}mm (distance: ${bestDistance.toFixed(1)}mm)`);
+      } else {
+        console.warn(`Registration matrix produces out-of-range coordinates. Best distance: ${bestDistance?.toFixed(1)}mm`);
+        console.log(`MRI Z range: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}], Transformed Z: ${mriZ_direct.toFixed(1)}`);
         
-        // Calculate position as percentage through the CT scan
-        const ctPercent = ctIndex / (images.length - 1);
+        // The registration matrix might have incorrect values or different convention
+        // Use anatomical correspondence as fallback
+        const ctPercent = (ctZ - ctMinPos) / (ctMaxPos - ctMinPos);
         
-        // Apply non-linear mapping based on typical head/neck anatomy
-        // CT and MRI often have different coverage of anatomy
+        // For head/neck imaging, apply non-linear mapping based on typical anatomy
         let mriPercent = ctPercent;
         
-        // Adjust for typical coverage differences:
-        // - MRI often has better brain coverage (superior)
-        // - CT often extends further into chest (inferior)
-        if (ctPercent < 0.2) {
-          // Lower neck/chest region - MRI has less coverage
-          mriPercent = ctPercent * 0.5;
-        } else if (ctPercent < 0.8) {
-          // Mid neck/head region - relatively linear mapping
-          mriPercent = 0.1 + (ctPercent - 0.2) * 0.8 / 0.6;
+        // Adjust for coverage differences between CT and MRI
+        if (ctPercent < 0.3) {
+          // Lower chest/neck region - MRI has less coverage
+          mriPercent = ctPercent * 0.6;
+        } else if (ctPercent < 0.7) {
+          // Mid neck/head region - relatively linear
+          mriPercent = 0.18 + (ctPercent - 0.3) * 0.64 / 0.4;
         } else {
-          // Upper head region - MRI has more coverage
-          mriPercent = 0.9 + (ctPercent - 0.8) * 0.1 / 0.2;
+          // Upper head region - MRI has more coverage  
+          mriPercent = 0.82 + (ctPercent - 0.7) * 0.18 / 0.3;
         }
         
-        // Find corresponding MRI slice
-        const targetMriIndex = Math.round(mriPercent * (secondaryImages.length - 1));
-        const clampedIndex = Math.max(0, Math.min(targetMriIndex, secondaryImages.length - 1));
-        closestSecondaryImage = secondaryImages[clampedIndex];
-        
-        if (closestSecondaryImage) {
-          console.log(`Anatomical mapping: CT ${ctZ.toFixed(1)}mm (${(ctPercent*100).toFixed(0)}%) -> MRI ${closestSecondaryImage.sliceLocation}mm (${(mriPercent*100).toFixed(0)}%)`);
-          minDistance = 0;
-          
-          // Verify the registration matrix for X-Y alignment
-          if (registrationMatrix) {
-            console.log(`✓ Using registration matrix for X-Y alignment`);
-          }
-        }
-      }
-      
-      if (!closestSecondaryImage) {
-        console.warn("Could not find anatomical correspondence, using linear fallback");
-        
-        // Simple linear mapping as last resort
-        const ctRelPos = (ctZ - ctMinPos) / (ctMaxPos - ctMinPos);
-        const targetIndex = Math.round(ctRelPos * (secondaryImages.length - 1));
+        const targetIndex = Math.round(mriPercent * (secondaryImages.length - 1));
         closestSecondaryImage = secondaryImages[Math.max(0, Math.min(targetIndex, secondaryImages.length - 1))];
         minDistance = 0;
+        
+        console.log(`Using anatomical mapping: CT ${ctZ.toFixed(1)}mm (${(ctPercent*100).toFixed(0)}%) -> MRI ${closestSecondaryImage.sliceLocation}mm (${(mriPercent*100).toFixed(0)}%)`);
       }
       
       if (closestSecondaryImage) {
@@ -1718,16 +1713,53 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     
     console.log(`MRI data range: min=${minPixelValue}, max=${maxPixelValue}`);
     
-    // Auto-normalize for MRI - use percentage of actual data range
+    // Check if DICOM metadata has window/level values
+    let dicomCenter = null;
+    let dicomWidth = null;
+    
+    if (secondaryImageData.metadata) {
+      if (secondaryImageData.metadata.windowCenter) {
+        dicomCenter = parseFloat(secondaryImageData.metadata.windowCenter);
+      }
+      if (secondaryImageData.metadata.windowWidth) {
+        dicomWidth = parseFloat(secondaryImageData.metadata.windowWidth);
+      }
+    }
+    
+    // Auto-calculate window/level for MRI
+    // Use a wider range to avoid oversaturation
     const dataRange = maxPixelValue - minPixelValue;
-    const autoCenter = minPixelValue + dataRange * 0.5;
-    const autoWidth = dataRange * 0.2; // Use 20% of range for very dark MRI
+    
+    // For T1-weighted images (like "AX T1 FS+C"), use different auto settings
+    const isT1 = closestSecondaryImage.seriesDescription?.toLowerCase().includes('t1');
+    const isContrast = closestSecondaryImage.seriesDescription?.toLowerCase().includes('+c');
+    
+    let autoCenter, autoWidth;
+    
+    if (dicomCenter && dicomWidth) {
+      // Use DICOM metadata if available
+      autoCenter = dicomCenter;
+      autoWidth = dicomWidth;
+      console.log(`Using DICOM window/level: C=${dicomCenter}, W=${dicomWidth}`);
+    } else {
+      // Calculate based on image type and statistics
+      if (isT1) {
+        // T1 images: Use middle 60-80% of range for better soft tissue contrast
+        autoCenter = minPixelValue + dataRange * 0.5;
+        autoWidth = dataRange * (isContrast ? 0.7 : 0.6); // Wider for contrast-enhanced
+      } else {
+        // Default MRI: Use middle 50% of range
+        autoCenter = minPixelValue + dataRange * 0.5;
+        autoWidth = dataRange * 0.5;
+      }
+      console.log(`Auto-calculated window/level for ${isT1 ? 'T1' : 'MRI'}: C=${autoCenter.toFixed(0)}, W=${autoWidth.toFixed(0)}`);
+    }
     
     // Use manual window/level if set (width > 0), otherwise use auto values
     const center = mriWindowLevel.width > 0 ? mriWindowLevel.center : autoCenter;
     const width = mriWindowLevel.width > 0 ? mriWindowLevel.width : autoWidth;
     
-    console.log(`MRI Window/Level - Center: ${center}, Width: ${width}, Series: ${closestSecondaryImage.seriesDescription || 'Unknown'}`);
+    console.log(`MRI Window/Level - Center: ${center.toFixed(0)}, Width: ${width.toFixed(0)}, Series: ${closestSecondaryImage.seriesDescription || 'Unknown'}`);
     
     const min = center - width / 2;
     const max = center + width / 2;

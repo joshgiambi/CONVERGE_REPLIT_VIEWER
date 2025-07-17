@@ -225,26 +225,26 @@ export function FusionControlPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 200, center: 100 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 0, center: 0 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  Dark
+                  Auto
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 300, center: 200 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 1200, center: 600 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  Normal
+                  Brain
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onMriWindowLevelChange?.({ width: 450, center: 350 })}
+                  onClick={() => onMriWindowLevelChange?.({ width: 1500, center: 750 })}
                   className="flex-1 text-xs h-7 bg-purple-600/20 border-purple-500/50 hover:bg-purple-600/30"
                 >
-                  Bright
+                  Enhanced
                 </Button>
               </div>
             </div>
