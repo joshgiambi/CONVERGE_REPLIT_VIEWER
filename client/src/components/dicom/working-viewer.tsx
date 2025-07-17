@@ -1538,7 +1538,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       let ctX = -249.51171875, ctY = -465.51171875, ctZ = ctSlicePosition;
       
       if (ctImagePosition) {
-        const positions = ctImagePosition.split('\\').map((p: string) => parseFloat(p));
+        const positions = typeof ctImagePosition === 'string'
+          ? ctImagePosition.split('\\').map((p: string) => parseFloat(p))
+          : ctImagePosition;
         if (positions.length >= 3) {
           ctX = positions[0];
           ctY = positions[1];
