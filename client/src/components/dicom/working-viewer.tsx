@@ -1531,71 +1531,171 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         }
       }
       
-      // CRITICAL: Fix registration transformation using center-based alignment
-      // The large offset in the registration matrix suggests different coordinate system origins
+      // CRITICAL: Implement proper DICOM coordinate transformation chain
+      // As per the guide: image coords → patient coords → registered coords → target image coords
       
-      console.log(`CT world position: [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}]`);
-      console.log(`Registration matrix - R: [[${R[0][0]}, ${R[0][1]}, ${R[0][2]}], [${R[1][0]}, ${R[1][1]}, ${R[1][2]}], [${R[2][0]}, ${R[2][1]}, ${R[2][2]}]]`);
-      console.log(`Registration matrix - T: [${T[0]}, ${T[1]}, ${T[2]}]`);
+      console.log(`Starting DICOM coordinate transformation...`);
       
-      // Calculate center of each volume
-      const ctCenter = (ctMinPos + ctMaxPos) / 2;
-      const mriCenter = (mriMinPos + mriMaxPos) / 2;
+      // Helper functions for matrix operations
+      const multiplyMatrices = (a: number[][], b: number[][]): number[][] => {
+        const result: number[][] = [];
+        for (let i = 0; i < 4; i++) {
+          result[i] = [];
+          for (let j = 0; j < 4; j++) {
+            result[i][j] = 0;
+            for (let k = 0; k < 4; k++) {
+              result[i][j] += a[i][k] * b[k][j];
+            }
+          }
+        }
+        return result;
+      };
       
-      console.log(`Volume centers - CT: ${ctCenter.toFixed(1)}mm, MRI: ${mriCenter.toFixed(1)}mm`);
+      const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
+        const result: number[] = [];
+        for (let i = 0; i < 4; i++) {
+          result[i] = 0;
+          for (let j = 0; j < 4; j++) {
+            result[i] += matrix[i][j] * vector[j];
+          }
+        }
+        return result;
+      };
       
-      // Approach 1: Apply only rotation, then align centers
-      // This ignores the translation component which seems incorrect
-      const ctOffsetFromCenter = ctSlicePosition - ctCenter;
+      const invertMatrix4x4 = (m: number[][]): number[][] => {
+        // Simplified inverse for transformation matrix
+        // Extract rotation and translation parts
+        const R_inv: number[][] = [
+          [m[0][0], m[1][0], m[2][0], 0],
+          [m[0][1], m[1][1], m[2][1], 0],
+          [m[0][2], m[1][2], m[2][2], 0],
+          [0, 0, 0, 1]
+        ];
+        
+        // Compute -R^T * t
+        const t = [m[0][3], m[1][3], m[2][3]];
+        const t_inv = [
+          -(R_inv[0][0] * t[0] + R_inv[0][1] * t[1] + R_inv[0][2] * t[2]),
+          -(R_inv[1][0] * t[0] + R_inv[1][1] * t[1] + R_inv[1][2] * t[2]),
+          -(R_inv[2][0] * t[0] + R_inv[2][1] * t[1] + R_inv[2][2] * t[2])
+        ];
+        
+        R_inv[0][3] = t_inv[0];
+        R_inv[1][3] = t_inv[1];
+        R_inv[2][3] = t_inv[2];
+        
+        return R_inv;
+      };
       
-      // Apply rotation to the offset
-      const rotatedOffset = R[2][2] * ctOffsetFromCenter; // Using only Z-component of rotation
+      // Build image-to-patient transformation matrix for CT
+      const ctImageToPatient = (() => {
+        const currentCT = images[currentIndex];
+        if (!currentCT) return null;
+        
+        const imagePosition = currentCT.imagePosition ? 
+          currentCT.imagePosition.split('\\').map((p: string) => parseFloat(p)) : [0, 0, 0];
+        const imageOrientation = currentCT.imageOrientation ? 
+          currentCT.imageOrientation.split('\\').map((p: string) => parseFloat(p)) : [1, 0, 0, 0, 1, 0];
+        const pixelSpacing = currentCT.pixelSpacing ? 
+          currentCT.pixelSpacing.split('\\').map((p: string) => parseFloat(p)) : [1, 1];
+        
+        const rowVector = imageOrientation.slice(0, 3);
+        const colVector = imageOrientation.slice(3, 6);
+        
+        // Calculate slice direction (cross product)
+        const sliceVector = [
+          rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
+          rowVector[2] * colVector[0] - rowVector[0] * colVector[2],
+          rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
+        ];
+        
+        const sliceSpacing = 1.0; // Default slice spacing
+        
+        return [
+          [rowVector[0] * pixelSpacing[1], colVector[0] * pixelSpacing[0], sliceVector[0] * sliceSpacing, imagePosition[0]],
+          [rowVector[1] * pixelSpacing[1], colVector[1] * pixelSpacing[0], sliceVector[1] * sliceSpacing, imagePosition[1]],
+          [rowVector[2] * pixelSpacing[1], colVector[2] * pixelSpacing[0], sliceVector[2] * sliceSpacing, imagePosition[2]],
+          [0, 0, 0, 1]
+        ];
+      })();
       
-      // Map to MRI space
-      const mriZ_centered = mriCenter + rotatedOffset;
+      // For the current CT slice, we already have patient coordinates
+      const ctPatientCoords = [ctX, ctY, ctZ, 1];
       
-      console.log(`Center-based transform: CT ${ctSlicePosition.toFixed(1)}mm -> MRI ${mriZ_centered.toFixed(1)}mm`);
+      console.log(`CT patient coordinates: [${ctPatientCoords.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
+      console.log(`Registration matrix applied...`);
       
-      // Also try simple percentage mapping as backup
-      const ctPercent = (ctSlicePosition - ctMinPos) / (ctMaxPos - ctMinPos);
-      const mriZ_percent = mriMinPos + ctPercent * (mriMaxPos - mriMinPos);
+      // Apply registration transformation: CT patient coords -> registered MRI patient coords
+      const registeredCoords = multiplyMatrixVector(matrix, ctPatientCoords);
       
-      console.log(`Percentage mapping: CT ${ctSlicePosition.toFixed(1)}mm (${(ctPercent*100).toFixed(0)}%) -> MRI ${mriZ_percent.toFixed(1)}mm`);
+      console.log(`Registered coordinates: [${registeredCoords.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
       
-      // Use center-based if within range, otherwise fallback to percentage
-      let transformedZ = mriZ_centered;
-      if (mriZ_centered < mriMinPos || mriZ_centered > mriMaxPos) {
-        console.warn(`Center-based transform out of range, using percentage mapping`);
-        transformedZ = mriZ_percent;
-      }
+      // The registered Z coordinate is what we need to find in MRI space
+      const transformedZ = registeredCoords[2];
       
-      // Find the MRI slice with the closest Z position
+      // Find the MRI slice with the closest patient coordinates
       let bestMatch = null;
       let bestDistance = Infinity;
+      
+      // Build MRI image-to-patient transform for first MRI image to get orientation
+      const mriImageToPatient = (() => {
+        const firstMri = secondaryImages[0];
+        if (!firstMri) return null;
+        
+        const imagePosition = firstMri.imagePosition ? 
+          firstMri.imagePosition.split('\\').map((p: string) => parseFloat(p)) : [0, 0, 0];
+        const imageOrientation = firstMri.imageOrientation ? 
+          firstMri.imageOrientation.split('\\').map((p: string) => parseFloat(p)) : [1, 0, 0, 0, 1, 0];
+        const pixelSpacing = firstMri.pixelSpacing ? 
+          firstMri.pixelSpacing.split('\\').map((p: string) => parseFloat(p)) : [1, 1];
+        
+        const rowVector = imageOrientation.slice(0, 3);
+        const colVector = imageOrientation.slice(3, 6);
+        const sliceVector = [
+          rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
+          rowVector[2] * colVector[0] - rowVector[0] * colVector[2],
+          rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
+        ];
+        
+        return {
+          rowVector,
+          colVector,
+          sliceVector,
+          pixelSpacing
+        };
+      })();
       
       for (let i = 0; i < secondaryImages.length; i++) {
         const mriImage = secondaryImages[i];
         const mriPos = mriImage.imagePosition;
         if (!mriPos) continue;
         
-        const positions = mriPos.split('\\').map((p: string) => parseFloat(p));
-        if (positions.length < 3) continue;
+        const mriPatientPosition = mriPos.split('\\').map((p: string) => parseFloat(p));
+        if (mriPatientPosition.length < 3) continue;
         
-        const mriZ = positions[2];
-        const distance = Math.abs(mriZ - transformedZ);
+        // Calculate 3D distance in patient space
+        const dx = mriPatientPosition[0] - registeredCoords[0];
+        const dy = mriPatientPosition[1] - registeredCoords[1];
+        const dz = mriPatientPosition[2] - registeredCoords[2];
+        const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
         
-        if (distance < bestDistance) {
-          bestDistance = distance;
+        // For axial slices, we mainly care about Z distance
+        const zDistance = Math.abs(dz);
+        
+        if (zDistance < bestDistance) {
+          bestDistance = zDistance;
           bestMatch = mriImage;
           
           // Log close matches for debugging
-          if (distance < 10) {
-            console.log(`  Close match: MRI slice at ${mriZ}mm, distance: ${distance.toFixed(1)}mm`);
+          if (zDistance < 10) {
+            console.log(`  Close match: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance.toFixed(1)}mm`);
           }
         }
       }
       
-      if (bestMatch && bestDistance < 20) { // Tighter tolerance for good registration
+      console.log(`Best match Z-distance: ${bestDistance.toFixed(1)}mm`);
+      
+      if (bestMatch && bestDistance < 50) { // Allow larger tolerance for initial testing
         closestSecondaryImage = bestMatch;
         minDistance = bestDistance;
         console.log(`✓ Found MRI slice using registration: ${bestMatch.sliceLocation}mm (distance: ${bestDistance.toFixed(1)}mm)`);
