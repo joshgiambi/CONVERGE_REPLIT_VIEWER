@@ -1607,12 +1607,19 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         const currentCT = images[currentIndex];
         if (!currentCT) return null;
         
+        // Handle both string and array formats for imagePosition
         const imagePosition = currentCT.imagePosition ? 
-          currentCT.imagePosition.split('\\').map((p: string) => parseFloat(p)) : [0, 0, 0];
+          (typeof currentCT.imagePosition === 'string' 
+            ? currentCT.imagePosition.split('\\').map((p: string) => parseFloat(p))
+            : currentCT.imagePosition) : [0, 0, 0];
         const imageOrientation = currentCT.imageOrientation ? 
-          currentCT.imageOrientation.split('\\').map((p: string) => parseFloat(p)) : [1, 0, 0, 0, 1, 0];
+          (typeof currentCT.imageOrientation === 'string'
+            ? currentCT.imageOrientation.split('\\').map((p: string) => parseFloat(p))
+            : currentCT.imageOrientation) : [1, 0, 0, 0, 1, 0];
         const pixelSpacing = currentCT.pixelSpacing ? 
-          currentCT.pixelSpacing.split('\\').map((p: string) => parseFloat(p)) : [1, 1];
+          (typeof currentCT.pixelSpacing === 'string'
+            ? currentCT.pixelSpacing.split('\\').map((p: string) => parseFloat(p))
+            : currentCT.pixelSpacing) : [1, 1];
         
         const rowVector = imageOrientation.slice(0, 3);
         const colVector = imageOrientation.slice(3, 6);
@@ -1665,7 +1672,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         const mriPos = mriImage.imagePosition;
         if (!mriPos) continue;
         
-        const mriPatientPosition = mriPos.split('\\').map((p: string) => parseFloat(p));
+        const mriPatientPosition = typeof mriPos === 'string' 
+          ? mriPos.split('\\').map((p: string) => parseFloat(p))
+          : mriPos;
         if (mriPatientPosition.length < 3) continue;
         
         // Transform MRI coordinates to CT space
@@ -1689,13 +1698,17 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       
       // Check if we're outside MRI coverage
       const mriZMin = Math.min(...secondaryImages.map(img => {
-        const pos = img.imagePosition?.split('\\').map((p: string) => parseFloat(p));
+        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
+          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
+          : img.imagePosition) : null;
         if (!pos || pos.length < 3) return Infinity;
         const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
         return transformed[2];
       }));
       const mriZMax = Math.max(...secondaryImages.map(img => {
-        const pos = img.imagePosition?.split('\\').map((p: string) => parseFloat(p));
+        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
+          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
+          : img.imagePosition) : null;
         if (!pos || pos.length < 3) return -Infinity;
         const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
         return transformed[2];
@@ -1936,8 +1949,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       // For proper alignment, we need to compute the X-Y translation offset
       
       // Get the image positions for both CT and MRI
-      const ctPos = primaryImage.imagePosition?.split('\\').map((p: string) => parseFloat(p)) || [0, 0, 0];
-      const mriPos = closestSecondaryImage.imagePosition?.split('\\').map((p: string) => parseFloat(p)) || [0, 0, 0];
+      const ctPos = primaryImage.imagePosition ? (typeof primaryImage.imagePosition === 'string'
+        ? primaryImage.imagePosition.split('\\').map((p: string) => parseFloat(p))
+        : primaryImage.imagePosition) : [0, 0, 0];
+      const mriPos = closestSecondaryImage.imagePosition ? (typeof closestSecondaryImage.imagePosition === 'string'
+        ? closestSecondaryImage.imagePosition.split('\\').map((p: string) => parseFloat(p))
+        : closestSecondaryImage.imagePosition) : [0, 0, 0];
       
       // Transform MRI position to CT space
       const mriHomogeneous = [mriPos[0], mriPos[1], mriPos[2], 1];
@@ -2009,8 +2026,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     }
     // Priority 4: Extract Z from image position
     else if (currentImage.imageMetadata && currentImage.imageMetadata.imagePosition) {
-      const imagePos = currentImage.imageMetadata.imagePosition.split("\\");
-      if (imagePos.length >= 3) {
+      const imagePos = typeof currentImage.imageMetadata.imagePosition === 'string'
+        ? currentImage.imageMetadata.imagePosition.split("\\")
+        : currentImage.imageMetadata.imagePosition;
+      if (imagePos && imagePos.length >= 3) {
         const parsed = parseFloat(imagePos[2]);
         if (!isNaN(parsed)) {
           currentSlicePosition = parsed;
@@ -2027,7 +2046,15 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
       parsedZPosition: ${currentImage.parsedZPosition} 
       imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
-      imageMetadata.imagePosition Z: ${currentImage.imageMetadata?.imagePosition ? currentImage.imageMetadata.imagePosition.split("\\")[2] : currentImage.imagePosition?.split("\\")[2] || "N/A"}
+      imageMetadata.imagePosition Z: ${currentImage.imageMetadata?.imagePosition 
+        ? (typeof currentImage.imageMetadata.imagePosition === 'string' 
+          ? currentImage.imageMetadata.imagePosition.split("\\")[2] 
+          : currentImage.imageMetadata.imagePosition[2])
+        : (currentImage.imagePosition 
+          ? (typeof currentImage.imagePosition === 'string' 
+            ? currentImage.imagePosition.split("\\")[2] 
+            : currentImage.imagePosition[2])
+          : "N/A")}
       currentIndex: ${currentIndex}
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
     console.log(
