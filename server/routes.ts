@@ -6,6 +6,9 @@ import { storage } from "./storage";
 import { Server } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
+import { db } from "./db";
+import { images as imagesTable } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const upload = multer({ dest: 'uploads/' });
 
@@ -602,6 +605,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching patients:', error);
       res.status(500).json({ message: "Failed to fetch patients" });
+    }
+  });
+  
+  // Get all series for the patient manager
+  app.get("/api/series", async (req, res) => {
+    try {
+      const series = await storage.getAllSeries();
+      res.json(series);
+    } catch (error) {
+      console.error("Error fetching series:", error);
+      res.status(500).json({ error: "Failed to fetch series" });
+    }
+  });
+  
+  // Get complete metadata dump for debugging
+  app.get("/api/metadata/all", async (req, res) => {
+    try {
+      const patients = await storage.getAllPatients();
+      const studies = await storage.getAllStudies();
+      const series = await storage.getAllSeries();
+      
+      // Get images for each series with metadata
+      const seriesWithImages = await Promise.all(
+        series.map(async (s) => {
+          const images = await storage.getImagesBySeriesId(s.id);
+          return {
+            ...s,
+            images: images.map(img => ({
+              id: img.id,
+              sopInstanceUID: img.sopInstanceUID,
+              instanceNumber: img.instanceNumber,
+              sliceLocation: img.sliceLocation,
+              windowCenter: img.windowCenter,
+              windowWidth: img.windowWidth,
+              imagePosition: img.imagePosition,
+              imageOrientation: img.imageOrientation,
+              pixelSpacing: img.pixelSpacing,
+              metadata: img.metadata
+            }))
+          };
+        })
+      );
+      
+      res.json({
+        patients,
+        studies,
+        series: seriesWithImages,
+        summary: {
+          totalPatients: patients.length,
+          totalStudies: studies.length,
+          totalSeries: series.length,
+          totalImages: seriesWithImages.reduce((sum, s) => sum + s.images.length, 0)
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching metadata:", error);
+      res.status(500).json({ error: "Failed to fetch metadata" });
     }
   });
 

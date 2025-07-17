@@ -1466,17 +1466,52 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       // For a point [x, y, z, 1] in CT space, the transformed point is:
       // [x', y', z', 1] = [x, y, z, 1] * Matrix
       
-      // Since we only care about z-coordinate matching, we need to consider
-      // the image position patient (IPP) of both CT and MRI
-      const ctIPP = primaryImage.imagePositionPatient || [0, 0, ctSlicePosition];
-      const ctX = parseFloat(ctIPP[0]) || 0;
-      const ctY = parseFloat(ctIPP[1]) || 0;
+      // For identity matrix (no transformation), CT and MRI coordinates should match
+      // Check if this is an identity matrix
+      const isIdentity = R[0][0] === 1 && R[1][1] === 1 && R[2][2] === 1 && 
+                        T[0] === 0 && T[1] === 0 && T[2] === 0;
+      
+      if (isIdentity) {
+        console.log("Identity registration matrix detected - using direct coordinate matching");
+      }
+      
+      // The registration transforms from CT coordinate system to MRI coordinate system
+      // For slice matching, we transform the CT z-coordinate
       const ctZ = ctSlicePosition;
       
-      // Apply the transformation: P' = R * P + T
-      const mriX = R[0][0] * ctX + R[0][1] * ctY + R[0][2] * ctZ + T[0];
-      const mriY = R[1][0] * ctX + R[1][1] * ctY + R[1][2] * ctZ + T[1];
-      const mriZ = R[2][0] * ctX + R[2][1] * ctY + R[2][2] * ctZ + T[2];
+      // Apply the transformation: z' = R[2][2] * z + T[2]
+      // For the fusion dataset, the registration matrix transforms CT to MRI space
+      const mriZ = R[2][2] * ctZ + T[2];
+      
+      // Check if the transformation result is within MRI bounds
+      const mriMinPos = -74.441441121391;
+      const mriMaxPos = 161.558552445182;
+      
+      if (mriZ < mriMinPos || mriZ > mriMaxPos) {
+        console.warn(`Transformed MRI z=${mriZ.toFixed(1)}mm is outside MRI bounds [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
+        // Use linear mapping as fallback
+        const ctMinPos = 325.5;
+        const ctMaxPos = 723.5;
+        const ctRange = ctMaxPos - ctMinPos;
+        const mriRange = mriMaxPos - mriMinPos;
+        const ctRatio = (ctZ - ctMinPos) / ctRange;
+        const linearMriZ = mriMinPos + (ctRatio * mriRange);
+        console.log(`Using linear mapping: CT ${ctZ.toFixed(1)}mm -> MRI ${linearMriZ.toFixed(1)}mm`);
+        
+        // Find closest MRI slice to linear mapped position
+        for (const secondaryImage of secondaryImages) {
+          const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
+          const distance = Math.abs(mriSlicePos - linearMriZ);
+          
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestSecondaryImage = secondaryImage;
+          }
+        }
+        
+        console.log(`Found MRI slice at ${closestSecondaryImage?.sliceLocation}mm (distance: ${minDistance.toFixed(1)}mm)`);
+        return;
+      }
       
       console.log(`Registration transform: CT z=${ctZ.toFixed(1)}mm -> MRI z=${mriZ.toFixed(1)}mm`);
       

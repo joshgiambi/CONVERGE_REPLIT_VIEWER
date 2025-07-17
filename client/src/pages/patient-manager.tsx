@@ -15,6 +15,7 @@ import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DICOMUploader } from "@/components/dicom/dicom-uploader";
+import { PatientCard } from "@/components/patient-manager/patient-card";
 import { 
   User, 
   Calendar, 
@@ -143,6 +144,11 @@ export default function PatientManager() {
   // Fetch studies
   const { data: studies = [], isLoading: studiesLoading } = useQuery<Study[]>({
     queryKey: ["/api/studies"],
+  });
+  
+  // Fetch series data for patient cards
+  const { data: series = [] } = useQuery<any[]>({
+    queryKey: ["/api/series"],
   });
 
   // Fetch PACS connections
@@ -400,33 +406,39 @@ export default function PatientManager() {
         {/* Search Bar with dark styling */}
         <div className="mb-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <Input
               placeholder="Search patients, studies, or modalities..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 bg-gray-900/60 border-gray-700/50 text-white placeholder:text-gray-400 focus:border-gray-600"
+              className="pl-10 h-12 bg-gray-900/80 border border-gray-700/50 text-white placeholder:text-gray-500 
+                       focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 rounded-xl
+                       transition-all duration-200"
             />
           </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 bg-gray-900/60 border-gray-700/50">
-            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
+          <TabsList className="grid w-full grid-cols-5 bg-gray-900/60 border border-gray-700/50 rounded-xl p-1">
+            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
+            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Upload className="h-4 w-4" />
               Import DICOM
             </TabsTrigger>
-            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gray-800 data-[state=active]:text-white text-gray-300">
+            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Network className="h-4 w-4" />
               PACS
             </TabsTrigger>
-            <TabsTrigger value="query" className="flex items-center gap-2">
+            <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Database className="h-4 w-4" />
               Query
+            </TabsTrigger>
+            <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+              <FileText className="h-4 w-4" />
+              Metadata
             </TabsTrigger>
           </TabsList>
 
@@ -435,69 +447,36 @@ export default function PatientManager() {
             {patientsLoading ? (
               <div className="text-center py-8">Loading patients...</div>
             ) : filteredPatients.length === 0 ? (
-              <Card>
-                <CardContent className="text-center py-8">
-                  <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No patients found</p>
+              <Card className="bg-gray-900/60 border-gray-700/50">
+                <CardContent className="text-center py-12">
+                  <User className="h-16 w-16 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 text-lg">No patients found</p>
+                  <p className="text-gray-500 text-sm mt-2">Upload DICOM files to get started</p>
                 </CardContent>
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredPatients.map((patient) => (
-                  <Card key={patient.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <User className="h-5 w-5" />
-                        {patient.patientName || "Unknown Patient"}
-                      </CardTitle>
-                      <CardDescription>
-                        ID: {patient.patientID}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm">
-                        {patient.patientSex && (
-                          <div>Sex: {patient.patientSex}</div>
-                        )}
-                        {patient.patientAge && (
-                          <div>Age: {patient.patientAge}</div>
-                        )}
-                        {patient.dateOfBirth && (
-                          <div>DOB: {formatDate(patient.dateOfBirth)}</div>
-                        )}
-                        <div className="text-gray-500">
-                          Created: {formatDate(patient.createdAt)}
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mt-4">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          className="w-full bg-green-600 hover:bg-green-700"
-                          onClick={() => {
-                            // Filter studies for this patient and prioritize CT studies
-                            const patientStudies = studies.filter(study => study.patientID === patient.patientID);
-                            if (patientStudies.length > 0) {
-                              // Prioritize CT studies over RT structure sets
-                              const ctStudy = patientStudies.find(study => study.modality === 'CT');
-                              const targetStudy = ctStudy || patientStudies[0];
-                              window.location.href = `/enhanced-viewer?studyId=${targetStudy.id}`;
-                            } else {
-                              toast({
-                                title: "No studies found",
-                                description: `No studies found for patient ${patient.patientName}`,
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View Images
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                {filteredPatients.map((patient) => {
+                  // Get studies and series for this patient
+                  const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                  const patientSeries = series.filter(s => 
+                    patientStudies.some(study => study.id === s.studyId)
+                  );
+                  
+                  return (
+                    <PatientCard
+                      key={patient.id}
+                      patient={{
+                        ...patient,
+                        patientId: patient.patientID,
+                        sex: patient.patientSex,
+                        age: patient.patientAge
+                      }}
+                      studies={patientStudies}
+                      series={patientSeries}
+                    />
+                  );
+                })}
               </div>
             )}
           </TabsContent>
@@ -506,13 +485,13 @@ export default function PatientManager() {
 
           {/* Import DICOM Tab */}
           <TabsContent value="import" className="space-y-4">
-            <Card>
+            <Card className="bg-gray-900/80 border border-gray-700/50 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Upload className="h-5 w-5" />
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Upload className="h-5 w-5 text-purple-400" />
                   Import DICOM Files
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-gray-400">
                   Upload DICOM files to parse metadata and import into the database. 
                   Supports CT, MRI, PET/CT, RT Structure Sets, Dose, and Plan files.
                 </CardDescription>
@@ -834,8 +813,188 @@ export default function PatientManager() {
               </Card>
             </div>
           </TabsContent>
+          {/* Metadata Tab */}
+          <TabsContent value="metadata" className="space-y-4">
+            <MetadataViewer />
+          </TabsContent>
         </Tabs>
       </div>
+    </div>
+  );
+}
+
+// Metadata Viewer Component
+function MetadataViewer() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [metadata, setMetadata] = useState<any>(null);
+  const [expandedSeries, setExpandedSeries] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      setIsLoading(true);
+      try {
+        const response = await fetch('/api/metadata/all');
+        if (response.ok) {
+          const data = await response.json();
+          setMetadata(data);
+        }
+      } catch (error) {
+        console.error('Error fetching metadata:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchMetadata();
+  }, []);
+
+  const toggleSeries = (seriesId: number) => {
+    setExpandedSeries(prev => {
+      const next = new Set(prev);
+      if (next.has(seriesId)) {
+        next.delete(seriesId);
+      } else {
+        next.add(seriesId);
+      }
+      return next;
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="bg-gray-900/60 border-gray-700/50">
+        <CardContent className="py-8 text-center">
+          <p className="text-gray-400">Loading metadata...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!metadata) {
+    return (
+      <Card className="bg-gray-900/60 border-gray-700/50">
+        <CardContent className="py-8 text-center">
+          <p className="text-gray-400">No metadata available</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Card */}
+      <Card className="bg-gray-900/60 border-gray-700/50">
+        <CardHeader>
+          <CardTitle className="text-white">DICOM Database Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/30">
+              <p className="text-gray-400 text-sm">Total Patients</p>
+              <p className="text-2xl font-bold text-white">{metadata.summary.totalPatients}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/30">
+              <p className="text-gray-400 text-sm">Total Studies</p>
+              <p className="text-2xl font-bold text-white">{metadata.summary.totalStudies}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/30">
+              <p className="text-gray-400 text-sm">Total Series</p>
+              <p className="text-2xl font-bold text-white">{metadata.summary.totalSeries}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/30">
+              <p className="text-gray-400 text-sm">Total Images</p>
+              <p className="text-2xl font-bold text-white">{metadata.summary.totalImages}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Detailed Metadata */}
+      <Card className="bg-gray-900/60 border-gray-700/50">
+        <CardHeader>
+          <CardTitle className="text-white">Detailed DICOM Metadata</CardTitle>
+          <CardDescription className="text-gray-400">
+            Click on series to expand and view image metadata
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {metadata.patients.map((patient: any) => {
+              const patientStudies = metadata.studies.filter((s: any) => s.patientId === patient.id);
+              const patientSeries = metadata.series.filter((s: any) => 
+                patientStudies.some((study: any) => study.id === s.studyId)
+              );
+              
+              return (
+                <div key={patient.id} className="border border-gray-700/50 rounded-lg p-4 bg-gray-800/30">
+                  <h3 className="text-white font-semibold mb-2">
+                    {patient.patientName} (ID: {patient.patientID})
+                  </h3>
+                  
+                  {patientSeries.map((series: any) => (
+                    <div key={series.id} className="ml-4 mb-2">
+                      <button
+                        onClick={() => toggleSeries(series.id)}
+                        className="w-full text-left p-2 rounded hover:bg-gray-700/30 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Badge className="mr-2" variant="outline">
+                              {series.modality}
+                            </Badge>
+                            <span className="text-gray-300">
+                              {series.seriesDescription || 'Series ' + series.seriesNumber}
+                            </span>
+                            <span className="text-gray-500 ml-2">
+                              ({series.imageCount || series.images?.length || 0} images)
+                            </span>
+                          </div>
+                          <span className="text-gray-500">
+                            {expandedSeries.has(series.id) ? '▼' : '▶'}
+                          </span>
+                        </div>
+                      </button>
+                      
+                      {expandedSeries.has(series.id) && series.images && (
+                        <div className="ml-8 mt-2 space-y-1 text-sm">
+                          <div className="grid grid-cols-2 gap-2 text-gray-400">
+                            <div>Series UID: {series.seriesInstanceUID}</div>
+                            <div>Slice Thickness: {series.sliceThickness || 'N/A'}</div>
+                          </div>
+                          {series.metadata && (
+                            <div className="mt-2 p-2 bg-gray-900/50 rounded">
+                              <pre className="text-xs text-gray-500 overflow-x-auto">
+                                {JSON.stringify(series.metadata, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {series.images.slice(0, 3).map((image: any, idx: number) => (
+                            <div key={image.id} className="p-2 bg-gray-900/50 rounded">
+                              <div className="text-gray-300">
+                                Instance #{image.instanceNumber}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
+                                <div>Slice Location: {image.sliceLocation || 'N/A'}</div>
+                                <div>Window: {image.windowCenter}/{image.windowWidth}</div>
+                                <div>Position: {image.imagePosition || 'N/A'}</div>
+                                <div>Orientation: {image.imageOrientation || 'N/A'}</div>
+                              </div>
+                            </div>
+                          ))}
+                          {series.images.length > 3 && (
+                            <p className="text-gray-500 text-xs">
+                              ... and {series.images.length - 3} more images
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -32,6 +32,7 @@ export interface IStorage {
   getSeriesByStudyId(studyId: number): Promise<Series[]>;
   getSeriesWithImages(seriesId: number): Promise<any>;
   getRTStructuresForStudy(studyId: number): Promise<Series[]>;
+  getAllSeries(): Promise<Series[]>;
 
   // Image operations
   createImage(image: InsertImage): Promise<DicomImage>;
@@ -374,6 +375,13 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(series)
       .where(eq(series.studyId, studyId));
+  }
+  
+  async getAllSeries(): Promise<Series[]> {
+    return await db
+      .select()
+      .from(series)
+      .orderBy(series.studyId, series.seriesNumber);
   }
 
   // RT Structure operations

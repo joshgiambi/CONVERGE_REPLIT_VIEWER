@@ -95,8 +95,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
-      if (rtSeries && !rtStructures) {
+      if (rtSeries) {
+        console.log(`Loading RT structures for study ${studyData.studies[0]?.id}`);
         handleRTSeriesSelect(rtSeries);
+      } else {
+        // Clear RT structures if no RT series found for this study
+        console.log(`No RT structures found for study ${studyData.studies[0]?.id}`);
+        setRTStructures(null);
       }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
