@@ -987,6 +987,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
         setSecondaryImages(sortedImages);
         console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
+        console.log("Secondary series ID:", secondarySeriesId);
+        console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
         
         // Debug log the sorted order
         console.log('MRI sorted order (first 5 and last 5):');
@@ -1307,7 +1309,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
           }
         } catch (reloadError) {
           console.error("Failed to reload image:", reloadError);
-          throw new Error("Image not available and could not be reloaded");
+          throw new Error(`Image not available: ${reloadError.message || 'Unknown error'}`);
         }
       }
 
@@ -1321,7 +1323,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0 && fusionOpacity > 0) {
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
-        await renderFusionOverlay(ctx, currentImage);
+        try {
+          await renderFusionOverlay(ctx, currentImage);
+        } catch (fusionError) {
+          console.error("Error rendering fusion overlay:", fusionError);
+          // Continue without fusion rather than failing entire image display
+        }
       }
 
       // Render RT structure overlays if available
@@ -1340,6 +1347,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       }
     } catch (error: any) {
       console.error("Error displaying image:", error);
+      console.error("Error details:", error.message, error.stack);
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "red";
@@ -1350,7 +1358,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         canvas.width / 2,
         canvas.height / 2 - 10,
       );
-      ctx.fillText(error.message, canvas.width / 2, canvas.height / 2 + 10);
+      ctx.fillText(error.message || "Unknown error", canvas.width / 2, canvas.height / 2 + 10);
     }
   };
 
@@ -1442,7 +1450,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
   };
   
   const renderFusionOverlay = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    if (!secondaryImages.length || !secondarySeriesId) return;
+    if (!secondaryImages.length || !secondarySeriesId) {
+      console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId);
+      return;
+    }
     
     // Get the current CT slice position
     let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
@@ -1509,34 +1520,26 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
       if (mriZ < mriMinPos || mriZ > mriMaxPos) {
         console.warn(`Transformed MRI z=${mriZ.toFixed(1)}mm is outside MRI bounds [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}]`);
         
-        // MRI focuses on nasal cavity region - map CT range to MRI range
-        // CT range is approximately 325.5 to 723.5 (head/neck)
-        // MRI range is -74.4 to 161.6 (nasal cavity region)
+        // General purpose solution: Find the closest available MRI slice
+        // This works for any body region where MRI data exists
         
-        // Map CT anatomical regions to MRI regions
-        const ctHeadStart = 500; // Approximate head start in CT
-        const ctHeadEnd = 650;   // Approximate head end in CT
+        console.log(`Finding closest MRI slice to CT position ${ctZ.toFixed(1)}mm`);
         
-        if (ctZ >= ctHeadStart && ctZ <= ctHeadEnd) {
-          // This is the head region in CT - map to MRI range
-          const ctRatio = (ctZ - ctHeadStart) / (ctHeadEnd - ctHeadStart);
-          const targetMriZ = mriMinPos + ctRatio * (mriMaxPos - mriMinPos);
+        // Check all MRI slices to find the closest one
+        for (const secondaryImage of secondaryImages) {
+          const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
+          const distance = Math.abs(mriSlicePos - ctZ);
           
-          console.log(`Anatomical mapping: CT ${ctZ.toFixed(1)}mm (head region) -> MRI target ${targetMriZ.toFixed(1)}mm`);
-          
-          // Find closest MRI slice
-          for (const secondaryImage of secondaryImages) {
-            const mriSlicePos = parseFloat(secondaryImage.sliceLocation);
-            const distance = Math.abs(mriSlicePos - targetMriZ);
-            
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestSecondaryImage = secondaryImage;
-            }
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestSecondaryImage = secondaryImage;
           }
-        } else {
-          // Outside head region - no MRI correspondence
-          console.log(`CT slice ${ctZ.toFixed(1)}mm is outside head region - no MRI overlay`);
+        }
+        
+        // Only show MRI if a reasonably close slice exists
+        // For general purpose fusion, allow larger distances
+        if (minDistance > 200) {
+          console.log(`No MRI slice within 200mm of CT position ${ctZ.toFixed(1)}mm`);
           return;
         }
         
