@@ -1324,8 +1324,20 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         await renderFusionOverlay(ctx, currentImage);
       }
 
-      // RT structures are now rendered by the RTStructureOverlay component
-      // No need to render them here anymore to avoid double rendering
+      // Render RT structure overlays if available
+      if (localRTStructures && showStructures) {
+        try {
+          // Pass currentImage with its metadata attached
+          const imageWithMetadata = {
+            ...currentImage,
+            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+          };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
+        } catch (rtError) {
+          console.warn("Error drawing RT structures:", rtError);
+          // Don't let RT structure errors prevent image display
+        }
+      }
     } catch (error: any) {
       console.error("Error displaying image:", error);
       ctx.fillStyle = "black";
@@ -2459,30 +2471,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
               />
             )}
 
-          {/* RT Structure Overlay with prediction confirmation */}
-          {rtStructures && showStructures && studyId && (
-            <RTStructureOverlay
-              canvasRef={canvasRef}
-              studyId={studyId}
-              currentSlicePosition={
-                images.length > 0 && images[currentIndex]
-                  ? (images[currentIndex].parsedSliceLocation ??
-                    images[currentIndex].parsedZPosition ??
-                    currentIndex)
-                  : 0
-              }
-              imageWidth={1024}
-              imageHeight={1024}
-              zoom={zoom}
-              panX={panX}
-              panY={panY}
-              contourWidth={contourSettings?.width || 3}
-              contourOpacity={contourSettings?.opacity || 30}
-              onPredictionConfirm={handlePredictionConfirm}
-              animationTime={animationTime}
-              rtStructures={rtStructures}
-            />
-          )}
+          {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
