@@ -49,6 +49,7 @@ interface FusionControlPanelProps {
   isVisible: boolean;
   mriWindowLevel?: { width: number; center: number };
   onMriWindowLevelChange?: (windowLevel: { width: number; center: number }) => void;
+  selectedSecondaryId?: number | null;
 }
 
 export function FusionControlPanel({
@@ -59,10 +60,10 @@ export function FusionControlPanel({
   onOpacityChange,
   isVisible,
   mriWindowLevel = { width: 800, center: 400 },
-  onMriWindowLevelChange
+  onMriWindowLevelChange,
+  selectedSecondaryId
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
-  const [selectedSecondaryId, setSelectedSecondaryId] = useState<number | null>(null);
   
   // Fetch available MR series for fusion
   const { data: availableSeries } = useQuery({
@@ -84,14 +85,12 @@ export function FusionControlPanel({
       const seriestoSelect = preferredSeries || mrSeries[0];
       console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
       
-      setSelectedSecondaryId(seriestoSelect.id);
       onSecondarySeriesSelect(seriestoSelect.id);
     }
   }, [mrSeries, selectedSecondaryId]);
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
-    setSelectedSecondaryId(seriesId);
     onSecondarySeriesSelect(seriesId);
   };
   

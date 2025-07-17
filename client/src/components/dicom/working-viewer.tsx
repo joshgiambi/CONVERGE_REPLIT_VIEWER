@@ -48,6 +48,8 @@ interface WorkingViewerProps {
   onSlicePositionChange?: (slicePosition: number) => void;
   secondarySeriesId?: number | null;
   fusionOpacity?: number;
+  onSecondarySeriesSelect?: (id: number | null) => void;
+  onFusionOpacityChange?: (opacity: number) => void;
 }
 
 export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) => {
@@ -127,8 +129,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   const [secondaryImageCache, setSecondaryImageCache] = useState<
     Map<string, { data: Float32Array; width: number; height: number }>
   >(new Map());
-  const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(externalSecondarySeriesId || null);
-  const [fusionOpacity, setFusionOpacity] = useState(externalFusionOpacity || 0.5);
+  const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
+  const fusionOpacity = externalFusionOpacity || 0.5;
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
 
@@ -2796,16 +2798,17 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           </div>
           
           {/* Fusion Control Panel - Visible when study has MR series available */}
-          {studyId && (
+          {studyId && props.secondarySeriesId !== undefined && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}
-              onSecondarySeriesSelect={(id) => setSecondarySeriesId(id)}
+              onSecondarySeriesSelect={props.onSecondarySeriesSelect}
               opacity={fusionOpacity}
-              onOpacityChange={setFusionOpacity}
+              onOpacityChange={props.onFusionOpacityChange}
               isVisible={true}
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
+              selectedSecondaryId={secondarySeriesId}
             />
           )}
         </div>

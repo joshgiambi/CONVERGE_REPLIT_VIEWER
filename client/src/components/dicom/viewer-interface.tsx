@@ -434,6 +434,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               // Clear after a short delay to allow component to react
               setTimeout(() => setAutoLocalizeTarget(undefined), 100);
             }}
+            secondarySeriesId={secondarySeriesId}
+            onSecondarySeriesSelect={setSecondarySeriesId}
           />
         </div>
 
@@ -488,6 +490,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 autoLocalizeTarget={autoLocalizeTarget}
                 secondarySeriesId={secondarySeriesId}
                 fusionOpacity={fusionOpacity}
+                onSecondarySeriesSelect={setSecondarySeriesId}
+                onFusionOpacityChange={setFusionOpacity}
               />
               
               {/* Structure Tags on Right Side */}

@@ -30,6 +30,8 @@ interface SeriesSelectorProps {
   onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
   onAutoZoom?: (zoom: number) => void;
   onAutoLocalize?: (x: number, y: number, z: number) => void;
+  secondarySeriesId?: number | null;
+  onSecondarySeriesSelect?: (seriesId: number | null) => void;
 }
 
 export function SeriesSelector({
@@ -48,7 +50,9 @@ export function SeriesSelector({
   onSelectedForEditChange,
   onContourSettingsChange,
   onAutoZoom,
-  onAutoLocalize
+  onAutoLocalize,
+  secondarySeriesId,
+  onSecondarySeriesSelect
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -563,12 +567,22 @@ export function SeriesSelector({
                                       key={mrS.id}
                                       className={`
                                         w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
-                                        ${selectedSeries?.id === mrS.id
+                                        ${secondarySeriesId === mrS.id
+                                          ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
+                                          : selectedSeries?.id === mrS.id
                                           ? 'bg-purple-500/20 border-purple-500 shadow-lg'
                                           : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
                                         } border
                                       `}
-                                      onClick={() => onSeriesSelect(mrS)}
+                                      onClick={() => {
+                                        // When clicking MRI in series list:
+                                        // 1. Select it as primary series to view MRI alone
+                                        onSeriesSelect(mrS);
+                                        // 2. If we have fusion callback and CT is selected, also activate fusion
+                                        if (onSecondarySeriesSelect && selectedSeries?.modality === 'CT') {
+                                          onSecondarySeriesSelect(mrS.id);
+                                        }
+                                      }}
                                     >
                                       <div className="flex items-center space-x-2">
                                         <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
@@ -577,9 +591,15 @@ export function SeriesSelector({
                                         <span className="truncate text-xs">
                                           {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
                                         </span>
-                                        <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
-                                          Fusion Ready
-                                        </Badge>
+                                        {secondarySeriesId === mrS.id ? (
+                                          <Badge className="ml-auto bg-purple-500 text-white text-xs animate-pulse">
+                                            Fusion Active
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
+                                            Fusion Ready
+                                          </Badge>
+                                        )}
                                       </div>
                                     </div>
                                   ))}

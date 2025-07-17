@@ -105,6 +105,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 17, 2025: Fusion Panel State Sync and Series Selection Integration - COMPLETED
+  - ✅ Fixed critical fusion panel state synchronization issue where secondarySeriesId wasn't syncing between components
+  - ✅ Updated WorkingViewer to use external secondarySeriesId prop directly instead of local state
+  - ✅ Modified FusionControlPanel to accept selectedSecondaryId prop and removed conflicting local state management
+  - ✅ Added secondary series handlers (onSecondarySeriesSelect, onFusionOpacityChange) to ViewerInterface component
+  - ✅ Updated SeriesSelector interface to accept secondarySeriesId prop for fusion selection synchronization
+  - ✅ Series list now shows which MRI is selected for fusion with purple glow and "Fusion Active" badge
+  - ✅ Clarified MRI click behavior: clicking MRI in series list views MRI alone and activates fusion if CT is currently selected
+  - ✅ Fusion panel thumbnails now correctly sync with series selection state
 - July 17, 2025: Fusion X-Y Alignment Fix and UI Improvements - COMPLETED
   - ✅ Fixed X-Y alignment issue in MRI fusion by properly applying registration matrix transformation
   - ✅ Updated registration matrix transformation to calculate proper X-Y offset between CT and MRI
