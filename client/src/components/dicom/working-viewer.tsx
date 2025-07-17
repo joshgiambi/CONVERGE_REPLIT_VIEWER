@@ -1481,6 +1481,13 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     console.log("Secondary cache size:", secondaryImageCache.size);
     console.log("Fusion opacity:", fusionOpacity);
     
+    // Test: Draw a colored rectangle to confirm function is executing
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 0, 255, 0.3)";
+    ctx.fillRect(100, 100, 200, 200);
+    ctx.restore();
+    console.log("Test rectangle drawn at 100,100");
+    
     // Helper function for matrix-vector multiplication (defined at top for use throughout)
     const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
       const result: number[] = [];
@@ -1948,8 +1955,6 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
     console.log(`Base MRI position (before registration): x=${x.toFixed(1)}, y=${y.toFixed(1)}`);
-    console.log(`CT position: [${ctPos[0].toFixed(1)}, ${ctPos[1].toFixed(1)}, ${ctPos[2].toFixed(1)}]`);
-    console.log(`MRI position: [${mriPos[0].toFixed(1)}, ${mriPos[1].toFixed(1)}, ${mriPos[2].toFixed(1)}]`);
     
     // Apply registration transformation if available
     ctx.save();
@@ -1995,14 +2000,16 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       const pixelOffsetY = offsetY / secondarySpacing;
       
       // Apply the offset to center the MRI on the CT
-      // Note: The offset should align MRI to CT position
-      const adjustedX = x - (pixelOffsetX * secondaryBaseScale);
-      const adjustedY = y - (pixelOffsetY * secondaryBaseScale);
+      // Try without any offset first to see base position
+      const adjustedX = x;
+      const adjustedY = y;
       
       // Debug: Log where the image will be drawn
       console.log(`MRI draw position: x=${adjustedX.toFixed(1)}, y=${adjustedY.toFixed(1)}, width=${scaledWidth.toFixed(1)}, height=${scaledHeight.toFixed(1)}`);
       console.log(`Canvas dimensions: ${canvasWidth}x${canvasHeight}`);
       console.log(`MRI visible bounds: [${adjustedX.toFixed(1)}, ${adjustedY.toFixed(1)}, ${(adjustedX + scaledWidth).toFixed(1)}, ${(adjustedY + scaledHeight).toFixed(1)}]`);
+      console.log(`Pixel offsets: X=${pixelOffsetX.toFixed(1)}, Y=${pixelOffsetY.toFixed(1)}`);
+      console.log(`Scale factor: ${secondaryBaseScale.toFixed(3)}, Spacing ratio: ${spacingRatio.toFixed(3)}`);
       
       // Check if MRI is off-screen
       if (adjustedX + scaledWidth < 0 || adjustedX > canvasWidth || 
