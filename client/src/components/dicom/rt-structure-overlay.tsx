@@ -192,7 +192,7 @@ function renderRTStructures(
   // The RT structure positions should directly match the CT image positions
   // No transformation needed - just use the actual Z positions from the contours
   
-  const tolerance = 1.5; // mm tolerance for slice matching (half slice thickness typical for CT)
+  const tolerance = 0.5; // mm tolerance for slice matching - reduced to avoid drawing adjacent slices
   
   // Check if rtStructures has the expected structure
   if (!rtStructures?.structures) {

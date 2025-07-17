@@ -344,7 +344,7 @@ export default function PatientManager() {
     <div className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 pt-24 pb-8">
         {/* Header matching viewer interface */}
-        <header className="fixed top-4 left-4 right-4 bg-gray-900/80 backdrop-blur-md border border-gray-700/30 rounded-2xl px-6 py-3 z-50 shadow-xl">
+        <header className="fixed top-4 left-4 right-4 bg-gray-900/80 backdrop-blur-md border border-pink-500/50 rounded-2xl px-6 py-3 z-50 shadow-xl">
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center space-x-4">
               <div>
@@ -412,7 +412,7 @@ export default function PatientManager() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 h-12 bg-gray-900/80 border border-gray-700/50 text-white placeholder:text-gray-500 
-                       focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 rounded-xl
+                       focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl
                        transition-all duration-200"
             />
           </div>
@@ -420,23 +420,23 @@ export default function PatientManager() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5 bg-gray-900/60 border border-gray-700/50 rounded-xl p-1">
-            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Upload className="h-4 w-4" />
               Import DICOM
             </TabsTrigger>
-            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Network className="h-4 w-4" />
               PACS
             </TabsTrigger>
-            <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Database className="h-4 w-4" />
               Query
             </TabsTrigger>
-            <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600/20 data-[state=active]:to-pink-600/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <FileText className="h-4 w-4" />
               Metadata
             </TabsTrigger>

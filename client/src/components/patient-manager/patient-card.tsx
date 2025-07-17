@@ -86,8 +86,8 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
   };
 
   return (
-    <Card className="bg-gray-900/80 border border-gray-700/50 hover:border-purple-500/50 
-                     transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/10
+    <Card className="bg-gray-900/80 border border-gray-700/50 hover:border-indigo-500/50 
+                     transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10
                      backdrop-blur-sm">
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
@@ -97,7 +97,7 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
           </div>
           <Badge 
             variant="outline" 
-            className="border-purple-500/50 text-purple-400 bg-purple-500/10"
+            className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
           >
             {patient.sex || 'Unknown'} • {patient.age || 'Age N/A'}
           </Badge>
@@ -153,19 +153,26 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
                   onMouseLeave={handleThumbnailLeave}
                 >
                   <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
-                              group-hover:border-purple-500/50 transition-all duration-200
-                              group-hover:shadow-md group-hover:shadow-purple-500/20">
-                    {getThumbnailUrl(imageSeries.id) ? (
+                              group-hover:border-indigo-500/50 transition-all duration-200
+                              group-hover:shadow-md group-hover:shadow-indigo-500/20">
+                    {thumbnailData[imageSeries.id]?.length > 0 ? (
                       <img
-                        src={getThumbnailUrl(imageSeries.id)}
+                        src={`/api/images/${thumbnailData[imageSeries.id][currentImageIndex[imageSeries.id] || 0].id}/file`}
                         alt={`${imageSeries.modality} ${imageSeries.seriesNumber}`}
                         className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
                         <Image className="h-8 w-8 text-gray-600" />
                       </div>
                     )}
+                    <div className="hidden w-full h-full flex items-center justify-center">
+                      <Image className="h-8 w-8 text-gray-600" />
+                    </div>
                   </div>
                   <Badge 
                     variant="secondary" 
@@ -189,10 +196,10 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
           <Link href={`/enhanced-viewer?patientId=${patient.patientId}`}>
             <Button 
               size="sm" 
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500"
             >
               <Eye className="h-4 w-4 mr-1" />
-              View Images
+              Advanced Viewer
             </Button>
           </Link>
           {rtStructureSeries.length > 0 && (

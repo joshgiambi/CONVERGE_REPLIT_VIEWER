@@ -1324,20 +1324,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         await renderFusionOverlay(ctx, currentImage);
       }
 
-      // Render RT structure overlays if available
-      if (localRTStructures && showStructures) {
-        try {
-          // Pass currentImage with its metadata attached
-          const imageWithMetadata = {
-            ...currentImage,
-            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-          };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
-        } catch (rtError) {
-          console.warn("Error drawing RT structures:", rtError);
-          // Don't let RT structure errors prevent image display
-        }
-      }
+      // RT structures are now rendered by the RTStructureOverlay component
+      // No need to render them here anymore to avoid double rendering
     } catch (error: any) {
       console.error("Error displaying image:", error);
       ctx.fillStyle = "black";
@@ -1717,7 +1705,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
 
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
-    const tolerance = 2.0; // mm tolerance for slice matching
+    const tolerance = 0.5; // mm tolerance for slice matching - reduced to only show contours on current slice
 
     // CRITICAL DEBUG: Log all slice position sources for comparison
     console.log(`🔍 SLICE POSITION DEBUG:
