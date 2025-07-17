@@ -1947,6 +1947,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
     
+    console.log(`Base MRI position (before registration): x=${x.toFixed(1)}, y=${y.toFixed(1)}`);
+    console.log(`CT position: [${ctPos[0].toFixed(1)}, ${ctPos[1].toFixed(1)}, ${ctPos[2].toFixed(1)}]`);
+    console.log(`MRI position: [${mriPos[0].toFixed(1)}, ${mriPos[1].toFixed(1)}, ${mriPos[2].toFixed(1)}]`);
+    
     // Apply registration transformation if available
     ctx.save();
     ctx.globalAlpha = fusionOpacity;
@@ -1977,9 +1981,13 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       
       const transformedMRI = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
       
+      console.log(`Transformed MRI position: [${transformedMRI[0].toFixed(1)}, ${transformedMRI[1].toFixed(1)}, ${transformedMRI[2].toFixed(1)}]`);
+      
       // Calculate the offset in patient coordinates
       const offsetX = ctPos[0] - transformedMRI[0];
       const offsetY = ctPos[1] - transformedMRI[1];
+      
+      console.log(`Offset calculation: CT[${ctPos[0].toFixed(1)}, ${ctPos[1].toFixed(1)}] - MRI_transformed[${transformedMRI[0].toFixed(1)}, ${transformedMRI[1].toFixed(1)}] = [${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}]`);
       
       // Convert patient coordinate offset to pixel offset
       // Account for different pixel spacing between CT and MRI
@@ -1987,8 +1995,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       const pixelOffsetY = offsetY / secondarySpacing;
       
       // Apply the offset to center the MRI on the CT
-      const adjustedX = x + (pixelOffsetX * secondaryBaseScale);
-      const adjustedY = y + (pixelOffsetY * secondaryBaseScale);
+      // Note: The offset should align MRI to CT position
+      const adjustedX = x - (pixelOffsetX * secondaryBaseScale);
+      const adjustedY = y - (pixelOffsetY * secondaryBaseScale);
       
       // Debug: Log where the image will be drawn
       console.log(`MRI draw position: x=${adjustedX.toFixed(1)}, y=${adjustedY.toFixed(1)}, width=${scaledWidth.toFixed(1)}, height=${scaledHeight.toFixed(1)}`);
