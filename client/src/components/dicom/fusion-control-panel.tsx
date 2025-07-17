@@ -8,6 +8,38 @@ import { Minimize2, Maximize2, Layers, Settings2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 
+// Simple MRI Thumbnail component
+function MriThumbnail({ seriesId }: { seriesId: number }) {
+  const [thumbnailSrc, setThumbnailSrc] = useState<string>('');
+  
+  useEffect(() => {
+    // Fetch middle image of the series for thumbnail
+    fetch(`/api/series/${seriesId}/images`)
+      .then(res => res.json())
+      .then(images => {
+        if (images.length > 0) {
+          const middleIndex = Math.floor(images.length / 2);
+          const sopInstanceUID = images[middleIndex].sopInstanceUID;
+          // Use the render endpoint to get a processed image
+          setThumbnailSrc(`/api/images/${sopInstanceUID}/render?width=64&windowWidth=1200&windowCenter=600`);
+        }
+      })
+      .catch(console.error);
+  }, [seriesId]);
+  
+  return thumbnailSrc ? (
+    <img 
+      src={thumbnailSrc} 
+      alt="MRI Preview" 
+      className="w-full h-full object-cover"
+    />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center">
+      <Layers className="w-8 h-8 text-purple-500/30" />
+    </div>
+  );
+}
+
 interface FusionControlPanelProps {
   primarySeriesId: number; // CT series
   studyId: number;
@@ -146,9 +178,10 @@ export function FusionControlPanel({
                     }
                   `}
                 >
-                  {/* Placeholder thumbnail */}
-                  <div className="w-full aspect-square bg-gradient-to-br from-purple-900/20 to-purple-800/20 rounded flex items-center justify-center">
-                    <Layers className="w-8 h-8 text-purple-500/50" />
+                  {/* MRI Preview Thumbnail */}
+                  <div className="w-full aspect-square bg-gradient-to-br from-purple-900/20 to-purple-800/20 rounded overflow-hidden relative">
+                    <MriThumbnail seriesId={series.id} />
+                    <Layers className="absolute inset-0 m-auto w-8 h-8 text-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                   <div className="mt-1 px-1">
                     <p className="text-xs text-purple-200 truncate font-medium">

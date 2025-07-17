@@ -474,6 +474,9 @@ export function SeriesSelector({
                     const regSeries = series.filter(s => s.modality === 'REG');
                     const otherSeries = series.filter(s => !['CT', 'MR', 'REG', 'RTSTRUCT'].includes(s.modality));
                     
+                    // Check if we have registration data
+                    const hasRegistration = regSeries.length > 0;
+                    
                     return (
                       <>
                         {/* CT Series as Primary */}
@@ -544,39 +547,28 @@ export function SeriesSelector({
                                 </div>
                               )}
                               
-                              {/* Registration and MR Series nested under CT */}
-                              {(regSeries.length > 0 || mrSeries.length > 0) && (
+                              {/* Registration and MR Series that can be fused */}
+                              {hasRegistration && mrSeries.length > 0 && (
                                 <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
-                                  {/* Registration objects */}
-                                  {regSeries.map((regS) => (
-                                    <div
-                                      key={regS.id}
-                                      className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg"
-                                    >
-                                      <div className="flex items-center space-x-2">
-                                        <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                          REG
-                                        </Badge>
-                                        <span className="truncate text-xs">
-                                          {regS.seriesDescription || 'Registration'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  ))}
+                                  <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                    Fusion-ready MRI (Registered)
+                                  </div>
                                   
                                   {/* MR Series that can be fused */}
                                   {mrSeries.map((mrS) => (
                                     <div
                                       key={mrS.id}
-                                      className="w-full p-2 text-left text-xs bg-purple-600/10 text-gray-300 border border-purple-500/30 rounded-lg hover:bg-purple-600/20 cursor-pointer"
-                                      title="Click to load this MR series for fusion"
-                                      onClick={() => {
-                                        // This will be handled by the fusion control panel auto-selection
-                                        toast({
-                                          title: "MR Series Selected",
-                                          description: `${mrS.seriesDescription || 'MR Series'} is now loading for fusion...`,
-                                        });
-                                      }}
+                                      className={`
+                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
+                                        ${selectedSeries?.id === mrS.id
+                                          ? 'bg-purple-500/20 border-purple-500 shadow-lg'
+                                          : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
+                                        } border
+                                      `}
+                                      onClick={() => onSeriesSelect(mrS)}
                                     >
                                       <div className="flex items-center space-x-2">
                                         <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">

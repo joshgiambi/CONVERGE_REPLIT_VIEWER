@@ -105,6 +105,16 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 17, 2025: Fusion X-Y Alignment Fix and UI Improvements - COMPLETED
+  - ✅ Fixed X-Y alignment issue in MRI fusion by properly applying registration matrix transformation
+  - ✅ Updated registration matrix transformation to calculate proper X-Y offset between CT and MRI
+  - ✅ Fixed multiplyMatrixVector function error by defining it at the top of renderFusionOverlay
+  - ✅ Enhanced series selector UI to show registration relationships with "Fusion-ready MRI (Registered)" label
+  - ✅ MRI series now appear nested under CT series with purple theme to indicate fusion capability
+  - ✅ Registration files no longer appear as selectable items in series list
+  - ✅ Added real MRI image thumbnails to fusion panel replacing placeholder icons
+  - ✅ Thumbnails now show middle slice preview of each MRI series for better visual selection
+  - Note: MRI fusion still limited to registered areas - disappears when CT extends beyond MRI coverage as intended
 - July 16, 2025: MRI Window/Level Controls and UI Refinements - COMPLETED
   - ✅ Removed redundant MR tab buttons from fusion control panel since thumbnails provide same functionality
   - ✅ Added dedicated MRI window/level controls to fusion panel with preset buttons (Auto, T1, T1+C)

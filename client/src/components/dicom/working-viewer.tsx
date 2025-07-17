@@ -50,27 +50,28 @@ interface WorkingViewerProps {
   fusionOpacity?: number;
 }
 
-export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
-  seriesId,
-  studyId,
-  windowLevel: externalWindowLevel,
-  onWindowLevelChange,
-  onZoomIn,
-  onZoomOut,
-  onResetZoom,
-  rtStructures: externalRTStructures,
-  structureVisibility: externalStructureVisibility,
-  brushToolState,
-  selectedForEdit,
-  onBrushSizeChange,
-  onContourUpdate,
-  contourSettings,
-  autoZoomLevel,
-  autoLocalizeTarget,
-  onSlicePositionChange,
-  secondarySeriesId: externalSecondarySeriesId,
-  fusionOpacity: externalFusionOpacity = 0.5,
-}, ref) => {
+export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) => {
+  const {
+    seriesId,
+    studyId,
+    windowLevel: externalWindowLevel,
+    onWindowLevelChange,
+    onZoomIn,
+    onZoomOut,
+    onResetZoom,
+    rtStructures: externalRTStructures,
+    structureVisibility: externalStructureVisibility,
+    brushToolState,
+    selectedForEdit,
+    onBrushSizeChange,
+    onContourUpdate,
+    contourSettings,
+    autoZoomLevel,
+    autoLocalizeTarget,
+    onSlicePositionChange,
+    secondarySeriesId: externalSecondarySeriesId,
+    fusionOpacity: externalFusionOpacity = 0.5,
+  } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1478,6 +1479,18 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     console.log("Secondary cache size:", secondaryImageCache.size);
     console.log("Fusion opacity:", fusionOpacity);
     
+    // Helper function for matrix-vector multiplication (defined at top for use throughout)
+    const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
+      const result: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        result[i] = 0;
+        for (let j = 0; j < 4; j++) {
+          result[i] += matrix[i][j] * vector[j];
+        }
+      }
+      return result;
+    };
+    
     // Get the current CT slice position and image metadata
     let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
     const ctImageMetadata = imageMetadata || {};
@@ -1635,46 +1648,16 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
       ];
       
-      // Apply registration transformation: CT patient coords -> registered MRI patient coords
-      const registeredCoords = multiplyMatrixVector(regMatrix4x4, ctPatientCoords);
-      
-      console.log(`Registered coordinates: [${registeredCoords.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
-      
-      // The registered Z coordinate is what we need to find in MRI space
-      const transformedZ = registeredCoords[2];
+      // The registration matrix transforms MRI to CT coordinates
+      // We need to use it to find which MRI slice corresponds to this CT slice
       
       // Find the MRI slice with the closest patient coordinates
       let bestMatch = null;
       let bestDistance = Infinity;
       
-      // Try both registration directions since DICOM registration can be ambiguous
-      // First try: registration transforms CT to MRI
-      let bestMatchDirect = null;
-      let bestDistanceDirect = Infinity;
+      // Since registration matrix transforms MRI->CT, we need to find which MRI slice 
+      // when transformed, has a Z coordinate closest to the current CT Z
       
-      // Second try: registration transforms MRI to CT (need inverse)
-      let bestMatchInverse = null;
-      let bestDistanceInverse = Infinity;
-      
-      // Compute inverse of registration matrix
-      const regMatrixInverse = invertMatrix4x4(regMatrix4x4);
-      
-      // Debug: Log first few MRI positions to understand the coordinate space
-      if (secondaryImages.length > 0) {
-        console.log(`\nMRI metadata check:`);
-        console.log(`First MRI:`, {
-          imagePosition: secondaryImages[0].imagePosition,
-          sliceLocation: secondaryImages[0].sliceLocation,
-          instanceNumber: secondaryImages[0].instanceNumber
-        });
-        console.log(`Last MRI:`, {
-          imagePosition: secondaryImages[secondaryImages.length-1].imagePosition,
-          sliceLocation: secondaryImages[secondaryImages.length-1].sliceLocation,
-          instanceNumber: secondaryImages[secondaryImages.length-1].instanceNumber
-        });
-      }
-      
-      // Try both directions of registration
       for (let i = 0; i < secondaryImages.length; i++) {
         const mriImage = secondaryImages[i];
         const mriPos = mriImage.imagePosition;
@@ -1683,113 +1666,55 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
         const mriPatientPosition = mriPos.split('\\').map((p: string) => parseFloat(p));
         if (mriPatientPosition.length < 3) continue;
         
-        // Debug log first few iterations
-        if (i < 3) {
-          console.log(`MRI[${i}] patient position: [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}]`);
-        }
-        
-        // Direction 1: Registration transforms CT to MRI
-        const dx1 = mriPatientPosition[0] - registeredCoords[0];
-        const dy1 = mriPatientPosition[1] - registeredCoords[1];
-        const dz1 = mriPatientPosition[2] - registeredCoords[2];
-        const distance1 = Math.sqrt(dx1*dx1 + dy1*dy1 + dz1*dz1);
-        const zDistance1 = Math.abs(dz1);
-        
-        if (zDistance1 < bestDistanceDirect) {
-          bestDistanceDirect = zDistance1;
-          bestMatchDirect = mriImage;
-          
-          if (zDistance1 < 10) {
-            console.log(`  Direction 1 - Close match: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance1.toFixed(1)}mm`);
-          }
-        }
-        
-        // Direction 2: Registration transforms MRI to CT (use inverse)
+        // Transform MRI coordinates to CT space
         const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
         const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
         
-        const dx2 = ctX - mriTransformed[0];
-        const dy2 = ctY - mriTransformed[1];
-        const dz2 = ctZ - mriTransformed[2];
-        const distance2 = Math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2);
-        const zDistance2 = Math.abs(dz2);
+        // Check Z-distance in CT space
+        const zDistance = Math.abs(mriTransformed[2] - ctZ);
         
-        // Debug first few iterations
-        if (i < 3) {
-          console.log(`  MRI->CT: MRI at [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}] -> [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
-          console.log(`  Distance to CT [${ctX.toFixed(1)}, ${ctY.toFixed(1)}, ${ctZ.toFixed(1)}]: ${distance2.toFixed(1)}mm`);
-        }
-        
-        if (zDistance2 < bestDistanceInverse) {
-          bestDistanceInverse = zDistance2;
-          bestMatchInverse = mriImage;
+        if (zDistance < bestDistance) {
+          bestDistance = zDistance;
+          bestMatch = mriImage;
           
-          if (zDistance2 < 10) {
-            console.log(`  Direction 2 - Close match: MRI transforms to CT at [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}], Z-distance: ${zDistance2.toFixed(1)}mm`);
+          if (i < 3 || zDistance < 10) {
+            console.log(`MRI[${i}] at Z=${mriPatientPosition[2].toFixed(1)}mm -> CT Z=${mriTransformed[2].toFixed(1)}mm, distance=${zDistance.toFixed(1)}mm`);
           }
         }
-      }
-      
-      // Choose the direction with the best match
-      console.log(`Direction 1 (CT->MRI) best distance: ${bestDistanceDirect.toFixed(1)}mm`);
-      console.log(`Direction 2 (MRI->CT) best distance: ${bestDistanceInverse.toFixed(1)}mm`);
-      
-      if (bestDistanceDirect < bestDistanceInverse && bestDistanceDirect < 50) {
-        bestMatch = bestMatchDirect;
-        bestDistance = bestDistanceDirect;
-        console.log(`✓ Using Direction 1: Registration transforms CT to MRI`);
-      } else if (bestDistanceInverse < 50) {
-        bestMatch = bestMatchInverse;
-        bestDistance = bestDistanceInverse;
-        console.log(`✓ Using Direction 2: Registration transforms MRI to CT`);
-      } else {
-        bestDistance = Math.min(bestDistanceDirect, bestDistanceInverse);
       }
       
       console.log(`Best match Z-distance: ${bestDistance.toFixed(1)}mm`);
       
-      if (bestMatch && bestDistance < 50) { // Allow larger tolerance for initial testing
-        closestSecondaryImage = bestMatch;
-        minDistance = bestDistance;
-        console.log(`✓ Found MRI slice using registration: ${bestMatch.sliceLocation}mm (distance: ${bestDistance.toFixed(1)}mm)`);
-      } else {
-        console.warn(`Registration matrix produces out-of-range coordinates. Best distance: ${bestDistance?.toFixed(1)}mm`);
-        console.log(`MRI Z range: [${mriMinPos.toFixed(1)}, ${mriMaxPos.toFixed(1)}], Transformed Z: ${transformedZ.toFixed(1)}`);
-        console.log(`CRITICAL ERROR: User requires registration-based alignment only. No fallback to linear mapping allowed.`);
-        console.error(`Unable to find matching MRI slice using registration. Check registration matrix validity.`);
-        return; // Don't render fusion if registration fails
-        
-        // NOTE: The code below is disabled per user requirements - ONLY use registration matrix
-        // Use anatomical correspondence as fallback
-        const ctPercent = (ctZ - ctMinPos) / (ctMaxPos - ctMinPos);
-        
-        // For head/neck imaging, apply non-linear mapping based on typical anatomy
-        let mriPercent = ctPercent;
-        
-        // Adjust for coverage differences between CT and MRI
-        if (ctPercent < 0.3) {
-          // Lower chest/neck region - MRI has less coverage
-          mriPercent = ctPercent * 0.6;
-        } else if (ctPercent < 0.7) {
-          // Mid neck/head region - relatively linear
-          mriPercent = 0.18 + (ctPercent - 0.3) * 0.64 / 0.4;
-        } else {
-          // Upper head region - MRI has more coverage  
-          mriPercent = 0.82 + (ctPercent - 0.7) * 0.18 / 0.3;
-        }
-        
-        const targetIndex = Math.round(mriPercent * (secondaryImages.length - 1));
-        closestSecondaryImage = secondaryImages[Math.max(0, Math.min(targetIndex, secondaryImages.length - 1))];
-        minDistance = 0;
-        
-        console.log(`Using anatomical mapping: CT ${ctZ.toFixed(1)}mm (${(ctPercent*100).toFixed(0)}%) -> MRI ${closestSecondaryImage.sliceLocation}mm (${(mriPercent*100).toFixed(0)}%)`);
+      // Check if we're outside MRI coverage
+      const mriZMin = Math.min(...secondaryImages.map(img => {
+        const pos = img.imagePosition?.split('\\').map((p: string) => parseFloat(p));
+        if (!pos || pos.length < 3) return Infinity;
+        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
+        return transformed[2];
+      }));
+      const mriZMax = Math.max(...secondaryImages.map(img => {
+        const pos = img.imagePosition?.split('\\').map((p: string) => parseFloat(p));
+        if (!pos || pos.length < 3) return -Infinity;
+        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
+        return transformed[2];
+      }));
+      
+      console.log(`MRI Z range in CT space: [${mriZMin.toFixed(1)}, ${mriZMax.toFixed(1)}]`);
+      console.log(`Current CT Z: ${ctZ.toFixed(1)}mm`);
+      
+      if (ctZ < mriZMin - 5 || ctZ > mriZMax + 5) {
+        console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+        return; // MRI doesn't cover this CT slice
       }
       
-      if (closestSecondaryImage) {
-        console.log(`Found MRI slice at ${closestSecondaryImage.sliceLocation}mm (distance: ${minDistance.toFixed(1)}mm)`);
+      if (bestMatch && bestDistance < 10) { // Tighter tolerance for proper alignment
+        closestSecondaryImage = bestMatch;
+        minDistance = bestDistance;
+        console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
       } else {
-        console.log("No suitable MRI slice found for fusion");
-        return;
+        console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
+        console.error(`Unable to find matching MRI slice using registration.`);
+        return; // Don't render fusion if match isn't good enough
       }
     } else {
       // Fallback: simple linear mapping if no registration available
@@ -2005,50 +1930,40 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     ctx.imageSmoothingQuality = "high";
     
     if (registrationMatrix && registrationMatrix.length === 16) {
-      // Apply the full 3D transformation matrix to align MRI with CT
-      // Extract rotation and translation components
-      const R = [
-        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2]],
-        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6]],
-        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10]]
+      // The registration matrix transforms MRI coordinates to CT coordinates
+      // For proper alignment, we need to compute the X-Y translation offset
+      
+      // Get the image positions for both CT and MRI
+      const ctPos = primaryImage.imagePosition?.split('\\').map((p: string) => parseFloat(p)) || [0, 0, 0];
+      const mriPos = closestSecondaryImage.imagePosition?.split('\\').map((p: string) => parseFloat(p)) || [0, 0, 0];
+      
+      // Transform MRI position to CT space
+      const mriHomogeneous = [mriPos[0], mriPos[1], mriPos[2], 1];
+      const regMatrix4x4 = [
+        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
+        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
+        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
+        [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
       ];
-      const T = [registrationMatrix[3], registrationMatrix[7], registrationMatrix[11]];
       
-      // The registration matrix transforms from one space to another
-      // We need to apply the inverse transformation to align MRI with CT
-      // For display purposes, we primarily care about in-plane (X-Y) transformation
+      const transformedMRI = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
       
-      // Calculate determinant for 2x2 rotation matrix
-      const det2D = R[0][0] * R[1][1] - R[0][1] * R[1][0];
+      // Calculate the offset in patient coordinates
+      const offsetX = ctPos[0] - transformedMRI[0];
+      const offsetY = ctPos[1] - transformedMRI[1];
       
-      if (Math.abs(det2D) > 0.0001) {
-        // Compute inverse of 2x2 rotation matrix
-        const invR00 = R[1][1] / det2D;
-        const invR01 = -R[0][1] / det2D;
-        const invR10 = -R[1][0] / det2D;
-        const invR11 = R[0][0] / det2D;
-        
-        // Compute inverse translation
-        const invTx = -(invR00 * T[0] + invR01 * T[1]);
-        const invTy = -(invR10 * T[0] + invR11 * T[1]);
-        
-        // Apply scaling to translations
-        const scaledInvTx = invTx * secondaryBaseScale / primarySpacing;
-        const scaledInvTy = invTy * secondaryBaseScale / primarySpacing;
-        
-        // Apply inverse transformation
-        ctx.translate(x + scaledInvTx, y + scaledInvTy);
-        ctx.transform(invR00, invR10, invR01, invR11, 0, 0);
-        
-        // Draw image
-        ctx.drawImage(tempCanvas, 0, 0, scaledWidth, scaledHeight);
-        
-        console.log(`Applied inverse registration: rot=[${invR00.toFixed(3)}, ${invR11.toFixed(3)}], trans=[${scaledInvTx.toFixed(1)}, ${scaledInvTy.toFixed(1)}]`);
-      } else {
-        // Fallback: draw without transformation if matrix is singular
-        console.warn("Registration matrix is singular, drawing without transformation");
-        ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
-      }
+      // Convert patient coordinate offset to pixel offset
+      // Account for different pixel spacing between CT and MRI
+      const pixelOffsetX = offsetX / secondarySpacing;
+      const pixelOffsetY = offsetY / secondarySpacing;
+      
+      // Apply the offset to center the MRI on the CT
+      const adjustedX = x + (pixelOffsetX * secondaryBaseScale);
+      const adjustedY = y + (pixelOffsetY * secondaryBaseScale);
+      
+      ctx.drawImage(tempCanvas, adjustedX, adjustedY, scaledWidth, scaledHeight);
+      
+      console.log(`Applied registration offset: [${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}]mm -> [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
     } else {
       // No registration matrix, draw normally
       ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
@@ -2898,6 +2813,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>(({
     </Card>
   );
 });
+
+WorkingViewer.displayName = 'WorkingViewer';
 
 declare global {
   interface Window {
