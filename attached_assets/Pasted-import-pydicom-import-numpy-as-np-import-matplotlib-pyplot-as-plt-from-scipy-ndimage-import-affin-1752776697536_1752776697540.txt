@@ -1,0 +1,502 @@
+import pydicom
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import affine_transform
+from scipy import interpolate
+import warnings
+
+class RTRegistrationProcessor:
+    """
+    A class to process RT registration files and properly overlay MRI on CT scans
+    based on the transformation matrices in DICOM RT registration files.
+    """
+    
+    def __init__(self):
+        self.ct_dataset = None
+        self.mri_dataset = None
+        self.registration_dataset = None
+        self.transformation_matrix = None
+        self.ct_image = None
+        self.mri_image = None
+        
+    def load_ct_scan(self, ct_path):
+        """Load the primary CT scan dataset."""
+        try:
+            self.ct_dataset = pydicom.dcmread(ct_path)
+            self.ct_image = self.ct_dataset.pixel_array.astype(float)
+            
+            # Apply rescale slope and intercept if available (common in CT)
+            if hasattr(self.ct_dataset, 'RescaleSlope'):
+                slope = float(self.ct_dataset.RescaleSlope)
+            else:
+                slope = 1.0
+                
+            if hasattr(self.ct_dataset, 'RescaleIntercept'):
+                intercept = float(self.ct_dataset.RescaleIntercept)
+            else:
+                intercept = 0.0
+                
+            self.ct_image = self.ct_image * slope + intercept
+            print(f"CT image loaded: {self.ct_image.shape}")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading CT scan: {e}")
+            return False
+    
+    def load_mri_scan(self, mri_path):
+        """Load the secondary MRI scan dataset."""
+        try:
+            self.mri_dataset = pydicom.dcmread(mri_path)
+            self.mri_image = self.mri_dataset.pixel_array.astype(float)
+            
+            # MRI typically doesn't use rescale slope/intercept the same way as CT
+            # but check anyway
+            if hasattr(self.mri_dataset, 'RescaleSlope'):
+                slope = float(self.mri_dataset.RescaleSlope)
+                self.mri_image = self.mri_image * slope
+                
+            if hasattr(self.mri_dataset, 'RescaleIntercept'):
+                intercept = float(self.mri_dataset.RescaleIntercept)
+                self.mri_image = self.mri_image + intercept
+                
+            print(f"MRI image loaded: {self.mri_image.shape}")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading MRI scan: {e}")
+            return False
+    
+    def load_rt_registration(self, reg_path):
+        """Load the RT registration file and extract transformation matrix."""
+        try:
+            self.registration_dataset = pydicom.dcmread(reg_path)
+            
+            # Extract transformation matrix from registration file
+            # The matrix is typically in RegistrationSequence
+            if hasattr(self.registration_dataset, 'RegistrationSequence'):
+                reg_seq = self.registration_dataset.RegistrationSequence[0]
+                
+                # Look for Matrix Registration Sequence
+                if hasattr(reg_seq, 'MatrixRegistrationSequence'):
+                    matrix_seq = reg_seq.MatrixRegistrationSequence[0]
+                    
+                    # Get the Frame of Reference Transformation Matrix
+                    if hasattr(matrix_seq, 'MatrixSequence'):
+                        matrix_item = matrix_seq.MatrixSequence[0]
+                        
+                        if hasattr(matrix_item, 'FrameOfReferenceTransformationMatrix'):
+                            matrix_values = matrix_item.FrameOfReferenceTransformationMatrix
+                            # Convert to 4x4 numpy array (values are in row-major order)
+                            self.transformation_matrix = np.array(matrix_values).reshape(4, 4)
+                            
+                            print("Transformation matrix loaded:")
+                            print(self.transformation_matrix)
+                            return True
+                            
+            # Alternative location for transformation matrix
+            elif hasattr(self.registration_dataset, 'SpatialRegistrationSequence'):
+                spatial_reg = self.registration_dataset.SpatialRegistrationSequence[0]
+                
+                if hasattr(spatial_reg, 'MatrixSequence'):
+                    matrix_item = spatial_reg.MatrixSequence[0]
+                    
+                    if hasattr(matrix_item, 'FrameOfReferenceTransformationMatrix'):
+                        matrix_values = matrix_item.FrameOfReferenceTransformationMatrix
+                        self.transformation_matrix = np.array(matrix_values).reshape(4, 4)
+                        
+                        print("Transformation matrix loaded from SpatialRegistrationSequence:")
+                        print(self.transformation_matrix)
+                        return True
+            
+            print("No transformation matrix found in registration file")
+            return False
+            
+        except Exception as e:
+            print(f"Error loading RT registration: {e}")
+            return False
+    
+    def get_image_to_world_matrix(self, dataset):
+        """
+        Calculate the image-to-world coordinate transformation matrix
+        from DICOM image position and orientation information.
+        """
+        # Get image position (origin)
+        if hasattr(dataset, 'ImagePositionPatient'):
+            origin = np.array(dataset.ImagePositionPatient, dtype=float)
+        else:
+            origin = np.array([0.0, 0.0, 0.0])
+        
+        # Get image orientation (direction cosines)
+        if hasattr(dataset, 'ImageOrientationPatient'):
+            orientation = np.array(dataset.ImageOrientationPatient, dtype=float)
+            # First 3 values are row direction, last 3 are column direction
+            row_cosines = orientation[:3]
+            col_cosines = orientation[3:]
+            # Cross product gives slice direction
+            slice_cosines = np.cross(row_cosines, col_cosines)
+        else:
+            # Default to identity orientation
+            row_cosines = np.array([1.0, 0.0, 0.0])
+            col_cosines = np.array([0.0, 1.0, 0.0])
+            slice_cosines = np.array([0.0, 0.0, 1.0])
+        
+        # Get pixel spacing
+        if hasattr(dataset, 'PixelSpacing'):
+            pixel_spacing = np.array(dataset.PixelSpacing, dtype=float)
+            row_spacing = pixel_spacing[0]  # Between rows
+            col_spacing = pixel_spacing[1]  # Between columns
+        else:
+            row_spacing = col_spacing = 1.0
+        
+        # Get slice thickness
+        if hasattr(dataset, 'SliceThickness'):
+            slice_spacing = float(dataset.SliceThickness)
+        else:
+            slice_spacing = 1.0
+        
+        # Build transformation matrix
+        matrix = np.eye(4)
+        matrix[0:3, 0] = row_cosines * row_spacing
+        matrix[0:3, 1] = col_cosines * col_spacing
+        matrix[0:3, 2] = slice_cosines * slice_spacing
+        matrix[0:3, 3] = origin
+        
+        return matrix
+    
+    def apply_registration_transform(self):
+        """
+        Apply the registration transformation to align MRI with CT.
+        """
+        if self.transformation_matrix is None:
+            print("No transformation matrix available")
+            return None
+        
+        if self.mri_image is None:
+            print("No MRI image loaded")
+            return None
+        
+        # Get the inverse of the transformation matrix for scipy's affine_transform
+        # (scipy expects the inverse transformation)
+        try:
+            inv_matrix = np.linalg.inv(self.transformation_matrix[:3, :3])
+            offset = -np.dot(inv_matrix, self.transformation_matrix[:3, 3])
+            
+            # Apply the transformation to the MRI image
+            transformed_mri = affine_transform(
+                self.mri_image,
+                inv_matrix,
+                offset=offset,
+                output_shape=self.ct_image.shape if self.ct_image is not None else self.mri_image.shape,
+                order=1,  # Linear interpolation
+                mode='constant',
+                cval=0.0
+            )
+            
+            print(f"Transformed MRI shape: {transformed_mri.shape}")
+            return transformed_mri
+            
+        except Exception as e:
+            print(f"Error applying transformation: {e}")
+            return None
+    
+    def create_fusion_image(self, ct_window_center=40, ct_window_width=400, 
+                          mri_alpha=0.5, mri_colormap='hot'):
+        """
+        Create a fused image with MRI overlaid on CT.
+        
+        Parameters:
+        - ct_window_center: CT windowing center
+        - ct_window_width: CT windowing width
+        - mri_alpha: Transparency of MRI overlay (0-1)
+        - mri_colormap: Colormap for MRI overlay
+        """
+        if self.ct_image is None or self.mri_image is None:
+            print("Both CT and MRI images must be loaded")
+            return None
+        
+        # Apply registration transformation
+        transformed_mri = self.apply_registration_transform()
+        if transformed_mri is None:
+            print("Failed to apply registration transformation")
+            return None
+        
+        # Normalize CT image for display (windowing)
+        ct_min = ct_window_center - ct_window_width / 2
+        ct_max = ct_window_center + ct_window_width / 2
+        ct_display = np.clip((self.ct_image - ct_min) / (ct_max - ct_min), 0, 1)
+        
+        # Normalize MRI for overlay
+        mri_min = np.percentile(transformed_mri[transformed_mri > 0], 5)
+        mri_max = np.percentile(transformed_mri[transformed_mri > 0], 95)
+        mri_normalized = np.clip((transformed_mri - mri_min) / (mri_max - mri_min), 0, 1)
+        
+        # Create mask for non-zero MRI values
+        mri_mask = transformed_mri > 0
+        
+        return ct_display, mri_normalized, mri_mask, transformed_mri
+    
+    def display_fusion(self, slice_idx=None, ct_window_center=40, ct_window_width=400, 
+                      mri_alpha=0.5, figsize=(15, 5)):
+        """
+        Display the fused CT-MRI image.
+        """
+        fusion_data = self.create_fusion_image(ct_window_center, ct_window_width, mri_alpha)
+        if fusion_data is None:
+            return
+        
+        ct_display, mri_normalized, mri_mask, transformed_mri = fusion_data
+        
+        # If no slice specified, use middle slice
+        if slice_idx is None:
+            slice_idx = ct_display.shape[0] // 2 if len(ct_display.shape) == 3 else 0
+        
+        # Handle 2D vs 3D images
+        if len(ct_display.shape) == 3:
+            ct_slice = ct_display[slice_idx]
+            mri_slice = mri_normalized[slice_idx]
+            mask_slice = mri_mask[slice_idx]
+        else:
+            ct_slice = ct_display
+            mri_slice = mri_normalized
+            mask_slice = mri_mask
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(1, 4, figsize=figsize)
+        
+        # CT only
+        axes[0].imshow(ct_slice, cmap='gray', vmin=0, vmax=1)
+        axes[0].set_title('CT Image')
+        axes[0].axis('off')
+        
+        # MRI only
+        axes[1].imshow(mri_slice, cmap='hot', vmin=0, vmax=1)
+        axes[1].set_title('Registered MRI')
+        axes[1].axis('off')
+        
+        # Fusion overlay
+        axes[2].imshow(ct_slice, cmap='gray', vmin=0, vmax=1)
+        masked_mri = np.ma.masked_where(~mask_slice, mri_slice)
+        axes[2].imshow(masked_mri, cmap='hot', alpha=mri_alpha, vmin=0, vmax=1)
+        axes[2].set_title('CT-MRI Fusion')
+        axes[2].axis('off')
+        
+        # Checkerboard pattern for registration verification
+        checker = self.create_checkerboard_pattern(ct_slice, mri_slice, mask_slice)
+        axes[3].imshow(checker, cmap='gray', vmin=0, vmax=1)
+        axes[3].set_title('Registration Check')
+        axes[3].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def create_checkerboard_pattern(self, ct_slice, mri_slice, mask_slice, 
+                                   checker_size=20):
+        """
+        Create a checkerboard pattern to verify registration accuracy.
+        """
+        h, w = ct_slice.shape
+        checker = np.zeros_like(ct_slice)
+        
+        # Create checkerboard mask
+        for i in range(0, h, checker_size):
+            for j in range(0, w, checker_size):
+                if ((i // checker_size) + (j // checker_size)) % 2 == 0:
+                    end_i = min(i + checker_size, h)
+                    end_j = min(j + checker_size, w)
+                    checker[i:end_i, j:end_j] = 1
+        
+        # Apply checkerboard: CT where checker=1, MRI where checker=0 and mask=True
+        result = ct_slice.copy()
+        mri_areas = (checker == 0) & mask_slice
+        result[mri_areas] = mri_slice[mri_areas]
+        
+        return result
+    
+    def validate_registration_quality(self):
+        """
+        Perform basic validation of registration quality.
+        """
+        if self.transformation_matrix is None:
+            print("No transformation matrix to validate")
+            return
+        
+        # Check if matrix is identity (no transformation)
+        if np.allclose(self.transformation_matrix, np.eye(4)):
+            print("Warning: Transformation matrix is identity - no registration applied")
+        
+        # Extract rotation matrix and check if it's orthogonal
+        rotation_matrix = self.transformation_matrix[:3, :3]
+        should_be_identity = np.dot(rotation_matrix, rotation_matrix.T)
+        
+        if not np.allclose(should_be_identity, np.eye(3), atol=1e-3):
+            print("Warning: Rotation matrix is not orthogonal - registration may be invalid")
+        else:
+            print("Registration matrix validation passed")
+        
+        # Calculate determinant to check for reflections
+        det = np.linalg.det(rotation_matrix)
+        if det < 0:
+            print("Warning: Transformation includes reflection")
+        
+        # Print transformation information
+        translation = self.transformation_matrix[:3, 3]
+        print(f"Translation: {translation}")
+        
+        # Extract rotation angles (approximate)
+        try:
+            from scipy.spatial.transform import Rotation
+            r = Rotation.from_matrix(rotation_matrix)
+            angles = r.as_euler('xyz', degrees=True)
+            print(f"Rotation angles (degrees): {angles}")
+        except ImportError:
+            print("scipy.spatial.transform not available for rotation analysis")
+
+# Example usage function
+def example_usage():
+    """
+    Example of how to use the RTRegistrationProcessor class.
+    """
+    # Initialize the processor
+    processor = RTRegistrationProcessor()
+    
+    # Load the images and registration file
+    # Replace these paths with your actual file paths
+    ct_path = "path/to/planning_ct.dcm"
+    mri_path = "path/to/mri_scan.dcm"
+    reg_path = "path/to/rt_registration.dcm"
+    
+    print("Loading CT scan...")
+    if not processor.load_ct_scan(ct_path):
+        return
+    
+    print("Loading MRI scan...")
+    if not processor.load_mri_scan(mri_path):
+        return
+    
+    print("Loading RT registration...")
+    if not processor.load_rt_registration(reg_path):
+        return
+    
+    # Validate the registration
+    print("\nValidating registration...")
+    processor.validate_registration_quality()
+    
+    # Display the fusion
+    print("\nDisplaying fusion...")
+    processor.display_fusion(
+        slice_idx=None,  # Use middle slice
+        ct_window_center=40,
+        ct_window_width=400,
+        mri_alpha=0.6
+    )
+
+# Alternative approach for multi-sequence MRI fusion
+class MultiSequenceMRIProcessor(RTRegistrationProcessor):
+    """
+    Extended processor for handling multiple co-registered MRI sequences.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.mri_sequences = {}  # Dictionary to store multiple MRI sequences
+        
+    def load_mri_sequence(self, sequence_name, mri_path):
+        """Load an additional MRI sequence."""
+        try:
+            dataset = pydicom.dcmread(mri_path)
+            image = dataset.pixel_array.astype(float)
+            
+            # Apply rescale if available
+            if hasattr(dataset, 'RescaleSlope'):
+                image *= float(dataset.RescaleSlope)
+            if hasattr(dataset, 'RescaleIntercept'):
+                image += float(dataset.RescaleIntercept)
+                
+            self.mri_sequences[sequence_name] = {
+                'dataset': dataset,
+                'image': image
+            }
+            
+            print(f"MRI sequence '{sequence_name}' loaded: {image.shape}")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading MRI sequence '{sequence_name}': {e}")
+            return False
+    
+    def display_multi_sequence_fusion(self, slice_idx=None, sequences=None):
+        """Display fusion with multiple MRI sequences."""
+        if sequences is None:
+            sequences = list(self.mri_sequences.keys())
+        
+        if not sequences:
+            print("No MRI sequences available")
+            return
+        
+        n_sequences = len(sequences)
+        fig, axes = plt.subplots(2, n_sequences + 1, figsize=(4 * (n_sequences + 1), 8))
+        
+        if slice_idx is None:
+            slice_idx = self.ct_image.shape[0] // 2 if len(self.ct_image.shape) == 3 else 0
+        
+        # Handle 2D vs 3D
+        if len(self.ct_image.shape) == 3:
+            ct_slice = self.ct_image[slice_idx]
+        else:
+            ct_slice = self.ct_image
+        
+        # Display CT
+        axes[0, 0].imshow(ct_slice, cmap='gray')
+        axes[0, 0].set_title('CT')
+        axes[0, 0].axis('off')
+        
+        axes[1, 0].imshow(ct_slice, cmap='gray')
+        axes[1, 0].set_title('CT (for fusion)')
+        axes[1, 0].axis('off')
+        
+        # Display each MRI sequence
+        for i, seq_name in enumerate(sequences):
+            if seq_name not in self.mri_sequences:
+                continue
+                
+            # Set current MRI for transformation
+            self.mri_image = self.mri_sequences[seq_name]['image']
+            transformed_mri = self.apply_registration_transform()
+            
+            if transformed_mri is not None:
+                if len(transformed_mri.shape) == 3:
+                    mri_slice = transformed_mri[slice_idx]
+                else:
+                    mri_slice = transformed_mri
+                
+                # Normalize for display
+                mri_min = np.percentile(mri_slice[mri_slice > 0], 5) if np.any(mri_slice > 0) else 0
+                mri_max = np.percentile(mri_slice[mri_slice > 0], 95) if np.any(mri_slice > 0) else 1
+                mri_normalized = np.clip((mri_slice - mri_min) / (mri_max - mri_min), 0, 1)
+                
+                # Top row: MRI sequences alone
+                axes[0, i + 1].imshow(mri_normalized, cmap='hot')
+                axes[0, i + 1].set_title(f'MRI {seq_name}')
+                axes[0, i + 1].axis('off')
+                
+                # Bottom row: Fusion with CT
+                axes[1, i + 1].imshow(ct_slice, cmap='gray')
+                mask = mri_slice > 0
+                masked_mri = np.ma.masked_where(~mask, mri_normalized)
+                axes[1, i + 1].imshow(masked_mri, cmap='hot', alpha=0.6)
+                axes[1, i + 1].set_title(f'CT + {seq_name}')
+                axes[1, i + 1].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+
+if __name__ == "__main__":
+    print("RT Registration Processor for MRI-CT Fusion")
+    print("=" * 50)
+    print("This script processes DICOM RT registration files to properly")
+    print("overlay MRI images on CT scans using transformation matrices.")
+    print("\nUsage:")
+    print("1. Update file paths in example_usage() function")
+    print("2. Run example_usage() to process your files")
+    print("\nFor multiple MRI sequences, use MultiSequenceMRIProcessor class")
