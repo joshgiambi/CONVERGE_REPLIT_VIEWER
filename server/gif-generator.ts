@@ -77,7 +77,30 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
         const windowWidth = parseFloat(dataSet.string('x00281051') || '300');
         
         // Get pixel data
-        const pixelData = new Uint16Array(buffer.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+        let pixelData: Uint16Array;
+        if (pixelDataElement.fragments) {
+          // Handle encapsulated pixel data
+          const fragments = pixelDataElement.fragments;
+          let totalLength = 0;
+          fragments.forEach((fragment: any) => {
+            totalLength += fragment.length;
+          });
+          
+          const combinedArray = new Uint8Array(totalLength);
+          let offset = 0;
+          fragments.forEach((fragment: any) => {
+            const fragmentData = new Uint8Array(byteArray.buffer, fragment.position, fragment.length);
+            combinedArray.set(fragmentData, offset);
+            offset += fragment.length;
+          });
+          
+          pixelData = new Uint16Array(combinedArray.buffer);
+        } else {
+          // Handle uncompressed pixel data
+          const pixelDataOffset = pixelDataElement.dataOffset;
+          const pixelDataLength = pixelDataElement.length;
+          pixelData = new Uint16Array(byteArray.buffer, pixelDataOffset, pixelDataLength / 2);
+        }
         
         // Create temporary canvas for this frame
         const frameCanvas = createCanvas(columns, rows);

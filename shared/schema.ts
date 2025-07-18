@@ -267,3 +267,21 @@ export interface DICOMImageMetadata {
   sopInstanceUID: string;
   sopClassUID: string;
 }
+
+// Patient Tags for organizing by anatomical sites and registration
+export const patientTags = pgTable("patient_tags", {
+  id: serial("id").primaryKey(),
+  patientId: integer("patient_id").notNull().references(() => patients.id),
+  tagType: text("tag_type").notNull(), // 'anatomical', 'registration', 'fusion', 'custom'
+  tagValue: text("tag_value").notNull(),
+  color: text("color"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertPatientTagSchema = createInsertSchema(patientTags).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type PatientTag = typeof patientTags.$inferSelect;
+export type InsertPatientTag = z.infer<typeof insertPatientTagSchema>;

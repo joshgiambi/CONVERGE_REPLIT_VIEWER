@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2 } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
+import { MetadataEditDialog } from './metadata-edit-dialog';
 
 interface PatientCardProps {
   patient: any;
@@ -17,6 +18,9 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
   const [registrationInfo, setRegistrationInfo] = useState<any>(null);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [tags, setTags] = useState<any[]>([]);
+  const hasLoadedRef = useRef(false);
 
   // Group series by study
   const studiesWithSeries = studies.map(study => ({
@@ -33,11 +37,24 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
   const ctSeries = imageSeries.filter(s => s.modality === 'CT');
   const mriSeries = imageSeries.filter(s => s.modality === 'MR');
 
-  // Load RT structures when expanded
+  // Load patient tags
   useEffect(() => {
-    if (isExpanded) {
-      rtStructureSeries.forEach(async (rtSeries) => {
-        if (!rtStructures[rtSeries.id]) {
+    if (patient) {
+      fetch(`/api/patients/${patient.id}/tags`)
+        .then(res => res.json())
+        .then(data => setTags(data))
+        .catch(err => console.error('Error loading tags:', err));
+    }
+  }, [patient]);
+
+  // Load data when expanded
+  useEffect(() => {
+    if (isExpanded && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      
+      // Load RT structures
+      const loadRTStructures = async () => {
+        for (const rtSeries of rtStructureSeries) {
           setLoadingStructures(prev => ({ ...prev, [rtSeries.id]: true }));
           try {
             const response = await fetch(`/api/rt-structures/${rtSeries.studyId}/${rtSeries.id}`);
@@ -51,23 +68,29 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
             setLoadingStructures(prev => ({ ...prev, [rtSeries.id]: false }));
           }
         }
-      });
+      };
       
-      // Load registration info if available
-      if (registrationSeries.length > 0 || (ctSeries.length > 0 && mriSeries.length > 0)) {
-        studies.forEach(study => {
-          fetch(`/api/registrations/${study.id}`)
-            .then(res => res.json())
-            .then(data => {
+      // Load registration info
+      const loadRegistrationInfo = async () => {
+        if (studies.length > 0) {
+          try {
+            const response = await fetch(`/api/registrations/${studies[0].id}`);
+            if (response.ok) {
+              const data = await response.json();
               if (data && data.transformationMatrix) {
                 setRegistrationInfo(data);
               }
-            })
-            .catch(err => console.error('Error loading registration:', err));
-        });
-      }
+            }
+          } catch (err) {
+            console.error('Error loading registration:', err);
+          }
+        }
+      };
+      
+      loadRTStructures();
+      loadRegistrationInfo();
     }
-  }, [isExpanded, rtStructureSeries, studies]);
+  }, [isExpanded]);
 
   const getModalityColor = (modality: string) => {
     switch (modality) {
@@ -80,6 +103,12 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
     }
   };
 
+  // Simple placeholder image for now
+  const getPlaceholderImage = (seriesId: number) => {
+    // Return a simple placeholder URL or use the first image
+    return `/api/series/${seriesId}/thumbnail`;
+  };
+
   return (
     <Card className="bg-gray-900/80 border border-gray-700/50 hover:border-indigo-500/50 
                      transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10
@@ -88,14 +117,43 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
         <div className="flex justify-between items-start">
           <div>
             <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
-            <p className="text-sm text-gray-500">ID: {patient.patientId}</p>
+            <p className="text-sm text-gray-500">ID: {patient.patientID}</p>
+            {/* Display tags */}
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {tags.map(tag => (
+                  <Badge
+                    key={tag.id}
+                    variant="secondary"
+                    className="text-xs px-2 py-0"
+                    style={{ 
+                      backgroundColor: tag.color + '20', 
+                      borderColor: tag.color, 
+                      color: tag.color 
+                    }}
+                  >
+                    {tag.tagValue}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
-          <Badge 
-            variant="outline" 
-            className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
-          >
-            {patient.sex || 'Unknown'} • {patient.age || 'Age N/A'}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge 
+              variant="outline" 
+              className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
+            >
+              {patient.sex || 'Unknown'} • {patient.age || 'Age N/A'}
+            </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowEditDialog(true)}
+              className="h-8 w-8 p-0"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       
@@ -118,24 +176,14 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
               </div>
             </div>
 
-            {/* Series Preview Grid with GIF thumbnails */}
+            {/* Series Preview Grid - simplified for now */}
             <div className="grid grid-cols-4 gap-2">
               {study.series.filter(s => ['CT', 'MR', 'PT'].includes(s.modality)).map((imageSeries) => (
                 <div key={imageSeries.id} className="relative group">
                   <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
                               group-hover:border-indigo-500/50 transition-all duration-200
                               group-hover:shadow-md group-hover:shadow-indigo-500/20">
-                    <img
-                      src={`/api/series/${imageSeries.id}/gif`}
-                      alt={`${imageSeries.modality} ${imageSeries.seriesNumber}`}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                      }}
-                    />
-                    <div className="hidden w-full h-full flex items-center justify-center bg-gray-800">
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
                       <div className="text-center">
                         <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
                         <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
@@ -301,6 +349,26 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
           </Button>
         </div>
       </CardContent>
+      
+      {/* Metadata Edit Dialog */}
+      <MetadataEditDialog
+        open={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        patient={patient}
+        studies={studies}
+        series={series}
+        onUpdate={() => {
+          // Reload tags after update
+          if (patient) {
+            fetch(`/api/patients/${patient.id}/tags`)
+              .then(res => res.json())
+              .then(data => setTags(data))
+              .catch(err => console.error('Error loading tags:', err));
+          }
+          // You might want to reload patient data here too
+          window.location.reload();
+        }}
+      />
     </Card>
   );
 }

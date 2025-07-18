@@ -1399,5 +1399,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Patient metadata editing endpoints
+  app.patch("/api/patients/:patientId", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patientId = parseInt(req.params.patientId);
+      const metadata = req.body;
+      
+      const updated = await storage.updatePatientMetadata(patientId, metadata);
+      if (!updated) {
+        return res.status(404).json({ error: 'Patient not found' });
+      }
+      
+      res.json(updated);
+    } catch (error) {
+      console.error('Error updating patient metadata:', error);
+      next(error);
+    }
+  });
+
+  // Series description editing endpoint
+  app.patch("/api/series/:seriesId/description", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const { description } = req.body;
+      
+      const updated = await storage.updateSeriesDescription(seriesId, description);
+      if (!updated) {
+        return res.status(404).json({ error: 'Series not found' });
+      }
+      
+      res.json(updated);
+    } catch (error) {
+      console.error('Error updating series description:', error);
+      next(error);
+    }
+  });
+
+  // Patient tagging endpoints
+  app.get("/api/patients/:patientId/tags", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patientId = parseInt(req.params.patientId);
+      const tags = await storage.getPatientTags(patientId);
+      res.json(tags);
+    } catch (error) {
+      console.error('Error getting patient tags:', error);
+      next(error);
+    }
+  });
+
+  app.post("/api/patients/:patientId/tags", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patientId = parseInt(req.params.patientId);
+      const { tagType, tagValue, color } = req.body;
+      
+      const tag = await storage.createPatientTag({
+        patientId,
+        tagType,
+        tagValue,
+        color
+      });
+      
+      if (!tag) {
+        return res.status(400).json({ error: 'Failed to create tag' });
+      }
+      
+      res.json(tag);
+    } catch (error) {
+      console.error('Error creating patient tag:', error);
+      next(error);
+    }
+  });
+
+  app.delete("/api/tags/:tagId", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const tagId = parseInt(req.params.tagId);
+      const success = await storage.deletePatientTag(tagId);
+      
+      if (!success) {
+        return res.status(404).json({ error: 'Tag not found' });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting patient tag:', error);
+      next(error);
+    }
+  });
+
+  // Generate anatomical tags for a patient
+  app.post("/api/patients/:patientId/tags/generate", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patientId = parseInt(req.params.patientId);
+      const tags = await storage.generateAnatomicalTags(patientId);
+      res.json(tags);
+    } catch (error) {
+      console.error('Error generating anatomical tags:', error);
+      next(error);
+    }
+  });
+
   return { close: () => {} } as Server;
 }

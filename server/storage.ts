@@ -1,4 +1,4 @@
-import { studies, series, images, patients, pacsConnections, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection } from "@shared/schema";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
@@ -54,6 +54,20 @@ export interface IStorage {
   // RT Structure operations
   updateRTStructureName(structureId: number, name: string): Promise<void>;
   updateRTStructureColor(structureId: number, color: number[]): Promise<void>;
+  
+  // Registration operations
+  createRegistration(data: InsertRegistration): Promise<Registration | null>;
+  getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
+  
+  // Patient metadata editing
+  updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null>;
+  updateSeriesDescription(seriesId: number, description: string): Promise<Series | null>;
+  
+  // Patient tagging
+  createPatientTag(data: InsertPatientTag): Promise<PatientTag | null>;
+  getPatientTags(patientId: number): Promise<PatientTag[]>;
+  deletePatientTag(tagId: number): Promise<boolean>;
+  generateAnatomicalTags(patientId: number): Promise<PatientTag[]>;
   
   // Clear all data
   clearAll(): void;
@@ -395,6 +409,163 @@ export class DatabaseStorage implements IStorage {
     const existing = rtStructureModifications.get(structureId) || {};
     rtStructureModifications.set(structureId, { ...existing, color });
     console.log(`Updated RT structure ${structureId} color to: ${color}`);
+  }
+
+  // Registration operations
+  async createRegistration(data: InsertRegistration): Promise<Registration | null> {
+    try {
+      const [registration] = await db.insert(registrations).values(data).returning();
+      return registration;
+    } catch (error) {
+      console.error('Error creating registration:', error);
+      return null;
+    }
+  }
+
+  async getRegistrationByStudyId(studyId: number): Promise<Registration | null> {
+    try {
+      const [registration] = await db.select().from(registrations).where(eq(registrations.studyId, studyId));
+      return registration || null;
+    } catch (error) {
+      console.error('Error getting registration:', error);
+      return null;
+    }
+  }
+
+  // Patient metadata editing
+  async updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null> {
+    try {
+      const [updated] = await db
+        .update(patients)
+        .set(metadata)
+        .where(eq(patients.id, patientId))
+        .returning();
+      return updated || null;
+    } catch (error) {
+      console.error('Error updating patient metadata:', error);
+      return null;
+    }
+  }
+
+  async updateSeriesDescription(seriesId: number, description: string): Promise<Series | null> {
+    try {
+      const [updated] = await db
+        .update(series)
+        .set({ seriesDescription: description })
+        .where(eq(series.id, seriesId))
+        .returning();
+      return updated || null;
+    } catch (error) {
+      console.error('Error updating series description:', error);
+      return null;
+    }
+  }
+
+  // Patient tagging
+  async createPatientTag(data: InsertPatientTag): Promise<PatientTag | null> {
+    try {
+      const [tag] = await db.insert(patientTags).values(data).returning();
+      return tag;
+    } catch (error) {
+      console.error('Error creating patient tag:', error);
+      return null;
+    }
+  }
+
+  async getPatientTags(patientId: number): Promise<PatientTag[]> {
+    try {
+      return await db.select().from(patientTags).where(eq(patientTags.patientId, patientId));
+    } catch (error) {
+      console.error('Error getting patient tags:', error);
+      return [];
+    }
+  }
+
+  async deletePatientTag(tagId: number): Promise<boolean> {
+    try {
+      await db.delete(patientTags).where(eq(patientTags.id, tagId));
+      return true;
+    } catch (error) {
+      console.error('Error deleting patient tag:', error);
+      return false;
+    }
+  }
+
+  async generateAnatomicalTags(patientId: number): Promise<PatientTag[]> {
+    try {
+      // Get all studies for this patient
+      const patientStudies = await this.getStudiesByPatient(patientId);
+      const tags: PatientTag[] = [];
+      const createdTags: PatientTag[] = [];
+      
+      // For each study, check series for RT structures and determine anatomical sites
+      for (const study of patientStudies) {
+        const studySeries = await this.getSeriesByStudyId(study.id);
+        const rtStructures = studySeries.filter(s => s.modality === 'RTSTRUCT');
+        
+        // Analyze RT structures to determine anatomical sites
+        const anatomicalSites = new Set<string>();
+        
+        // Common anatomical mapping based on structure names
+        const anatomicalMapping: Record<string, string> = {
+          'BRAIN': 'Head & Neck',
+          'BRAINSTEM': 'Head & Neck',
+          'CHIASM': 'Head & Neck',
+          'GLOBE': 'Head & Neck',
+          'LENS': 'Head & Neck',
+          'OPTIC': 'Head & Neck',
+          'PAROTID': 'Head & Neck',
+          'MANDIBLE': 'Head & Neck',
+          'LARYNX': 'Head & Neck',
+          'CTVNECK': 'Head & Neck',
+          'LUNG': 'Thorax',
+          'HEART': 'Thorax',
+          'ESOPHAGUS': 'Thorax',
+          'LIVER': 'Abdomen',
+          'KIDNEY': 'Abdomen',
+          'BOWEL': 'Abdomen',
+          'BLADDER': 'Pelvis',
+          'RECTUM': 'Pelvis',
+          'FEMUR': 'Pelvis'
+        };
+        
+        // For now, we'll check if it's head & neck based on common structures
+        if (rtStructures.length > 0) {
+          anatomicalSites.add('Head & Neck'); // Default for HN-ATLAS dataset
+        }
+        
+        // Check for fusion capability
+        const hasCT = studySeries.some(s => s.modality === 'CT');
+        const hasMRI = studySeries.some(s => s.modality === 'MR');
+        const hasRegistration = await this.getRegistrationByStudyId(study.id);
+        
+        if (hasCT && hasMRI && hasRegistration) {
+          const fusionTag = await this.createPatientTag({
+            patientId,
+            tagType: 'fusion',
+            tagValue: 'CT/MRI Fusion Ready',
+            color: '#9333ea' // Purple
+          });
+          if (fusionTag) createdTags.push(fusionTag);
+        }
+        
+        // Add anatomical tags
+        for (const site of anatomicalSites) {
+          const anatomicalTag = await this.createPatientTag({
+            patientId,
+            tagType: 'anatomical',
+            tagValue: site,
+            color: '#10b981' // Green
+          });
+          if (anatomicalTag) createdTags.push(anatomicalTag);
+        }
+      }
+      
+      return createdTags;
+    } catch (error) {
+      console.error('Error generating anatomical tags:', error);
+      return [];
+    }
   }
 
   clearAll(): void {
