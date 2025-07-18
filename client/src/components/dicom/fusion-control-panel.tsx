@@ -114,15 +114,19 @@ export function FusionControlPanel({
             >
               <Maximize2 className="h-4 w-4" />
             </Button>
-            <div className="w-32">
-              <Slider
-                value={[opacity]}
-                onValueChange={handleOpacityChange}
-                min={0}
-                max={1}
-                step={0.05}
-                className="w-full"
-              />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400 font-medium">CT</span>
+              <div className="w-32">
+                <Slider
+                  value={[opacity]}
+                  onValueChange={handleOpacityChange}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  className="w-full"
+                />
+              </div>
+              <span className="text-xs text-purple-400 font-medium">MRI</span>
             </div>
             <span className="text-xs text-purple-300 min-w-[3ch]">
               {Math.round(opacity * 100)}%
@@ -233,13 +237,13 @@ export function FusionControlPanel({
                 onValueChange={handleOpacityChange}
                 min={0}
                 max={1}
-                step={0.05}
+                step={0.01}
                 className="w-full"
               />
               <div className="flex justify-between text-xs text-gray-400">
-                <span>More MR</span>
+                <span>100% CT</span>
                 <span>50/50</span>
-                <span>More CT</span>
+                <span>100% MRI</span>
               </div>
             </div>
           )}
