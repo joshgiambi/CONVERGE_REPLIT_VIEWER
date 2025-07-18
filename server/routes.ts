@@ -428,6 +428,243 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Parse DICOM files and extract metadata
+  app.post("/api/parse-dicom", upload.array('files'), async (req: Request, res: Response, next: NextFunction) => {
+    console.log('Parse DICOM endpoint hit with files:', req.files?.length);
+    
+    try {
+      const files = req.files as Express.Multer.File[];
+      
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      const parsedData: any[] = [];
+      const rtstructDetails: any = {};
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Parse each file
+      for (const file of files) {
+        try {
+          if (!isDICOMFile(file.path)) {
+            errorCount++;
+            parsedData.push({
+              filename: file.originalname,
+              error: "Not a valid DICOM file"
+            });
+            continue;
+          }
+
+          const metadata = extractDICOMMetadata(file.path);
+          if (!metadata) {
+            errorCount++;
+            parsedData.push({
+              filename: file.originalname,
+              error: "Failed to extract metadata"
+            });
+            continue;
+          }
+
+          // Add filename to metadata
+          const dicomData = {
+            filename: file.originalname,
+            ...metadata
+          };
+
+          // Check if it's an RT Structure Set
+          if (metadata.modality === 'RTSTRUCT') {
+            const rtData = extractRTStructMetadata(file.path);
+            if (rtData) {
+              rtstructDetails[file.originalname] = {
+                structureSetDate: rtData.structureSetDate,
+                structures: rtData.structures.map((s: any) => [s.name, s.color])
+              };
+            }
+          }
+
+          parsedData.push(dicomData);
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          parsedData.push({
+            filename: file.originalname,
+            error: error instanceof Error ? error.message : "Unknown error"
+          });
+        }
+      }
+
+      // Clean up uploaded files
+      for (const file of files) {
+        fs.unlinkSync(file.path);
+      }
+
+      res.json({
+        success: true,
+        data: parsedData,
+        rtstructDetails: rtstructDetails,
+        totalFiles: files.length,
+        message: `Successfully parsed ${successCount} files, ${errorCount} errors`
+      });
+
+    } catch (error) {
+      console.error('Error parsing DICOM files:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to parse DICOM files" });
+    }
+  });
+
+  // Import parsed DICOM metadata into database
+  app.post("/api/import-dicom-metadata", async (req: Request, res: Response, next: NextFunction) => {
+    console.log('Import DICOM metadata endpoint hit');
+    
+    try {
+      const { data, rtstructDetails } = req.body;
+      
+      if (!data || !Array.isArray(data)) {
+        return res.status(400).json({ error: "Invalid data format" });
+      }
+
+      // Group files by patient, study, and series
+      const patientMap = new Map();
+      
+      for (const metadata of data) {
+        if (metadata.error) continue; // Skip files with errors
+
+        const patientKey = metadata.patientID || 'UNKNOWN';
+        const studyKey = metadata.studyInstanceUID || 'UNKNOWN';
+        const seriesKey = metadata.seriesInstanceUID || 'UNKNOWN';
+
+        if (!patientMap.has(patientKey)) {
+          patientMap.set(patientKey, {
+            metadata: metadata,
+            studies: new Map()
+          });
+        }
+
+        const patient = patientMap.get(patientKey);
+        if (!patient.studies.has(studyKey)) {
+          patient.studies.set(studyKey, {
+            metadata: metadata,
+            series: new Map()
+          });
+        }
+
+        const study = patient.studies.get(studyKey);
+        if (!study.series.has(seriesKey)) {
+          study.series.set(seriesKey, {
+            metadata: metadata,
+            images: []
+          });
+        }
+
+        study.series.get(seriesKey).images.push(metadata);
+      }
+
+      // Process and store in database
+      const uploadedPatients = [];
+      
+      for (const [patientKey, patientData] of patientMap) {
+        // Create or update patient
+        const existingPatient = await storage.getPatientByPatientID(patientKey);
+        let patient;
+        
+        if (existingPatient) {
+          patient = existingPatient;
+        } else {
+          const firstMetadata = patientData.metadata;
+          patient = await storage.createPatient({
+            patientID: patientKey,
+            patientName: firstMetadata.patientName || 'Unknown',
+            patientSex: firstMetadata.patientSex,
+            dateOfBirth: firstMetadata.patientBirthDate,
+            patientAge: firstMetadata.patientAge
+          });
+        }
+
+        // Process studies
+        for (const [studyKey, studyData] of patientData.studies) {
+          const existingStudy = await storage.getStudyByUID(studyKey);
+          let study;
+          
+          if (existingStudy) {
+            study = existingStudy;
+          } else {
+            const firstMetadata = studyData.metadata;
+            study = await storage.createStudy({
+              studyInstanceUID: studyKey,
+              patientId: patient.id,
+              patientName: firstMetadata.patientName || patient.patientName,
+              patientID: patient.patientID,
+              studyDate: firstMetadata.studyDate,
+              studyTime: firstMetadata.studyTime,
+              studyDescription: firstMetadata.studyDescription,
+              accessionNumber: firstMetadata.accessionNumber,
+              modality: firstMetadata.modality,
+              numberOfSeries: studyData.series.size,
+              numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.images.length, 0)
+            });
+          }
+
+          // Process series
+          for (const [seriesKey, seriesData] of studyData.series) {
+            const existingSeries = await storage.getSeriesByUID(seriesKey);
+            let series;
+            
+            if (existingSeries) {
+              series = existingSeries;
+            } else {
+              const firstMetadata = seriesData.metadata;
+              series = await storage.createSeries({
+                seriesInstanceUID: seriesKey,
+                studyId: study.id,
+                seriesNumber: firstMetadata.seriesNumber,
+                seriesDescription: firstMetadata.seriesDescription,
+                modality: firstMetadata.modality,
+                imageCount: seriesData.images.length
+              });
+            }
+
+            // Process images
+            for (const imageMetadata of seriesData.images) {
+              const existingImage = await storage.getImageByUID(imageMetadata.sopInstanceUID);
+              
+              if (!existingImage) {
+                await storage.createImage({
+                  sopInstanceUID: imageMetadata.sopInstanceUID,
+                  seriesId: series.id,
+                  instanceNumber: imageMetadata.instanceNumber,
+                  imageType: imageMetadata.imageType,
+                  pixelSpacing: imageMetadata.pixelSpacing,
+                  imagePosition: imageMetadata.imagePositionPatient,
+                  imageOrientation: imageMetadata.imageOrientationPatient,
+                  rows: imageMetadata.rows,
+                  columns: imageMetadata.columns,
+                  windowCenter: imageMetadata.windowCenter,
+                  windowWidth: imageMetadata.windowWidth,
+                  rescaleIntercept: imageMetadata.rescaleIntercept,
+                  rescaleSlope: imageMetadata.rescaleSlope,
+                  filename: imageMetadata.filename
+                });
+              }
+            }
+          }
+        }
+
+        uploadedPatients.push(patient);
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully imported ${uploadedPatients.length} patients`,
+        patients: uploadedPatients
+      });
+
+    } catch (error) {
+      console.error('Error importing DICOM metadata:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to import metadata" });
+    }
+  });
+
   // Handle file uploads
   app.post("/api/upload", upload.array('dicomFiles'), async (req: Request, res: Response, next: NextFunction) => {
     console.log('Upload endpoint hit with files:', req.files?.length);
