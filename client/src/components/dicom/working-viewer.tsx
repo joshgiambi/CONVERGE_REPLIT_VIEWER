@@ -1953,7 +1953,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     
     // Apply registration transformation if available
     ctx.save();
-    ctx.globalAlpha = fusionOpacity;
+    // Invert opacity: slider right (toward MR) = 1 should make CT more opaque (MRI less visible)
+    ctx.globalAlpha = 1 - fusionOpacity;
     ctx.globalCompositeOperation = 'source-over';
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";

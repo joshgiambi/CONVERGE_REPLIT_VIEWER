@@ -223,9 +223,9 @@ export function FusionControlPanel({
           {selectedSecondaryId && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Opacity</Label>
+                <Label className="text-xs text-gray-300">Fusion Balance</Label>
                 <span className="text-xs text-purple-300">
-                  {Math.round(opacity * 100)}%
+                  CT: {Math.round(opacity * 100)}%
                 </span>
               </div>
               <Slider
@@ -237,9 +237,9 @@ export function FusionControlPanel({
                 className="w-full"
               />
               <div className="flex justify-between text-xs text-gray-400">
-                <span>CT</span>
+                <span>More MR</span>
                 <span>50/50</span>
-                <span>MR</span>
+                <span>More CT</span>
               </div>
             </div>
           )}
