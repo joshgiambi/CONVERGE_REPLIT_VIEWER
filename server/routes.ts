@@ -1053,7 +1053,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const filePath = image.filePath.startsWith('uploads/') 
         ? image.filePath 
         : path.join('uploads', image.filePath);
-      const buffer = await fs.readFile(filePath);
+      const buffer = await fs.promises.readFile(filePath);
       
       // Parse DICOM file
       const byteArray = new Uint8Array(buffer);

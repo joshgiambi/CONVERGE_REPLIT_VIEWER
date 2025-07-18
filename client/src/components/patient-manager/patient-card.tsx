@@ -6,7 +6,6 @@ import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBra
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
-import { CanvasPreview } from './canvas-preview';
 
 interface PatientCardProps {
   patient: any;
@@ -185,21 +184,11 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                   <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
                               group-hover:border-indigo-500/50 transition-all duration-200
                               group-hover:shadow-md group-hover:shadow-indigo-500/20">
-                    <CanvasPreview 
-                      seriesId={imageSeries.id}
-                      imageCount={imageSeries.imageCount}
-                      modality={imageSeries.modality}
-                      seriesNumber={imageSeries.seriesNumber}
-                    />
-                  </div>
-                  <Badge 
-                    variant="secondary" 
-                    className={`absolute bottom-1 right-1 text-xs px-1 py-0 ${getModalityColor(imageSeries.modality)}`}
-                  >
-                    {imageSeries.modality}
-                  </Badge>
-                  <div className="absolute top-1 left-1 text-xs text-white bg-black/70 px-1 rounded">
-                    {imageSeries.imageCount} imgs
+                    <div className="w-full h-full flex flex-col items-center justify-center p-3">
+                      <div className="text-3xl font-bold text-gray-300">{imageSeries.modality}</div>
+                      <div className="text-xs text-gray-500 mt-1">Series {imageSeries.seriesNumber || 1}</div>
+                      <div className="text-sm text-gray-400 mt-2">{imageSeries.imageCount} images</div>
+                    </div>
                   </div>
                 </div>
               ))}

@@ -110,6 +110,7 @@ const querySchema = z.object({
 
 export default function PatientManager() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPacs, setSelectedPacs] = useState<number | null>(null);
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
@@ -154,6 +155,11 @@ export default function PatientManager() {
   // Fetch PACS connections
   const { data: pacsConnections = [], isLoading: pacsLoading } = useQuery<PacsConnection[]>({
     queryKey: ["/api/pacs"],
+  });
+
+  // Fetch all patient tags for filtering
+  const { data: patientTags = [] } = useQuery<any[]>({
+    queryKey: ["/api/patient-tags"],
   });
 
   // PACS connection form
@@ -256,11 +262,25 @@ export default function PatientManager() {
     },
   });
 
+  // Get unique tags from all patient tags
+  const uniqueTags = [...new Set(patientTags.map(tag => tag.tagValue))];
+
   // Filter patients and studies
-  const filteredPatients = patients.filter(patient =>
-    patient.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.patientID?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredPatients = patients.filter(patient => {
+    // Search term filter
+    const matchesSearch = patient.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         patient.patientID?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Tag filter
+    const patientTagValues = patientTags
+      .filter(tag => tag.patientId === patient.id)
+      .map(tag => tag.tagValue);
+    
+    const matchesTags = selectedTags.length === 0 || 
+                       selectedTags.some(tag => patientTagValues.includes(tag));
+    
+    return matchesSearch && matchesTags;
+  });
 
   const filteredStudies = studies.filter(study =>
     study.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -404,7 +424,7 @@ export default function PatientManager() {
         </header>
 
         {/* Search Bar with dark styling */}
-        <div className="mb-6">
+        <div className="mb-6 space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <Input
@@ -416,6 +436,44 @@ export default function PatientManager() {
                        transition-all duration-200"
             />
           </div>
+          
+          {/* Tag Filters */}
+          {uniqueTags.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <span className="text-sm text-gray-400 self-center mr-2">Filter by tags:</span>
+              {uniqueTags.map(tag => (
+                <Button
+                  key={tag}
+                  variant={selectedTags.includes(tag) ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    if (selectedTags.includes(tag)) {
+                      setSelectedTags(selectedTags.filter(t => t !== tag));
+                    } else {
+                      setSelectedTags([...selectedTags, tag]);
+                    }
+                  }}
+                  className={`text-xs transition-all ${
+                    selectedTags.includes(tag)
+                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500'
+                      : 'bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 border-gray-600'
+                  }`}
+                >
+                  {tag}
+                </Button>
+              ))}
+              {selectedTags.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedTags([])}
+                  className="text-xs text-gray-400 hover:text-white"
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
