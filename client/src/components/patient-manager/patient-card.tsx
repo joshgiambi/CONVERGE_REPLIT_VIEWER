@@ -11,9 +11,10 @@ interface PatientCardProps {
   patient: any;
   studies: any[];
   series: any[];
+  onUpdate?: () => void;
 }
 
-export function PatientCard({ patient, studies, series }: PatientCardProps) {
+export function PatientCard({ patient, studies, series, onUpdate }: PatientCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
@@ -143,7 +144,7 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
               variant="outline" 
               className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
             >
-              {patient.sex || 'Unknown'} • {patient.age || 'Age N/A'}
+              {patient.patientSex || 'Unknown'} • {patient.patientAge || 'Age N/A'}
             </Badge>
             <Button
               size="sm"
@@ -355,11 +356,7 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
                     </div>
                   ))}
                   
-                  <div className="bg-gray-700/30 p-3 rounded-lg">
-                    <p className="text-xs text-gray-400">
-                      💡 This patient has multi-modal registration enabling CT/MRI fusion viewing with precise anatomical alignment
-                    </p>
-                  </div>
+
                 </div>
               </div>
             )}
@@ -416,8 +413,10 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
               .then(data => setTags(data))
               .catch(err => console.error('Error loading tags:', err));
           }
-          // You might want to reload patient data here too
-          window.location.reload();
+          // Call parent's onUpdate if provided
+          if (onUpdate) {
+            onUpdate();
+          }
         }}
       />
     </Card>

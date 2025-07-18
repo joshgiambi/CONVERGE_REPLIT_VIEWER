@@ -129,6 +129,13 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 18, 2025: Simplified Tag System and Fixed Metadata Update Issues - COMPLETED
+  - ✅ Removed tag category dropdown per user request - now simple text input for tags
+  - ✅ Fixed patient age field not updating (was using wrong field name 'age' instead of 'patientAge')
+  - ✅ Fixed missing thumbnails after metadata update by adding proper query invalidation
+  - ✅ Added refresh mechanism to PatientCard component to update all data after changes
+  - ✅ Tags now display with neutral gray styling instead of colored categories
+  - ✅ Fixed metadata dialog initialization to properly load current patient data
 - July 18, 2025: Enhanced Metadata Editing UI and Registration Visualization - COMPLETED
   - ✅ Redesigned metadata edit dialog with dark theme matching overall UI design
   - ✅ Improved patient tags with emoji icons and color presets (Anatomical, Registration, Fusion, Custom)

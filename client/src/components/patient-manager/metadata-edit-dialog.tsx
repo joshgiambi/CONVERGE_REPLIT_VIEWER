@@ -29,11 +29,19 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
   
   const [seriesDescriptions, setSeriesDescriptions] = useState<Record<number, string>>({});
   const [tags, setTags] = useState<any[]>([]);
-  const [newTag, setNewTag] = useState({ type: 'custom', value: '', color: '#3b82f6' });
+  const [newTag, setNewTag] = useState({ value: '' });
   const [loadingTags, setLoadingTags] = useState(false);
 
   useEffect(() => {
     if (open && patient) {
+      // Reset patient data when dialog opens
+      setPatientData({
+        patientName: patient.patientName || '',
+        patientID: patient.patientID || '',
+        age: patient.patientAge || '',
+        sex: patient.patientSex || ''
+      });
+      
       // Initialize series descriptions
       const descriptions: Record<number, string> = {};
       series.forEach(s => {
@@ -66,7 +74,12 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
       const response = await fetch(`/api/patients/${patient.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patientData)
+        body: JSON.stringify({
+          patientName: patientData.patientName,
+          patientID: patientData.patientID,
+          patientAge: patientData.age,
+          patientSex: patientData.sex
+        })
       });
       
       if (response.ok) {
@@ -120,16 +133,16 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tagType: newTag.type,
+          tagType: 'general',
           tagValue: newTag.value,
-          color: newTag.color
+          color: '#6b7280' // neutral gray
         })
       });
       
       if (response.ok) {
         const tag = await response.json();
         setTags([...tags, tag]);
-        setNewTag({ type: 'custom', value: '', color: '#3b82f6' });
+        setNewTag({ value: '' });
         toast({
           title: "Success",
           description: "Tag added successfully"
@@ -289,72 +302,32 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
             
             {/* Existing Tags */}
             <div className="flex flex-wrap gap-2">
-              {tags.map(tag => {
-                const preset = tagPresets.find(p => p.type === tag.tagType);
-                return (
-                  <Badge
-                    key={tag.id}
-                    variant="secondary"
-                    className="px-3 py-1 flex items-center gap-1 border"
-                    style={{ 
-                      backgroundColor: tag.color + '15', 
-                      borderColor: tag.color + '50', 
-                      color: tag.color 
-                    }}
+              {tags.map(tag => (
+                <Badge
+                  key={tag.id}
+                  variant="secondary"
+                  className="px-3 py-1 flex items-center gap-1 bg-gray-700/50 border border-gray-600 text-gray-200"
+                >
+                  <span>{tag.tagValue}</span>
+                  <button
+                    onClick={() => handleDeleteTag(tag.id)}
+                    className="ml-2 hover:text-red-400 transition-colors"
                   >
-                    {preset && <span className="text-sm">{preset.icon}</span>}
-                    <span>{tag.tagValue}</span>
-                    <button
-                      onClick={() => handleDeleteTag(tag.id)}
-                      className="ml-2 hover:opacity-70 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                );
-              })}
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
             </div>
             
             {/* Add New Tag */}
             <div className="flex gap-2 items-center">
-              <select
-                className="px-3 py-2 rounded-md border bg-gray-800 border-gray-600 text-white"
-                value={newTag.type}
-                onChange={e => {
-                  const type = e.target.value;
-                  const preset = tagPresets.find(p => p.type === type);
-                  setNewTag({ 
-                    ...newTag, 
-                    type,
-                    color: preset?.colors[0] || '#3b82f6'
-                  });
-                }}
-              >
-                {tagPresets.map(preset => (
-                  <option key={preset.type} value={preset.type}>
-                    {preset.icon} {preset.label}
-                  </option>
-                ))}
-              </select>
               <Input
-                placeholder="Tag value..."
+                placeholder="Add a tag..."
                 value={newTag.value}
                 onChange={e => setNewTag({ ...newTag, value: e.target.value })}
                 onKeyPress={e => e.key === 'Enter' && handleAddTag()}
-                className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
+                className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500 flex-1"
               />
-              <div className="flex gap-1">
-                {tagPresets.find(p => p.type === newTag.type)?.colors.map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setNewTag({ ...newTag, color })}
-                    className={`w-8 h-8 rounded border-2 transition-all ${
-                      newTag.color === color ? 'border-white scale-110' : 'border-gray-600'
-                    }`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
               <Button 
                 onClick={handleAddTag} 
                 size="icon"

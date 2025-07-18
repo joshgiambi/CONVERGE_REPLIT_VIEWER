@@ -474,6 +474,11 @@ export default function PatientManager() {
                       }}
                       studies={patientStudies}
                       series={patientSeries}
+                      onUpdate={() => {
+                        queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+                        queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+                        queryClient.invalidateQueries({ queryKey: ["/api/series"] });
+                      }}
                     />
                   );
                 })}
