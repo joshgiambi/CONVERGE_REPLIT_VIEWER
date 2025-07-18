@@ -187,24 +187,36 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                     {imageSeries.imageCount > 1 ? (
                       <>
                         <img 
-                          src={`/api/series/${imageSeries.id}/gif`}
+                          src={`data:image/gif;base64,R0lGODlhCgAKAPAAAAAAAP///yH5BAAAAAAALAAAAAAKAAoAAAIRhI+py+0Po5y02ouz3rz7AgA7`}
                           alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
                           className="w-full h-full object-cover"
-                          style={{ display: 'block' }}
                           onError={(e) => {
+                            console.log('Data URL GIF also failed to load');
                             // Hide image and show fallback
                             const target = e.target as HTMLImageElement;
                             target.style.display = 'none';
+                            // Show the fallback div
+                            const fallback = target.nextElementSibling as HTMLElement;
+                            if (fallback) {
+                              fallback.style.display = 'flex';
+                            }
                           }}
                         />
+                        <div className="w-full h-full flex items-center justify-center bg-gray-800" style={{ display: 'none' }}>
+                          <div className="text-center">
+                            <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
+                            <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
+                          </div>
+                        </div>
                       </>
-                    ) : null}
-                    <div className={`w-full h-full flex items-center justify-center bg-gray-800 ${imageSeries.imageCount > 1 ? 'hidden' : ''}`}>
-                      <div className="text-center">
-                        <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
-                        <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                        <div className="text-center">
+                          <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
+                          <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                   <Badge 
                     variant="secondary" 
