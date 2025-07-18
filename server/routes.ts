@@ -11,7 +11,34 @@ import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
 
-const upload = multer({ dest: 'uploads/' });
+// Configure multer to use session-specific upload directories
+const upload = multer({ 
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      // Check if we already have a session ID for this request
+      let uploadSessionId = (req as any).uploadSessionId;
+      
+      if (!uploadSessionId) {
+        // Generate session-specific directory only once per request
+        uploadSessionId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        (req as any).uploadSessionId = uploadSessionId;
+      }
+      
+      const uploadDir = path.join('uploads', uploadSessionId);
+      
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      // Keep original filename
+      cb(null, file.originalname);
+    }
+  })
+});
 
 // In-memory storage for RT structure modifications
 // In production, this would be stored in a database
@@ -2201,12 +2228,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No files uploaded" });
       }
 
+      // Use the upload session ID from multer
+      const uploadSessionId = (req as any).uploadSessionId;
+      
       // Generate session ID
       const sessionId = `parse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
       // Create session - handle up to 1000 files
       const session = {
         sessionId,
+        uploadSessionId,
         status: 'parsing' as const,
         progress: 0,
         total: Math.min(files.length, 1000),

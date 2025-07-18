@@ -206,12 +206,9 @@ export function DICOMUploader() {
     setError(null);
 
     try {
-      await apiRequest('/api/import-dicom-metadata', {
-        method: 'POST',
-        body: {
-          data: parseResult.data,
-          rtstructDetails: parseResult.rtstructDetails
-        }
+      await apiRequest('POST', '/api/import-dicom-metadata', {
+        data: parseResult.data,
+        rtstructDetails: parseResult.rtstructDetails
       });
 
       // Invalidate queries to refresh the UI
