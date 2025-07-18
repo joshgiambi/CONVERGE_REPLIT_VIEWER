@@ -366,7 +366,7 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
         {/* Action Buttons */}
         <div className="flex items-center justify-between pt-2">
           <div className="flex gap-2">
-            <Link href={`/enhanced-viewer?patientId=${patient.patientId}`}>
+            <Link href={`/enhanced-viewer?patientId=${patient.patientID}`}>
               <Button 
                 size="sm" 
                 className="bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500"

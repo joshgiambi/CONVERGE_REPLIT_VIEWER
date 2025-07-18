@@ -458,7 +458,7 @@ export default function PatientManager() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredPatients.map((patient) => {
                   // Get studies and series for this patient
-                  const patientStudies = studies.filter(study => study.patientID === patient.patientID);
+                  const patientStudies = studies.filter(study => study.patientId === patient.id);
                   const patientSeries = series.filter(s => 
                     patientStudies.some(study => study.id === s.studyId)
                   );
