@@ -115,8 +115,25 @@ export default function PatientManager() {
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
+  const [hasActiveParsingSession, setHasActiveParsingSession] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Check for active parsing session
+  useEffect(() => {
+    const checkActiveSession = () => {
+      const sessionId = localStorage.getItem('currentParseSessionId');
+      setHasActiveParsingSession(!!sessionId);
+    };
+
+    // Check immediately
+    checkActiveSession();
+
+    // Check periodically while on this page
+    const interval = setInterval(checkActiveSession, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Auto-populate demo data on component mount
   useEffect(() => {
@@ -482,9 +499,15 @@ export default function PatientManager() {
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
+            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all relative">
               <Upload className="h-4 w-4" />
               Import DICOM
+              {hasActiveParsingSession && (
+                <div className="absolute -top-1 -right-1 h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+                </div>
+              )}
             </TabsTrigger>
             <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Network className="h-4 w-4" />

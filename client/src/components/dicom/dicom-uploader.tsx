@@ -67,6 +67,13 @@ interface ParseSession {
   completedAt?: Date;
 }
 
+interface UnprocessedFile {
+  sessionId: string;
+  uploadTime: string;
+  fileCount: number;
+  path: string;
+}
+
 export function DICOMUploader() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -75,11 +82,13 @@ export function DICOMUploader() {
   const [parseSession, setParseSession] = useState<ParseSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  const [unprocessedFiles, setUnprocessedFiles] = useState<UnprocessedFile[]>([]);
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
-  // Poll for session status
-  const pollSessionStatus = useCallback(async (sessionId: string) => {
+  // Poll for session status (not using useCallback to avoid dependency issues)
+  const pollSessionStatus = async (sessionId: string) => {
+    console.log('Polling session status for:', sessionId);
     try {
       const response = await fetch(`/api/parse-dicom-session/${sessionId}`);
       if (!response.ok) {
@@ -87,6 +96,7 @@ export function DICOMUploader() {
       }
       
       const session: ParseSession = await response.json();
+      console.log('Session status:', session.status, 'Progress:', session.progress, '/', session.total);
       setParseSession(session);
       
       // Update progress
@@ -113,19 +123,20 @@ export function DICOMUploader() {
       setIsUploading(false);
       localStorage.removeItem('currentParseSessionId');
     }
-  }, []);
+  };
 
   // Check for existing session on mount
   useEffect(() => {
     const sessionId = localStorage.getItem('currentParseSessionId');
+    console.log('Checking for existing session on mount:', sessionId);
     if (sessionId) {
       setSavedSessionId(sessionId);
       setIsUploading(true);
       pollSessionStatus(sessionId);
     }
-  }, [pollSessionStatus]);
+  }, []); // Empty dependency array - only run on mount
 
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+  const onDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
     setIsUploading(true);
@@ -151,21 +162,27 @@ export function DICOMUploader() {
         throw new Error(errorData.error || 'Failed to start parsing session');
       }
 
-      const { sessionId } = await response.json();
+      const data = await response.json();
+      const sessionId = data.sessionId;
+      console.log('Started parsing session:', sessionId);
       
       // Save session ID to localStorage
       localStorage.setItem('currentParseSessionId', sessionId);
+      console.log('Saved to localStorage:', localStorage.getItem('currentParseSessionId'));
       setSavedSessionId(sessionId);
       
       // Start polling for progress
       pollSessionStatus(sessionId);
+      
+      // Set initial progress to show activity
+      setUploadProgress(5);
 
     } catch (error) {
       console.error('Upload error:', error);
       setError(error instanceof Error ? error.message : 'Upload failed');
       setIsUploading(false);
     }
-  }, [pollSessionStatus]);
+  };
 
   const handleImportToDatabase = async () => {
     if (!parseResult) return;
@@ -240,6 +257,17 @@ export function DICOMUploader() {
 
   return (
     <div className="space-y-6">
+      {/* Session Recovery Notice */}
+      {savedSessionId && isUploading && !parseSession && (
+        <Card className="border-yellow-600 bg-yellow-900/20">
+          <div className="p-4">
+            <p className="text-yellow-300 text-sm">
+              Recovering parsing session {savedSessionId}...
+            </p>
+          </div>
+        </Card>
+      )}
+
       {/* Upload Area */}
       <Card className="border-2 border-dashed border-indigo-600 bg-black/20">
         <div
@@ -279,7 +307,7 @@ export function DICOMUploader() {
                 {isDragActive ? 'Drop DICOM files here' : 'Drag & drop DICOM files here'}
               </p>
               <p className="text-sm text-gray-400 mb-4">
-                Supports .dcm files, ZIP archives, and folders
+                Supports .dcm files, ZIP archives, and folders • Up to 1000 files per batch
               </p>
               <Button variant="outline" className="border-indigo-600 text-indigo-300">
                 Or click to browse files

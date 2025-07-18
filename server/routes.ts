@@ -2063,6 +2063,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check for unprocessed files in uploads directory
+  app.get("/api/unprocessed-files", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const uploadsDir = path.join(__dirname, '../uploads');
+      
+      // Check if uploads directory exists
+      if (!fs.existsSync(uploadsDir)) {
+        return res.json({ files: [] });
+      }
+
+      // Get all directories in uploads folder
+      const items = fs.readdirSync(uploadsDir);
+      const unprocessedFiles: any[] = [];
+
+      for (const item of items) {
+        const itemPath = path.join(uploadsDir, item);
+        const stat = fs.statSync(itemPath);
+        
+        if (stat.isDirectory() && item.startsWith('upload-')) {
+          // Check for .dcm files in this upload directory
+          const files = fs.readdirSync(itemPath);
+          const dcmFiles = files.filter(f => f.toLowerCase().endsWith('.dcm'));
+          
+          if (dcmFiles.length > 0) {
+            unprocessedFiles.push({
+              sessionId: item,
+              uploadTime: stat.mtime,
+              fileCount: dcmFiles.length,
+              path: itemPath
+            });
+          }
+        }
+      }
+
+      // Sort by upload time, newest first
+      unprocessedFiles.sort((a, b) => b.uploadTime.getTime() - a.uploadTime.getTime());
+
+      res.json({ files: unprocessedFiles });
+    } catch (error) {
+      console.error('Error checking unprocessed files:', error);
+      res.status(500).json({ error: 'Failed to check unprocessed files' });
+    }
+  });
+
+  // Clear unprocessed files
+  app.delete("/api/unprocessed-files/:sessionId", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sessionId } = req.params;
+      const uploadPath = path.join(__dirname, '../uploads', sessionId);
+      
+      if (!fs.existsSync(uploadPath) || !sessionId.startsWith('upload-')) {
+        return res.status(404).json({ error: 'Upload session not found' });
+      }
+
+      // Remove the directory and all its contents
+      fs.rmSync(uploadPath, { recursive: true, force: true });
+      
+      res.json({ success: true, message: 'Files cleared successfully' });
+    } catch (error) {
+      console.error('Error clearing files:', error);
+      res.status(500).json({ error: 'Failed to clear files' });
+    }
+  });
+
   // Start a new parsing session
   app.post("/api/parse-dicom-session", upload.array('files'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -2075,14 +2139,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate session ID
       const sessionId = `parse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
-      // Create session
+      // Create session - handle up to 1000 files
       const session = {
         sessionId,
         status: 'parsing' as const,
         progress: 0,
-        total: Math.min(files.length, 50),
+        total: Math.min(files.length, 1000),
         startedAt: new Date(),
-        files: files.slice(0, 50)
+        files: files.slice(0, 1000)
       };
       
       parsingSessions.set(sessionId, session);
@@ -2093,7 +2157,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         sessionId,
         total: session.total,
-        message: `Started parsing ${session.total} files`
+        message: files.length > 1000 
+          ? `Started parsing first 1000 of ${files.length} files. Please upload remaining files in a separate batch.`
+          : `Started parsing ${session.total} files`
       });
       
     } catch (error) {
