@@ -125,7 +125,7 @@ export function DICOMUploader() {
     }
   };
 
-  // Check for existing session on mount
+  // Check for existing session and unprocessed files on mount
   useEffect(() => {
     const sessionId = localStorage.getItem('currentParseSessionId');
     console.log('Checking for existing session on mount:', sessionId);
@@ -134,7 +134,22 @@ export function DICOMUploader() {
       setIsUploading(true);
       pollSessionStatus(sessionId);
     }
+    
+    // Check for unprocessed files
+    checkUnprocessedFiles();
   }, []); // Empty dependency array - only run on mount
+  
+  const checkUnprocessedFiles = async () => {
+    try {
+      const response = await fetch('/api/unprocessed-files');
+      if (response.ok) {
+        const data = await response.json();
+        setUnprocessedFiles(data.files || []);
+      }
+    } catch (error) {
+      console.error('Error checking unprocessed files:', error);
+    }
+  };
 
   const onDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -232,6 +247,63 @@ export function DICOMUploader() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+  
+  const handleProcessUnprocessedFiles = async (sessionId: string) => {
+    try {
+      const unprocessedFile = unprocessedFiles.find(f => f.sessionId === sessionId);
+      if (!unprocessedFile) return;
+      
+      // Create a new parse session from existing upload directory
+      const parseResponse = await fetch('/api/parse-dicom-session/from-existing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadSessionId: sessionId })
+      });
+      
+      if (!parseResponse.ok) {
+        throw new Error('Failed to start parsing session');
+      }
+      
+      const data = await parseResponse.json();
+      console.log('Started parsing session:', data.sessionId);
+      
+      // Save session ID and start polling
+      localStorage.setItem('currentParseSessionId', data.sessionId);
+      setSavedSessionId(data.sessionId);
+      setIsUploading(true);
+      pollSessionStatus(data.sessionId);
+      setUploadProgress(5);
+      
+      // Remove from unprocessed list
+      setUnprocessedFiles(prev => prev.filter(f => f.sessionId !== sessionId));
+      
+    } catch (error) {
+      console.error('Error processing files:', error);
+      setError('Failed to process files');
+    }
+  };
+  
+  const handleDeleteUnprocessedFiles = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/unprocessed-files/${sessionId}`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete files');
+      }
+      
+      // Remove from list
+      setUnprocessedFiles(prev => prev.filter(f => f.sessionId !== sessionId));
+      
+      // Refresh the list
+      checkUnprocessedFiles();
+      
+    } catch (error) {
+      console.error('Error deleting files:', error);
+      setError('Failed to delete files');
+    }
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -257,6 +329,48 @@ export function DICOMUploader() {
 
   return (
     <div className="space-y-6">
+      {/* Unprocessed Files */}
+      {unprocessedFiles.length > 0 && !isUploading && (
+        <Card className="border-orange-600 bg-orange-900/20">
+          <CardHeader>
+            <CardTitle className="text-orange-300 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              Unprocessed Files Found
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {unprocessedFiles.map((file) => (
+              <div key={file.sessionId} className="flex items-center justify-between p-3 bg-orange-800/20 rounded-lg">
+                <div>
+                  <p className="text-white font-medium">{file.fileCount} DICOM files</p>
+                  <p className="text-sm text-gray-400">
+                    Uploaded {new Date(file.uploadTime).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleProcessUnprocessedFiles(file.sessionId)}
+                    className="border-green-600 text-green-300 hover:bg-green-600/20"
+                  >
+                    Process
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeleteUnprocessedFiles(file.sessionId)}
+                    className="border-red-600 text-red-300 hover:bg-red-600/20"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Session Recovery Notice */}
       {savedSessionId && isUploading && !parseSession && (
         <Card className="border-yellow-600 bg-yellow-900/20">

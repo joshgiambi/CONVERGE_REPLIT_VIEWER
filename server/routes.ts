@@ -2066,7 +2066,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Check for unprocessed files in uploads directory
   app.get("/api/unprocessed-files", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const uploadsDir = path.join(__dirname, '../uploads');
+      const uploadsDir = path.join(process.cwd(), 'uploads');
       
       // Check if uploads directory exists
       if (!fs.existsSync(uploadsDir)) {
@@ -2111,7 +2111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/unprocessed-files/:sessionId", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { sessionId } = req.params;
-      const uploadPath = path.join(__dirname, '../uploads', sessionId);
+      const uploadPath = path.join(process.cwd(), 'uploads', sessionId);
       
       if (!fs.existsSync(uploadPath) || !sessionId.startsWith('upload-')) {
         return res.status(404).json({ error: 'Upload session not found' });
@@ -2124,6 +2124,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error clearing files:', error);
       res.status(500).json({ error: 'Failed to clear files' });
+    }
+  });
+
+  // Process existing uploaded files
+  app.post("/api/parse-dicom-session/from-existing", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { uploadSessionId } = req.body;
+      
+      if (!uploadSessionId || !uploadSessionId.startsWith('upload-')) {
+        return res.status(400).json({ error: "Invalid upload session ID" });
+      }
+      
+      const uploadPath = path.join(process.cwd(), 'uploads', uploadSessionId);
+      
+      if (!fs.existsSync(uploadPath)) {
+        return res.status(404).json({ error: "Upload directory not found" });
+      }
+      
+      // Get all DICOM files from the directory
+      const files = fs.readdirSync(uploadPath)
+        .filter(f => f.toLowerCase().endsWith('.dcm'))
+        .map(filename => ({
+          fieldname: 'files',
+          originalname: filename,
+          encoding: '7bit',
+          mimetype: 'application/dicom',
+          destination: uploadPath,
+          filename: filename,
+          path: path.join(uploadPath, filename),
+          size: fs.statSync(path.join(uploadPath, filename)).size
+        })) as Express.Multer.File[];
+      
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No DICOM files found in upload directory" });
+      }
+      
+      // Generate session ID
+      const sessionId = `parse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create session - handle up to 1000 files
+      const session = {
+        sessionId,
+        status: 'parsing' as const,
+        progress: 0,
+        total: Math.min(files.length, 1000),
+        startedAt: new Date(),
+        files: files.slice(0, 1000)
+      };
+      
+      parsingSessions.set(sessionId, session);
+      
+      // Start async parsing process
+      processDicomFiles(sessionId);
+      
+      res.json({
+        sessionId,
+        total: session.total,
+        message: files.length > 1000 
+          ? `Started parsing first 1000 of ${files.length} files from existing upload.`
+          : `Started parsing ${session.total} files from existing upload`
+      });
+      
+    } catch (error) {
+      console.error('Error starting parse from existing:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to start parsing" });
     }
   });
 
