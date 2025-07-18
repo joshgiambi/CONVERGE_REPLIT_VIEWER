@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 18, 2025: Server-Side DICOM Parsing Sessions - COMPLETED
+  - ✅ Implemented background parsing sessions that continue when user navigates away
+  - ✅ Added `/api/parse-dicom-session` endpoint to start async parsing sessions
+  - ✅ Added `/api/parse-dicom-session/:sessionId` endpoint for status polling
+  - ✅ Real-time progress display shows actual file being processed (e.g., "File 15 of 50: CT.Image.23.dcm")
+  - ✅ Session IDs stored in localStorage for recovery on page refresh
+  - ✅ Parsing continues server-side even when user leaves Import DICOM tab
+  - ✅ Progress automatically resumes when returning to Import tab
+  - ✅ Added informative message: "You can navigate away - parsing continues in background"
 - July 18, 2025: CSS-Based Animated Previews for Patient Cards - COMPLETED
   - ✅ Discovered browser environment blocks ALL images (including data URLs and GIFs)
   - ✅ Implemented CSS-based animated preview system as alternative to GIF images

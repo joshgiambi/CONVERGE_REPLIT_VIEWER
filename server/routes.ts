@@ -31,6 +31,20 @@ const rtStructureModifications = new Map<number, {
 // Cache for parsed RT structure sets to improve performance
 const rtStructureCache = new Map<string, any>();
 
+// Store parsing sessions server-side
+const parsingSessions = new Map<string, {
+  sessionId: string;
+  status: 'parsing' | 'complete' | 'error';
+  progress: number;
+  total: number;
+  currentFile?: string;
+  result?: any;
+  error?: string;
+  startedAt: Date;
+  completedAt?: Date;
+  files?: Express.Multer.File[];
+}>();
+
 function isDICOMFile(filePath: string): boolean {
   try {
     // Skip DICOM validation for now - just check file extension
@@ -2048,6 +2062,215 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next(error);
     }
   });
+
+  // Start a new parsing session
+  app.post("/api/parse-dicom-session", upload.array('files'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      // Generate session ID
+      const sessionId = `parse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create session
+      const session = {
+        sessionId,
+        status: 'parsing' as const,
+        progress: 0,
+        total: Math.min(files.length, 50),
+        startedAt: new Date(),
+        files: files.slice(0, 50)
+      };
+      
+      parsingSessions.set(sessionId, session);
+      
+      // Start async parsing process
+      processDicomFiles(sessionId);
+      
+      res.json({
+        sessionId,
+        total: session.total,
+        message: `Started parsing ${session.total} files`
+      });
+      
+    } catch (error) {
+      console.error('Error starting parse session:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to start parsing session" });
+    }
+  });
+
+  // Check parsing session status
+  app.get("/api/parse-dicom-session/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const session = parsingSessions.get(req.params.sessionId);
+      
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      
+      res.json({
+        sessionId: session.sessionId,
+        status: session.status,
+        progress: session.progress,
+        total: session.total,
+        currentFile: session.currentFile,
+        result: session.result,
+        error: session.error,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt
+      });
+      
+    } catch (error) {
+      console.error('Error checking session status:', error);
+      res.status(500).json({ error: "Failed to check session status" });
+    }
+  });
+
+  // Async function to process DICOM files
+  async function processDicomFiles(sessionId: string) {
+    const session = parsingSessions.get(sessionId);
+    if (!session || !session.files) return;
+    
+    try {
+      const parsedData: any[] = [];
+      const rtstructDetails: any = {};
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < session.files.length; i++) {
+        const file = session.files[i];
+        
+        // Update progress
+        session.progress = i + 1;
+        session.currentFile = file.originalname;
+        
+        try {
+          // Check if DICOM file
+          const isDicom = isDICOMFile(file.path);
+          
+          if (!isDicom) {
+            errorCount++;
+            parsedData.push({
+              filename: file.originalname,
+              error: "Not a valid DICOM file"
+            });
+            continue;
+          }
+
+          // Extract metadata
+          const metadata = extractDICOMMetadata(file.path);
+          
+          if (!metadata) {
+            errorCount++;
+            parsedData.push({
+              filename: file.originalname,
+              error: "Failed to extract metadata"
+            });
+            continue;
+          }
+
+          const dicomData = {
+            filename: file.originalname,
+            ...metadata
+          };
+
+          // Special handling for RT structure sets
+          if (metadata.modality === 'RTSTRUCT') {
+            const rtMetadata = extractRTStructMetadata(file.path);
+            dicomData.structureSetLabel = rtMetadata.structureSetLabel;
+            dicomData.structureSetDate = rtMetadata.structureSetDate;
+            dicomData.structures = rtMetadata.structures;
+            
+            rtstructDetails[file.originalname] = {
+              structureSetLabel: rtMetadata.structureSetLabel,
+              structureSetDate: rtMetadata.structureSetDate,
+              structures: rtMetadata.structures
+            };
+          }
+
+          parsedData.push(dicomData);
+          successCount++;
+          
+        } catch (err) {
+          console.error(`Error processing ${file.originalname}:`, err);
+          errorCount++;
+          parsedData.push({
+            filename: file.originalname,
+            error: err.message || 'Unknown error'
+          });
+        }
+        
+        // Clean up temp file
+        try {
+          await fs.promises.unlink(file.path);
+        } catch (e) {
+          console.error('Error deleting temp file:', e);
+        }
+      }
+
+      // Group by patient
+      const patientGroups = new Map();
+      parsedData.forEach(data => {
+        if (!data.error && data.patientID) {
+          const key = data.patientID;
+          if (!patientGroups.has(key)) {
+            patientGroups.set(key, {
+              patientId: data.patientID,
+              patientName: data.patientName || 'Unknown',
+              studies: new Map()
+            });
+          }
+          
+          const patient = patientGroups.get(key);
+          const studyKey = data.studyInstanceUID || 'unknown';
+          
+          if (!patient.studies.has(studyKey)) {
+            patient.studies.set(studyKey, {
+              studyId: data.studyInstanceUID,
+              studyDate: data.studyDate,
+              series: []
+            });
+          }
+          
+          patient.studies.get(studyKey).series.push(data);
+        }
+      });
+
+      // Convert to array format
+      const patientPreviews = Array.from(patientGroups.values()).map(patient => ({
+        patientId: patient.patientId,
+        patientName: patient.patientName,
+        studies: Array.from(patient.studies.values()).map(study => ({
+          studyId: study.studyId,
+          studyDate: study.studyDate,
+          seriesCount: new Set(study.series.map(s => s.seriesInstanceUID)).size,
+          imageCount: study.series.length,
+          modalities: Array.from(new Set(study.series.map(s => s.modality).filter(Boolean)))
+        }))
+      }));
+
+      // Update session with results
+      session.status = 'complete';
+      session.completedAt = new Date();
+      session.result = {
+        success: true,
+        data: parsedData,
+        rtstructDetails: rtstructDetails,
+        totalFiles: session.files.length,
+        message: `Successfully parsed ${successCount} files, ${errorCount} errors`,
+        patientPreviews
+      };
+      
+    } catch (error) {
+      console.error('Error in async DICOM processing:', error);
+      session.status = 'error';
+      session.error = error.message || 'Processing failed';
+      session.completedAt = new Date();
+    }
+  }
 
   return { close: () => {} } as Server;
 }

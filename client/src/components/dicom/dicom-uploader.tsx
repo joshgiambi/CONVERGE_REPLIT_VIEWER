@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -55,14 +55,75 @@ interface ParseResult {
   patientPreviews?: PatientPreview[];
 }
 
+interface ParseSession {
+  sessionId: string;
+  status: 'parsing' | 'complete' | 'error';
+  progress: number;
+  total: number;
+  currentFile?: string;
+  result?: ParseResult;
+  error?: string;
+  startedAt: Date;
+  completedAt?: Date;
+}
+
 export function DICOMUploader() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
+  const [parseSession, setParseSession] = useState<ParseSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+
+  // Poll for session status
+  const pollSessionStatus = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/parse-dicom-session/${sessionId}`);
+      if (!response.ok) {
+        throw new Error('Failed to check session status');
+      }
+      
+      const session: ParseSession = await response.json();
+      setParseSession(session);
+      
+      // Update progress
+      if (session.total > 0) {
+        setUploadProgress(Math.round((session.progress / session.total) * 100));
+      }
+      
+      // If complete, set the result
+      if (session.status === 'complete' && session.result) {
+        setParseResult(session.result);
+        setIsUploading(false);
+        localStorage.removeItem('currentParseSessionId');
+      } else if (session.status === 'error') {
+        setError(session.error || 'Parsing failed');
+        setIsUploading(false);
+        localStorage.removeItem('currentParseSessionId');
+      } else {
+        // Continue polling
+        setTimeout(() => pollSessionStatus(sessionId), 500);
+      }
+    } catch (error) {
+      console.error('Error polling session:', error);
+      setError('Failed to check parsing status');
+      setIsUploading(false);
+      localStorage.removeItem('currentParseSessionId');
+    }
+  }, []);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const sessionId = localStorage.getItem('currentParseSessionId');
+    if (sessionId) {
+      setSavedSessionId(sessionId);
+      setIsUploading(true);
+      pollSessionStatus(sessionId);
+    }
+  }, [pollSessionStatus]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -70,6 +131,7 @@ export function DICOMUploader() {
     setIsUploading(true);
     setError(null);
     setParseResult(null);
+    setParseSession(null);
     setUploadProgress(0);
 
     try {
@@ -78,35 +140,32 @@ export function DICOMUploader() {
         formData.append('files', file);
       });
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90));
-      }, 200);
-
-      const response = await fetch('/api/parse-dicom', {
+      // Start parsing session
+      const response = await fetch('/api/parse-dicom-session', {
         method: 'POST',
         body: formData,
       });
 
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to parse DICOM files');
+        throw new Error(errorData.error || 'Failed to start parsing session');
       }
 
-      const result: ParseResult = await response.json();
-      setParseResult(result);
+      const { sessionId } = await response.json();
+      
+      // Save session ID to localStorage
+      localStorage.setItem('currentParseSessionId', sessionId);
+      setSavedSessionId(sessionId);
+      
+      // Start polling for progress
+      pollSessionStatus(sessionId);
 
     } catch (error) {
       console.error('Upload error:', error);
       setError(error instanceof Error ? error.message : 'Upload failed');
-    } finally {
       setIsUploading(false);
-      setTimeout(() => setUploadProgress(0), 1000);
     }
-  }, []);
+  }, [pollSessionStatus]);
 
   const handleImportToDatabase = async () => {
     if (!parseResult) return;
@@ -194,9 +253,25 @@ export function DICOMUploader() {
           
           {isUploading ? (
             <div className="space-y-4">
-              <p className="text-lg text-white">Parsing DICOM files...</p>
+              <p className="text-lg text-white">
+                {parseSession?.currentFile ? 'Processing DICOM files...' : 'Uploading files...'}
+              </p>
               <Progress value={uploadProgress} className="w-full max-w-md mx-auto" />
-              <p className="text-sm text-gray-400">{uploadProgress}% complete</p>
+              {parseSession?.currentFile ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-400">
+                    File {parseSession.progress} of {parseSession.total} ({uploadProgress}%)
+                  </p>
+                  <p className="text-xs text-gray-500 truncate max-w-md mx-auto">
+                    {parseSession.currentFile}
+                  </p>
+                  <p className="text-xs text-gray-500 italic">
+                    You can navigate away - parsing continues in background
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">{uploadProgress}% complete</p>
+              )}
             </div>
           ) : (
             <div>
