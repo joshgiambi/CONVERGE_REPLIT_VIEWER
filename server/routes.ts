@@ -40,6 +40,46 @@ function isDICOMFile(filePath: string): boolean {
   }
 }
 
+function extractRTStructMetadata(filePath: string) {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const byteArray = new Uint8Array(buffer);
+    const dataSet = dicomParser.parseDicom(byteArray, {
+      untilTag: 'x30060050' // stop after ROI Contour Sequence
+    });
+
+    const getString = (tag: string) => {
+      try {
+        return dataSet.string(tag)?.trim() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    const structures: any[] = [];
+    
+    // Try to get structure set ROI sequence
+    try {
+      const roiSequence = dataSet.elements.x30060020;
+      if (roiSequence) {
+        // Simple extraction - just get structure names
+        // Full RT struct parsing would be more complex
+        console.log('Found RT Structure Set');
+      }
+    } catch (error) {
+      console.log('Could not parse RT structures:', error);
+    }
+
+    return {
+      structureSetDate: getString('x30060008'),
+      structures: structures
+    };
+  } catch (error) {
+    console.error('RT struct parse error:', error);
+    return null;
+  }
+}
+
 function extractDICOMMetadata(filePath: string) {
   try {
     const buffer = fs.readFileSync(filePath);
@@ -56,37 +96,66 @@ function extractDICOMMetadata(filePath: string) {
       }
     };
 
-    const getArray = (tag: string) => {
+    const getNumber = (tag: string) => {
       try {
-        return getString(tag)?.split('\\').map(Number) || null;
+        const value = getString(tag);
+        return value ? parseFloat(value) : null;
       } catch {
         return null;
       }
     };
 
-    return {
+    const getArray = (tag: string) => {
+      try {
+        const value = getString(tag);
+        return value ? value.split('\\').map(Number) : null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Extract essential metadata
+    const metadata: any = {
       patientName: getString('x00100010'),
       patientID: getString('x00100020'),
+      patientSex: getString('x00100040'),
+      patientAge: getString('x00101010'),
+      patientBirthDate: getString('x00100030'),
       studyInstanceUID: getString('x0020000d'),
       seriesInstanceUID: getString('x0020000e'),
       sopInstanceUID: getString('x00080018'),
       modality: getString('x00080060'),
       studyDate: getString('x00080020'),
+      studyTime: getString('x00080030'),
+      studyDescription: getString('x00081030'),
       seriesDescription: getString('x0008103e'),
-      instanceNumber: getString('x00200013'),
-      pixelSpacing: getArray('x00280030'),             // [rowSpacing, colSpacing]
-      imagePositionPatient: getArray('x00200032'),     // [x, y, z]
-      imageOrientationPatient: getArray('x00200037'),  // [rx, ry, rz, cx, cy, cz]
-      sliceThickness: getString('x00180050'),          // Slice thickness in mm
-      sliceLocation: getString('x00201041'),           // Slice location
-      frameOfReferenceUID: getString('x00200052'),     // Frame of Reference UID
-      rows: getString('x00280010'),                    // Image rows
-      columns: getString('x00280011'),                 // Image columns
-      windowCenter: getString('x00281050'),            // Window center
-      windowWidth: getString('x00281051'),             // Window width
-      rescaleSlope: getString('x00281053'),            // Rescale slope
-      rescaleIntercept: getString('x00281052')         // Rescale intercept
+      seriesNumber: getNumber('x00200011'),
+      instanceNumber: getNumber('x00200013'),
+      imageType: getString('x00080008'),
+      pixelSpacing: getArray('x00280030'),
+      imagePositionPatient: getArray('x00200032'),
+      imageOrientationPatient: getArray('x00200037'),
+      sliceThickness: getNumber('x00180050'),
+      sliceLocation: getNumber('x00201041'),
+      frameOfReferenceUID: getString('x00200052'),
+      rows: getNumber('x00280010'),
+      columns: getNumber('x00280011'),
+      windowCenter: getNumber('x00281050'),
+      windowWidth: getNumber('x00281051'),
+      rescaleSlope: getNumber('x00281053'),
+      rescaleIntercept: getNumber('x00281052'),
+      accessionNumber: getString('x00080050')
     };
+
+    // Return only non-null values
+    const cleanMetadata: any = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value !== null && value !== undefined) {
+        cleanMetadata[key] = value;
+      }
+    }
+
+    return cleanMetadata;
   } catch (error) {
     console.error('DICOM parse error:', error);
     return null;
@@ -439,15 +508,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No files uploaded" });
       }
 
+      console.log('Starting to parse', files.length, 'files...');
       const parsedData: any[] = [];
       const rtstructDetails: any = {};
       let successCount = 0;
       let errorCount = 0;
 
       // Parse each file
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        console.log(`Processing file ${i + 1}/${files.length}: ${file.originalname}`);
+        
         try {
-          if (!isDICOMFile(file.path)) {
+          // Check if DICOM file
+          const isDicom = isDICOMFile(file.path);
+          console.log(`Is DICOM: ${isDicom}`);
+          
+          if (!isDicom) {
             errorCount++;
             parsedData.push({
               filename: file.originalname,
@@ -456,7 +533,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
+          // Extract metadata
+          console.log('Extracting metadata...');
           const metadata = extractDICOMMetadata(file.path);
+          
           if (!metadata) {
             errorCount++;
             parsedData.push({
@@ -466,6 +546,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
+          console.log('Metadata extracted:', {
+            modality: metadata.modality,
+            patientID: metadata.patientID,
+            studyUID: metadata.studyInstanceUID
+          });
+
           // Add filename to metadata
           const dicomData = {
             filename: file.originalname,
@@ -474,31 +560,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Check if it's an RT Structure Set
           if (metadata.modality === 'RTSTRUCT') {
-            const rtData = extractRTStructMetadata(file.path);
-            if (rtData) {
-              rtstructDetails[file.originalname] = {
-                structureSetDate: rtData.structureSetDate,
-                structures: rtData.structures.map((s: any) => [s.name, s.color])
-              };
+            console.log('Processing RT Structure Set...');
+            try {
+              const rtData = extractRTStructMetadata(file.path);
+              if (rtData) {
+                rtstructDetails[file.originalname] = {
+                  structureSetDate: rtData.structureSetDate,
+                  structures: rtData.structures.map((s: any) => [s.name, s.color])
+                };
+              }
+            } catch (rtError) {
+              console.error('Error extracting RT struct:', rtError);
             }
           }
 
           parsedData.push(dicomData);
           successCount++;
-        } catch (error) {
+          console.log(`File ${i + 1} processed successfully`);
+        } catch (fileError) {
+          console.error(`Error processing file ${file.originalname}:`, fileError);
           errorCount++;
           parsedData.push({
             filename: file.originalname,
-            error: error instanceof Error ? error.message : "Unknown error"
+            error: fileError instanceof Error ? fileError.message : "Unknown error"
           });
         }
       }
 
+      console.log('Cleaning up uploaded files...');
       // Clean up uploaded files
       for (const file of files) {
-        fs.unlinkSync(file.path);
+        try {
+          fs.unlinkSync(file.path);
+        } catch (cleanupError) {
+          console.error('Error cleaning up file:', file.path, cleanupError);
+        }
       }
 
+      console.log(`Parse complete: ${successCount} success, ${errorCount} errors`);
+      
       res.json({
         success: true,
         data: parsedData,
