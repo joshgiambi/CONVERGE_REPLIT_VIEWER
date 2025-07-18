@@ -95,7 +95,9 @@ export function FusionControlPanel({
   };
   
   const handleOpacityChange = (values: number[]) => {
-    onOpacityChange(values[0]);
+    // Ensure the value is clamped between 0 and 1
+    const newValue = Math.max(0, Math.min(1, values[0]));
+    onOpacityChange(newValue);
   };
   
   if (!isVisible) return null;
@@ -115,7 +117,9 @@ export function FusionControlPanel({
               <Maximize2 className="h-4 w-4" />
             </Button>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 font-medium">CT</span>
+              <Badge variant="outline" className="text-[10px] border-gray-500/50 text-gray-300 px-1.5 py-0">
+                CT
+              </Badge>
               <div className="w-32">
                 <Slider
                   value={[opacity]}
@@ -126,10 +130,12 @@ export function FusionControlPanel({
                   className="w-full"
                 />
               </div>
-              <span className="text-xs text-purple-400 font-medium">MRI</span>
+              <Badge variant="outline" className="text-[10px] border-purple-500/50 text-purple-300 px-1.5 py-0">
+                MRI
+              </Badge>
             </div>
-            <span className="text-xs text-purple-300 min-w-[3ch]">
-              {Math.round(opacity * 100)}%
+            <span className="text-xs text-purple-300 min-w-[6ch]">
+              CT {Math.round((1 - opacity) * 100)}%
             </span>
           </div>
         </Card>
@@ -229,7 +235,7 @@ export function FusionControlPanel({
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-gray-300">Fusion Balance</Label>
                 <span className="text-xs text-purple-300">
-                  CT: {Math.round(opacity * 100)}%
+                  CT: {Math.round((1 - opacity) * 100)}% | MRI: {Math.round(opacity * 100)}%
                 </span>
               </div>
               <Slider
@@ -240,10 +246,14 @@ export function FusionControlPanel({
                 step={0.01}
                 className="w-full"
               />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>100% CT</span>
-                <span>50/50</span>
-                <span>100% MRI</span>
+              <div className="flex justify-between text-xs">
+                <Badge variant="outline" className="text-[10px] border-gray-500/50 text-gray-300 px-2 py-0">
+                  100% CT
+                </Badge>
+                <span className="text-gray-400">50/50</span>
+                <Badge variant="outline" className="text-[10px] border-purple-500/50 text-purple-300 px-2 py-0">
+                  100% MRI
+                </Badge>
               </div>
             </div>
           )}
