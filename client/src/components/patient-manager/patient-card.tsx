@@ -113,20 +113,27 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
   return (
     <Card className="bg-gray-900/80 border border-gray-700/50 hover:border-indigo-500/50 
                      transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10
-                     backdrop-blur-sm">
+                     backdrop-blur-sm w-full">
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
-          <div>
-            <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
-            <p className="text-sm text-gray-500">ID: {patient.patientID}</p>
-            {/* Display tags */}
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
+                <p className="text-sm text-gray-500">ID: {patient.patientID}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge 
+                  variant="outline" 
+                  className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
+                >
+                  {patient.patientSex || 'Unknown'} • {patient.patientAge || 'Age N/A'}
+                </Badge>
                 {tags.map(tag => (
                   <Badge
                     key={tag.id}
                     variant="secondary"
-                    className="text-xs px-2 py-0"
+                    className="text-xs px-2 py-0.5"
                     style={{ 
                       backgroundColor: tag.color + '20', 
                       borderColor: tag.color, 
@@ -137,95 +144,89 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                   </Badge>
                 ))}
               </div>
-            )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge 
-              variant="outline" 
-              className="border-indigo-500/50 text-indigo-400 bg-indigo-500/10"
-            >
-              {patient.patientSex || 'Unknown'} • {patient.patientAge || 'Age N/A'}
-            </Badge>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowEditDialog(true)}
-              className="h-8 w-8 p-0"
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowEditDialog(true)}
+            className="h-8 w-8 p-0 ml-4"
+          >
+            <Edit className="h-4 w-4" />
+          </Button>
         </div>
       </CardHeader>
       
       <CardContent className="space-y-4">
         {/* Study Information */}
         {studiesWithSeries.map((study) => (
-          <div key={study.id} className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-gray-400">
-                <Calendar className="h-4 w-4" />
-                <span>{
-                  study.studyDate && !isNaN(Date.parse(study.studyDate))
-                    ? format(new Date(study.studyDate), 'MMM d, yyyy')
-                    : study.studyDate || 'Date N/A'
-                }</span>
+          <div key={study.id} className="space-y-2">
+            {/* Study Header Row */}
+            <div className="flex items-center justify-between pb-2 border-b border-gray-800">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Calendar className="h-4 w-4" />
+                  <span>{
+                    study.studyDate && !isNaN(Date.parse(study.studyDate))
+                      ? format(new Date(study.studyDate), 'MMM d, yyyy')
+                      : study.studyDate || 'Date N/A'
+                  }</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <FileStack className="h-4 w-4 text-gray-400" />
+                  <span className="text-sm text-gray-400">{study.series.length} series</span>
+                </div>
               </div>
+              
+              {/* Special Status Badges */}
               <div className="flex items-center gap-2">
-                <FileStack className="h-4 w-4 text-gray-400" />
-                <span className="text-sm text-gray-400">{study.series.length} series</span>
+                {study.series.some(s => s.modality === 'RTSTRUCT') && (
+                  <Badge 
+                    variant="secondary" 
+                    className="bg-green-900/20 text-green-400 border-green-600/50"
+                  >
+                    <Brain className="h-3 w-3 mr-1" />
+                    RT Structures
+                  </Badge>
+                )}
+                
+                {registrationInfo && (
+                  <Badge 
+                    variant="secondary" 
+                    className="bg-orange-900/20 text-orange-400 border-orange-600/50"
+                  >
+                    <GitBranch className="h-3 w-3 mr-1" />
+                    Registration
+                  </Badge>
+                )}
+                
+                {mriSeries.length > 0 && ctSeries.length > 0 && (
+                  <Badge 
+                    variant="secondary" 
+                    className="bg-purple-900/20 text-purple-400 border-purple-600/50"
+                  >
+                    <Layers className="h-3 w-3 mr-1" />
+                    Fusion Ready
+                  </Badge>
+                )}
               </div>
             </div>
 
-            {/* Series Preview Grid with GIF animations */}
-            <div className="grid grid-cols-4 gap-2">
+            {/* Series Summary - Horizontal Layout */}
+            <div className="flex items-center gap-6">
               {study.series.filter(s => ['CT', 'MR', 'PT'].includes(s.modality)).map((imageSeries) => (
-                <div key={imageSeries.id} className="relative group">
-                  <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
-                              group-hover:border-indigo-500/50 transition-all duration-200
-                              group-hover:shadow-md group-hover:shadow-indigo-500/20">
-                    <div className="w-full h-full flex flex-col items-center justify-center p-3">
-                      <div className="text-3xl font-bold text-gray-300">{imageSeries.modality}</div>
-                      <div className="text-xs text-gray-500 mt-1">Series {imageSeries.seriesNumber || 1}</div>
-                      <div className="text-sm text-gray-400 mt-2">{imageSeries.imageCount} images</div>
-                    </div>
+                <div key={imageSeries.id} className="flex items-center gap-3">
+                  <Badge 
+                    variant="secondary" 
+                    className={`${getModalityColor(imageSeries.modality)} text-xs px-2 py-0.5`}
+                  >
+                    {imageSeries.modality}
+                  </Badge>
+                  <div className="text-sm text-gray-400">
+                    {imageSeries.seriesDescription || `Series ${imageSeries.seriesNumber || 1}`} • {imageSeries.imageCount} imgs
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Special Series Badges */}
-            <div className="flex flex-wrap gap-2">
-              {study.series.filter(s => s.modality === 'RTSTRUCT').map((rtSeries) => (
-                <Badge 
-                  key={rtSeries.id}
-                  variant="secondary" 
-                  className="bg-green-900/20 text-green-400 border-green-600/50"
-                >
-                  <Brain className="h-3 w-3 mr-1" />
-                  RT Structure Set
-                </Badge>
-              ))}
-              
-              {registrationInfo && (
-                <Badge 
-                  variant="secondary" 
-                  className="bg-orange-900/20 text-orange-400 border-orange-600/50"
-                >
-                  <GitBranch className="h-3 w-3 mr-1" />
-                  Registration Available
-                </Badge>
-              )}
-              
-              {mriSeries.length > 0 && ctSeries.length > 0 && (
-                <Badge 
-                  variant="secondary" 
-                  className="bg-purple-900/20 text-purple-400 border-purple-600/50"
-                >
-                  <Layers className="h-3 w-3 mr-1" />
-                  Fusion Ready
-                </Badge>
-              )}
             </div>
           </div>
         ))}
@@ -246,14 +247,14 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                     Loading structures...
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-6 gap-1.5">
                     {rtStructures[rtSeries.id]?.map((structure: any) => (
                       <div 
                         key={structure.roiNumber}
-                        className="flex items-center gap-2 bg-gray-800/50 p-2 rounded-lg"
+                        className="flex items-center gap-1.5 bg-gray-800/50 p-1.5 rounded"
                       >
                         <div 
-                          className="w-3 h-3 rounded-full"
+                          className="w-2 h-2 rounded-full flex-shrink-0"
                           style={{ 
                             backgroundColor: structure.color 
                               ? `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})`

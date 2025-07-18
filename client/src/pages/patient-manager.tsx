@@ -513,7 +513,7 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-4">
                 {filteredPatients.map((patient) => {
                   // Get studies and series for this patient
                   const patientStudies = studies.filter(study => study.patientId === patient.id);
