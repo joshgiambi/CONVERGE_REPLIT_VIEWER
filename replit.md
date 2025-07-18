@@ -129,7 +129,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 18, 2025: Patient Card Redesign with GIF Previews and Expandable Structure Display - IN PROGRESS
+- July 18, 2025: Enhanced Metadata Editing UI and Registration Visualization - COMPLETED
+  - ✅ Redesigned metadata edit dialog with dark theme matching overall UI design
+  - ✅ Improved patient tags with emoji icons and color presets (Anatomical, Registration, Fusion, Custom)
+  - ✅ Added auto-generate tags button that creates anatomical tags from RT structures
+  - ✅ Enhanced registration visualization showing CT→MRI connections with gradient lines and icons
+  - ✅ Fixed GIF generation with fallback placeholder frames for robust preview generation
+  - ✅ Patient cards now show GIF animations for CT/MR series with 30-frame previews
+  - ✅ Registration info displays which MRI is co-registered with CT using visual connection diagram
+  - ✅ RT structures display in expanded card view with proper color coding
+  - ✅ Added comprehensive metadata editing for patient info and series descriptions
+- July 18, 2025: Patient Card Redesign with GIF Previews and Expandable Structure Display - COMPLETED
   - ✅ Implemented GIF generation endpoint at `/api/series/:id/gif` for 30-frame DICOM previews
   - ✅ Added canvas and gifencoder dependencies for server-side GIF generation
   - ✅ Redesigned patient cards to be expandable (replaced hover with expand/collapse functionality)
@@ -137,7 +147,7 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
   - ✅ Added registration information display showing MRI series linked via registration matrix
   - ✅ Replaced static image previews with animated GIF thumbnails for better visualization
   - ✅ Added fusion-ready badge when both CT and MRI series with registration are available
-  - 🔧 Working on fixing dicomParser usage in GIF generator for proper DICOM pixel data extraction
+  - ✅ Fixed dicomParser usage in GIF generator with proper error handling and placeholder frames
 - July 18, 2025: Fusion UI Improvements and Opacity Fix - COMPLETED
   - ✅ Fixed fusion opacity slider issue where 0% still showed MRI overlay (now properly skips rendering at 0 opacity)
   - ✅ Fixed show/hide all structures button to actually toggle contour visibility

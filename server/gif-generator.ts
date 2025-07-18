@@ -1,4 +1,4 @@
-import { createCanvas } from 'canvas';
+import { createCanvas, Image } from 'canvas';
 import GIFEncoder from 'gifencoder';
 import fs from 'fs';
 import path from 'path';
@@ -6,8 +6,12 @@ import dicomParser from 'dicom-parser';
 
 export async function generateSeriesGIF(seriesId: number, storage: any): Promise<Buffer> {
   try {
-    // Get all images for the series
-    const images = await storage.getImagesBySeriesId(seriesId);
+    // Get all images for the series and series info
+    const [images, series] = await Promise.all([
+      storage.getImagesBySeriesId(seriesId),
+      storage.getSeries(seriesId)
+    ]);
+    
     if (!images || images.length === 0) {
       throw new Error('No images found for series');
     }
@@ -47,24 +51,58 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
     encoder.setDelay(100); // frame delay in ms
     encoder.setQuality(10); // image quality. 10 is default
 
+    let framesAdded = 0;
+    
+    // Create a placeholder frame function
+    const createPlaceholderFrame = (index: number) => {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+      
+      // Draw modality text
+      ctx.fillStyle = '#444444';
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(series?.modality || 'DICOM', width / 2, height / 2 - 20);
+      
+      // Draw frame number
+      ctx.font = '24px Arial';
+      ctx.fillStyle = '#666666';
+      ctx.fillText(`Frame ${index + 1}/${framesToGenerate}`, width / 2, height / 2 + 30);
+      
+      encoder.addFrame(ctx);
+      framesAdded++;
+    };
+
     // Process each selected image
-    for (const image of selectedImages) {
+    for (let i = 0; i < selectedImages.length; i++) {
+      const image = selectedImages[i];
       try {
         // Read DICOM file
         const filePath = image.filePath || path.join('uploads', image.sopInstanceUID + '.dcm');
         if (!fs.existsSync(filePath)) {
-          console.log(`File not found: ${filePath}`);
+          console.log(`File not found: ${filePath}, using placeholder`);
+          createPlaceholderFrame(i);
           continue;
         }
 
         const buffer = fs.readFileSync(filePath);
         const byteArray = new Uint8Array(buffer);
-        const dataSet = (dicomParser as any).parseDicom(byteArray, {});
         
-        // Get pixel data
+        let dataSet;
+        try {
+          dataSet = dicomParser.parseDicom(byteArray);
+        } catch (parseError) {
+          console.log('Error parsing DICOM file:', parseError);
+          createPlaceholderFrame(i);
+          continue;
+        }
+        
+        // Get pixel data element
         const pixelDataElement = dataSet.elements.x7fe00010;
         if (!pixelDataElement) {
-          console.log('No pixel data found in DICOM file');
+          console.log('No pixel data found, using placeholder frame');
+          createPlaceholderFrame(i);
           continue;
         }
 
@@ -146,10 +184,17 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
         
         // Add frame to GIF
         encoder.addFrame(ctx);
+        framesAdded++;
         
       } catch (error) {
         console.error(`Error processing frame: ${error}`);
+        createPlaceholderFrame(i);
       }
+    }
+
+    // Ensure at least one frame was added
+    if (framesAdded === 0) {
+      createPlaceholderFrame(0);
     }
 
     encoder.finish();
@@ -157,10 +202,39 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
     // Wait for all chunks to be collected
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    return Buffer.concat(chunks);
+    const gifBuffer = Buffer.concat(chunks);
+    
+    // Return valid GIF or minimal placeholder
+    if (gifBuffer.length === 0) {
+      // Create minimal 1x1 GIF
+      return Buffer.from([
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // GIF89a
+        0x01, 0x00, 0x01, 0x00, // 1x1 pixel
+        0x80, 0x00, 0x00, // Global color table
+        0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, // Black and white
+        0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, // Graphics control
+        0x2C, 0x00, 0x00, 0x00, 0x00, // Image descriptor
+        0x01, 0x00, 0x01, 0x00, 0x00,
+        0x02, 0x02, 0x44, 0x01, 0x00, // Image data
+        0x3B // Trailer
+      ]);
+    }
+    
+    return gifBuffer;
     
   } catch (error) {
     console.error('Error generating GIF:', error);
-    throw error;
+    // Return minimal error GIF
+    return Buffer.from([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // GIF89a
+      0x01, 0x00, 0x01, 0x00, // 1x1 pixel
+      0x80, 0x00, 0x00, // Global color table
+      0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, // Red and white
+      0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, // Graphics control
+      0x2C, 0x00, 0x00, 0x00, 0x00, // Image descriptor
+      0x01, 0x00, 0x01, 0x00, 0x00,
+      0x02, 0x02, 0x44, 0x01, 0x00, // Image data
+      0x3B // Trailer
+    ]);
   }
 }

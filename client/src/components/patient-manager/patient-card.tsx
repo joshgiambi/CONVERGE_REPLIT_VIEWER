@@ -176,14 +176,28 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
               </div>
             </div>
 
-            {/* Series Preview Grid - simplified for now */}
+            {/* Series Preview Grid with GIF animations */}
             <div className="grid grid-cols-4 gap-2">
               {study.series.filter(s => ['CT', 'MR', 'PT'].includes(s.modality)).map((imageSeries) => (
                 <div key={imageSeries.id} className="relative group">
                   <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
                               group-hover:border-indigo-500/50 transition-all duration-200
                               group-hover:shadow-md group-hover:shadow-indigo-500/20">
-                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                    {imageSeries.imageCount > 1 ? (
+                      <img 
+                        src={`/api/series/${imageSeries.id}/gif`}
+                        alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Fallback to text display on error
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const fallback = target.nextSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <div className={`w-full h-full flex items-center justify-center bg-gray-800 ${imageSeries.imageCount > 1 ? 'hidden' : ''}`}>
                       <div className="text-center">
                         <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
                         <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
@@ -279,36 +293,73 @@ export function PatientCard({ patient, studies, series }: PatientCardProps) {
               </div>
             ))}
 
-            {/* Registration Info */}
+            {/* Registration Info - Enhanced with visual connections */}
             {registrationInfo && (
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-orange-400 flex items-center gap-2">
                   <GitBranch className="h-4 w-4" />
-                  Registration Details
+                  Registration & Fusion Links
                 </h4>
-                <div className="bg-gray-800/50 p-3 rounded-lg">
-                  <p className="text-xs text-gray-400">
-                    Registration Type: <span className="text-orange-300">{registrationInfo.matrixType || 'RIGID'}</span>
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    This patient has multi-modal registration for CT/MRI fusion viewing
-                  </p>
-                  {mriSeries.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-xs text-gray-400">Registered MRI Series:</p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {mriSeries.map((mri) => (
-                          <Badge 
-                            key={mri.id}
-                            variant="secondary" 
-                            className="text-xs bg-purple-900/20 text-purple-400 border-purple-600/50"
-                          >
-                            {mri.seriesDescription || `MR Series ${mri.seriesNumber}`}
+                <div className="bg-gray-800/50 p-4 rounded-lg space-y-4">
+                  {/* Show CT Series */}
+                  {ctSeries.map(ct => (
+                    <div key={ct.id} className="space-y-3">
+                      {/* Primary CT Series */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-shrink-0">
+                          <Badge className="bg-blue-900/20 text-blue-400 border-blue-600/50">
+                            CT
                           </Badge>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-300 font-medium">
+                            {ct.seriesDescription || `CT Series ${ct.seriesNumber}`}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {ct.imageCount} images • Reference series
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {/* Registration Connection Visualization */}
+                      <div className="relative pl-8">
+                        <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-400 via-orange-400 to-purple-400"></div>
+                        <div className="absolute left-3 top-4 w-2.5 h-2.5 bg-orange-400 rounded-full ring-2 ring-gray-800"></div>
+                        <div className="pl-4 py-2">
+                          <p className="text-xs text-orange-400 font-medium">4x4 Registration Matrix</p>
+                          <p className="text-xs text-gray-500">{registrationInfo.matrixType || 'RIGID'} transformation</p>
+                        </div>
+                      </div>
+                      
+                      {/* Connected MRI Series */}
+                      <div className="space-y-2 pl-8">
+                        {mriSeries.map((mri) => (
+                          <div key={mri.id} className="flex items-center gap-3 relative">
+                            <div className="absolute -left-4 top-3 w-2 h-2 bg-purple-400 rounded-full"></div>
+                            <div className="flex-shrink-0">
+                              <Badge className="bg-purple-900/20 text-purple-400 border-purple-600/50">
+                                MR
+                              </Badge>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm text-gray-300">
+                                {mri.seriesDescription || `MR Series ${mri.seriesNumber}`}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {mri.imageCount} images • Co-registered for fusion
+                              </p>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
-                  )}
+                  ))}
+                  
+                  <div className="bg-gray-700/30 p-3 rounded-lg">
+                    <p className="text-xs text-gray-400">
+                      💡 This patient has multi-modal registration enabling CT/MRI fusion viewing with precise anatomical alignment
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Save, Tag, Plus, X, Sparkles } from 'lucide-react';
+import { Loader2, Save, Tag, Plus, X, Sparkles, User, Hash, Calendar, Users, Layers } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface MetadataEditDialogProps {
@@ -203,48 +203,62 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
     }
   };
 
+  const tagPresets = [
+    { type: 'anatomical', label: 'Anatomical', icon: '🧠', colors: ['#8b5cf6', '#7c3aed', '#6d28d9'] },
+    { type: 'registration', label: 'Registration', icon: '🔗', colors: ['#f59e0b', '#d97706', '#b45309'] },
+    { type: 'fusion', label: 'Fusion', icon: '🔀', colors: ['#10b981', '#059669', '#047857'] },
+    { type: 'custom', label: 'Custom', icon: '✏️', colors: ['#3b82f6', '#2563eb', '#1d4ed8'] }
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-700">
         <DialogHeader>
-          <DialogTitle>Edit Patient Metadata</DialogTitle>
+          <DialogTitle className="text-xl font-semibold text-white">Edit Patient Metadata</DialogTitle>
         </DialogHeader>
         
         <div className="space-y-6">
           {/* Patient Information */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Patient Information</h3>
+            <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+              <User className="h-5 w-5 text-indigo-400" />
+              Patient Information
+            </h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="patientName">Patient Name</Label>
+                <Label htmlFor="patientName" className="text-gray-300">Patient Name</Label>
                 <Input
                   id="patientName"
                   value={patientData.patientName}
                   onChange={e => setPatientData({ ...patientData, patientName: e.target.value })}
+                  className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="patientID">Patient ID</Label>
+                <Label htmlFor="patientID" className="text-gray-300">Patient ID</Label>
                 <Input
                   id="patientID"
                   value={patientData.patientID}
                   onChange={e => setPatientData({ ...patientData, patientID: e.target.value })}
+                  className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="age">Age</Label>
+                <Label htmlFor="age" className="text-gray-300">Age</Label>
                 <Input
                   id="age"
                   value={patientData.age}
                   onChange={e => setPatientData({ ...patientData, age: e.target.value })}
+                  className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sex">Sex</Label>
+                <Label htmlFor="sex" className="text-gray-300">Sex</Label>
                 <Input
                   id="sex"
                   value={patientData.sex}
                   onChange={e => setPatientData({ ...patientData, sex: e.target.value })}
+                  className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
                 />
               </div>
             </div>
@@ -253,67 +267,99 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
           {/* Tags */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Patient Tags</h3>
+              <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+                <Tag className="h-5 w-5 text-purple-400" />
+                Patient Tags
+              </h3>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateAnatomicalTags}
                 disabled={loadingTags}
+                className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10"
               >
                 {loadingTags ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                <span className="ml-2">Auto-Generate</span>
+                <span className="ml-2">Auto-Generate from RT Structures</span>
               </Button>
             </div>
             
             {/* Existing Tags */}
             <div className="flex flex-wrap gap-2">
-              {tags.map(tag => (
-                <Badge
-                  key={tag.id}
-                  variant="secondary"
-                  className="px-3 py-1"
-                  style={{ backgroundColor: tag.color + '20', borderColor: tag.color, color: tag.color }}
-                >
-                  <span className="mr-1">{tag.tagValue}</span>
-                  <button
-                    onClick={() => handleDeleteTag(tag.id)}
-                    className="ml-1 hover:opacity-70"
+              {tags.map(tag => {
+                const preset = tagPresets.find(p => p.type === tag.tagType);
+                return (
+                  <Badge
+                    key={tag.id}
+                    variant="secondary"
+                    className="px-3 py-1 flex items-center gap-1 border"
+                    style={{ 
+                      backgroundColor: tag.color + '15', 
+                      borderColor: tag.color + '50', 
+                      color: tag.color 
+                    }}
                   >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
+                    {preset && <span className="text-sm">{preset.icon}</span>}
+                    <span>{tag.tagValue}</span>
+                    <button
+                      onClick={() => handleDeleteTag(tag.id)}
+                      className="ml-2 hover:opacity-70 transition-opacity"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                );
+              })}
             </div>
             
             {/* Add New Tag */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
               <select
-                className="px-3 py-2 rounded-md border bg-background"
+                className="px-3 py-2 rounded-md border bg-gray-800 border-gray-600 text-white"
                 value={newTag.type}
-                onChange={e => setNewTag({ ...newTag, type: e.target.value })}
+                onChange={e => {
+                  const type = e.target.value;
+                  const preset = tagPresets.find(p => p.type === type);
+                  setNewTag({ 
+                    ...newTag, 
+                    type,
+                    color: preset?.colors[0] || '#3b82f6'
+                  });
+                }}
               >
-                <option value="custom">Custom</option>
-                <option value="anatomical">Anatomical</option>
-                <option value="registration">Registration</option>
-                <option value="fusion">Fusion</option>
+                {tagPresets.map(preset => (
+                  <option key={preset.type} value={preset.type}>
+                    {preset.icon} {preset.label}
+                  </option>
+                ))}
               </select>
               <Input
                 placeholder="Tag value..."
                 value={newTag.value}
                 onChange={e => setNewTag({ ...newTag, value: e.target.value })}
                 onKeyPress={e => e.key === 'Enter' && handleAddTag()}
+                className="bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
               />
-              <input
-                type="color"
-                value={newTag.color}
-                onChange={e => setNewTag({ ...newTag, color: e.target.value })}
-                className="w-12 h-10 rounded border cursor-pointer"
-              />
-              <Button onClick={handleAddTag} size="icon">
+              <div className="flex gap-1">
+                {tagPresets.find(p => p.type === newTag.type)?.colors.map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setNewTag({ ...newTag, color })}
+                    className={`w-8 h-8 rounded border-2 transition-all ${
+                      newTag.color === color ? 'border-white scale-110' : 'border-gray-600'
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+              <Button 
+                onClick={handleAddTag} 
+                size="icon"
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
@@ -321,16 +367,22 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
 
           {/* Series Descriptions */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Series Descriptions</h3>
+            <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+              <Layers className="h-5 w-5 text-blue-400" />
+              Series Descriptions
+            </h3>
             <div className="space-y-2">
               {series.map(s => (
-                <div key={s.id} className="flex items-center gap-2">
-                  <Badge className={getModalityColor(s.modality)}>
+                <div key={s.id} className="flex items-center gap-2 p-2 rounded-lg bg-gray-800/50">
+                  <Badge 
+                    variant="outline"
+                    className={`${getModalityColor(s.modality)} border-current bg-current/10`}
+                  >
                     {s.modality}
                   </Badge>
-                  <span className="text-sm text-gray-500">Series {s.seriesNumber}</span>
+                  <span className="text-sm text-gray-400 min-w-[80px]">Series {s.seriesNumber}</span>
                   <Input
-                    className="flex-1"
+                    className="flex-1 bg-gray-800 border-gray-600 text-white focus:border-indigo-500"
                     placeholder="Series description..."
                     value={seriesDescriptions[s.id] || ''}
                     onChange={e => setSeriesDescriptions({
@@ -342,6 +394,7 @@ export function MetadataEditDialog({ open, onClose, patient, studies, series, on
                     size="sm"
                     variant="ghost"
                     onClick={() => handleSaveSeriesDescription(s.id)}
+                    className="text-gray-400 hover:text-white hover:bg-gray-700"
                   >
                     <Save className="h-4 w-4" />
                   </Button>
