@@ -2008,36 +2008,50 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         return result;
       };
       
-      // Transform MRI top-left corner to CT space to get offset
-      const mriCornerPhysical = [mriPosition[0], mriPosition[1], mriPosition[2], 1];
-      const ctCornerTransformed = multiplyMatrixVectorLocal(regMatrix4x4, mriCornerPhysical);
+      // Get MRI image dimensions
+      const mriWidth = secondaryImageData.width;
+      const mriHeight = secondaryImageData.height;
       
-      console.log(`MRI corner physical: [${mriPosition[0].toFixed(1)}, ${mriPosition[1].toFixed(1)}, ${mriPosition[2].toFixed(1)}]`);
-      console.log(`CT position: [${ctPosition[0].toFixed(1)}, ${ctPosition[1].toFixed(1)}, ${ctPosition[2].toFixed(1)}]`);
-      console.log(`Transformed MRI corner: [${ctCornerTransformed[0].toFixed(1)}, ${ctCornerTransformed[1].toFixed(1)}, ${ctCornerTransformed[2].toFixed(1)}]`);
+      // Calculate MRI center in physical space
+      // MRI center = MRI origin + (width/2 * column_spacing, height/2 * row_spacing)
+      const mriCenterPhysical = [
+        mriPosition[0] + (mriWidth / 2) * mriSpacing[1],  // X: column spacing
+        mriPosition[1] + (mriHeight / 2) * mriSpacing[0],  // Y: row spacing  
+        mriPosition[2],  // Z
+        1  // Homogeneous coordinate
+      ];
       
-      // Calculate physical offset in mm
-      const physicalOffsetX = ctCornerTransformed[0] - ctPosition[0];
-      const physicalOffsetY = ctCornerTransformed[1] - ctPosition[1];
+      // Transform MRI center to CT space
+      const mriCenterTransformed = multiplyMatrixVectorLocal(regMatrix4x4, mriCenterPhysical);
       
-      console.log(`Physical offset: X=${physicalOffsetX.toFixed(1)}mm, Y=${physicalOffsetY.toFixed(1)}mm`);
+      // Calculate CT center in physical space
+      const ctWidth = primaryImageData.width;
+      const ctHeight = primaryImageData.height;
+      const ctCenterPhysical = [
+        ctPosition[0] + (ctWidth / 2) * ctSpacing[1],  // X: column spacing
+        ctPosition[1] + (ctHeight / 2) * ctSpacing[0],  // Y: row spacing
+        ctPosition[2]  // Z
+      ];
       
-      // Convert physical offset to pixel offset
-      // DICOM pixel spacing is [row spacing, column spacing] = [Y spacing, X spacing]
-      const pixelOffsetX = physicalOffsetX / ctSpacing[1]; // Use column spacing for X
-      const pixelOffsetY = physicalOffsetY / ctSpacing[0]; // Use row spacing for Y
+      console.log(`MRI center physical: [${mriCenterPhysical[0].toFixed(1)}, ${mriCenterPhysical[1].toFixed(1)}, ${mriCenterPhysical[2].toFixed(1)}]`);
+      console.log(`CT center physical: [${ctCenterPhysical[0].toFixed(1)}, ${ctCenterPhysical[1].toFixed(1)}, ${ctCenterPhysical[2].toFixed(1)}]`);
+      console.log(`Transformed MRI center: [${mriCenterTransformed[0].toFixed(1)}, ${mriCenterTransformed[1].toFixed(1)}, ${mriCenterTransformed[2].toFixed(1)}]`);
       
-      console.log(`Pixel offset (before scaling): X=${pixelOffsetX.toFixed(1)}px, Y=${pixelOffsetY.toFixed(1)}px`);
+      // Calculate offset between transformed MRI center and CT center
+      const centerOffsetX = mriCenterTransformed[0] - ctCenterPhysical[0];
+      const centerOffsetY = mriCenterTransformed[1] - ctCenterPhysical[1];
       
-      // Apply the same scale as used for the CT image display
-      const displayOffsetX = pixelOffsetX * primaryBaseScale;
-      const displayOffsetY = pixelOffsetY * primaryBaseScale;
+      console.log(`Center offset in mm: X=${centerOffsetX.toFixed(1)}, Y=${centerOffsetY.toFixed(1)}`);
       
-      console.log(`Display offset: X=${displayOffsetX.toFixed(1)}px, Y=${displayOffsetY.toFixed(1)}px`);
+      // Convert center offset to pixel offset 
+      const pixelOffsetX = centerOffsetX / ctSpacing[1] * primaryBaseScale;
+      const pixelOffsetY = centerOffsetY / ctSpacing[0] * primaryBaseScale;
       
-      // Apply registration offset to drawing position
-      const registeredX = x + displayOffsetX;
-      const registeredY = y + displayOffsetY;
+      console.log(`Pixel offset: X=${pixelOffsetX.toFixed(1)}, Y=${pixelOffsetY.toFixed(1)}`);
+      
+      // Apply offset to center-aligned position
+      const registeredX = x + pixelOffsetX;
+      const registeredY = y + pixelOffsetY;
       
       ctx.drawImage(tempCanvas, registeredX, registeredY, scaledWidth, scaledHeight);
       console.log(`Registered draw position: x=${registeredX.toFixed(1)}, y=${registeredY.toFixed(1)}`);
