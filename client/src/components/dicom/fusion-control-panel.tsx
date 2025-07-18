@@ -8,37 +8,7 @@ import { Minimize2, Maximize2, Layers, Settings2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 
-// Simple MRI Thumbnail component
-function MriThumbnail({ seriesId }: { seriesId: number }) {
-  const [thumbnailSrc, setThumbnailSrc] = useState<string>('');
-  
-  useEffect(() => {
-    // Fetch middle image of the series for thumbnail
-    fetch(`/api/series/${seriesId}/images`)
-      .then(res => res.json())
-      .then(images => {
-        if (images.length > 0) {
-          const middleIndex = Math.floor(images.length / 2);
-          const sopInstanceUID = images[middleIndex].sopInstanceUID;
-          // Use the render endpoint to get a processed image
-          setThumbnailSrc(`/api/images/${sopInstanceUID}/render?width=64&windowWidth=1200&windowCenter=600`);
-        }
-      })
-      .catch(console.error);
-  }, [seriesId]);
-  
-  return thumbnailSrc ? (
-    <img 
-      src={thumbnailSrc} 
-      alt="MRI Preview" 
-      className="w-full h-full object-cover"
-    />
-  ) : (
-    <div className="w-full h-full flex items-center justify-center">
-      <Layers className="w-8 h-8 text-purple-500/30" />
-    </div>
-  );
-}
+
 
 interface FusionControlPanelProps {
   primarySeriesId: number; // CT series
@@ -64,6 +34,12 @@ export function FusionControlPanel({
   selectedSecondaryId
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
+  const [localOpacity, setLocalOpacity] = useState(opacity);
+  
+  // Sync local opacity with prop
+  useEffect(() => {
+    setLocalOpacity(opacity);
+  }, [opacity]);
   
   // Fetch available MR series for fusion
   const { data: availableSeries } = useQuery({
@@ -95,9 +71,13 @@ export function FusionControlPanel({
   };
   
   const handleOpacityChange = (values: number[]) => {
-    // Ensure the value is clamped between 0 and 1
-    const newValue = Math.max(0, Math.min(1, values[0]));
-    onOpacityChange(newValue);
+    const newValue = values[0];
+    if (typeof newValue === 'number' && !isNaN(newValue)) {
+      // Clamp to ensure we stay within bounds
+      const clampedValue = Math.max(0, Math.min(1, newValue));
+      setLocalOpacity(clampedValue);
+      onOpacityChange(clampedValue);
+    }
   };
   
   if (!isVisible) return null;
@@ -120,14 +100,16 @@ export function FusionControlPanel({
               <Badge variant="outline" className="text-[10px] border-gray-500/50 text-gray-300 px-1.5 py-0">
                 CT
               </Badge>
-              <div className="w-32">
+              <div className="w-32 relative py-2">
                 <Slider
-                  value={[opacity]}
+                  value={[localOpacity]}
                   onValueChange={handleOpacityChange}
                   min={0}
                   max={1}
                   step={0.01}
-                  className="w-full"
+                  className="w-full cursor-pointer"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerMove={(e) => e.stopPropagation()}
                 />
               </div>
               <Badge variant="outline" className="text-[10px] border-purple-500/50 text-purple-300 px-1.5 py-0">
@@ -135,7 +117,7 @@ export function FusionControlPanel({
               </Badge>
             </div>
             <span className="text-xs text-purple-300 min-w-[6ch]">
-              CT {Math.round((1 - opacity) * 100)}%
+              CT {Math.round((1 - localOpacity) * 100)}%
             </span>
           </div>
         </Card>
@@ -173,35 +155,38 @@ export function FusionControlPanel({
               </Badge>
             </div>
             
-            {/* Thumbnail Grid */}
-            <div className="grid grid-cols-3 gap-2">
+            {/* MR Series Buttons */}
+            <div className="space-y-2">
               {mrSeries.map((series: any, index: number) => (
                 <button
                   key={series.id}
                   onClick={() => handleSecondarySelect(series.id.toString())}
                   className={`
-                    relative p-1 rounded-lg border-2 transition-all
+                    w-full p-3 rounded-lg border-2 transition-all flex items-center justify-between
                     ${selectedSecondaryId === series.id
-                      ? 'border-purple-400 bg-purple-500/20 scale-105 shadow-lg shadow-purple-500/20'
+                      ? 'border-purple-400 bg-purple-500/20 shadow-lg shadow-purple-500/20'
                       : 'border-purple-600/30 bg-purple-900/10 hover:border-purple-500/50 hover:bg-purple-500/10'
                     }
                   `}
                 >
-                  {/* MRI Preview Thumbnail */}
-                  <div className="w-full aspect-square bg-gradient-to-br from-purple-900/20 to-purple-800/20 rounded overflow-hidden relative">
-                    <MriThumbnail seriesId={series.id} />
-                    <Layers className="absolute inset-0 m-auto w-8 h-8 text-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="mt-1 px-1">
-                    <p className="text-xs text-purple-200 truncate font-medium">
-                      MR {index + 1}
-                    </p>
-                    <p className="text-xs text-purple-400">
-                      {series.imageCount} imgs
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600/30 to-purple-500/30 flex items-center justify-center">
+                      <Layers className="w-5 h-5 text-purple-300" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm text-purple-200 font-medium">
+                        {series.seriesDescription || `MR Series ${index + 1}`}
+                      </p>
+                      <p className="text-xs text-purple-400">
+                        {series.imageCount} images
+                      </p>
+                    </div>
                   </div>
                   {selectedSecondaryId === series.id && (
-                    <div className="absolute top-1 right-1 w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-purple-300 font-medium">Active</span>
+                      <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                    </div>
                   )}
                 </button>
               ))}
@@ -210,19 +195,28 @@ export function FusionControlPanel({
               <button
                 onClick={() => handleSecondarySelect('none')}
                 className={`
-                  relative p-1 rounded-lg border-2 transition-all
+                  w-full p-3 rounded-lg border-2 transition-all flex items-center justify-between
                   ${selectedSecondaryId === null
                     ? 'border-gray-400 bg-gray-500/20'
                     : 'border-gray-600/30 bg-gray-900/10 hover:border-gray-500/50 hover:bg-gray-500/10'
                   }
                 `}
               >
-                <div className="w-full aspect-square bg-gray-900/20 rounded flex items-center justify-center">
-                  <X className="w-8 h-8 text-gray-500/50" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gray-700/30 flex items-center justify-center">
+                    <X className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm text-gray-300 font-medium">No Fusion</p>
+                    <p className="text-xs text-gray-500">View CT only</p>
+                  </div>
                 </div>
-                <div className="mt-1 px-1">
-                  <p className="text-xs text-gray-400 font-medium">No Fusion</p>
-                </div>
+                {selectedSecondaryId === null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 font-medium">Active</span>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full" />
+                  </div>
+                )}
               </button>
             </div>
           </div>
@@ -235,17 +229,21 @@ export function FusionControlPanel({
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-gray-300">Fusion Balance</Label>
                 <span className="text-xs text-purple-300">
-                  CT: {Math.round((1 - opacity) * 100)}% | MRI: {Math.round(opacity * 100)}%
+                  CT: {Math.round((1 - localOpacity) * 100)}% | MRI: {Math.round(localOpacity * 100)}%
                 </span>
               </div>
-              <Slider
-                value={[opacity]}
-                onValueChange={handleOpacityChange}
-                min={0}
-                max={1}
-                step={0.01}
-                className="w-full"
-              />
+              <div className="relative py-2">
+                <Slider
+                  value={[localOpacity]}
+                  onValueChange={handleOpacityChange}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  className="w-full cursor-pointer"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerMove={(e) => e.stopPropagation()}
+                />
+              </div>
               <div className="flex justify-between text-xs">
                 <Badge variant="outline" className="text-[10px] border-gray-500/50 text-gray-300 px-2 py-0">
                   100% CT
