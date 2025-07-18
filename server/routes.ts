@@ -9,6 +9,7 @@ import { RTStructureParser } from './rt-structure-parser';
 import { db } from "./db";
 import { images as imagesTable } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { generateSeriesGIF } from './gif-generator';
 
 const upload = multer({ dest: 'uploads/' });
 
@@ -1013,6 +1014,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });
+    }
+  });
+
+  // Generate GIF preview for a series
+  app.get("/api/series/:id/gif", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.id);
+      const series = await storage.getSeries(seriesId);
+      
+      if (!series) {
+        return res.status(404).json({ message: "Series not found" });
+      }
+      
+      // Check if GIF already exists in cache
+      const gifCachePath = path.join('uploads', 'gif-cache', `series-${seriesId}.gif`);
+      const gifCacheDir = path.dirname(gifCachePath);
+      
+      // Create cache directory if it doesn't exist
+      if (!fs.existsSync(gifCacheDir)) {
+        fs.mkdirSync(gifCacheDir, { recursive: true });
+      }
+      
+      // If cached GIF exists and is newer than 24 hours, serve it
+      if (fs.existsSync(gifCachePath)) {
+        const stats = fs.statSync(gifCachePath);
+        const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
+        
+        if (ageInHours < 24) {
+          res.setHeader('Content-Type', 'image/gif');
+          res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
+          return fs.createReadStream(gifCachePath).pipe(res);
+        }
+      }
+      
+      // Generate new GIF
+      console.log(`Generating GIF for series ${seriesId}...`);
+      const gifBuffer = await generateSeriesGIF(seriesId, storage);
+      
+      // Save to cache
+      fs.writeFileSync(gifCachePath, gifBuffer);
+      
+      // Send response
+      res.setHeader('Content-Type', 'image/gif');
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
+      res.send(gifBuffer);
+      
+    } catch (error) {
+      console.error('Error generating GIF:', error);
+      res.status(500).json({ message: "Failed to generate GIF preview" });
     }
   });
 

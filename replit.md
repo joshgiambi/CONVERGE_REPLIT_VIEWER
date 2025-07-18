@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 18, 2025: Patient Card Redesign with GIF Previews and Expandable Structure Display - IN PROGRESS
+  - ✅ Implemented GIF generation endpoint at `/api/series/:id/gif` for 30-frame DICOM previews
+  - ✅ Added canvas and gifencoder dependencies for server-side GIF generation
+  - ✅ Redesigned patient cards to be expandable (replaced hover with expand/collapse functionality)
+  - ✅ Patient cards now display RT structures in expanded view with color-coded structure names
+  - ✅ Added registration information display showing MRI series linked via registration matrix
+  - ✅ Replaced static image previews with animated GIF thumbnails for better visualization
+  - ✅ Added fusion-ready badge when both CT and MRI series with registration are available
+  - 🔧 Working on fixing dicomParser usage in GIF generator for proper DICOM pixel data extraction
 - July 18, 2025: Fusion UI Improvements and Opacity Fix - COMPLETED
   - ✅ Fixed fusion opacity slider issue where 0% still showed MRI overlay (now properly skips rendering at 0 opacity)
   - ✅ Fixed show/hide all structures button to actually toggle contour visibility
