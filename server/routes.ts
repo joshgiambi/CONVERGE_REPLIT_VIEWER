@@ -1066,9 +1066,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
         
         if (ageInHours < 24) {
+          console.log(`Serving cached GIF for series ${seriesId}`);
+          const gifBuffer = fs.readFileSync(gifCachePath);
           res.setHeader('Content-Type', 'image/gif');
           res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
-          return fs.createReadStream(gifCachePath).pipe(res);
+          res.setHeader('Content-Length', gifBuffer.length.toString());
+          return res.send(gifBuffer);
         }
       }
       
@@ -1082,6 +1085,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Send response
       res.setHeader('Content-Type', 'image/gif');
       res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
+      res.setHeader('Content-Length', gifBuffer.length.toString());
       res.send(gifBuffer);
       
     } catch (error) {

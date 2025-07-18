@@ -456,15 +456,12 @@ export default function PatientManager() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {console.log('Rendering patients:', filteredPatients.length)}
                 {filteredPatients.map((patient) => {
                   // Get studies and series for this patient
                   const patientStudies = studies.filter(study => study.patientId === patient.id);
                   const patientSeries = series.filter(s => 
                     patientStudies.some(study => study.id === s.studyId)
                   );
-                  
-                  console.log(`Patient ${patient.id}: ${patientStudies.length} studies, ${patientSeries.length} series`);
                   
                   return (
                     <PatientCard
