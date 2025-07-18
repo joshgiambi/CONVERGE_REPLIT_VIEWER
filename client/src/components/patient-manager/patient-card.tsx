@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface PatientCardProps {
   patient: any;
@@ -21,7 +22,9 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
   const [registrationInfo, setRegistrationInfo] = useState<any>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
   const hasLoadedRef = useRef(false);
+  const { toast } = useToast();
 
   // Group series by study
   const studiesWithSeries = studies.map(study => ({
@@ -108,6 +111,42 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
   const getPlaceholderImage = (seriesId: number) => {
     // Return a simple placeholder URL or use the first image
     return `/api/series/${seriesId}/thumbnail`;
+  };
+  
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete patient ${patient.patientName}? This will delete all associated studies, series, and images.`)) {
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/patients/${patient.id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete patient');
+      }
+      
+      toast({
+        title: "Patient deleted",
+        description: `Successfully deleted ${patient.patientName} and all associated data.`,
+      });
+      
+      // Call the onUpdate callback to refresh the patient list
+      if (onUpdate) {
+        onUpdate();
+      }
+    } catch (error) {
+      console.error('Error deleting patient:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete patient. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -352,6 +391,15 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                 Advanced Viewer
               </Button>
             </Link>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => handleDelete()}
+              className="bg-red-600 hover:bg-red-700 text-white border border-red-500"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
           </div>
           
           <Button

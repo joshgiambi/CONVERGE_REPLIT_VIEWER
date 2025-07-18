@@ -31,7 +31,8 @@ import {
   Wifi,
   WifiOff,
   Play,
-  Eye
+  Eye,
+  AlertTriangle
 } from "lucide-react";
 
 interface Patient {
@@ -116,6 +117,7 @@ export default function PatientManager() {
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
+  const [hasPendingData, setHasPendingData] = useState(false);
   const hasActiveParsingSession = useParsingSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -138,6 +140,27 @@ export default function PatientManager() {
     };
     populateDemo();
   }, [queryClient]);
+
+  // Check for unprocessed files periodically
+  useEffect(() => {
+    const checkUnprocessedFiles = async () => {
+      try {
+        const response = await fetch('/api/unprocessed-files');
+        if (response.ok) {
+          const data = await response.json();
+          setHasPendingData(data.files && data.files.length > 0);
+        }
+      } catch (error) {
+        console.error('Error checking unprocessed files:', error);
+      }
+    };
+
+    // Check immediately and then every 5 seconds
+    checkUnprocessedFiles();
+    const interval = setInterval(checkUnprocessedFiles, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch patients
   const { data: patients = [], isLoading: patientsLoading } = useQuery<Patient[]>({
@@ -487,12 +510,17 @@ export default function PatientManager() {
             <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all relative">
               <Upload className="h-4 w-4" />
               Import DICOM
-              {hasActiveParsingSession && (
-                <div className="absolute -top-1 -right-1 h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+              {hasActiveParsingSession ? (
+                <div className="absolute -top-1 -right-1">
+                  <svg className="h-4 w-4 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
+                  </svg>
                 </div>
-              )}
+              ) : hasPendingData ? (
+                <div className="absolute -top-1 -right-1">
+                  <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                </div>
+              ) : null}
             </TabsTrigger>
             <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Network className="h-4 w-4" />

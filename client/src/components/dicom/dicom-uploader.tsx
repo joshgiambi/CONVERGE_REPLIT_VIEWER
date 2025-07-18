@@ -109,10 +109,12 @@ export function DICOMUploader() {
         setParseResult(session.result);
         setIsUploading(false);
         localStorage.removeItem('currentParseSessionId');
+        localStorage.removeItem('uploadActive');
       } else if (session.status === 'error') {
         setError(session.error || 'Parsing failed');
         setIsUploading(false);
         localStorage.removeItem('currentParseSessionId');
+        localStorage.removeItem('uploadActive');
       } else {
         // Continue polling
         setTimeout(() => pollSessionStatus(sessionId), 500);
@@ -122,6 +124,7 @@ export function DICOMUploader() {
       setError('Failed to check parsing status');
       setIsUploading(false);
       localStorage.removeItem('currentParseSessionId');
+      localStorage.removeItem('uploadActive');
     }
   };
 
@@ -135,8 +138,13 @@ export function DICOMUploader() {
       pollSessionStatus(sessionId);
     }
     
-    // Check for unprocessed files
+    // Check for unprocessed files immediately
     checkUnprocessedFiles();
+    
+    // Poll for unprocessed files every 3 seconds
+    const interval = setInterval(checkUnprocessedFiles, 3000);
+    
+    return () => clearInterval(interval);
   }, []); // Empty dependency array - only run on mount
   
   const checkUnprocessedFiles = async () => {
@@ -159,6 +167,9 @@ export function DICOMUploader() {
     setParseResult(null);
     setParseSession(null);
     setUploadProgress(0);
+    
+    // Set upload active flag for global tracking
+    localStorage.setItem('uploadActive', 'true');
 
     try {
       const formData = new FormData();
@@ -196,6 +207,7 @@ export function DICOMUploader() {
       console.error('Upload error:', error);
       setError(error instanceof Error ? error.message : 'Upload failed');
       setIsUploading(false);
+      localStorage.removeItem('uploadActive');
     }
   };
 
@@ -206,9 +218,21 @@ export function DICOMUploader() {
     setError(null);
 
     try {
-      await apiRequest('POST', '/api/import-dicom-metadata', {
+      // Show toast notification for import start
+      toast({
+        title: "Importing DICOM data",
+        description: "Processing patient data and saving to database...",
+      });
+
+      const response = await apiRequest('POST', '/api/import-dicom-metadata', {
         data: parseResult.data,
         rtstructDetails: parseResult.rtstructDetails
+      });
+
+      // Show success toast
+      toast({
+        title: "Import successful",
+        description: `Successfully imported ${parseResult.data.patients?.length || 0} patients with their studies and series.`,
       });
 
       // Invalidate queries to refresh the UI
@@ -220,11 +244,19 @@ export function DICOMUploader() {
       // Navigate to patient manager
       setTimeout(() => {
         setLocation('/patients');
-      }, 500);
+      }, 1000);
       
     } catch (error) {
       console.error('Import error:', error);
-      setError(error instanceof Error ? error.message : 'Import failed');
+      const errorMessage = error instanceof Error ? error.message : 'Import failed';
+      setError(errorMessage);
+      
+      // Show error toast
+      toast({
+        title: "Import failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsImporting(false);
     }

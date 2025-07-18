@@ -5,7 +5,15 @@ export function useParsingSession() {
   
   useEffect(() => {
     const checkActiveSession = async () => {
+      // Check for both upload and parsing sessions
+      const uploadActive = localStorage.getItem('uploadActive') === 'true';
       const sessionId = localStorage.getItem('currentParseSessionId');
+      
+      if (uploadActive) {
+        setHasActiveSession(true);
+        return;
+      }
+      
       if (!sessionId) {
         setHasActiveSession(false);
         return;
@@ -36,11 +44,11 @@ export function useParsingSession() {
     checkActiveSession();
 
     // Check periodically
-    const interval = setInterval(checkActiveSession, 2000);
+    const interval = setInterval(checkActiveSession, 1000);
 
     // Also listen for storage events to sync across tabs
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'currentParseSessionId') {
+      if (e.key === 'currentParseSessionId' || e.key === 'uploadActive') {
         checkActiveSession();
       }
     };

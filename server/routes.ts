@@ -855,7 +855,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   windowWidth: imageMetadata.windowWidth,
                   rescaleIntercept: imageMetadata.rescaleIntercept,
                   rescaleSlope: imageMetadata.rescaleSlope,
-                  filename: imageMetadata.filename
+                  fileName: imageMetadata.filename,
+                  filePath: imageMetadata.filePath || imageMetadata.filename // Use filePath if available
                 });
               }
             }
@@ -2336,6 +2337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const dicomData = {
             filename: file.originalname,
+            filePath: file.path,
             ...metadata
           };
 
@@ -2365,12 +2367,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
         
-        // Clean up temp file
-        try {
-          await fs.promises.unlink(file.path);
-        } catch (e) {
-          console.error('Error deleting temp file:', e);
-        }
+        // Don't delete files - we need them for serving images later
+        // try {
+        //   await fs.promises.unlink(file.path);
+        // } catch (e) {
+        //   console.error('Error deleting temp file:', e);
+        // }
       }
 
       // Group by patient
