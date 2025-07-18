@@ -777,7 +777,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       for (const [patientKey, patientData] of patientMap) {
         // Create or update patient
-        const existingPatient = await storage.getPatientByPatientID(patientKey);
+        const existingPatient = await storage.getPatientByID(patientKey);
         let patient;
         
         if (existingPatient) {
