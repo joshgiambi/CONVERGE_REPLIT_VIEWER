@@ -602,7 +602,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/patients", async (req, res) => {
     try {
       const patients = await storage.getAllPatients();
-      res.json(patients);
+      
+      // Enhance each patient with their studies and series
+      const patientsWithStudies = await Promise.all(
+        patients.map(async (patient) => {
+          const studies = await storage.getStudiesByPatient(patient.id);
+          
+          // For each study, get its series
+          const studiesWithSeries = await Promise.all(
+            studies.map(async (study) => {
+              const series = await storage.getSeriesByStudyId(study.id);
+              return {
+                ...study,
+                series
+              };
+            })
+          );
+          
+          return {
+            ...patient,
+            studies: studiesWithSeries
+          };
+        })
+      );
+      
+      res.json(patientsWithStudies);
     } catch (error) {
       console.error('Error fetching patients:', error);
       res.status(500).json({ message: "Failed to fetch patients" });
