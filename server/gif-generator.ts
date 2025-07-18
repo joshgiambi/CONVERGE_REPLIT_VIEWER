@@ -40,12 +40,15 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
     const ctx = canvas.getContext('2d');
     
     const encoder = new GIFEncoder(width, height);
+    
+    // Create stream for collecting data
+    const stream = encoder.createWriteStream();
     const chunks: Buffer[] = [];
     
-    encoder.createReadStream().on('data', (chunk: Buffer) => {
+    stream.on('data', (chunk: Buffer) => {
       chunks.push(chunk);
     });
-
+    
     encoder.start();
     encoder.setRepeat(0); // 0 for repeat, -1 for no-repeat
     encoder.setDelay(100); // frame delay in ms
@@ -199,13 +202,15 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
 
     encoder.finish();
     
-    // Wait for all chunks to be collected
+    // Wait for stream to complete
     await new Promise(resolve => setTimeout(resolve, 100));
     
+    // Get the GIF buffer from chunks
     const gifBuffer = Buffer.concat(chunks);
     
     // Return valid GIF or minimal placeholder
-    if (gifBuffer.length === 0) {
+    if (!gifBuffer || gifBuffer.length === 0) {
+      console.log('Warning: GIF buffer is empty, returning placeholder');
       // Create minimal 1x1 GIF
       return Buffer.from([
         0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // GIF89a

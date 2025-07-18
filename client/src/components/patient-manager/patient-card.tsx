@@ -185,20 +185,19 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                               group-hover:border-indigo-500/50 transition-all duration-200
                               group-hover:shadow-md group-hover:shadow-indigo-500/20">
                     {imageSeries.imageCount > 1 ? (
-                      <img 
-                        src={`/api/series/${imageSeries.id}/gif`}
-                        alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
-                        className="w-full h-full object-cover"
-                        onLoad={() => console.log(`GIF loaded for series ${imageSeries.id}`)}
-                        onError={(e) => {
-                          console.error(`Failed to load GIF for series ${imageSeries.id}`, e);
-                          // Fallback to text display on error
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const fallback = target.nextSibling as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
+                      <>
+                        <img 
+                          src={`/api/series/${imageSeries.id}/gif`}
+                          alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
+                          className="w-full h-full object-cover"
+                          style={{ display: 'block' }}
+                          onError={(e) => {
+                            // Hide image and show fallback
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                          }}
+                        />
+                      </>
                     ) : null}
                     <div className={`w-full h-full flex items-center justify-center bg-gray-800 ${imageSeries.imageCount > 1 ? 'hidden' : ''}`}>
                       <div className="text-center">
