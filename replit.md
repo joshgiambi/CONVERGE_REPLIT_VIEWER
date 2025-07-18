@@ -100,13 +100,45 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ### Fusion Registration System
 - **Registration Matrix**: The fusion viewer MUST use the 4x4 transformation matrix from DICOM registration files
-- **Matrix Application**: Transform CT z-coordinates to MRI z-coordinates using: `mriZ = R[2][2] * ctZ + T[2]`
+- **Matrix Application**: Full 3D transformation including X, Y, and Z coordinates
 - **Database Storage**: Registration matrices are stored in the registrations table with transformation_matrix as JSON array
 - **API Endpoint**: `/api/registrations/:studyId` returns the transformation matrix for fusion alignment
 - **Fallback Behavior**: Only use linear mapping if registration matrix is unavailable (with console warning)
 
+#### Critical Implementation Details (PROVEN WORKING):
+1. **Center-to-Center Alignment**: Registration matrices align anatomical centers, NOT image corners
+   - Calculate MRI center in physical space: `mriPosition + (dimensions/2 * pixelSpacing)`
+   - Transform MRI center to CT space using registration matrix
+   - Calculate offset between transformed MRI center and CT center
+   - Apply offset to achieve proper anatomical alignment
+
+2. **Coordinate System Transformations**:
+   - Convert pixel coordinates to physical (mm) coordinates using image position and pixel spacing
+   - Apply 4x4 registration transformation matrix
+   - Convert back to pixel coordinates for display
+   - DICOM pixel spacing is [row spacing, column spacing] = [Y spacing, X spacing]
+
+3. **Database Requirements**:
+   - All images MUST have `image_position` and `pixel_spacing` metadata populated
+   - Missing metadata causes misalignment - run update scripts if needed
+
+4. **Z-Axis Slice Matching**:
+   - Transform all MRI slice positions to CT coordinate space
+   - Find MRI slice with minimum Z-distance to current CT slice
+   - Only render fusion if Z-distance < 10mm (tight tolerance)
+
 ## Changelog
 
+- July 18, 2025: Perfect CT/MRI Fusion Alignment Using Center-to-Center Registration - COMPLETED
+  - ✅ Fixed critical fusion misalignment issue by implementing center-to-center coordinate transformation
+  - ✅ Registration matrices now properly align anatomical centers, not image corners
+  - ✅ Calculate MRI center in physical space using image position + (dimensions/2 * pixel spacing)
+  - ✅ Transform MRI center to CT space using 4x4 registration matrix
+  - ✅ Calculate center offset between transformed MRI center and CT center
+  - ✅ Apply pixel offset based on center alignment for perfect anatomical registration
+  - ✅ Added comprehensive logging for debugging coordinate transformations
+  - ✅ Documented proven working fusion methodology in Critical Implementation Details
+  - ✅ User confirmed: "PERFECT, YOU DID IT" - fusion alignment now working flawlessly
 - July 17, 2025: Fusion Panel State Sync and Series Selection Integration - COMPLETED
   - ✅ Fixed critical fusion panel state synchronization issue where secondarySeriesId wasn't syncing between components
   - ✅ Updated WorkingViewer to use external secondarySeriesId prop directly instead of local state
