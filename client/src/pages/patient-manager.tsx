@@ -16,6 +16,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DICOMUploader } from "@/components/dicom/dicom-uploader";
 import { PatientCard } from "@/components/patient-manager/patient-card";
+import { useParsingSession } from "@/hooks/use-parsing-session";
 import { 
   User, 
   Calendar, 
@@ -115,43 +116,9 @@ export default function PatientManager() {
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
-  const [hasActiveParsingSession, setHasActiveParsingSession] = useState(false);
+  const hasActiveParsingSession = useParsingSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-
-  // Check for active parsing session
-  useEffect(() => {
-    const checkActiveSession = async () => {
-      const sessionId = localStorage.getItem('currentParseSessionId');
-      if (!sessionId) {
-        setHasActiveParsingSession(false);
-        return;
-      }
-
-      // Check if session is actually still active
-      try {
-        const response = await fetch(`/api/parse-dicom-session/${sessionId}`);
-        if (response.ok) {
-          const session = await response.json();
-          // Only show animation if session is actively parsing
-          setHasActiveParsingSession(session.status === 'parsing');
-        } else {
-          setHasActiveParsingSession(false);
-          localStorage.removeItem('currentParseSessionId');
-        }
-      } catch (error) {
-        setHasActiveParsingSession(false);
-      }
-    };
-
-    // Check immediately
-    checkActiveSession();
-
-    // Check periodically while on this page
-    const interval = setInterval(checkActiveSession, 2000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Auto-populate demo data on component mount
   useEffect(() => {
