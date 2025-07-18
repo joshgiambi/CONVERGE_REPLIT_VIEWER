@@ -507,19 +507,15 @@ export default function PatientManager() {
               <User className="h-4 w-4" />
               Patients
             </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all relative">
+            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <Upload className="h-4 w-4" />
               Import DICOM
               {hasActiveParsingSession ? (
-                <div className="absolute -top-1 -right-1">
-                  <svg className="h-4 w-4 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
-                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
-                  </svg>
-                </div>
+                <svg className="h-4 w-4 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
+                </svg>
               ) : hasPendingData ? (
-                <div className="absolute -top-1 -right-1">
-                  <AlertTriangle className="h-4 w-4 text-yellow-400" />
-                </div>
+                <AlertTriangle className="h-4 w-4 text-yellow-400" />
               ) : null}
             </TabsTrigger>
             <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
