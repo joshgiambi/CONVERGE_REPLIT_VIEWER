@@ -189,7 +189,9 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                         src={`/api/series/${imageSeries.id}/gif`}
                         alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
                         className="w-full h-full object-cover"
+                        onLoad={() => console.log(`GIF loaded for series ${imageSeries.id}`)}
                         onError={(e) => {
+                          console.error(`Failed to load GIF for series ${imageSeries.id}`, e);
                           // Fallback to text display on error
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';

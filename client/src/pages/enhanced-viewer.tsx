@@ -17,8 +17,20 @@ export default function EnhancedViewer() {
   
   useEffect(() => {
     if (studies && studies.length > 0) {
-      const studyId = new URLSearchParams(window.location.search).get('studyId');
-      const study = studyId ? studies.find((s: any) => s.id === parseInt(studyId)) : studies[0];
+      const urlParams = new URLSearchParams(window.location.search);
+      const studyId = urlParams.get('studyId');
+      const patientId = urlParams.get('patientId');
+      
+      let study;
+      if (studyId) {
+        study = studies.find((s: any) => s.id === parseInt(studyId));
+      } else if (patientId) {
+        // Find first study for this patient
+        study = studies.find((s: any) => s.patientID === patientId);
+      } else {
+        study = studies[0];
+      }
+      
       if (study) {
         setStudyData({ studies: [study] });
       }
