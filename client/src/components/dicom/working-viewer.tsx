@@ -2012,15 +2012,32 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       const mriCornerPhysical = [mriPosition[0], mriPosition[1], mriPosition[2], 1];
       const ctCornerTransformed = multiplyMatrixVectorLocal(regMatrix4x4, mriCornerPhysical);
       
-      // Calculate pixel offset in CT space
-      const xOffset = (ctCornerTransformed[0] - ctPosition[0]) / ctSpacing[1] * secondaryBaseScale;
-      const yOffset = (ctCornerTransformed[1] - ctPosition[1]) / ctSpacing[0] * secondaryBaseScale;
+      console.log(`MRI corner physical: [${mriPosition[0].toFixed(1)}, ${mriPosition[1].toFixed(1)}, ${mriPosition[2].toFixed(1)}]`);
+      console.log(`CT position: [${ctPosition[0].toFixed(1)}, ${ctPosition[1].toFixed(1)}, ${ctPosition[2].toFixed(1)}]`);
+      console.log(`Transformed MRI corner: [${ctCornerTransformed[0].toFixed(1)}, ${ctCornerTransformed[1].toFixed(1)}, ${ctCornerTransformed[2].toFixed(1)}]`);
       
-      console.log(`Registration offset: X=${xOffset.toFixed(1)}px, Y=${yOffset.toFixed(1)}px`);
+      // Calculate physical offset in mm
+      const physicalOffsetX = ctCornerTransformed[0] - ctPosition[0];
+      const physicalOffsetY = ctCornerTransformed[1] - ctPosition[1];
+      
+      console.log(`Physical offset: X=${physicalOffsetX.toFixed(1)}mm, Y=${physicalOffsetY.toFixed(1)}mm`);
+      
+      // Convert physical offset to pixel offset
+      // DICOM pixel spacing is [row spacing, column spacing] = [Y spacing, X spacing]
+      const pixelOffsetX = physicalOffsetX / ctSpacing[1]; // Use column spacing for X
+      const pixelOffsetY = physicalOffsetY / ctSpacing[0]; // Use row spacing for Y
+      
+      console.log(`Pixel offset (before scaling): X=${pixelOffsetX.toFixed(1)}px, Y=${pixelOffsetY.toFixed(1)}px`);
+      
+      // Apply the same scale as used for the CT image display
+      const displayOffsetX = pixelOffsetX * primaryBaseScale;
+      const displayOffsetY = pixelOffsetY * primaryBaseScale;
+      
+      console.log(`Display offset: X=${displayOffsetX.toFixed(1)}px, Y=${displayOffsetY.toFixed(1)}px`);
       
       // Apply registration offset to drawing position
-      const registeredX = x + xOffset;
-      const registeredY = y + yOffset;
+      const registeredX = x + displayOffsetX;
+      const registeredY = y + displayOffsetY;
       
       ctx.drawImage(tempCanvas, registeredX, registeredY, scaledWidth, scaledHeight);
       console.log(`Registered draw position: x=${registeredX.toFixed(1)}, y=${registeredY.toFixed(1)}`);
