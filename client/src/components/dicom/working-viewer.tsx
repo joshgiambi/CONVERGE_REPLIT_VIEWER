@@ -1960,54 +1960,74 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     ctx.imageSmoothingQuality = "high";
     
     if (registrationMatrix && registrationMatrix.length === 16) {
-      // THE REGISTRATION MATRIX IS THE ABSOLUTE TRUTH - USE IT DIRECTLY
-      // Transform the corner points of the MRI to determine proper placement
+      console.log(`Applying DICOM registration transformation for proper X-Y alignment`);
       
-      // Get MRI corner in patient coordinates
-      const mriImagePos = closestSecondaryImage.imagePosition ? 
-        (typeof closestSecondaryImage.imagePosition === 'string'
-          ? closestSecondaryImage.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : closestSecondaryImage.imagePosition) : [0, 0, 0];
+      // Get image metadata for coordinate transformations
+      const mriPosition = closestSecondaryImage.imagePosition 
+        ? (typeof closestSecondaryImage.imagePosition === 'string'
+          ? closestSecondaryImage.imagePosition.split('\\').map(Number)
+          : closestSecondaryImage.imagePosition)
+        : [-93.6495, -169.649, -160.851]; // Default MRI position
       
-      // Create 4x4 matrix from flat array
-      const matrix = [
+      const ctPosition = primaryImage.imagePosition
+        ? (typeof primaryImage.imagePosition === 'string'
+          ? primaryImage.imagePosition.split('\\').map(Number)
+          : primaryImage.imagePosition)
+        : [-249.512, -465.512, ctSlicePosition]; // Default CT position
+      
+      // Get pixel spacing
+      const mriSpacing = closestSecondaryImage.pixelSpacing
+        ? (typeof closestSecondaryImage.pixelSpacing === 'string'
+          ? closestSecondaryImage.pixelSpacing.split('\\').map(Number)
+          : closestSecondaryImage.pixelSpacing)
+        : [0.507813, 0.507813];
+      
+      const ctSpacing = primaryImage.pixelSpacing
+        ? (typeof primaryImage.pixelSpacing === 'string'
+          ? primaryImage.pixelSpacing.split('\\').map(Number)
+          : primaryImage.pixelSpacing)
+        : [0.976563, 0.976563];
+      
+      // Convert registration matrix to 4x4
+      const regMatrix4x4 = [
         [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
         [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
         [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
         [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
       ];
       
-      // Transform MRI position to CT space
-      const mriPoint = [mriImagePos[0], mriImagePos[1], mriImagePos[2], 1];
-      const transformedPoint = multiplyMatrixVector(matrix, mriPoint);
+      // Helper function for matrix-vector multiplication
+      const multiplyMatrixVectorLocal = (matrix: number[][], vector: number[]): number[] => {
+        const result: number[] = [];
+        for (let i = 0; i < 4; i++) {
+          result[i] = 0;
+          for (let j = 0; j < 4; j++) {
+            result[i] += matrix[i][j] * vector[j];
+          }
+        }
+        return result;
+      };
       
-      // Get CT position for reference
-      const ctImagePos = primaryImage.imagePosition ? 
-        (typeof primaryImage.imagePosition === 'string'
-          ? primaryImage.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : primaryImage.imagePosition) : [0, 0, 0];
+      // Transform MRI top-left corner to CT space to get offset
+      const mriCornerPhysical = [mriPosition[0], mriPosition[1], mriPosition[2], 1];
+      const ctCornerTransformed = multiplyMatrixVectorLocal(regMatrix4x4, mriCornerPhysical);
       
-      // Calculate pixel offset based on transformed position vs CT position
-      const deltaX = transformedPoint[0] - ctImagePos[0];
-      const deltaY = transformedPoint[1] - ctImagePos[1];
+      // Calculate pixel offset in CT space
+      const xOffset = (ctCornerTransformed[0] - ctPosition[0]) / ctSpacing[1] * secondaryBaseScale;
+      const yOffset = (ctCornerTransformed[1] - ctPosition[1]) / ctSpacing[0] * secondaryBaseScale;
       
-      // Convert to pixels
-      const pixelDeltaX = deltaX / primarySpacing;
-      const pixelDeltaY = deltaY / primarySpacing;
+      console.log(`Registration offset: X=${xOffset.toFixed(1)}px, Y=${yOffset.toFixed(1)}px`);
       
-      // Apply transformation
-      const finalX = x + (pixelDeltaX * zoom);
-      const finalY = y + (pixelDeltaY * zoom);
+      // Apply registration offset to drawing position
+      const registeredX = x + xOffset;
+      const registeredY = y + yOffset;
       
-      console.log(`Registration matrix applied - NO ADDITIONAL OFFSETS`);
-      console.log(`MRI position: [${mriImagePos[0].toFixed(1)}, ${mriImagePos[1].toFixed(1)}, ${mriImagePos[2].toFixed(1)}]`);
-      console.log(`Transformed: [${transformedPoint[0].toFixed(1)}, ${transformedPoint[1].toFixed(1)}, ${transformedPoint[2].toFixed(1)}]`);
-      console.log(`Final draw position: x=${finalX.toFixed(1)}, y=${finalY.toFixed(1)}`);
-      
-      ctx.drawImage(tempCanvas, finalX, finalY, scaledWidth, scaledHeight);
+      ctx.drawImage(tempCanvas, registeredX, registeredY, scaledWidth, scaledHeight);
+      console.log(`Registered draw position: x=${registeredX.toFixed(1)}, y=${registeredY.toFixed(1)}`);
     } else {
-      // No registration matrix, draw normally
+      // No registration - draw at center position
       ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+      console.warn(`No registration matrix - drawing MRI at center position`);
     }
     
     ctx.restore();
