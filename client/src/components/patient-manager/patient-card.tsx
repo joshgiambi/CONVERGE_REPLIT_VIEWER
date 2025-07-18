@@ -58,7 +58,7 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
         for (const rtSeries of rtStructureSeries) {
           setLoadingStructures(prev => ({ ...prev, [rtSeries.id]: true }));
           try {
-            const response = await fetch(`/api/rt-structures/${rtSeries.studyId}/${rtSeries.id}`);
+            const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
             if (response.ok) {
               const data = await response.json();
               setRtStructures(prev => ({ ...prev, [rtSeries.id]: data.structures || [] }));

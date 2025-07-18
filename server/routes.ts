@@ -7,7 +7,7 @@ import { Server } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
 import { db } from "./db";
-import { images as imagesTable } from "@shared/schema";
+import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
 
@@ -1563,6 +1563,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(updated);
     } catch (error) {
       console.error('Error updating series description:', error);
+      next(error);
+    }
+  });
+
+  // Get all patient tags for filtering
+  app.get("/api/patient-tags", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const tags = await db.select().from(patientTags);
+      res.json(tags);
+    } catch (error) {
+      console.error('Error getting all patient tags:', error);
       next(error);
     }
   });
