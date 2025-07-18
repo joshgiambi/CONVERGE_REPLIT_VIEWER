@@ -492,6 +492,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 fusionOpacity={fusionOpacity}
                 onSecondarySeriesSelect={setSecondarySeriesId}
                 onFusionOpacityChange={setFusionOpacity}
+                hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
               />
               
               {/* Structure Tags on Right Side */}

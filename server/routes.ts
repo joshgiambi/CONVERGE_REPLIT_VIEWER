@@ -1163,6 +1163,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/patients/:id", async (req, res) => {
+    try {
+      const patientId = parseInt(req.params.id);
+      await storage.deletePatient(patientId);
+      res.json({ success: true, message: "Patient deleted successfully" });
+    } catch (error) {
+      console.error('Error deleting patient:', error);
+      res.status(500).json({ message: "Failed to delete patient" });
+    }
+  });
+
   // Study routes
   app.get("/api/studies", async (req, res) => {
     try {

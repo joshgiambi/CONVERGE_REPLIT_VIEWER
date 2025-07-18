@@ -50,6 +50,7 @@ interface WorkingViewerProps {
   fusionOpacity?: number;
   onSecondarySeriesSelect?: (id: number | null) => void;
   onFusionOpacityChange?: (opacity: number) => void;
+  hasSecondarySeriesForFusion?: boolean;
 }
 
 export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) => {
@@ -2904,8 +2905,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
             )}
           </div>
           
-          {/* Fusion Control Panel - Visible when study has MR series available */}
-          {studyId && props.secondarySeriesId !== undefined && (
+          {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
+          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}
