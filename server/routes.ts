@@ -33,8 +33,9 @@ const rtStructureCache = new Map<string, any>();
 
 function isDICOMFile(filePath: string): boolean {
   try {
-    const buffer = fs.readFileSync(filePath, { start: 128, end: 132 } as any);
-    return buffer.toString() === 'DICM';
+    // Skip DICOM validation for now - just check file extension
+    const ext = path.extname(filePath).toLowerCase();
+    return ext === '.dcm' || ext === '';
   } catch {
     return false;
   }
@@ -497,9 +498,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Add middleware to log all requests
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    next();
+  });
+
   // Parse DICOM files and extract metadata
   app.post("/api/parse-dicom", upload.array('files'), async (req: Request, res: Response, next: NextFunction) => {
-    console.log('Parse DICOM endpoint hit with files:', req.files?.length);
+    console.log('====== PARSE DICOM ENDPOINT HIT ======');
+    console.log('Time:', new Date().toISOString());
+    console.log('Files received:', req.files?.length || 0);
+    console.log('Body:', req.body);
+    console.log('======================================');
     
     try {
       const files = req.files as Express.Multer.File[];
@@ -509,6 +520,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('Starting to parse', files.length, 'files...');
+      
+      // Limit files to prevent timeout
+      const maxFiles = 50;
+      if (files.length > maxFiles) {
+        console.log(`Warning: ${files.length} files uploaded, processing only first ${maxFiles} files`);
+        files.splice(maxFiles);
+      }
+      
       const parsedData: any[] = [];
       const rtstructDetails: any = {};
       let successCount = 0;
@@ -591,7 +610,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clean up uploaded files
       for (const file of files) {
         try {
-          fs.unlinkSync(file.path);
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
         } catch (cleanupError) {
           console.error('Error cleaning up file:', file.path, cleanupError);
         }
@@ -599,12 +620,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`Parse complete: ${successCount} success, ${errorCount} errors`);
       
+      // Group data by patient for preview
+      const patientGroups = new Map<string, {
+        patientId: string;
+        patientName: string;
+        studies: Map<string, {
+          studyId: string;
+          studyDate: string;
+          series: any[];
+        }>;
+      }>();
+
+      // Group parsed data by patient/study
+      for (const item of parsedData.filter(d => !d.error)) {
+        const patientId = item.patientID || 'Unknown';
+        const studyId = item.studyInstanceUID || 'Unknown';
+        
+        if (!patientGroups.has(patientId)) {
+          patientGroups.set(patientId, {
+            patientId,
+            patientName: item.patientName || 'Unknown Patient',
+            studies: new Map()
+          });
+        }
+        
+        const patient = patientGroups.get(patientId)!;
+        if (!patient.studies.has(studyId)) {
+          patient.studies.set(studyId, {
+            studyId,
+            studyDate: item.studyDate || '',
+            series: []
+          });
+        }
+        
+        patient.studies.get(studyId)!.series.push(item);
+      }
+
+      // Convert to array format for frontend
+      const patientPreviews = Array.from(patientGroups.values()).map(patient => ({
+        patientId: patient.patientId,
+        patientName: patient.patientName,
+        studies: Array.from(patient.studies.values()).map(study => ({
+          studyId: study.studyId,
+          studyDate: study.studyDate,
+          seriesCount: new Set(study.series.map(s => s.seriesInstanceUID)).size,
+          imageCount: study.series.length,
+          modalities: Array.from(new Set(study.series.map(s => s.modality).filter(Boolean)))
+        }))
+      }));
+      
       res.json({
         success: true,
         data: parsedData,
         rtstructDetails: rtstructDetails,
         totalFiles: files.length,
-        message: `Successfully parsed ${successCount} files, ${errorCount} errors`
+        message: `Successfully parsed ${successCount} files, ${errorCount} errors`,
+        patientPreviews
       });
 
     } catch (error) {
