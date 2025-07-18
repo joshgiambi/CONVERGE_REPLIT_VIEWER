@@ -1041,6 +1041,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get pixel data for an image
+  app.get('/api/images/:id/pixels', async (req, res) => {
+    try {
+      const imageId = parseInt(req.params.id);
+      const image = await storage.getImage(imageId);
+      if (!image || !image.filePath) {
+        return res.status(404).json({ error: 'Image not found' });
+      }
+
+      const filePath = image.filePath.startsWith('uploads/') 
+        ? image.filePath 
+        : path.join('uploads', image.filePath);
+      const buffer = await fs.readFile(filePath);
+      
+      // Parse DICOM file
+      const byteArray = new Uint8Array(buffer);
+      const dataSet = dicomParser.parseDicom(byteArray, { untilTag: 'x7fe00010' });
+      
+      // Get pixel data
+      const pixelDataElement = dataSet.elements.x7fe00010;
+      if (!pixelDataElement) {
+        return res.status(400).json({ error: 'No pixel data found' });
+      }
+
+      // Get image dimensions
+      const rows = dataSet.uint16('x00280010') || 512;
+      const columns = dataSet.uint16('x00280011') || 512;
+      const windowCenter = parseFloat(dataSet.string('x00281050') || '40');
+      const windowWidth = parseFloat(dataSet.string('x00281051') || '400');
+      
+      // Get pixel data bytes - the pixel data starts at the element's dataOffset in the original buffer
+      const pixelDataOffset = pixelDataElement.dataOffset;
+      const pixelDataLength = pixelDataElement.length;
+      
+      // Create a view of the pixel data from the original buffer
+      const pixels16 = new Uint16Array(buffer.buffer, buffer.byteOffset + pixelDataOffset, pixelDataLength / 2);
+      
+      // Convert to 8-bit RGBA for canvas
+      const pixels8 = new Uint8ClampedArray(rows * columns * 4);
+      
+      for (let i = 0; i < pixels16.length; i++) {
+        // Apply window/level
+        const pixelValue = pixels16[i];
+        const minValue = windowCenter - windowWidth / 2;
+        const maxValue = windowCenter + windowWidth / 2;
+        
+        let normalizedValue = (pixelValue - minValue) / (maxValue - minValue);
+        normalizedValue = Math.max(0, Math.min(1, normalizedValue));
+        const grayscale = Math.floor(normalizedValue * 255);
+        
+        const offset = i * 4;
+        pixels8[offset] = grayscale;     // R
+        pixels8[offset + 1] = grayscale; // G
+        pixels8[offset + 2] = grayscale; // B
+        pixels8[offset + 3] = 255;       // A
+      }
+
+      res.json({
+        width: columns,
+        height: rows,
+        pixels: Array.from(pixels8)
+      });
+    } catch (error: any) {
+      console.error('Error fetching pixel data:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch pixel data' });
+    }
+  });
+
   // Generate GIF preview for a series
   app.get("/api/series/:id/gif", async (req, res) => {
     try {
