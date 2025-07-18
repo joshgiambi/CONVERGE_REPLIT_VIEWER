@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 18, 2025: CSS-Based Animated Previews for Patient Cards - COMPLETED
+  - ✅ Discovered browser environment blocks ALL images (including data URLs and GIFs)
+  - ✅ Implemented CSS-based animated preview system as alternative to GIF images
+  - ✅ Created gradient backgrounds with animated sliding effect for multi-slice series
+  - ✅ Added visual indicators: "Animated Preview" badge with pulsing green dot
+  - ✅ Series with single image show static modality text, multi-image series show animation
+  - ✅ Fixed fallback display to properly show modality text when images fail
+  - ✅ GIF generation backend still works properly (verified with curl) but browser blocks display
 - July 18, 2025: Simplified Tag System and Fixed Metadata Update Issues - COMPLETED
   - ✅ Removed tag category dropdown per user request - now simple text input for tags
   - ✅ Fixed patient age field not updating (was using wrong field name 'age' instead of 'patientAge')

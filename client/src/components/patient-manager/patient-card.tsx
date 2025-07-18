@@ -184,39 +184,28 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
                   <div className="aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50 
                               group-hover:border-indigo-500/50 transition-all duration-200
                               group-hover:shadow-md group-hover:shadow-indigo-500/20">
-                    {imageSeries.imageCount > 1 ? (
-                      <>
-                        <img 
-                          src={`data:image/gif;base64,R0lGODlhCgAKAPAAAAAAAP///yH5BAAAAAAALAAAAAAKAAoAAAIRhI+py+0Po5y02ouz3rz7AgA7`}
-                          alt={`${imageSeries.modality} Series ${imageSeries.seriesNumber}`}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            console.log('Data URL GIF also failed to load');
-                            // Hide image and show fallback
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                            // Show the fallback div
-                            const fallback = target.nextElementSibling as HTMLElement;
-                            if (fallback) {
-                              fallback.style.display = 'flex';
-                            }
-                          }}
-                        />
-                        <div className="w-full h-full flex items-center justify-center bg-gray-800" style={{ display: 'none' }}>
-                          <div className="text-center">
-                            <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
-                            <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
+                    <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
+                      {/* Animated preview effect using CSS */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900">
+                        {imageSeries.imageCount > 1 && (
+                          <div className="absolute inset-0 animate-pulse">
+                            <div className="h-full w-full bg-gradient-to-t from-transparent via-gray-600/20 to-transparent transform translate-y-full animate-slide-up-continuous"></div>
                           </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-gray-800">
-                        <div className="text-center">
-                          <div className="text-3xl font-bold text-gray-600">{imageSeries.modality}</div>
-                          <div className="text-xs text-gray-500">Series {imageSeries.seriesNumber}</div>
-                        </div>
+                        )}
                       </div>
-                    )}
+                      <div className="relative z-10 text-center">
+                        <div className="text-3xl font-bold text-gray-300">{imageSeries.modality}</div>
+                        <div className="text-xs text-gray-400">Series {imageSeries.seriesNumber}</div>
+                        {imageSeries.imageCount > 1 && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            <span className="inline-flex items-center gap-1">
+                              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                              Animated Preview
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <Badge 
                     variant="secondary" 

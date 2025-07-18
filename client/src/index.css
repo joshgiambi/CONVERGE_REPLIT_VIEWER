@@ -140,6 +140,10 @@
   .animate-slide-up {
     animation: slideUp 0.4s ease-out;
   }
+  
+  .animate-slide-up-continuous {
+    animation: slide-up-continuous 3s ease-in-out infinite;
+  }
 
   .animate-shimmer {
     animation: shimmer 2s linear infinite;
@@ -297,6 +301,15 @@
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-10px); }
+}
+
+@keyframes slide-up-continuous {
+  0% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
 }
 
 /* Slider customization */
