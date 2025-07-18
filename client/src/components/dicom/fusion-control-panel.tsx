@@ -128,9 +128,9 @@ export function FusionControlPanel({
   // Expanded view with thumbnails
   return (
     <div className="fixed bottom-4 right-4 z-50">
-      <Card className="bg-black/90 backdrop-blur-sm border-purple-500/50 p-4 w-96">
+      <Card className="bg-black/90 backdrop-blur-sm border-purple-500/50 p-3 w-80">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-purple-400" />
             <span className="text-sm font-medium text-purple-300">Image Fusion</span>
@@ -155,38 +155,31 @@ export function FusionControlPanel({
               </Badge>
             </div>
             
-            {/* MR Series Buttons */}
-            <div className="space-y-2">
+            {/* MR Series Buttons - Compact Grid */}
+            <div className="grid grid-cols-3 gap-2">
               {mrSeries.map((series: any, index: number) => (
                 <button
                   key={series.id}
                   onClick={() => handleSecondarySelect(series.id.toString())}
                   className={`
-                    w-full p-3 rounded-lg border-2 transition-all flex items-center justify-between
+                    p-2 rounded-lg border-2 transition-all flex flex-col items-center
                     ${selectedSecondaryId === series.id
                       ? 'border-purple-400 bg-purple-500/20 shadow-lg shadow-purple-500/20'
                       : 'border-purple-600/30 bg-purple-900/10 hover:border-purple-500/50 hover:bg-purple-500/10'
                     }
                   `}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600/30 to-purple-500/30 flex items-center justify-center">
-                      <Layers className="w-5 h-5 text-purple-300" />
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm text-purple-200 font-medium">
-                        {series.seriesDescription || `MR Series ${index + 1}`}
-                      </p>
-                      <p className="text-xs text-purple-400">
-                        {series.imageCount} images
-                      </p>
-                    </div>
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600/30 to-purple-500/30 flex items-center justify-center mb-1">
+                    <Layers className="w-4 h-4 text-purple-300" />
                   </div>
+                  <p className="text-xs text-purple-200 font-medium">
+                    MR {index + 1}
+                  </p>
+                  <p className="text-[10px] text-purple-400">
+                    {series.imageCount} imgs
+                  </p>
                   {selectedSecondaryId === series.id && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-purple-300 font-medium">Active</span>
-                      <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
-                    </div>
+                    <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse mt-1" />
                   )}
                 </button>
               ))}
@@ -195,27 +188,20 @@ export function FusionControlPanel({
               <button
                 onClick={() => handleSecondarySelect('none')}
                 className={`
-                  w-full p-3 rounded-lg border-2 transition-all flex items-center justify-between
+                  p-2 rounded-lg border-2 transition-all flex flex-col items-center
                   ${selectedSecondaryId === null
                     ? 'border-gray-400 bg-gray-500/20'
                     : 'border-gray-600/30 bg-gray-900/10 hover:border-gray-500/50 hover:bg-gray-500/10'
                   }
                 `}
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-gray-700/30 flex items-center justify-center">
-                    <X className="w-5 h-5 text-gray-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm text-gray-300 font-medium">No Fusion</p>
-                    <p className="text-xs text-gray-500">View CT only</p>
-                  </div>
+                <div className="w-8 h-8 rounded-lg bg-gray-700/30 flex items-center justify-center mb-1">
+                  <X className="w-4 h-4 text-gray-400" />
                 </div>
+                <p className="text-xs text-gray-300 font-medium">None</p>
+                <p className="text-[10px] text-gray-500">CT only</p>
                 {selectedSecondaryId === null && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 font-medium">Active</span>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full" />
-                  </div>
+                  <div className="w-1.5 h-1.5 bg-gray-400 rounded-full mt-1" />
                 )}
               </button>
             </div>

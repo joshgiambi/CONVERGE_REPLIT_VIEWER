@@ -1336,7 +1336,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
-      if (secondarySeriesId && secondaryImages.length > 0 && fusionOpacity > 0) {
+      if (secondarySeriesId && secondaryImages.length > 0) {
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
           await renderFusionOverlay(ctx, currentImage);
@@ -1480,6 +1480,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     console.log("Starting fusion overlay render...");
     console.log("Secondary cache size:", secondaryImageCache.size);
     console.log("Fusion opacity:", fusionOpacity);
+    
+    // If opacity is 0, skip rendering entirely
+    if (fusionOpacity === 0) {
+      console.log("Fusion opacity is 0, skipping overlay render");
+      return;
+    }
     
 
     

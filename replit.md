@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 18, 2025: Fusion UI Improvements and Opacity Fix - COMPLETED
+  - ✅ Fixed fusion opacity slider issue where 0% still showed MRI overlay (now properly skips rendering at 0 opacity)
+  - ✅ Fixed show/hide all structures button to actually toggle contour visibility
+  - ✅ Updated global contour settings: default opacity 10%, default width 2px, minimum opacity 0%
+  - ✅ Simplified MRI fusion panel with clean button interface (removed broken image preview thumbnails)
+  - ✅ Made fusion panel more compact with 3-column grid layout (width 80, padding 3)
+  - ✅ Removed non-functional auto-zoom and auto-localize controls from structure settings
+  - ✅ User feedback: Prefers compact fusion UI over row-based layouts
 - July 18, 2025: Perfect CT/MRI Fusion Alignment Using Center-to-Center Registration - COMPLETED
   - ✅ Fixed critical fusion misalignment issue by implementing center-to-center coordinate transformation
   - ✅ Registration matrices now properly align anatomical centers, not image corners
