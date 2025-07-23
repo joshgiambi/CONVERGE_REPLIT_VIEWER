@@ -16,6 +16,7 @@ export interface IStorage {
   getPatient(id: number): Promise<Patient | undefined>;
   getPatientByID(patientID: string): Promise<Patient | undefined>;
   getAllPatients(): Promise<Patient[]>;
+  deletePatient(id: number): Promise<void>;
 
   // Study operations
   createStudy(study: InsertStudy): Promise<Study>;
@@ -264,6 +265,10 @@ export class DatabaseStorage implements IStorage {
 
   async getAllPatients(): Promise<Patient[]> {
     return await db.select().from(patients).orderBy(desc(patients.createdAt));
+  }
+
+  async deletePatient(id: number): Promise<void> {
+    await db.delete(patients).where(eq(patients.id, id));
   }
 
   // Study operations
