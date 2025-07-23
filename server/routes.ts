@@ -2580,8 +2580,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get triage (parsed but not imported) sessions
   app.get("/api/triage-sessions", async (req: Request, res: Response, next: NextFunction) => {
     try {
+      console.log('\n=== GET TRIAGE SESSIONS ===');
+      console.log('Total sessions in memory:', triageSessions.size);
+      
+      // Log each session
+      triageSessions.forEach((session, id) => {
+        console.log(`Session ${id}:`, {
+          sessionId: session.sessionId,
+          hasParseResult: !!session.parseResult,
+          dataLength: session.parseResult?.data?.length || 0,
+          uploadSessionId: session.uploadSessionId,
+          timestamp: new Date(session.timestamp).toISOString()
+        });
+      });
+      
       const sessions = Array.from(triageSessions.values())
         .sort((a, b) => b.timestamp - a.timestamp); // Newest first
+      
+      console.log('Returning', sessions.length, 'sessions');
+      console.log('===========================\n');
       
       res.json({ sessions });
     } catch (error) {
