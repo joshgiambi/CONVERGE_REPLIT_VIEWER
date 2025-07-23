@@ -1233,7 +1233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Create images for each file (skip duplicates)
             for (const metadata of seriesFiles) {
               // Reconstruct file path from upload session
-              const uploadDir = path.join(__dirname, '../uploads', triageSession.uploadSessionId);
+              const uploadDir = path.join(process.cwd(), 'uploads', triageSession.uploadSessionId);
               const originalPath = path.join(uploadDir, metadata.filename);
               
               // Check for file in upload directory (handling ZIP extraction subdirectories)
