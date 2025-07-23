@@ -1323,8 +1323,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Update database file paths to point to permanent storage
           for (const [sopInstanceUID, permanentPath] of Object.entries(filePathMap)) {
             await db.update(imagesTable)
-              .set({ file_path: permanentPath })
-              .where(eq(imagesTable.sop_instance_uid, sopInstanceUID));
+              .set({ filePath: permanentPath })
+              .where(eq(imagesTable.sopInstanceUID, sopInstanceUID));
           }
           
           console.log(`Updated ${Object.keys(filePathMap).length} database file paths to permanent storage`);
