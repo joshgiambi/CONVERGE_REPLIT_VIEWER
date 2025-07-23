@@ -9,7 +9,7 @@ async function repairEsophagusStorage() {
   console.log('Repairing ESOPHAGUS_31 storage entries...');
   
   // Find the ESOPHAGUS_31 patient
-  const [patient] = await db.select().from(patients).where(eq(patients.patientId, 'ESOPHAGUS_31'));
+  const [patient] = await db.select().from(patients).where(eq(patients.patientID, 'ESOPHAGUS_31'));
   if (!patient) {
     console.error('ESOPHAGUS_31 patient not found!');
     return;
@@ -18,7 +18,7 @@ async function repairEsophagusStorage() {
   console.log(`Found patient: ${patient.patientName} (ID: ${patient.id})`);
   
   // Scan the storage directory for this patient
-  const patientStoragePath = path.join('storage/patients', patient.patientId);
+  const patientStoragePath = path.join('storage/patients', patient.patientID);
   
   if (!fs.existsSync(patientStoragePath)) {
     console.error(`Storage path not found: ${patientStoragePath}`);
