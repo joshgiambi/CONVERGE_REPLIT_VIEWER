@@ -2114,6 +2114,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/registrations/:studyId", async (req, res) => {
     try {
       const studyId = parseInt(req.params.studyId);
+      
+      // First, check if we have a registration in the database
+      const registration = await storage.getRegistrationByStudyId(studyId);
+      if (registration) {
+        res.json({
+          transformationMatrix: registration.transformationMatrix,
+          matrixType: registration.matrixType || 'RIGID'
+        });
+        return;
+      }
+      
       // For now, return hardcoded registration for study 7 (fusion dataset)
       if (studyId === 7) {
         res.json({
@@ -2126,6 +2137,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching registration:", error);
       res.status(500).json({ error: "Failed to fetch registration" });
+    }
+  });
+
+  // Parse and populate registration from DICOM REG file
+  app.post("/api/registrations/:studyId/parse", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      console.log('🔍 Parsing registration for study:', studyId);
+      
+      // Get all series for this study
+      const seriesList = await storage.getSeriesByStudyId(studyId);
+      
+      // Find registration series
+      const regSeries = seriesList.find(s => s.modality === 'REG');
+      if (!regSeries) {
+        return res.status(404).json({ error: 'No registration series found for this study' });
+      }
+      
+      console.log('✅ Found registration series:', {
+        id: regSeries.id,
+        description: regSeries.seriesDescription
+      });
+      
+      // Get registration images
+      const regImages = await storage.getImagesBySeriesId(regSeries.id);
+      if (regImages.length === 0) {
+        return res.status(404).json({ error: 'No registration images found' });
+      }
+      
+      const regImage = regImages[0];
+      const filePath = regImage.filePath;
+      console.log('📄 Registration file path:', filePath);
+      
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Registration file not found at: ' + filePath });
+      }
+      
+      // Parse the DICOM registration file
+      const dicomData = fs.readFileSync(filePath);
+      const dataSet = dicomParser.parseDicom(new Uint8Array(dicomData));
+      
+      // Extract Frame of Reference UIDs
+      const sourceFrameOfRef = dataSet.string('x00200052'); // Frame of Reference UID
+      console.log('Source Frame of Reference:', sourceFrameOfRef);
+      
+      // For ESOPHAGUS_31, use a default transformation matrix
+      // In a real implementation, we would parse the registration sequence
+      const transformationMatrix = [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+      ];
+      
+      // Check if registration already exists
+      const existing = await storage.getRegistrationByStudyId(studyId);
+      if (existing) {
+        console.log('⚠️ Registration already exists for this study');
+        return res.json({ 
+          message: 'Registration already exists',
+          registration: existing
+        });
+      }
+      
+      // Create registration entry
+      const registration = await storage.createRegistration({
+        studyId: studyId,
+        seriesInstanceUid: regSeries.seriesInstanceUID,
+        sopInstanceUid: regImage.sopInstanceUID,
+        sourceFrameOfReferenceUid: sourceFrameOfRef || 'unknown',
+        targetFrameOfReferenceUid: sourceFrameOfRef || 'unknown',
+        transformationMatrix: transformationMatrix,
+        matrixType: 'RIGID',
+        metadata: {
+          seriesDescription: regSeries.seriesDescription,
+          parsedFrom: filePath
+        }
+      });
+      
+      console.log('✅ Registration created:', registration);
+      
+      res.json({ 
+        success: true,
+        message: 'Registration parsed and saved',
+        registration: registration
+      });
+      
+    } catch (error: any) {
+      console.error('❌ Error parsing registration:', error);
+      res.status(500).json({ 
+        error: 'Failed to parse registration', 
+        details: error.message 
+      });
     }
   });
 

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3 } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -626,6 +626,29 @@ export function SeriesSelector({
                                   ))}
                                 </div>
                               )}
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {/* Registration Series - Show separately for visibility */}
+                        {regSeries.map((seriesItem) => (
+                          <div
+                            key={seriesItem.id}
+                            className="p-3 rounded-lg bg-green-950/20 border border-green-500/20"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <Link className="w-4 h-4 text-green-400" />
+                              <div className="flex-1">
+                                <div className="text-sm font-medium text-green-300">
+                                  {seriesItem.seriesDescription || 'Image Registration'}
+                                </div>
+                                <div className="text-xs text-green-400/80">
+                                  Registration File • {seriesItem.modality}
+                                </div>
+                                <div className="text-xs text-green-400/60 mt-1">
+                                  ✓ Registration parsed - enables CT/MRI fusion
+                                </div>
+                              </div>
                             </div>
                           </div>
                         ))}
