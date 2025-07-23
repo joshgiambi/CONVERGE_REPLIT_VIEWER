@@ -1161,17 +1161,20 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
 
       const seriesImages = await response.json();
       
-      console.log(`Processing metadata for ${seriesImages.length} CT images...`);
-      
       // Use metadata already provided by the API - no need to load full DICOM files!
       const imagesWithMetadata = seriesImages.map((img: any) => {
         // Parse z-position from imagePosition if available
         let zPosition = null;
         if (img.imagePosition) {
-          const positions = img.imagePosition
-            .split("\\")
-            .map((p: string) => parseFloat(p));
-          zPosition = positions[2];
+          // Handle both string and array formats
+          const positions = typeof img.imagePosition === 'string'
+            ? img.imagePosition.split("\\").map((p: string) => parseFloat(p))
+            : Array.isArray(img.imagePosition) 
+              ? img.imagePosition 
+              : null;
+          if (positions && positions.length >= 3) {
+            zPosition = positions[2];
+          }
         }
         
         // Parse slice location

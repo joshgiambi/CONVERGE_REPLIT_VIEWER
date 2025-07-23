@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -180,22 +180,10 @@ export function SeriesSelector({
     }
   };
 
-  // Cache for loaded RT series to prevent repeated API calls
-  const rtSeriesCache = useRef<Map<string, any[]>>(new Map());
-  
   // Load RT structure series for all studies
   useEffect(() => {
     const studyIdsToLoad = studyIds || (studyId ? [studyId] : []);
     if (studyIdsToLoad.length === 0) return;
-    
-    // Create cache key from study IDs
-    const cacheKey = studyIdsToLoad.sort().join(',');
-    
-    // Check if already loaded
-    if (rtSeriesCache.current.has(cacheKey)) {
-      setRTSeries(rtSeriesCache.current.get(cacheKey) || []);
-      return;
-    }
     
     const loadRTSeries = async () => {
       try {
@@ -210,8 +198,6 @@ export function SeriesSelector({
           }
         }
         
-        // Cache the result
-        rtSeriesCache.current.set(cacheKey, allRTSeries);
         setRTSeries(allRTSeries);
       } catch (error) {
         // Silent fail - RT structures are optional
