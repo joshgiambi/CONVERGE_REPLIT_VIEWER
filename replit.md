@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Fixed MRI Fusion Slice Position Display - COMPLETED
+  - ✅ Removed confusing MRI slice position display during fusion viewing
+  - ✅ Confirmed CT slice position is the correct reference frame for fusion
+  - ✅ MRI slices are transformed to CT coordinate space, not vice versa
+  - ✅ Fusion display now shows only CT Z position as the spatial reference
+  - ✅ Maintains standard medical imaging convention: CT provides spatial reference for multi-modality fusion
+  - Previous issue: Added MRI slice position display that confused the reference frame
+  - Solution: Show only CT position since fusion is referenced to CT coordinate system
 - July 23, 2025: Fixed Fusion "None" Selection Database Errors - COMPLETED
   - ✅ Fixed critical bug where selecting "none" in fusion panel caused database errors
   - ✅ Added validation in loadSecondaryImages to check for invalid secondarySeriesId values
