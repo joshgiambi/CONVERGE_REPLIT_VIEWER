@@ -491,8 +491,9 @@ export function SeriesSelector({
                   {(() => {
                     const ctSeries = series.filter(s => s.modality === 'CT');
                     const mrSeries = series.filter(s => s.modality === 'MR');
+                    const ptSeries = series.filter(s => s.modality === 'PT');
                     const regSeries = series.filter(s => s.modality === 'REG');
-                    const otherSeries = series.filter(s => !['CT', 'MR', 'REG', 'RTSTRUCT'].includes(s.modality));
+                    const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'REG', 'RTSTRUCT'].includes(s.modality));
                     
                     // Check if we have registration data
                     const hasRegistration = regSeries.length > 0;
@@ -626,29 +627,42 @@ export function SeriesSelector({
                                   ))}
                                 </div>
                               )}
-                            </div>
-                          </div>
-                        ))}
-                        
-                        {/* Registration Series - Show separately for visibility */}
-                        {regSeries.map((seriesItem) => (
-                          <div
-                            key={seriesItem.id}
-                            className="p-3 rounded-lg bg-green-950/20 border border-green-500/20"
-                          >
-                            <div className="flex items-center space-x-3">
-                              <Link className="w-4 h-4 text-green-400" />
-                              <div className="flex-1">
-                                <div className="text-sm font-medium text-green-300">
-                                  {seriesItem.seriesDescription || 'Image Registration'}
+                              
+                              {/* PT Series that can be fused with CT */}
+                              {ptSeries.length > 0 && (
+                                <div className="space-y-1 border-l-2 border-yellow-500/30 pl-3">
+                                  <div className="text-xs text-yellow-300 mb-1 flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                    PET/CT Fusion
+                                  </div>
+                                  
+                                  {/* PT Series */}
+                                  {ptSeries.map((ptS) => (
+                                    <div
+                                      key={ptS.id}
+                                      className={`
+                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
+                                        ${selectedSeries?.id === ptS.id
+                                          ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
+                                          : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
+                                        } border
+                                      `}
+                                      onClick={() => onSeriesSelect(ptS)}
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
+                                          PT
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                                <div className="text-xs text-green-400/80">
-                                  Registration File • {seriesItem.modality}
-                                </div>
-                                <div className="text-xs text-green-400/60 mt-1">
-                                  ✓ Registration parsed - enables CT/MRI fusion
-                                </div>
-                              </div>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -693,6 +707,39 @@ export function SeriesSelector({
                             </div>
                           </div>
                         ))}
+                        
+                        {/* Registration Series - Show at bottom as non-interactive metadata */}
+                        {regSeries.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-gray-700">
+                            <div className="text-xs text-gray-500 mb-2">Registration Files</div>
+                            {regSeries.map((seriesItem) => (
+                              <div
+                                key={seriesItem.id}
+                                className="p-2 rounded-lg bg-gray-900/50 border border-gray-700/50 opacity-70"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <Link className="w-3 h-3 text-gray-500" />
+                                  <div className="flex-1">
+                                    <div className="flex items-center justify-between">
+                                      <Badge 
+                                        variant="outline" 
+                                        className="text-xs border-gray-600 text-gray-500"
+                                      >
+                                        {seriesItem.modality}
+                                      </Badge>
+                                      <span className="text-xs text-gray-600">
+                                        Enables fusion
+                                      </span>
+                                    </div>
+                                    <h4 className="text-xs text-gray-400 mt-1 truncate">
+                                      {seriesItem.seriesDescription || 'Image Registration'}
+                                    </h4>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     );
                   })()}
