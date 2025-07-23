@@ -749,8 +749,10 @@ export function DICOMUploader() {
         </Card>
       )}
 
-      {/* Parse Results */}
-      {parseResult && (
+      {/* Parse Results - Only show if not already in triage */}
+      {parseResult && !triageSessions.some(t => 
+        t.parseResult?.data?.length === parseResult.data?.length
+      ) && (
         <div className="space-y-6">
           {/* Header Card */}
           <Card className="border-green-600 bg-green-900/20">
