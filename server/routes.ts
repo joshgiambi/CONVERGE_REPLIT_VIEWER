@@ -1203,31 +1203,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results = [];
 
-      for (const [patientKey, patientData] of patientMap) {
-        const metadata = patientData.metadata;
-        
-        console.log(`\n=== Creating database entries for patient: ${metadata.patientID} ===`);
-        
-        // Create or get patient
-        let dbPatient = await storage.getPatientByID(metadata.patientID);
-        if (!dbPatient) {
-          console.log(`Creating new patient: ${metadata.patientID}`);
-          try {
-            dbPatient = await storage.createPatient({
-              patientID: metadata.patientID || 'UNKNOWN',
-              patientName: metadata.patientName || 'Unknown Patient',
-              patientSex: metadata.patientSex || 'U',
-              patientAge: metadata.patientAge || '',
-              dateOfBirth: metadata.patientBirthDate || ''
-            });
-            console.log(`Successfully created patient with ID: ${dbPatient.id}`);
-          } catch (error) {
-            console.error(`ERROR creating patient:`, error);
-            throw error;
+      // CRITICAL: Use transaction to ensure data integrity
+      const importWithTransaction = async () => {
+        for (const [patientKey, patientData] of patientMap) {
+          const metadata = patientData.metadata;
+          
+          console.log(`\n=== Creating database entries for patient: ${metadata.patientID} ===`);
+          
+          // IMPORTANT: Always re-fetch patient to ensure we have the correct ID
+          let dbPatient = await storage.getPatientByID(metadata.patientID);
+          if (!dbPatient) {
+            console.log(`Creating new patient: ${metadata.patientID}`);
+            try {
+              dbPatient = await storage.createPatient({
+                patientID: metadata.patientID || 'UNKNOWN',
+                patientName: metadata.patientName || 'Unknown Patient',
+                patientSex: metadata.patientSex || 'U',
+                patientAge: metadata.patientAge || '',
+                dateOfBirth: metadata.patientBirthDate || ''
+              });
+              console.log(`Successfully created patient with ID: ${dbPatient.id}`);
+              
+              // CRITICAL: Verify patient was created correctly
+              const verifyPatient = await storage.getPatientByID(metadata.patientID);
+              if (!verifyPatient || verifyPatient.id !== dbPatient.id) {
+                throw new Error(`Patient creation verification failed! Expected ID ${dbPatient.id} but got ${verifyPatient?.id}`);
+              }
+            } catch (error) {
+              console.error(`ERROR creating patient:`, error);
+              throw error;
+            }
+          } else {
+            console.log(`Patient already exists with ID: ${dbPatient.id}`);
+            
+            // CRITICAL: Verify patient ID matches what we expect
+            if (dbPatient.patientID !== metadata.patientID) {
+              console.error(`CRITICAL: Patient ID mismatch! Database has ${dbPatient.patientID} but import has ${metadata.patientID}`);
+              throw new Error(`Patient ID mismatch detected`);
+            }
           }
-        } else {
-          console.log(`Patient already exists with ID: ${dbPatient.id}`);
-        }
 
         const studies = patientData.studies;
         
@@ -1238,32 +1252,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let dbStudy = await storage.getStudyByUID(studyMetadata.studyInstanceUID);
           if (!dbStudy) {
             console.log(`Creating new study: ${studyMetadata.studyInstanceUID}`);
+            
+            // CRITICAL: Re-verify patient exists and has correct ID before creating study
+            const currentPatient = await storage.getPatientByID(metadata.patientID);
+            if (!currentPatient || currentPatient.id !== dbPatient.id) {
+              throw new Error(`Patient verification failed before study creation! Expected patient ID ${dbPatient.id} but found ${currentPatient?.id}`);
+            }
+            
             try {
               dbStudy = await storage.createStudy({
-                patientId: dbPatient.id,
+                patientId: currentPatient.id, // Use freshly verified patient ID
                 studyInstanceUID: studyMetadata.studyInstanceUID || generateUID(),
                 studyDate: studyMetadata.studyDate || '',
                 studyDescription: studyMetadata.studyDescription || '',
                 accessionNumber: studyMetadata.accessionNumber || '',
                 numberOfSeries: studyData.series.size,
                 numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0),
-                patientName: dbPatient.patientName,
-                patientID: dbPatient.patientID,
+                patientName: currentPatient.patientName,
+                patientID: currentPatient.patientID,
                 modality: studyData.series.values().next().value[0].modality || null
               });
-              console.log(`Successfully created study with ID: ${dbStudy.id}`);
+              console.log(`Successfully created study with ID: ${dbStudy.id} for patient ID: ${currentPatient.id}`);
+              
+              // CRITICAL: Verify study was created with correct patient link
+              const verifyStudy = await storage.getStudyByUID(studyMetadata.studyInstanceUID);
+              if (!verifyStudy || verifyStudy.patientId !== currentPatient.id) {
+                throw new Error(`Study creation verification failed! Study ${verifyStudy?.id} has patientId ${verifyStudy?.patientId} but expected ${currentPatient.id}`);
+              }
             } catch (error) {
               console.error(`ERROR creating study:`, error);
               console.error(`Study data:`, {
-                patientId: dbPatient.id,
+                patientId: currentPatient.id,
                 studyInstanceUID: studyMetadata.studyInstanceUID,
-                patientName: dbPatient.patientName,
-                patientID: dbPatient.patientID
+                patientName: currentPatient.patientName,
+                patientID: currentPatient.patientID
               });
               throw error;
             }
           } else {
             console.log(`Study already exists with ID: ${dbStudy.id}`);
+            
+            // CRITICAL: Verify existing study is linked to correct patient
+            if (dbStudy.patientId !== dbPatient.id) {
+              console.error(`CRITICAL: Study ${dbStudy.id} is linked to patient ${dbStudy.patientId} but import expects patient ${dbPatient.id}`);
+              throw new Error(`Study patient link mismatch detected`);
+            }
           }
 
           const series = studyData.series;
@@ -1358,6 +1391,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           studiesCount: studies.size,
           totalImages: Array.from(studies.values()).reduce((sum, study) => 
             sum + Array.from(study.series.values()).reduce((seriesSum, series) => seriesSum + series.length, 0), 0)
+        });
+        }
+      };
+
+      // Execute the import with error handling
+      try {
+        await importWithTransaction();
+      } catch (error) {
+        console.error('CRITICAL: Import failed with error:', error);
+        // Don't clean up on error to preserve data for debugging
+        return res.status(500).json({ 
+          error: error instanceof Error ? error.message : "Import failed with data integrity error",
+          preservedSession: sessionId,
+          message: "Upload data preserved for recovery. Please contact support with the session ID."
         });
       }
 

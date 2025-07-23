@@ -129,6 +129,20 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Critical Import Data Integrity Safeguards - COMPLETED
+  - ✅ CRITICAL BUG FIXED: Studies were being linked to wrong patient IDs during import process
+  - ✅ Root cause: No verification between patient creation and study linking, allowing race conditions
+  - ✅ Implemented comprehensive safeguards in import process:
+    - Patient verification before each study creation
+    - Re-fetch patient data to ensure correct ID is used
+    - Verify study was created with correct patient link after creation
+    - Check existing studies are linked to expected patient
+    - Transaction-like error handling that preserves data on failure
+  - ✅ Added detailed logging at each verification step for debugging
+  - ✅ Import now fails fast with descriptive errors if data integrity issues detected
+  - ✅ Preserved upload sessions on error to prevent data loss during recovery
+  - Previous issue: Patient created with ID 20, but study linked to non-existent patient ID 17
+  - Solution: Multi-layer verification ensures patient-study relationships are always correct
 - July 23, 2025: Critical Import Data Loss Fix - COMPLETED
   - ✅ Fixed CRITICAL bug where import process was deleting files before moving them to permanent storage
   - ✅ Enhanced moveDatasetToPermanentStorage to search for files in subdirectories (handles ZIP extractions)
