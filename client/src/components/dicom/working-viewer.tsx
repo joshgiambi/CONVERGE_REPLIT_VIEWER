@@ -136,6 +136,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
+  
+  // Cache for MRI slice mappings to prevent recalculation during scrolling
+  const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -992,6 +995,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       if (!secondarySeriesId) {
         setSecondaryImages([]);
         setSecondaryImageCache(new Map());
+        mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
         setSecondaryModality('MR'); // Reset to default
         return;
       }
@@ -1032,6 +1036,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         });
 
         setSecondaryImages(sortedImages);
+        mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
         console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
         console.log("Secondary series ID:", secondarySeriesId);
         console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
@@ -1713,17 +1718,30 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       // The registration matrix transforms MRI to CT coordinates
       // We need to use it to find which MRI slice corresponds to this CT slice
       
-      // Find the MRI slice with the closest patient coordinates
-      let bestMatch = null;
-      let bestDistance = Infinity;
-      
-      // Since registration matrix transforms MRI->CT, we need to find which MRI slice 
-      // when transformed, has a Z coordinate closest to the current CT Z
-      
-      for (let i = 0; i < secondaryImages.length; i++) {
-        const mriImage = secondaryImages[i];
-        const mriPos = mriImage.imagePosition;
-        if (!mriPos) continue;
+      // Check cache first
+      const cacheKey = currentIndex;
+      const cached = mriSliceMappingCache.current.get(cacheKey);
+      if (cached) {
+        if (cached === null) {
+          console.log("CT slice is outside MRI coverage (cached)");
+          return;
+        }
+        closestSecondaryImage = secondaryImages[cached.mriIndex];
+        minDistance = cached.distance;
+        console.log(`Using cached MRI mapping: CT[${currentIndex}] -> MRI[${cached.mriIndex}] (distance: ${cached.distance.toFixed(1)}mm)`);
+      } else {
+        // Find the MRI slice with the closest patient coordinates
+        let bestMatch = null;
+        let bestDistance = Infinity;
+        let bestIndex = -1;
+        
+        // Since registration matrix transforms MRI->CT, we need to find which MRI slice 
+        // when transformed, has a Z coordinate closest to the current CT Z
+        
+        for (let i = 0; i < secondaryImages.length; i++) {
+          const mriImage = secondaryImages[i];
+          const mriPos = mriImage.imagePosition;
+          if (!mriPos) continue;
         
         const mriPatientPosition = typeof mriPos === 'string' 
           ? mriPos.split('\\').map((p: string) => parseFloat(p))
@@ -1740,6 +1758,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         if (zDistance < bestDistance) {
           bestDistance = zDistance;
           bestMatch = mriImage;
+          bestIndex = i;
           
           if (i < 3 || zDistance < 10) {
             console.log(`MRI[${i}] at Z=${mriPatientPosition[2].toFixed(1)}mm -> CT Z=${mriTransformed[2].toFixed(1)}mm, distance=${zDistance.toFixed(1)}mm`);
@@ -1772,6 +1791,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       
       if (ctZ < mriZMin - 5 || ctZ > mriZMax + 5) {
         console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+        // Store null in cache to indicate out of coverage
+        mriSliceMappingCache.current.set(cacheKey, null);
         return; // MRI doesn't cover this CT slice
       }
       
@@ -1779,11 +1800,16 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         closestSecondaryImage = bestMatch;
         minDistance = bestDistance;
         console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
+        // Store in cache
+        mriSliceMappingCache.current.set(cacheKey, { mriIndex: bestIndex, distance: bestDistance });
       } else {
         console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
         console.error(`Unable to find matching MRI slice using registration.`);
+        // Store null in cache to indicate out of coverage
+        mriSliceMappingCache.current.set(cacheKey, null);
         return; // Don't render fusion if match isn't good enough
       }
+    } // Close the else block for cache check
     } else {
       // Fallback: simple linear mapping if no registration available
       console.warn("No registration matrix available, using linear mapping");

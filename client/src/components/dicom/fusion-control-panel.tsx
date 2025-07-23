@@ -38,12 +38,6 @@ export function FusionControlPanel({
   availableModalities = []
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
-  const [localOpacity, setLocalOpacity] = useState(opacity);
-  
-  // Sync local opacity with prop
-  useEffect(() => {
-    setLocalOpacity(opacity);
-  }, [opacity]);
   
   // Fetch available MR series for fusion
   const { data: availableSeries } = useQuery({
@@ -86,7 +80,6 @@ export function FusionControlPanel({
     if (typeof newValue === 'number' && !isNaN(newValue)) {
       // Clamp to ensure we stay within bounds
       const clampedValue = Math.max(0, Math.min(1, newValue));
-      setLocalOpacity(clampedValue);
       onOpacityChange(clampedValue);
     }
   };
@@ -113,7 +106,7 @@ export function FusionControlPanel({
               </Badge>
               <div className="w-32 relative py-2">
                 <Slider
-                  value={[localOpacity]}
+                  value={[opacity]}
                   onValueChange={handleOpacityChange}
                   min={0}
                   max={1}
@@ -128,7 +121,7 @@ export function FusionControlPanel({
               </Badge>
             </div>
             <span className="text-xs text-purple-300 min-w-[6ch]">
-              {actualPrimaryModality} {Math.round((1 - localOpacity) * 100)}%
+              {actualPrimaryModality} {Math.round((1 - opacity) * 100)}%
             </span>
           </div>
         </Card>
@@ -226,12 +219,12 @@ export function FusionControlPanel({
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-gray-300">Fusion Balance</Label>
                 <span className="text-xs text-purple-300">
-                  CT: {Math.round((1 - localOpacity) * 100)}% | MRI: {Math.round(localOpacity * 100)}%
+                  CT: {Math.round((1 - opacity) * 100)}% | MRI: {Math.round(opacity * 100)}%
                 </span>
               </div>
               <div className="relative py-2">
                 <Slider
-                  value={[localOpacity]}
+                  value={[opacity]}
                   onValueChange={handleOpacityChange}
                   min={0}
                   max={1}
