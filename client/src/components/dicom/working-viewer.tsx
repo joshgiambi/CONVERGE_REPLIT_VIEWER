@@ -134,6 +134,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   const fusionOpacity = externalFusionOpacity || 0.5;
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
+  const registrationMatrixRef = useRef<number[] | null>(null);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -943,10 +944,23 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         .then(data => {
           if (data && data.transformationMatrix) {
             console.log(`Loaded registration matrix for study ${studyId}:`, data);
-            setRegistrationMatrix(data.transformationMatrix);
+            // Parse the transformation matrix if it's a string
+            let matrix = data.transformationMatrix;
+            if (typeof matrix === 'string') {
+              try {
+                matrix = JSON.parse(matrix);
+                console.log('Parsed registration matrix:', matrix);
+              } catch (e) {
+                console.error('Failed to parse registration matrix:', e);
+                matrix = null;
+              }
+            }
+            setRegistrationMatrix(matrix);
+            registrationMatrixRef.current = matrix;
           } else {
             console.log(`No registration found for study ${studyId}`);
             setRegistrationMatrix(null);
+            registrationMatrixRef.current = null;
           }
         })
         .catch(error => {
@@ -955,6 +969,21 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         });
     }
   }, [studyId]);
+  
+  // Re-render fusion overlay when registration matrix is loaded
+  useEffect(() => {
+    console.log('Registration matrix useEffect:', {
+      hasMatrix: !!registrationMatrix,
+      matrixLength: registrationMatrix?.length,
+      secondarySeriesId,
+      imagesLength: images.length
+    });
+    
+    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && images.length > 0) {
+      console.log('Registration matrix loaded, re-rendering fusion overlay');
+      displayCurrentImage();
+    }
+  }, [registrationMatrix, secondarySeriesId, images.length]);
   
   // Load secondary series images for fusion
   useEffect(() => {
@@ -1510,17 +1539,20 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     let closestSecondaryImage;
     let minDistance = Infinity;
     
-    if (registrationMatrix && registrationMatrix.length === 16) {
+    // Use ref to get current registration matrix value
+    const currentRegistrationMatrix = registrationMatrixRef.current;
+    
+    if (currentRegistrationMatrix && currentRegistrationMatrix.length === 16) {
       // Based on Python implementation: The registration matrix might be from MRI to CT
       // We need to try both directions and see which one produces valid results
       
       // Extract transformation components from 4x4 matrix
       const R = [
-        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2]],
-        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6]],
-        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10]]
+        [currentRegistrationMatrix[0], currentRegistrationMatrix[1], currentRegistrationMatrix[2]],
+        [currentRegistrationMatrix[4], currentRegistrationMatrix[5], currentRegistrationMatrix[6]],
+        [currentRegistrationMatrix[8], currentRegistrationMatrix[9], currentRegistrationMatrix[10]]
       ];
-      const T = [registrationMatrix[3], registrationMatrix[7], registrationMatrix[11]];
+      const T = [currentRegistrationMatrix[3], currentRegistrationMatrix[7], currentRegistrationMatrix[11]];
       
       // Get MRI bounds from actual loaded images, filtering out null/invalid values
       const mriSlicePositions = secondaryImages
@@ -1662,10 +1694,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       
       // Convert flat array to 4x4 matrix
       const regMatrix4x4 = [
-        [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
-        [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
-        [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
-        [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
+        [currentRegistrationMatrix[0], currentRegistrationMatrix[1], currentRegistrationMatrix[2], currentRegistrationMatrix[3]],
+        [currentRegistrationMatrix[4], currentRegistrationMatrix[5], currentRegistrationMatrix[6], currentRegistrationMatrix[7]],
+        [currentRegistrationMatrix[8], currentRegistrationMatrix[9], currentRegistrationMatrix[10], currentRegistrationMatrix[11]],
+        [currentRegistrationMatrix[12], currentRegistrationMatrix[13], currentRegistrationMatrix[14], currentRegistrationMatrix[15]]
       ];
       
       // The registration matrix transforms MRI to CT coordinates
