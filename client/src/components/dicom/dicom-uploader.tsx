@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { PatientPreviewCard } from './patient-preview-card';
 import { useLocation } from 'wouter';
+import { useToast } from '@/hooks/use-toast';
 
 interface DICOMMetadata {
   filename: string;
@@ -211,6 +212,8 @@ export function DICOMUploader() {
     }
   };
 
+  const { toast } = useToast();
+  
   const handleImportToDatabase = async () => {
     if (!parseResult) return;
 
@@ -232,7 +235,7 @@ export function DICOMUploader() {
       // Show success toast
       toast({
         title: "Import successful",
-        description: `Successfully imported ${parseResult.data.patients?.length || 0} patients with their studies and series.`,
+        description: `Successfully imported ${parseResult.patientPreviews?.length || 0} patients with their studies and series.`,
       });
 
       // Invalidate queries to refresh the UI
