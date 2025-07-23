@@ -4,7 +4,7 @@ import { useLocation } from 'wouter';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Home, Download, Save, List, FolderDown } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -308,40 +308,55 @@ export default function Viewer() {
 
       {/* Save Dialog */}
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[425px] bg-gray-900 border-gray-700">
           <DialogHeader>
-            <DialogTitle>Save RT Structure Set</DialogTitle>
+            <DialogTitle className="text-white">Save RT Structure Set</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Create a new version of the RT structure set
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="series-description" className="text-right">
+              <Label htmlFor="series-description" className="text-right text-white">
                 Description
               </Label>
               <Input
                 id="series-description"
                 value={seriesDescription}
                 onChange={(e) => setSeriesDescription(e.target.value)}
-                className="col-span-3"
+                className="col-span-3 bg-gray-800 border-gray-700 text-white"
               />
             </div>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-gray-400">
               This will create a new version of the RT structure set that can be retrieved later.
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowSaveDialog(false)}
+              className="border-gray-600 text-gray-400 hover:bg-gray-800"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSaveConfirm}>Save</Button>
+            <Button 
+              onClick={handleSaveConfirm}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Export Dialog */}
       <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
-        <DialogContent className="sm:max-w-[600px] max-h-[600px]">
+        <DialogContent className="sm:max-w-[600px] max-h-[600px] bg-gray-900 border-gray-700">
           <DialogHeader>
-            <DialogTitle>Export DICOM Files</DialogTitle>
+            <DialogTitle className="text-white">Export DICOM Files</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Select the series you want to export
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <div className="mb-4">
@@ -355,13 +370,14 @@ export default function Viewer() {
                     setSelectedExportItems(new Set(exportItems.map(item => item.id)));
                   }
                 }}
+                className="border-gray-600 text-gray-400 hover:bg-gray-800"
               >
                 {selectedExportItems.size === exportItems.length ? 'Deselect All' : 'Select All'}
               </Button>
             </div>
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
               {exportItems.map((item) => (
-                <div key={item.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                <div key={item.id} className="flex items-center space-x-2 p-2 hover:bg-gray-800 rounded">
                   <Checkbox
                     id={item.id}
                     checked={selectedExportItems.has(item.id)}
@@ -374,23 +390,31 @@ export default function Viewer() {
                       }
                       setSelectedExportItems(newSelected);
                     }}
+                    className="border-gray-600 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
                   />
                   <Label
                     htmlFor={item.id}
                     className="flex-1 cursor-pointer"
                   >
-                    <div className="font-medium">{item.name}</div>
-                    <div className="text-sm text-gray-500">{item.description}</div>
+                    <div className="font-medium text-white">{item.name}</div>
+                    <div className="text-sm text-gray-400">{item.description}</div>
                   </Label>
                 </div>
               ))}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowExportDialog(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowExportDialog(false)}
+              className="border-gray-600 text-gray-400 hover:bg-gray-800"
+            >
               Cancel
             </Button>
-            <Button onClick={handleExportConfirm}>
+            <Button 
+              onClick={handleExportConfirm}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
               Export {selectedExportItems.size} Item{selectedExportItems.size !== 1 ? 's' : ''}
             </Button>
           </DialogFooter>
