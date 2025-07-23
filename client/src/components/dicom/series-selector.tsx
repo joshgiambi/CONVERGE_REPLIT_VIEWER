@@ -739,7 +739,7 @@ export function SeriesSelector({
                               return (
                                 <div
                                   key={seriesItem.id}
-                                  className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-yellow-800/50 border border-yellow-700/50 text-xs hover:bg-yellow-700/50 transition-colors cursor-pointer"
+                                  className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs hover:bg-gray-700/50 transition-colors cursor-pointer"
                                   onMouseEnter={() => setHoveredRegSeries(seriesItem.id)}
                                   onMouseLeave={() => setHoveredRegSeries(null)}
                                   onClick={async () => {

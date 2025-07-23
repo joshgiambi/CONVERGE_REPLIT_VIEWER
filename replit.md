@@ -129,14 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 23, 2025: Fusion System Enhancement - Registration Parsing and Yellow REG Pills - COMPLETED
-  - ✅ Made REG file pills yellow for all fusion types (CT/MR, CT/PT) for visual consistency
+- July 23, 2025: Fusion System Enhancement - Registration Parsing and Grey REG Pills - COMPLETED
   - ✅ Fixed fusion control panel not appearing for PET/CT cases by adding automatic registration parsing
   - ✅ Added registration matrix parsing when clicking REG files before initiating fusion
   - ✅ REG file onClick now calls `/api/registrations/${studyId}/parse` to extract and store transformation matrix
   - ✅ Fusion control panel now appears for any modality combination with valid REG file
   - ✅ Fixed contextual fusion labels (PT Fusion vs MR Fusion) based on secondary modality
   - ✅ Enhanced fusion panel to dynamically detect and display correct modality labels
+  - ✅ Kept REG file pills grey (not yellow) per user preference for subtle appearance
   - Previous issue: Fusion control panel required registration matrix but wasn't loading for PET/CT
   - Solution: Parse REG file on click to populate registration matrix in database before fusion
 - July 23, 2025: Critical Import Data Integrity Safeguards - COMPLETED
