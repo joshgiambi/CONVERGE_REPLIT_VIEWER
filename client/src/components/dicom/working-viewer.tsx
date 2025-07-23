@@ -74,6 +74,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     onSlicePositionChange,
     secondarySeriesId: externalSecondarySeriesId,
     fusionOpacity: externalFusionOpacity = 0.5,
+    onSecondarySeriesSelect,
+    onFusionOpacityChange,
+    hasSecondarySeriesForFusion,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -999,6 +1002,14 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     }
   }, [registrationMatrix, secondarySeriesId, images.length]);
   
+  // Trigger pre-computation when both registration matrix and secondary images are available
+  useEffect(() => {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0 && transformedMRIPositions.current.length === 0) {
+      console.log('Both registration matrix and secondary images available, pre-computing transformations...');
+      precomputeMRITransformations(secondaryImages, registrationMatrix);
+    }
+  }, [registrationMatrix, secondaryImages]);
+  
   // Pre-compute MRI transformations for performance
   const precomputeMRITransformations = (mriImages: any[], registrationMatrix: number[]) => {
     console.log("Pre-computing MRI transformations for performance optimization...");
@@ -1150,14 +1161,19 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         console.log(`Preloaded ${newCache.size} secondary images`);
         console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
         
+        // Store cache reference to avoid closure issues
+        (window as any).secondaryImageCacheRef = newCache;
+        
         // Pre-compute MRI positions in CT space if registration matrix is available
         if (registrationMatrix && registrationMatrix.length === 16) {
           precomputeMRITransformations(sortedImages, registrationMatrix);
         }
         
-        // Trigger re-render to show fusion overlay
+        // Trigger re-render to show fusion overlay with delay to ensure state is updated
         if (newCache.size > 0) {
-          displayCurrentImage();
+          setTimeout(() => {
+            displayCurrentImage();
+          }, 100);
         }
       } catch (err) {
         console.error("Error loading secondary images:", err);
@@ -1600,8 +1616,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     }
     
     console.log("Starting fusion overlay render...");
-    console.log("Secondary cache size:", secondaryImageCache.size);
+    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
+    console.log("Secondary cache size:", actualCache.size);
     console.log("Fusion opacity:", fusionOpacity);
+    console.log("Secondary images length:", secondaryImages.length);
+    console.log("Registration matrix available:", !!registrationMatrix);
     
     // If opacity is 0, skip rendering entirely
     if (fusionOpacity === 0) {
@@ -1928,8 +1947,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       console.error(`✗ WARNING: No registration matrix - using fallback linear mapping!`);
     }
     
-    // Get the secondary image data from cache
-    let secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
+    // Get the secondary image data from cache (use window reference to avoid closure issues)
+    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
+    let secondaryImageData = actualCache.get(closestSecondaryImage.sopInstanceUID);
     if (!secondaryImageData) {
       console.warn(`Secondary image not found in cache, attempting to load: ${closestSecondaryImage.sopInstanceUID}`);
       
