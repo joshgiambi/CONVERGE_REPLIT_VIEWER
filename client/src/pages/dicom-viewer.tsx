@@ -5,7 +5,12 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { UploadZone } from '@/components/dicom/upload-zone';
 import { ViewerInterface } from '@/components/dicom/viewer-interface';
-import { Download, User, Calendar, Home, ArrowLeft } from 'lucide-react';
+import { Download, User, Calendar, Home, ArrowLeft, Save, List, FolderDown } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Study {
   id: number;
@@ -40,6 +45,12 @@ export default function DICOMViewer() {
   const [studyData, setStudyData] = useState<any>(null);
   const [currentPatient, setCurrentPatient] = useState<any>(null);
   const [location, navigate] = useLocation();
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [seriesDescription, setSeriesDescription] = useState('');
+  const [selectedExportItems, setSelectedExportItems] = useState<Set<string>>(new Set());
+  const [exportItems, setExportItems] = useState<any[]>([]);
+  const { toast } = useToast();
 
   // Extract studyId from URL parameters
   const urlParams = new URLSearchParams(window.location.search);
@@ -129,47 +140,70 @@ export default function DICOMViewer() {
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div>
-              <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
+              <h1 className="text-xl font-black tracking-wider flex">
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #22c55e',
+                  background: 'linear-gradient(45deg, #00b4d8, #90e0ef)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
-                }}>C</span>
+                }}>S</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #10b981',
+                  background: 'linear-gradient(45deg, #0077b6, #00b4d8)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
-                }}>O</span>
+                }}>U</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #3b82f6',
+                  background: 'linear-gradient(45deg, #6366f1, #8b5cf6)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
-                }}>N</span>
+                }}>P</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #2563eb',
-                  fontWeight: '900'
-                }}>V</span>
-                <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #6366f1',
+                  background: 'linear-gradient(45deg, #8b5cf6, #a855f7)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
                 }}>E</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #8b5cf6',
+                  background: 'linear-gradient(45deg, #a855f7, #d946ef)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
                 }}>R</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #a855f7',
+                  background: 'linear-gradient(45deg, #ec4899, #f43f5e)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
-                }}>G</span>
+                }}>B</span>
                 <span style={{
-                  color: 'white',
-                  WebkitTextStroke: '1px #22c55e',
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                   fontWeight: '900'
                 }}>E</span>
+                <span style={{
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  fontWeight: '900'
+                }}>A</span>
+                <span style={{
+                  background: 'linear-gradient(45deg, #9333ea, #dc2626)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  fontWeight: '900'
+                }}>M</span>
               </h1>
             </div>
           </div>
