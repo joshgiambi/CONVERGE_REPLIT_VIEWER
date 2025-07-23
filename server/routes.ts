@@ -1101,7 +1101,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           patient: dbPatient,
           studiesCount: studies.size,
           totalImages: Array.from(studies.values()).reduce((sum, study) => 
-            sum + Array.from(study.values()).reduce((seriesSum, series) => seriesSum + series.length, 0), 0)
+            sum + Array.from(study.series.values()).reduce((seriesSum, series) => seriesSum + series.length, 0), 0)
         });
       }
 
@@ -1115,6 +1115,183 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error processing upload:', error);
       res.status(500).json({ message: "Failed to process uploaded files" });
+    }
+  });
+
+  // Import from triage session
+  app.post("/api/import-triage", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sessionId } = req.body;
+      
+      if (!sessionId) {
+        return res.status(400).json({ error: "Session ID is required" });
+      }
+
+      // Get triage session data
+      const triageSession = triageSessions.get(sessionId);
+      if (!triageSession || !triageSession.parseResult) {
+        return res.status(404).json({ error: "Triage session not found" });
+      }
+
+      const { data, rtstructDetails } = triageSession.parseResult;
+      
+      if (!data || !Array.isArray(data)) {
+        return res.status(400).json({ error: "Invalid triage data format" });
+      }
+
+      // Use the same import logic as the regular import endpoint
+      const patientMap = new Map();
+      
+      for (const metadata of data) {
+        if (metadata.error) continue; // Skip files with errors
+
+        const patientKey = metadata.patientID || 'UNKNOWN';
+        const studyKey = metadata.studyInstanceUID || 'UNKNOWN';
+        const seriesKey = metadata.seriesInstanceUID || 'UNKNOWN';
+
+        if (!patientMap.has(patientKey)) {
+          patientMap.set(patientKey, {
+            metadata: metadata,
+            studies: new Map()
+          });
+        }
+
+        const patient = patientMap.get(patientKey);
+        if (!patient.studies.has(studyKey)) {
+          patient.studies.set(studyKey, {
+            metadata: metadata,
+            series: new Map()
+          });
+        }
+
+        const study = patient.studies.get(studyKey);
+        if (!study.series.has(seriesKey)) {
+          study.series.set(seriesKey, []);
+        }
+
+        study.series.get(seriesKey).push(metadata);
+      }
+
+      const results = [];
+
+      for (const [patientKey, patientData] of patientMap) {
+        const metadata = patientData.metadata;
+        
+        // Create or get patient
+        let dbPatient = await storage.getPatientByID(metadata.patientID);
+        if (!dbPatient) {
+          dbPatient = await storage.createPatient({
+            patientID: metadata.patientID || 'UNKNOWN',
+            patientName: metadata.patientName || 'Unknown Patient',
+            patientSex: metadata.patientSex || 'U',
+            patientAge: metadata.patientAge || '',
+            dateOfBirth: metadata.patientBirthDate || ''
+          });
+        }
+
+        const studies = patientData.studies;
+        
+        for (const [studyKey, studyData] of studies) {
+          const studyMetadata = studyData.metadata;
+          
+          // Create or get study
+          let dbStudy = await storage.getStudyByUID(studyMetadata.studyInstanceUID);
+          if (!dbStudy) {
+            dbStudy = await storage.createStudy({
+              patientId: dbPatient.id,
+              studyInstanceUID: studyMetadata.studyInstanceUID || generateUID(),
+              studyDate: studyMetadata.studyDate || '',
+              studyTime: studyMetadata.studyTime || '',
+              studyDescription: studyMetadata.studyDescription || '',
+              accessionNumber: studyMetadata.accessionNumber || '',
+              numberOfSeries: studyData.series.size,
+              numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0)
+            });
+          }
+
+          const series = studyData.series;
+          
+          for (const [seriesKey, seriesFiles] of series) {
+            const seriesMetadata = seriesFiles[0];
+            
+            // Create or get series
+            let dbSeries = await storage.getSeriesByUID(seriesMetadata.seriesInstanceUID);
+            if (!dbSeries) {
+              dbSeries = await storage.createSeries({
+                studyId: dbStudy.id,
+                seriesInstanceUID: seriesMetadata.seriesInstanceUID || generateUID(),
+                seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
+                seriesDescription: seriesMetadata.seriesDescription || '',
+                modality: seriesMetadata.modality || 'OT',
+                numberOfImages: seriesFiles.length,
+                bodyPartExamined: seriesMetadata.bodyPartExamined || '',
+                protocolName: seriesMetadata.protocolName || ''
+              });
+            }
+
+            // Create images for each file
+            for (const metadata of seriesFiles) {
+              // Use the original file path from the triage session
+              const permanentPath = metadata.filePath;
+
+              if (fs.existsSync(permanentPath)) {
+                await storage.createImage({
+                  seriesId: dbSeries.id,
+                  sopInstanceUID: metadata.sopInstanceUID || generateUID(),
+                  instanceNumber: parseInt(metadata.instanceNumber) || 1,
+                  filePath: permanentPath,
+                  fileName: metadata.filename,
+                  fileSize: fs.statSync(permanentPath).size,
+                  metadata: { imported: true },
+                });
+              }
+            }
+
+            await storage.updateSeriesImageCount(dbSeries.id, seriesFiles.length);
+          }
+
+          await storage.updateStudyCounts(dbStudy.id, series.size, Array.from(series.values()).reduce((sum, s) => sum + s.length, 0));
+        }
+
+        results.push({
+          patient: dbPatient,
+          studiesCount: studies.size,
+          totalImages: Array.from(studies.values()).reduce((sum, study) => 
+            sum + Array.from(study.series.values()).reduce((seriesSum, series) => seriesSum + series.length, 0), 0)
+        });
+      }
+
+      // Clean up: Remove triage session and unprocessed files
+      console.log(`Cleaning up triage session: ${sessionId}`);
+      console.log(`Upload session ID for cleanup: ${triageSession.uploadSessionId}`);
+      
+      triageSessions.delete(sessionId);
+      console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
+      
+      // Clean up the upload files
+      if (triageSession.uploadSessionId) {
+        const uploadPath = path.join(process.cwd(), 'uploads', triageSession.uploadSessionId);
+        console.log(`Attempting to delete upload path: ${uploadPath}`);
+        
+        if (fs.existsSync(uploadPath)) {
+          fs.rmSync(uploadPath, { recursive: true, force: true });
+          console.log(`Successfully deleted upload directory: ${uploadPath}`);
+        } else {
+          console.log(`Upload directory not found: ${uploadPath}`);
+        }
+      } else {
+        console.log('No upload session ID found for cleanup');
+      }
+
+      res.json({ 
+        success: true, 
+        message: `Successfully imported ${data.length} DICOM files from triage`,
+        results 
+      });
+
+    } catch (error) {
+      console.error('Error importing triage session:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to import triage session" });
     }
   });
 
@@ -2369,8 +2546,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/parse-dicom-session/from-existing", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { uploadSessionId } = req.body;
+      console.log(`From-existing request received with uploadSessionId: ${uploadSessionId}`);
+      console.log('Request body:', req.body);
       
       if (!uploadSessionId || !uploadSessionId.startsWith('upload-')) {
+        console.log('Invalid or missing uploadSessionId:', uploadSessionId);
         return res.status(400).json({ error: "Invalid upload session ID" });
       }
       
@@ -2404,6 +2584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create session - handle up to 1000 files
       const session = {
         sessionId,
+        uploadSessionId, // Add the uploadSessionId to preserve it for cleanup
         status: 'parsing' as const,
         progress: 0,
         total: Math.min(files.length, 1000),
@@ -2682,8 +2863,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Move to triage after parsing completion
-      const uploadSessionId = session.files?.[0]?.destination?.split('/').pop() || '';
+      // Use the uploadSessionId from the session itself, not from file paths
+      const uploadSessionId = session.uploadSessionId || '';
       console.log(`Moving session ${session.sessionId} to triage with ${patientPreviews.length} patients and ${successCount} images`);
+      console.log(`Upload session ID for cleanup: ${uploadSessionId}`);
+      console.log(`Session data:`, { sessionId: session.sessionId, uploadSessionId: session.uploadSessionId, filesCount: session.files?.length });
       triageSessions.set(session.sessionId, {
         sessionId: session.sessionId,
         parseResult: session.result,
