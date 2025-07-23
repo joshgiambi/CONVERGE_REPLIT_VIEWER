@@ -263,12 +263,14 @@ export default function Viewer() {
               </h1>
             </div>
             
-            {currentStudy && (
+            {(studyData.patient || currentStudy) && (
               <div className="flex items-center space-x-3 pl-4 border-l border-gray-600">
                 <div>
-                  <h2 className="text-sm font-semibold text-dicom-yellow">{currentStudy.patientName}</h2>
+                  <h2 className="text-sm font-semibold text-dicom-yellow">
+                    {studyData.patient?.patientName || currentStudy.patientName || 'Unknown Patient'}
+                  </h2>
                   <p className="text-xs text-gray-400">
-                    {currentStudy.studyDescription} • {formatDate(currentStudy.studyDate)}
+                    ID: {studyData.patient?.patientID || currentStudy.patientID || 'No ID'}
                   </p>
                 </div>
               </div>
