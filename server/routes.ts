@@ -1230,11 +1230,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               patientId: dbPatient.id,
               studyInstanceUID: studyMetadata.studyInstanceUID || generateUID(),
               studyDate: studyMetadata.studyDate || '',
-              studyTime: studyMetadata.studyTime || '',
               studyDescription: studyMetadata.studyDescription || '',
               accessionNumber: studyMetadata.accessionNumber || '',
               numberOfSeries: studyData.series.size,
-              numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0)
+              numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0),
+              patientName: dbPatient.patientName,
+              patientID: dbPatient.patientID,
+              modality: studyData.series.values().next().value[0].modality || null
             });
           }
 
@@ -1252,9 +1254,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
                 seriesDescription: seriesMetadata.seriesDescription || '',
                 modality: seriesMetadata.modality || 'OT',
-                numberOfImages: seriesFiles.length,
-                bodyPartExamined: seriesMetadata.bodyPartExamined || '',
-                protocolName: seriesMetadata.protocolName || ''
+                imageCount: seriesFiles.length,
+                sliceThickness: seriesMetadata.sliceThickness || null,
+                metadata: { 
+                  bodyPartExamined: seriesMetadata.bodyPartExamined || '',
+                  protocolName: seriesMetadata.protocolName || '' 
+                }
               });
             }
 
@@ -1273,8 +1278,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     sopInstanceUID: metadata.sopInstanceUID || generateUID(),
                     instanceNumber: parseInt(metadata.instanceNumber) || 1,
                     filePath: permanentPath,  // Use permanent path
-                    fileName: metadata.filename,
+                    fileName: metadata.fileName || path.basename(permanentPath),
                     fileSize: fs.statSync(permanentPath).size,
+                    imagePosition: metadata.imagePosition || null,
+                    imageOrientation: metadata.imageOrientation || null,
+                    pixelSpacing: metadata.pixelSpacing || null,
+                    sliceLocation: metadata.sliceLocation || null,
+                    windowCenter: metadata.windowCenter || null,
+                    windowWidth: metadata.windowWidth || null,
                     metadata: { imported: true },
                   });
                 } else {
