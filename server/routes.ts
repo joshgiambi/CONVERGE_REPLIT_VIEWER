@@ -1218,6 +1218,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Image not found' });
       }
 
+      // Check if file exists before trying to read it
+      if (!fs.existsSync(image.filePath)) {
+        return res.status(404).json({ 
+          error: 'Image file not found',
+          message: 'The DICOM file is missing from the server. This may be test data that was not properly uploaded.',
+          filePath: image.filePath 
+        });
+      }
+      
       // Parse DICOM file to extract spatial metadata  
       const buffer = fs.readFileSync(image.filePath);
 
@@ -1346,7 +1355,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Filter to only RT structure series
       const rtSeries = series.filter(s => s.modality === 'RTSTRUCT');
-      res.json(rtSeries);
+      
+      // For each RT structure, determine which CT/MR series it references
+      const rtSeriesWithAssociations = await Promise.all(rtSeries.map(async (rtSeries) => {
+        try {
+          // Get the first image of the RT structure to parse its references
+          const images = await storage.getImagesBySeriesId(rtSeries.id);
+          if (images.length > 0 && images[0].filePath) {
+            const filePath = images[0].filePath.startsWith('uploads/') 
+              ? images[0].filePath 
+              : path.join('uploads', images[0].filePath);
+              
+            if (fs.existsSync(filePath)) {
+              // Use the RT structure parser to get referenced series information
+              const rtStructureSet = RTStructureParser.parseRTStructureSet(filePath);
+              
+              // Find which series in this study the RT structure references
+              if (rtStructureSet.referencedSeriesUID) {
+                const referencedSeries = series.find(s => s.seriesInstanceUid === rtStructureSet.referencedSeriesUID);
+                if (referencedSeries) {
+                  return {
+                    ...rtSeries,
+                    referencedSeriesId: referencedSeries.id,
+                    referencedSeriesDescription: referencedSeries.seriesDescription || `${referencedSeries.modality} Series`,
+                    referencedSeriesUID: rtStructureSet.referencedSeriesUID
+                  };
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.log('Error parsing RT structure associations:', error);
+        }
+        
+        // Return without association if we couldn't determine it
+        return rtSeries;
+      }));
+      
+      console.log('RT structures with associations:', rtSeriesWithAssociations.map(rt => ({
+        id: rt.id,
+        description: rt.seriesDescription,
+        referencedSeriesId: rt.referencedSeriesId,
+        referencedSeriesDescription: rt.referencedSeriesDescription
+      })));
+      res.json(rtSeriesWithAssociations);
     } catch (error: any) {
       console.error('Error fetching RT structure series:', error);
       res.status(500).json({ error: 'Failed to fetch RT structure series', details: error.message });

@@ -22,6 +22,8 @@ export interface RTStructureSet {
   structureSetLabel?: string;
   structureSetDate?: string;
   structures: RTStructureContour[];
+  referencedSeriesUID?: string; // The CT/MR series this RT structure references
+  referencedStudyUID?: string;
 }
 
 export class RTStructureParser {
@@ -69,7 +71,30 @@ export class RTStructureParser {
       // Combine the data
       rtStructureSet.structures = this.combineROIData(roiData, contourData, observationsData);
 
+      // Parse Referenced Frame of Reference Sequence (3006,0010) to find referenced series
+      const referencedFrameOfRefSeq = dataSet.elements.x30060010;
+      if (referencedFrameOfRefSeq && referencedFrameOfRefSeq.items && referencedFrameOfRefSeq.items.length > 0) {
+        const firstRefFrame = referencedFrameOfRefSeq.items[0];
+        
+        // Get RT Referenced Study Sequence (3006,0012)
+        const rtRefStudySeq = firstRefFrame.dataSet.elements.x30060012;
+        if (rtRefStudySeq && rtRefStudySeq.items && rtRefStudySeq.items.length > 0) {
+          const refStudy = rtRefStudySeq.items[0];
+          rtStructureSet.referencedStudyUID = this.getString(refStudy.dataSet, 'x0008112c');
+          
+          // Get RT Referenced Series Sequence (3006,0014)
+          const rtRefSeriesSeq = refStudy.dataSet.elements.x30060014;
+          if (rtRefSeriesSeq && rtRefSeriesSeq.items && rtRefSeriesSeq.items.length > 0) {
+            const refSeries = rtRefSeriesSeq.items[0];
+            rtStructureSet.referencedSeriesUID = this.getString(refSeries.dataSet, 'x0020000e');
+          }
+        }
+      }
+
       console.log(`Parsed RT Structure Set with ${rtStructureSet.structures.length} structures`);
+      if (rtStructureSet.referencedSeriesUID) {
+        console.log(`RT Structure references series: ${rtStructureSet.referencedSeriesUID}`);
+      }
       return rtStructureSet;
 
     } catch (error: any) {

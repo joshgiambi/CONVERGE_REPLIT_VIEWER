@@ -529,10 +529,15 @@ export function SeriesSelector({
 
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
-                              {/* RT Structure Series nested under CT */}
-                              {rtSeries.length > 0 && (
+                              {/* RT Structure Series nested under CT - only show those that reference this CT */}
+                              {rtSeries.filter((rtS: any) => 
+                                // Show RT structures that reference this CT series, or those without a reference (backward compatibility)
+                                rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
+                              ).length > 0 && (
                                 <div className="space-y-1 border-l-2 border-green-500/30 pl-3">
-                                  {rtSeries.map((rtS) => (
+                                  {rtSeries.filter((rtS: any) => 
+                                    rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
+                                  ).map((rtS: any) => (
                                     <Button
                                       key={rtS.id}
                                       variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
