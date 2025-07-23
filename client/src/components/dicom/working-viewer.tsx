@@ -131,7 +131,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     Map<string, { data: Float32Array; width: number; height: number }>
   >(new Map());
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
-  const fusionOpacity = externalFusionOpacity || 0.5;
+  const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
