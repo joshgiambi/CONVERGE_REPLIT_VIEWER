@@ -37,7 +37,8 @@ import {
   AlertTriangle,
   FolderDown,
   Merge,
-  CheckSquare
+  CheckSquare,
+  Trash2
 } from "lucide-react";
 
 interface Patient {
@@ -362,6 +363,54 @@ export default function PatientManager() {
     }
   };
 
+  // Delete selected patients handler
+  const handleDeleteSelected = async () => {
+    if (selectedPatients.size === 0) return;
+    
+    if (!confirm(`Are you sure you want to delete ${selectedPatients.size} patient${selectedPatients.size !== 1 ? 's' : ''}? This action cannot be undone.`)) {
+      return;
+    }
+    
+    const patientIds = Array.from(selectedPatients);
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const patientId of patientIds) {
+      try {
+        const response = await fetch(`/api/patients/${patientId}`, {
+          method: "DELETE",
+        });
+        
+        if (response.ok) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (error) {
+        errorCount++;
+      }
+    }
+    
+    if (successCount > 0) {
+      toast({
+        title: "Success",
+        description: `Deleted ${successCount} patient${successCount !== 1 ? 's' : ''}`,
+      });
+      setSelectedPatients(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/series"] });
+    }
+    
+    if (errorCount > 0) {
+      toast({
+        title: "Error",
+        description: `Failed to delete ${errorCount} patient${errorCount !== 1 ? 's' : ''}`,
+        variant: "destructive",
+      });
+    }
+  };
+
   // Query PACS mutation
   const queryPacsMutation = useMutation({
     mutationFn: async ({ pacsId, queryParams }: { pacsId: number; queryParams: z.infer<typeof querySchema> }) => {
@@ -668,6 +717,15 @@ export default function PatientManager() {
                       Merge
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteSelected}
+                    className="border-red-500/50 text-red-400 hover:bg-red-500/20"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
