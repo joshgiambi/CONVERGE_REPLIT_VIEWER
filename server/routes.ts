@@ -1869,10 +1869,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "RT Structure Set not found" });
       }
 
-      // Check if this is the fusion dataset RT structure
-      let rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      // Get the actual RT structure file path from the database
+      let rtStructPath: string | null = null;
       
-      // For fusion dataset (study ID 7), use the fusion RT structure file
       try {
         const images = await db.select()
           .from(imagesTable)
@@ -1880,14 +1879,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(1);
         
         if (images.length > 0 && images[0].filePath) {
-          // Use the actual RT structure file from the fusion dataset
-          if (images[0].filePath.includes('fusion-dataset')) {
-            rtStructPath = images[0].filePath;
-            console.log('Using fusion dataset RT structure:', rtStructPath);
-          }
+          rtStructPath = images[0].filePath;
+          console.log('Using RT structure file:', rtStructPath);
+        } else {
+          return res.status(404).json({ error: "RT Structure file not found in database for series " + seriesId });
         }
       } catch (e) {
         console.error('Error fetching RT structure image:', e);
+        return res.status(500).json({ error: "Failed to fetch RT structure file", details: e });
       }
       
       if (!fs.existsSync(rtStructPath)) {
@@ -2265,15 +2264,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const previousState = new Map(modifications.modifiedStructures);
       
       // Parse the original RT structure to get baseline contour counts
-      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      // Get the actual RT structure file path from the database
       let originalStructures: any = {};
-      if (fs.existsSync(rtStructPath)) {
-        if (rtStructureCache.has(rtStructPath)) {
-          const cached = rtStructureCache.get(rtStructPath);
-          cached.structures.forEach((s: any) => {
-            originalStructures[s.roiNumber] = s.contours?.length || 0;
-          });
+      try {
+        const images = await db.select()
+          .from(imagesTable)
+          .where(eq(imagesTable.seriesId, seriesId))
+          .limit(1);
+        
+        if (images.length > 0 && images[0].filePath && fs.existsSync(images[0].filePath)) {
+          const rtStructPath = images[0].filePath;
+          if (rtStructureCache.has(rtStructPath)) {
+            const cached = rtStructureCache.get(rtStructPath);
+            cached.structures.forEach((s: any) => {
+              originalStructures[s.roiNumber] = s.contours?.length || 0;
+            });
+          }
         }
+      } catch (e) {
+        console.error('Error fetching RT structure for contour counts:', e);
       }
       
       // Detect the action type if not provided
@@ -2348,10 +2357,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       modifications.historyIndex--;
       
-      // Now return the full RT structure data using cache for performance
-      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      // Get the actual RT structure file path from the database
+      let rtStructPath: string | null = null;
+      try {
+        const images = await db.select()
+          .from(imagesTable)
+          .where(eq(imagesTable.seriesId, seriesId))
+          .limit(1);
+        
+        if (images.length > 0 && images[0].filePath) {
+          rtStructPath = images[0].filePath;
+        } else {
+          return res.status(404).json({ error: "RT Structure file not found in database for series " + seriesId });
+        }
+      } catch (e) {
+        console.error('Error fetching RT structure image:', e);
+        return res.status(500).json({ error: "Failed to fetch RT structure file", details: e });
+      }
+      
       if (!fs.existsSync(rtStructPath)) {
-        return res.status(404).json({ error: "RT Structure file not found" });
+        return res.status(404).json({ error: "RT Structure file not found at: " + rtStructPath });
       }
 
       // Use cached parsed structure set or parse and cache it
@@ -2407,10 +2432,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         modifications.modifiedStructures = new Map(historyEntry.newState);
       }
       
-      // Now return the full RT structure data using cache for performance
-      const rtStructPath = 'attached_assets/HN-ATLAS-84/MIM/Fix June 2020.dcm';
+      // Get the actual RT structure file path from the database
+      let rtStructPath: string | null = null;
+      try {
+        const images = await db.select()
+          .from(imagesTable)
+          .where(eq(imagesTable.seriesId, seriesId))
+          .limit(1);
+        
+        if (images.length > 0 && images[0].filePath) {
+          rtStructPath = images[0].filePath;
+        } else {
+          return res.status(404).json({ error: "RT Structure file not found in database for series " + seriesId });
+        }
+      } catch (e) {
+        console.error('Error fetching RT structure image:', e);
+        return res.status(500).json({ error: "Failed to fetch RT structure file", details: e });
+      }
+      
       if (!fs.existsSync(rtStructPath)) {
-        return res.status(404).json({ error: "RT Structure file not found" });
+        return res.status(404).json({ error: "RT Structure file not found at: " + rtStructPath });
       }
 
       // Use cached parsed structure set or parse and cache it

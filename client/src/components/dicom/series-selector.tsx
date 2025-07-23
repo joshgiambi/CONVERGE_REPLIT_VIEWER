@@ -42,6 +42,7 @@ export function SeriesSelector({
   windowLevel,
   onWindowLevelChange,
   studyId,
+  studyIds,
   rtStructures,
   onRTStructureLoad,
   onStructureVisibilityChange,
@@ -184,24 +185,33 @@ export function SeriesSelector({
     }
   };
 
-  // Load RT structure series for the study
+  // Load RT structure series for all studies
   useEffect(() => {
-    if (!studyId) return;
+    const studyIdsToLoad = studyIds || (studyId ? [studyId] : []);
+    if (studyIdsToLoad.length === 0) return;
     
     const loadRTSeries = async () => {
       try {
-        const response = await fetch(`/api/studies/${studyId}/rt-structures`);
-        if (response.ok) {
-          const rtSeriesData = await response.json();
-          setRTSeries(rtSeriesData);
+        const allRTSeries: any[] = [];
+        
+        // Load RT structures for each study
+        for (const id of studyIdsToLoad) {
+          const response = await fetch(`/api/studies/${id}/rt-structures`);
+          if (response.ok) {
+            const rtSeriesData = await response.json();
+            allRTSeries.push(...rtSeriesData);
+          }
         }
+        
+        console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
+        setRTSeries(allRTSeries);
       } catch (error) {
         console.error('Error loading RT series:', error);
       }
     };
     
     loadRTSeries();
-  }, [studyId]);
+  }, [studyId, studyIds]);
 
   // Initialize structure visibility when RT structures are loaded
   useEffect(() => {

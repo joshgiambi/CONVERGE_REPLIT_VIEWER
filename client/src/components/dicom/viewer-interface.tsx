@@ -51,6 +51,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
   const [fusionOpacity, setFusionOpacity] = useState(0.5);
 
+  // Clear RT structures when patient changes
+  useEffect(() => {
+    console.log('Patient changed, clearing RT structures. Patient ID:', studyData?.patient?.id);
+    setRTStructures(null);
+    setStructureVisibility(new Map());
+    setSelectedStructures(new Set());
+    setSelectedForEdit(null);
+    setSelectedStructureColors([]);
+    setIsContourEditMode(false);
+  }, [studyData?.patient?.id]);
+
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
     if (selectedForEdit && rtStructures) {
@@ -240,6 +251,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleRTStructureLoad = (rtStructData: any) => {
+    console.log('Loading RT structures:', rtStructData);
     setRTStructures(rtStructData);
     // Initialize visibility for all structures
     const visibilityMap = new Map();
@@ -420,6 +432,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             windowLevel={windowLevel}
             onWindowLevelChange={setWindowLevel}
             studyId={studyData.studies[0]?.id}
+            studyIds={studyData.studies.map(s => s.id)}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
