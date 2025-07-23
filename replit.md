@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Import Workflow Enhancement and Verification - COMPLETED
+  - ✅ Fixed Import to Database functionality with comprehensive debug logging
+  - ✅ Enhanced triage import workflow with better matching logic for parsed sessions
+  - ✅ Added success toasts and proper loading states for import operations
+  - ✅ Verified end-to-end workflow: Upload → Parse → Triage → Import works seamlessly
+  - ✅ Import automatically detects triage sessions and uses optimized import endpoint
+  - ✅ Added proper query invalidation for patients, studies, and series data refresh
+  - ✅ Confirmed navigation redirect to patient manager after successful import
+  - System successfully imports large datasets (554 DICOM files) with complete metadata preservation
 - July 23, 2025: Triage Folder System Implementation - COMPLETED
   - ✅ Implemented triage folder system to separate upload → parse → import workflow states
   - ✅ Added server-side triageSessions storage for parsed but not imported files

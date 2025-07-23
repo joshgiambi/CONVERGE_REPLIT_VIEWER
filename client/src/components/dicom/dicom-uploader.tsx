@@ -246,11 +246,17 @@ export function DICOMUploader() {
       const triageSessionsResponse = await fetch('/api/triage-sessions');
       if (triageSessionsResponse.ok) {
         const triageData = await triageSessionsResponse.json();
+        console.log('Available triage sessions:', triageData.sessions?.length);
+        console.log('Looking for data length:', parseResult.data?.length);
+        
         const matchingTriage = triageData.sessions?.find(s => 
           s.parseResult?.data?.length === parseResult.data?.length
         );
         
+        console.log('Found matching triage:', !!matchingTriage);
+        
         if (matchingTriage) {
+          console.log('Using triage import for session:', matchingTriage.sessionId);
           // Use triage import endpoint
           const response = await fetch('/api/import-triage', {
             method: 'POST',
@@ -259,8 +265,23 @@ export function DICOMUploader() {
           });
           
           if (!response.ok) {
-            throw new Error('Failed to import from triage');
+            const errorText = await response.text();
+            console.error('Triage import failed:', errorText);
+            throw new Error(`Failed to import from triage: ${errorText}`);
           }
+          
+          console.log('Triage import successful');
+          
+          // Show success toast
+          toast({
+            title: "Import successful",
+            description: `Successfully imported ${parseResult.patientPreviews?.length || 1} patients with ${parseResult.data?.length || 0} images.`,
+          });
+          
+          // Invalidate queries to refresh the UI
+          queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/series'] });
           
           // Clean up and navigate
           setParseResult(null);
