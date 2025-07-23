@@ -2906,17 +2906,17 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           </div>
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && (
+          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
-              primarySeriesId={seriesId}
-              studyId={studyId}
-              onSecondarySeriesSelect={props.onSecondarySeriesSelect}
+              primarySeriesId={parseInt(seriesId)}
+              studyId={parseInt(studyId)}
+              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id.toString() : 'none')}
               opacity={fusionOpacity}
               onOpacityChange={props.onFusionOpacityChange}
               isVisible={true}
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
-              selectedSecondaryId={secondarySeriesId}
+              selectedSecondaryId={secondarySeriesId && secondarySeriesId !== 'none' ? parseInt(secondarySeriesId) : null}
             />
           )}
         </div>

@@ -20,6 +20,8 @@ interface FusionControlPanelProps {
   mriWindowLevel?: { width: number; center: number };
   onMriWindowLevelChange?: (windowLevel: { width: number; center: number }) => void;
   selectedSecondaryId?: number | null;
+  primaryModality?: string;
+  availableModalities?: string[];
 }
 
 export function FusionControlPanel({
@@ -31,7 +33,9 @@ export function FusionControlPanel({
   isVisible,
   mriWindowLevel = { width: 800, center: 400 },
   onMriWindowLevelChange,
-  selectedSecondaryId
+  selectedSecondaryId,
+  primaryModality = 'CT',
+  availableModalities = []
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
   const [localOpacity, setLocalOpacity] = useState(opacity);
@@ -49,6 +53,13 @@ export function FusionControlPanel({
   
   // Filter for MR series only
   const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
+  
+  // Get primary series info
+  const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
+  const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
+  
+  // Determine secondary modality label
+  const secondaryModality = mrSeries.length > 0 ? 'MR' : 'Secondary';
   
   // Auto-select first MR series with valid slice locations
   useEffect(() => {
@@ -98,7 +109,7 @@ export function FusionControlPanel({
             </Button>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px] border-gray-500/50 text-gray-300 px-1.5 py-0">
-                CT
+                {actualPrimaryModality}
               </Badge>
               <div className="w-32 relative py-2">
                 <Slider
@@ -113,11 +124,11 @@ export function FusionControlPanel({
                 />
               </div>
               <Badge variant="outline" className="text-[10px] border-purple-500/50 text-purple-300 px-1.5 py-0">
-                MRI
+                {secondaryModality}
               </Badge>
             </div>
             <span className="text-xs text-purple-300 min-w-[6ch]">
-              CT {Math.round((1 - localOpacity) * 100)}%
+              {actualPrimaryModality} {Math.round((1 - localOpacity) * 100)}%
             </span>
           </div>
         </Card>
@@ -151,7 +162,7 @@ export function FusionControlPanel({
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300">Available Fusion Series</Label>
               <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
-                {mrSeries.length} MR series
+                {mrSeries.length} {secondaryModality} series
               </Badge>
             </div>
             
@@ -173,7 +184,7 @@ export function FusionControlPanel({
                     <Layers className="w-4 h-4 text-purple-300" />
                   </div>
                   <p className="text-xs text-purple-200 font-medium">
-                    MR {index + 1}
+                    {secondaryModality} {index + 1}
                   </p>
                   <p className="text-[10px] text-purple-400">
                     {series.imageCount} imgs
