@@ -265,7 +265,7 @@ export function DICOMUploader() {
           // Clean up and navigate
           setParseResult(null);
           setParseSession(null);
-          setLocation('/patients');
+          setLocation('/');
           return;
         }
       }
@@ -301,7 +301,7 @@ export function DICOMUploader() {
       
       // Navigate to patient manager
       setTimeout(() => {
-        setLocation('/patients');
+        setLocation('/');
       }, 1000);
       
     } catch (error) {
