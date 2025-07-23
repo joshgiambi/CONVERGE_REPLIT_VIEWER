@@ -146,6 +146,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   
   // Cache for image metadata to prevent repeated loading
   const metadataCache = useRef<Map<number, any>>(new Map());
+  
+  // Cache for RT structures to prevent repeated API calls
+  const rtStructureCache = useRef<Map<number, any>>(new Map());
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1143,7 +1146,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         if (currentImage?.id) {
           loadImageMetadata(currentImage.id);
         }
-      }, 10);
+      }, 50); // Slightly longer delay to reduce excessive calls during fast scrolling
       
       return () => clearTimeout(timeoutId);
     }
@@ -1378,11 +1381,19 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       }
       const cacheKey = currentImage.sopInstanceUID;
 
-      // Clear canvas
+      // Clear canvas and show loading if image not ready
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       let imageData = imageCache.get(cacheKey);
+      
+      // Show loading message if image data not available
+      if (!imageData || !imageData.data) {
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Loading image...', canvas.width / 2, canvas.height / 2);
+      }
 
       if (!imageData || !imageData.data) {
         // Try to reload the image if it's not in cache
@@ -1442,7 +1453,6 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           };
           renderRTStructures(ctx, canvas, imageWithMetadata);
         } catch (rtError) {
-          console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
         }
       }

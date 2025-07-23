@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export interface RTContour {
   slicePosition: number;
@@ -55,6 +55,9 @@ export function RTStructureOverlay({
   const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
+  // Cache to prevent repeated API calls
+  const rtStructureCache = useRef<Map<number, RTStructureSet>>(new Map());
+  
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures || localRTStructures;
 
@@ -64,6 +67,12 @@ export function RTStructureOverlay({
       return; // Skip loading if external structures are provided
     }
     
+    // Check cache first
+    if (rtStructureCache.current.has(studyId)) {
+      setLocalRTStructures(rtStructureCache.current.get(studyId) || null);
+      return;
+    }
+    
     const loadRTStructures = async () => {
       try {
         setIsLoading(true);
@@ -71,7 +80,6 @@ export function RTStructureOverlay({
         // First get RT structure series for this study
         const response = await fetch(`/api/studies/${studyId}/rt-structures`);
         if (!response.ok) {
-          console.log('No RT structures found for this study');
           return;
         }
         
@@ -89,8 +97,10 @@ export function RTStructureOverlay({
         }
 
         const rtStructData = await contourResponse.json();
+        
+        // Cache the loaded data
+        rtStructureCache.current.set(studyId, rtStructData);
         setLocalRTStructures(rtStructData);
-        console.log(`Loaded RT structures with ${rtStructData.structures.length} ROIs`);
         
       } catch (error) {
         console.error('Error loading RT structures:', error);
