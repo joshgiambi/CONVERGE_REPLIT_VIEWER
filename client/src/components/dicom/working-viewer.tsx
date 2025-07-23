@@ -53,7 +53,7 @@ interface WorkingViewerProps {
   hasSecondarySeriesForFusion?: boolean;
 }
 
-export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) => {
+const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
   const {
     seriesId,
     studyId,
@@ -1948,8 +1948,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     }
     
     // Get the secondary image data from cache (use window reference to avoid closure issues)
-    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
-    let secondaryImageData = actualCache.get(closestSecondaryImage.sopInstanceUID);
+    const currentCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
+    let secondaryImageData = currentCache.get(closestSecondaryImage.sopInstanceUID);
     if (!secondaryImageData) {
       console.warn(`Secondary image not found in cache, attempting to load: ${closestSecondaryImage.sopInstanceUID}`);
       
@@ -3146,6 +3146,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
 });
 
 WorkingViewer.displayName = 'WorkingViewer';
+
+export { WorkingViewer };
 
 declare global {
   interface Window {
