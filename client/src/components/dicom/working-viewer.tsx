@@ -1325,7 +1325,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           }
         } catch (reloadError) {
           console.error("Failed to reload image:", reloadError);
-          throw new Error(`Image not available: ${reloadError.message || 'Unknown error'}`);
+          throw new Error(`Image not available: ${reloadError instanceof Error ? reloadError.message : 'Unknown error'}`);
         }
       }
 
@@ -1847,7 +1847,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     let dicomCenter = null;
     let dicomWidth = null;
     
-    if (secondaryImageData.metadata) {
+    if ('metadata' in secondaryImageData && secondaryImageData.metadata) {
       if (secondaryImageData.metadata.windowCenter) {
         dicomCenter = parseFloat(secondaryImageData.metadata.windowCenter);
       }
@@ -2908,15 +2908,15 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
           {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
-              primarySeriesId={parseInt(seriesId)}
-              studyId={parseInt(studyId)}
-              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id.toString() : 'none')}
+              primarySeriesId={seriesId}
+              studyId={studyId}
+              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id : 'none')}
               opacity={fusionOpacity}
               onOpacityChange={props.onFusionOpacityChange}
               isVisible={true}
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
-              selectedSecondaryId={secondarySeriesId && secondarySeriesId !== 'none' ? parseInt(secondarySeriesId) : null}
+              selectedSecondaryId={secondarySeriesId && secondarySeriesId !== 'none' ? secondarySeriesId : null}
             />
           )}
         </div>
