@@ -85,6 +85,8 @@ export function DICOMUploader() {
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const [unprocessedFiles, setUnprocessedFiles] = useState<UnprocessedFile[]>([]);
   const [triageSessions, setTriageSessions] = useState<any[]>([]);
+  const [processingMessage, setProcessingMessage] = useState<string>('');
+  const [importMessage, setImportMessage] = useState<string>('');
 
   const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -103,9 +105,16 @@ export function DICOMUploader() {
       console.log('Session status:', session.status, 'Progress:', session.progress, '/', session.total);
       setParseSession(session);
       
-      // Update progress
+      // Update progress and status message
       if (session.total > 0) {
         setUploadProgress(Math.round((session.progress / session.total) * 100));
+      }
+      
+      // Show current file being processed
+      if (session.currentFile) {
+        setProcessingMessage(`Processing file ${session.progress} of ${session.total}: ${session.currentFile}`);
+      } else if (session.status === 'parsing') {
+        setProcessingMessage(`Processing ${session.progress} of ${session.total} files...`);
       }
       
       // If complete, check for triage session and load it directly
@@ -256,6 +265,7 @@ export function DICOMUploader() {
 
     setIsImporting(true);
     setError(null);
+    setImportMessage('Starting import process...');
 
     try {
       // Check if this came from triage - use the better import endpoint
@@ -273,6 +283,7 @@ export function DICOMUploader() {
         
         if (matchingTriage) {
           console.log('Using triage import for session:', matchingTriage.sessionId);
+          setImportMessage('Moving files to permanent storage...');
           // Use triage import endpoint
           const response = await fetch('/api/import-triage', {
             method: 'POST',
@@ -447,6 +458,7 @@ export function DICOMUploader() {
     try {
       setIsImporting(true);
       setError(null);
+      setImportMessage('Moving files to permanent storage...');
       
       // Use the enhanced triage import endpoint
       const response = await fetch('/api/import-triage', {
@@ -565,7 +577,19 @@ export function DICOMUploader() {
                 {parseSession?.currentFile ? 'Processing DICOM files...' : 'Uploading files...'}
               </p>
               <Progress value={uploadProgress} className="w-full max-w-md mx-auto" />
-              {parseSession?.currentFile ? (
+              {processingMessage ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-300">
+                    {processingMessage}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {uploadProgress}% complete
+                  </p>
+                  <p className="text-xs text-gray-500 italic">
+                    You can navigate away - parsing continues in background
+                  </p>
+                </div>
+              ) : parseSession?.currentFile ? (
                 <div className="space-y-2">
                   <p className="text-sm text-gray-400">
                     File {parseSession.progress} of {parseSession.total} ({uploadProgress}%)
@@ -643,7 +667,7 @@ export function DICOMUploader() {
                     className="bg-blue-600 hover:bg-blue-700"
                   >
                     <Database className="w-4 h-4 mr-2" />
-                    {isImporting ? 'Importing...' : 'Import to Database'}
+                    {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
                   </Button>
                   <Button
                     size="sm"
@@ -782,7 +806,7 @@ export function DICOMUploader() {
                 className="bg-blue-600 hover:bg-blue-700"
               >
                 <Database className="w-4 h-4 mr-2" />
-                {isImporting ? 'Importing...' : 'Import to Database'}
+                {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
               </Button>
             </div>
           </Card>
