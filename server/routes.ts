@@ -2419,6 +2419,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Helper function to find DICOM files recursively
+  function findDicomFilesRecursive(dirPath: string): string[] {
+    const files: string[] = [];
+    
+    try {
+      const items = fs.readdirSync(dirPath);
+      
+      for (const item of items) {
+        const itemPath = path.join(dirPath, item);
+        const stat = fs.statSync(itemPath);
+        
+        if (stat.isDirectory()) {
+          // Recursively search subdirectories
+          files.push(...findDicomFilesRecursive(itemPath));
+        } else if (item.toLowerCase().endsWith('.dcm') || !path.extname(item)) {
+          files.push(itemPath);
+        }
+      }
+    } catch (error) {
+      console.error(`Error reading directory ${dirPath}:`, error);
+    }
+    
+    return files;
+  }
+
   // Check for unprocessed files in uploads directory
   app.get("/api/unprocessed-files", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -2438,9 +2463,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const stat = fs.statSync(itemPath);
         
         if (stat.isDirectory() && item.startsWith('upload-')) {
-          // Check for .dcm files in this upload directory
-          const files = fs.readdirSync(itemPath);
-          const dcmFiles = files.filter(f => f.toLowerCase().endsWith('.dcm'));
+          // Check for .dcm files in this upload directory (including subdirectories)
+          const dcmFiles = findDicomFilesRecursive(itemPath);
           
           if (dcmFiles.length > 0) {
             unprocessedFiles.push({
@@ -2456,21 +2480,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Sort by upload time, newest first
       unprocessedFiles.sort((a, b) => b.uploadTime.getTime() - a.uploadTime.getTime());
       
-      // Filter out sessions that have already been processed
-      const filteredFiles = [];
-      for (const file of unprocessedFiles) {
-        // Check if a parsing session exists for this upload session
-        const matchingSession = Array.from(parsingSessions.values()).find(
-          session => session.uploadSessionId === file.sessionId && session.status === 'complete'
-        );
-        
-        // Only include if no completed parsing session exists
-        if (!matchingSession) {
-          filteredFiles.push(file);
-        }
-      }
-
-      res.json({ files: filteredFiles });
+      // Since parsing sessions are lost on server restart, show all unprocessed files
+      // In a production system, this would check the database for imported data
+      res.json({ files: unprocessedFiles });
     } catch (error) {
       console.error('Error checking unprocessed files:', error);
       res.status(500).json({ error: 'Failed to check unprocessed files' });
@@ -2578,19 +2590,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Upload directory not found" });
       }
       
-      // Get all DICOM files from the directory
-      const files = fs.readdirSync(uploadPath)
-        .filter(f => f.toLowerCase().endsWith('.dcm'))
-        .map(filename => ({
+      // Get all DICOM files from the directory (including subdirectories)
+      const dicomFilePaths = findDicomFilesRecursive(uploadPath);
+      
+      const files = dicomFilePaths.map(filePath => {
+        const filename = path.basename(filePath);
+        return {
           fieldname: 'files',
           originalname: filename,
           encoding: '7bit',
           mimetype: 'application/dicom',
-          destination: uploadPath,
+          destination: path.dirname(filePath),
           filename: filename,
-          path: path.join(uploadPath, filename),
-          size: fs.statSync(path.join(uploadPath, filename)).size
-        })) as Express.Multer.File[];
+          path: filePath,
+          size: fs.statSync(filePath).size
+        };
+      }) as Express.Multer.File[];
       
       if (files.length === 0) {
         return res.status(400).json({ error: "No DICOM files found in upload directory" });
