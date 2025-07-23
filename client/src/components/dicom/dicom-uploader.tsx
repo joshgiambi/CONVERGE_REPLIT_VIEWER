@@ -653,7 +653,7 @@ export function DICOMUploader() {
               <div key={session.sessionId} className="flex items-center justify-between p-3 bg-green-800/20 rounded-lg">
                 <div>
                   <p className="text-white font-medium">
-                    {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.totalImages || 0} images
+                    {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.data?.length || session.parseResult?.totalFiles || 0} images
                   </p>
                   <p className="text-sm text-gray-400">
                     Parsed {new Date(session.timestamp).toLocaleString()}
