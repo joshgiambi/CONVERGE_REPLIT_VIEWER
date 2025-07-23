@@ -1206,16 +1206,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const [patientKey, patientData] of patientMap) {
         const metadata = patientData.metadata;
         
+        console.log(`\n=== Creating database entries for patient: ${metadata.patientID} ===`);
+        
         // Create or get patient
         let dbPatient = await storage.getPatientByID(metadata.patientID);
         if (!dbPatient) {
-          dbPatient = await storage.createPatient({
-            patientID: metadata.patientID || 'UNKNOWN',
-            patientName: metadata.patientName || 'Unknown Patient',
-            patientSex: metadata.patientSex || 'U',
-            patientAge: metadata.patientAge || '',
-            dateOfBirth: metadata.patientBirthDate || ''
-          });
+          console.log(`Creating new patient: ${metadata.patientID}`);
+          try {
+            dbPatient = await storage.createPatient({
+              patientID: metadata.patientID || 'UNKNOWN',
+              patientName: metadata.patientName || 'Unknown Patient',
+              patientSex: metadata.patientSex || 'U',
+              patientAge: metadata.patientAge || '',
+              dateOfBirth: metadata.patientBirthDate || ''
+            });
+            console.log(`Successfully created patient with ID: ${dbPatient.id}`);
+          } catch (error) {
+            console.error(`ERROR creating patient:`, error);
+            throw error;
+          }
+        } else {
+          console.log(`Patient already exists with ID: ${dbPatient.id}`);
         }
 
         const studies = patientData.studies;
@@ -1226,18 +1237,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Create or get study
           let dbStudy = await storage.getStudyByUID(studyMetadata.studyInstanceUID);
           if (!dbStudy) {
-            dbStudy = await storage.createStudy({
-              patientId: dbPatient.id,
-              studyInstanceUID: studyMetadata.studyInstanceUID || generateUID(),
-              studyDate: studyMetadata.studyDate || '',
-              studyDescription: studyMetadata.studyDescription || '',
-              accessionNumber: studyMetadata.accessionNumber || '',
-              numberOfSeries: studyData.series.size,
-              numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0),
-              patientName: dbPatient.patientName,
-              patientID: dbPatient.patientID,
-              modality: studyData.series.values().next().value[0].modality || null
-            });
+            console.log(`Creating new study: ${studyMetadata.studyInstanceUID}`);
+            try {
+              dbStudy = await storage.createStudy({
+                patientId: dbPatient.id,
+                studyInstanceUID: studyMetadata.studyInstanceUID || generateUID(),
+                studyDate: studyMetadata.studyDate || '',
+                studyDescription: studyMetadata.studyDescription || '',
+                accessionNumber: studyMetadata.accessionNumber || '',
+                numberOfSeries: studyData.series.size,
+                numberOfImages: Array.from(studyData.series.values()).reduce((sum, s) => sum + s.length, 0),
+                patientName: dbPatient.patientName,
+                patientID: dbPatient.patientID,
+                modality: studyData.series.values().next().value[0].modality || null
+              });
+              console.log(`Successfully created study with ID: ${dbStudy.id}`);
+            } catch (error) {
+              console.error(`ERROR creating study:`, error);
+              console.error(`Study data:`, {
+                patientId: dbPatient.id,
+                studyInstanceUID: studyMetadata.studyInstanceUID,
+                patientName: dbPatient.patientName,
+                patientID: dbPatient.patientID
+              });
+              throw error;
+            }
+          } else {
+            console.log(`Study already exists with ID: ${dbStudy.id}`);
           }
 
           const series = studyData.series;
@@ -1248,19 +1274,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Create or get series
             let dbSeries = await storage.getSeriesByUID(seriesMetadata.seriesInstanceUID);
             if (!dbSeries) {
-              dbSeries = await storage.createSeries({
-                studyId: dbStudy.id,
-                seriesInstanceUID: seriesMetadata.seriesInstanceUID || generateUID(),
-                seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
-                seriesDescription: seriesMetadata.seriesDescription || '',
-                modality: seriesMetadata.modality || 'OT',
-                imageCount: seriesFiles.length,
-                sliceThickness: seriesMetadata.sliceThickness || null,
-                metadata: { 
-                  bodyPartExamined: seriesMetadata.bodyPartExamined || '',
-                  protocolName: seriesMetadata.protocolName || '' 
-                }
-              });
+              console.log(`Creating new series: ${seriesMetadata.seriesInstanceUID} (${seriesFiles.length} images)`);
+              try {
+                dbSeries = await storage.createSeries({
+                  studyId: dbStudy.id,
+                  seriesInstanceUID: seriesMetadata.seriesInstanceUID || generateUID(),
+                  seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
+                  seriesDescription: seriesMetadata.seriesDescription || '',
+                  modality: seriesMetadata.modality || 'OT',
+                  imageCount: seriesFiles.length,
+                  sliceThickness: seriesMetadata.sliceThickness || null,
+                  metadata: { 
+                    bodyPartExamined: seriesMetadata.bodyPartExamined || '',
+                    protocolName: seriesMetadata.protocolName || '' 
+                  }
+                });
+                console.log(`Successfully created series with ID: ${dbSeries.id}`);
+              } catch (error) {
+                console.error(`ERROR creating series:`, error);
+                console.error(`Series data:`, {
+                  studyId: dbStudy.id,
+                  seriesInstanceUID: seriesMetadata.seriesInstanceUID,
+                  modality: seriesMetadata.modality
+                });
+                throw error;
+              }
+            } else {
+              console.log(`Series already exists with ID: ${dbSeries.id}`);
             }
 
             // Create images for each file (skip duplicates)
