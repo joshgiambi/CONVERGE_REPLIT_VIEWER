@@ -2977,6 +2977,27 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
                   currentIndex + 1}
               </div>
             )}
+            {/* Show MRI slice position when fusion is active with secondary images */}
+            {secondarySeriesId && secondarySeriesId !== 'none' && secondaryImages.length > 0 && fusionOpacity > 0 && (
+              <div className="mt-1 text-purple-400">
+                {secondaryModality} Z:{" "}
+                {(() => {
+                  // Find the closest MRI slice that's being shown for this CT slice
+                  const ctSlicePosition = images[currentIndex].parsedSliceLocation || 
+                                        images[currentIndex].parsedZPosition || 
+                                        currentIndex;
+                  
+                  // Look up the cached MRI slice mapping
+                  const cachedMapping = mriSliceMappingCache.current.get(currentIndex);
+                  if (cachedMapping && cachedMapping.mriIndex >= 0 && cachedMapping.mriIndex < secondaryImages.length) {
+                    const mriSlice = secondaryImages[cachedMapping.mriIndex];
+                    return mriSlice.sliceLocation ? parseFloat(mriSlice.sliceLocation).toFixed(1) : "N/A";
+                  }
+                  
+                  return "N/A";
+                })()}
+              </div>
+            )}
             {rtStructures && showStructures && (
               <div className="mt-1 text-green-400">
                 RT Structures: {rtStructures?.structures?.length || 0} ROIs
