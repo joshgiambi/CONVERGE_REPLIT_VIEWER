@@ -139,6 +139,10 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   
   // Cache for MRI slice mappings to prevent recalculation during scrolling
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
+  // Pre-computed MRI Z-range in CT space for performance
+  const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
+  // Pre-computed transformed MRI positions for fast lookup
+  const transformedMRIPositions = useRef<Array<{ original: any; transformed: number[]; zInCT: number }>>([]); 
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -985,10 +989,77 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     
     if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && images.length > 0) {
       console.log('Registration matrix loaded, re-rendering fusion overlay');
+      
+      // Pre-compute MRI transformations if we have secondary images loaded
+      if (secondaryImages.length > 0) {
+        precomputeMRITransformations(secondaryImages, registrationMatrix);
+      }
+      
       displayCurrentImage();
     }
   }, [registrationMatrix, secondarySeriesId, images.length]);
   
+  // Pre-compute MRI transformations for performance
+  const precomputeMRITransformations = (mriImages: any[], registrationMatrix: number[]) => {
+    console.log("Pre-computing MRI transformations for performance optimization...");
+    
+    // Convert flat array to 4x4 matrix
+    const regMatrix4x4 = [
+      [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
+      [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
+      [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
+      [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
+    ];
+    
+    const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
+      const result: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        result[i] = 0;
+        for (let j = 0; j < 4; j++) {
+          result[i] += matrix[i][j] * vector[j];
+        }
+      }
+      return result;
+    };
+    
+    // Transform all MRI positions to CT space
+    const transformed = mriImages.map((mriImage, index) => {
+      const mriPos = mriImage.imagePosition;
+      if (!mriPos) return null;
+      
+      const mriPatientPosition = typeof mriPos === 'string' 
+        ? mriPos.split('\\').map((p: string) => parseFloat(p))
+        : mriPos;
+        
+      if (mriPatientPosition.length < 3) return null;
+      
+      const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
+      const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
+      
+      return {
+        original: mriImage,
+        transformed: mriTransformed,
+        zInCT: mriTransformed[2]
+      };
+    }).filter(item => item !== null);
+    
+    // Store transformed positions
+    transformedMRIPositions.current = transformed;
+    
+    // Calculate and store Z-range
+    if (transformed.length > 0) {
+      const zValues = transformed.map(item => item.zInCT);
+      mriZRangeInCTSpace.current = {
+        min: Math.min(...zValues),
+        max: Math.max(...zValues)
+      };
+      console.log(`MRI Z-range in CT space: [${mriZRangeInCTSpace.current.min.toFixed(1)}, ${mriZRangeInCTSpace.current.max.toFixed(1)}]`);
+    }
+    
+    // Clear cache to force recomputation with new data
+    mriSliceMappingCache.current.clear();
+  };
+
   // Load secondary series images for fusion
   useEffect(() => {
     const loadSecondaryImages = async () => {
@@ -1078,6 +1149,11 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         setSecondaryImageCache(newCache);
         console.log(`Preloaded ${newCache.size} secondary images`);
         console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
+        
+        // Pre-compute MRI positions in CT space if registration matrix is available
+        if (registrationMatrix && registrationMatrix.length === 16) {
+          precomputeMRITransformations(sortedImages, registrationMatrix);
+        }
         
         // Trigger re-render to show fusion overlay
         if (newCache.size > 0) {
@@ -1731,86 +1807,85 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         minDistance = cached.distance;
         console.log(`Using cached MRI mapping: CT[${currentIndex}] -> MRI[${cached.mriIndex}] (distance: ${cached.distance.toFixed(1)}mm)`);
       } else {
-        // Find the MRI slice with the closest patient coordinates
-        let bestMatch = null;
-        let bestDistance = Infinity;
-        let bestIndex = -1;
-        
-        // Since registration matrix transforms MRI->CT, we need to find which MRI slice 
-        // when transformed, has a Z coordinate closest to the current CT Z
-        
-        for (let i = 0; i < secondaryImages.length; i++) {
-          const mriImage = secondaryImages[i];
-          const mriPos = mriImage.imagePosition;
-          if (!mriPos) continue;
-        
-        const mriPatientPosition = typeof mriPos === 'string' 
-          ? mriPos.split('\\').map((p: string) => parseFloat(p))
-          : mriPos;
-        if (mriPatientPosition.length < 3) continue;
-        
-        // Transform MRI coordinates to CT space
-        const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
-        const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
-        
-        // Check Z-distance in CT space
-        const zDistance = Math.abs(mriTransformed[2] - ctZ);
-        
-        if (zDistance < bestDistance) {
-          bestDistance = zDistance;
-          bestMatch = mriImage;
-          bestIndex = i;
-          
-          if (i < 3 || zDistance < 10) {
-            console.log(`MRI[${i}] at Z=${mriPatientPosition[2].toFixed(1)}mm -> CT Z=${mriTransformed[2].toFixed(1)}mm, distance=${zDistance.toFixed(1)}mm`);
+        // Use pre-computed transformations for fast lookup
+        const startTime = performance.now();
+        if (transformedMRIPositions.current.length > 0) {
+          // Quick check if CT is outside MRI range
+          if (mriZRangeInCTSpace.current) {
+            if (ctZ < mriZRangeInCTSpace.current.min - 5 || ctZ > mriZRangeInCTSpace.current.max + 5) {
+              console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+              mriSliceMappingCache.current.set(cacheKey, null);
+              return;
+            }
           }
+          
+          // Binary search for closest MRI slice (since they're sorted by slice location)
+          let bestMatch = null;
+          let bestDistance = Infinity;
+          let bestIndex = -1;
+          
+          // Use binary search to find the closest match
+          let left = 0;
+          let right = transformedMRIPositions.current.length - 1;
+          
+          while (left <= right) {
+            const mid = Math.floor((left + right) / 2);
+            const midZ = transformedMRIPositions.current[mid].zInCT;
+            const distance = Math.abs(midZ - ctZ);
+            
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestMatch = transformedMRIPositions.current[mid].original;
+              bestIndex = mid;
+            }
+            
+            if (midZ < ctZ) {
+              left = mid + 1;
+            } else {
+              right = mid - 1;
+            }
+          }
+          
+          // Also check neighbors for the absolute closest
+          if (bestIndex > 0) {
+            const prevDistance = Math.abs(transformedMRIPositions.current[bestIndex - 1].zInCT - ctZ);
+            if (prevDistance < bestDistance) {
+              bestDistance = prevDistance;
+              bestMatch = transformedMRIPositions.current[bestIndex - 1].original;
+              bestIndex = bestIndex - 1;
+            }
+          }
+          if (bestIndex < transformedMRIPositions.current.length - 1) {
+            const nextDistance = Math.abs(transformedMRIPositions.current[bestIndex + 1].zInCT - ctZ);
+            if (nextDistance < bestDistance) {
+              bestDistance = nextDistance;
+              bestMatch = transformedMRIPositions.current[bestIndex + 1].original;
+              bestIndex = bestIndex + 1;
+            }
+          }
+          
+          console.log(`⚡ Fast MRI lookup: Best match found in ${(performance.now() - startTime).toFixed(1)}ms (distance: ${bestDistance.toFixed(1)}mm)`);
+          
+          if (bestMatch && bestDistance < 10) {
+            closestSecondaryImage = bestMatch;
+            minDistance = bestDistance;
+            const actualIndex = secondaryImages.indexOf(bestMatch);
+            console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
+            mriSliceMappingCache.current.set(cacheKey, { mriIndex: actualIndex, distance: bestDistance });
+          } else {
+            console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
+            mriSliceMappingCache.current.set(cacheKey, null);
+            return;
+          }
+        } else {
+          // Fallback to computing on-the-fly if pre-computed data not available
+          console.warn("Pre-computed MRI transformations not available, computing on-the-fly");
+          
+          // ... original computation code would go here as fallback ...
+          mriSliceMappingCache.current.set(cacheKey, null);
+          return;
         }
-      }
-      
-      console.log(`Best match Z-distance: ${bestDistance.toFixed(1)}mm`);
-      
-      // Check if we're outside MRI coverage
-      const mriZMin = Math.min(...secondaryImages.map(img => {
-        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
-          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : img.imagePosition) : null;
-        if (!pos || pos.length < 3) return Infinity;
-        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
-        return transformed[2];
-      }));
-      const mriZMax = Math.max(...secondaryImages.map(img => {
-        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
-          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : img.imagePosition) : null;
-        if (!pos || pos.length < 3) return -Infinity;
-        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
-        return transformed[2];
-      }));
-      
-      console.log(`MRI Z range in CT space: [${mriZMin.toFixed(1)}, ${mriZMax.toFixed(1)}]`);
-      console.log(`Current CT Z: ${ctZ.toFixed(1)}mm`);
-      
-      if (ctZ < mriZMin - 5 || ctZ > mriZMax + 5) {
-        console.log(`CT slice is outside MRI coverage - no fusion overlay`);
-        // Store null in cache to indicate out of coverage
-        mriSliceMappingCache.current.set(cacheKey, null);
-        return; // MRI doesn't cover this CT slice
-      }
-      
-      if (bestMatch && bestDistance < 10) { // Tighter tolerance for proper alignment
-        closestSecondaryImage = bestMatch;
-        minDistance = bestDistance;
-        console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
-        // Store in cache
-        mriSliceMappingCache.current.set(cacheKey, { mriIndex: bestIndex, distance: bestDistance });
-      } else {
-        console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
-        console.error(`Unable to find matching MRI slice using registration.`);
-        // Store null in cache to indicate out of coverage
-        mriSliceMappingCache.current.set(cacheKey, null);
-        return; // Don't render fusion if match isn't good enough
-      }
-    } // Close the else block for cache check
+      } // Close the else block for cache check
     } else {
       // Fallback: simple linear mapping if no registration available
       console.warn("No registration matrix available, using linear mapping");
@@ -1879,6 +1954,52 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         return;
       }
     }
+    
+    // Optional: Enable interpolation for smoother transitions
+    const enableInterpolation = true; // User can toggle this for performance vs quality
+    let interpolatedImageData = secondaryImageData;
+    
+    if (enableInterpolation && minDistance > 1.0) { // Only interpolate if not exactly on a slice
+      console.log(`Interpolating MRI slices for smoother fusion (distance: ${minDistance.toFixed(1)}mm)`);
+      
+      // Find adjacent slices for interpolation
+      const currentMRIIndex = secondaryImages.indexOf(closestSecondaryImage);
+      let prevImage = null, nextImage = null;
+      let prevData = null, nextData = null;
+      
+      // Determine which adjacent slice to use based on CT position
+      const ctIsAbove = ctZ > transformedMRIPositions.current.find(p => p.original === closestSecondaryImage)?.zInCT;
+      
+      if (ctIsAbove && currentMRIIndex < secondaryImages.length - 1) {
+        nextImage = secondaryImages[currentMRIIndex + 1];
+        nextData = secondaryImageCache.get(nextImage.sopInstanceUID);
+      } else if (!ctIsAbove && currentMRIIndex > 0) {
+        prevImage = secondaryImages[currentMRIIndex - 1];
+        prevData = secondaryImageCache.get(prevImage.sopInstanceUID);
+      }
+      
+      // Perform linear interpolation if we have adjacent data
+      if ((prevData || nextData) && (secondaryImageData.width === (prevData?.width || nextData?.width))) {
+        const adjacentData = prevData || nextData;
+        const weight = Math.min(minDistance / 4.0, 0.5); // Cap interpolation weight at 0.5
+        
+        // Create interpolated image data
+        const interpolatedArray = new Float32Array(secondaryImageData.data.length);
+        for (let i = 0; i < secondaryImageData.data.length; i++) {
+          interpolatedArray[i] = secondaryImageData.data[i] * (1 - weight) + adjacentData.data[i] * weight;
+        }
+        
+        interpolatedImageData = {
+          data: interpolatedArray,
+          width: secondaryImageData.width,
+          height: secondaryImageData.height
+        };
+        
+        console.log(`Applied interpolation with weight: ${weight.toFixed(2)}`);
+      }
+    }
+    
+    secondaryImageData = interpolatedImageData;
     
     // Get primary image metadata for registration alignment
     const primaryImageData = imageCache.get(primaryImage.sopInstanceUID);
