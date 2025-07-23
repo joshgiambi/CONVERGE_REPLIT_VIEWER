@@ -46,6 +46,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
   
+  // Cache for RT structures to prevent repeated API calls
+  const rtStructureCache = useRef<Map<number, any>>(new Map());
+  
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
@@ -111,13 +114,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
-      if (rtSeries) {
-        console.log(`Loading RT structures for study ${rtSeries.studyId}`);
+      if (rtSeries && !rtStructureCache.current.has(rtSeries.id)) {
+        console.log(`Auto-loading RT structures for series:`, rtSeries.id);
         handleRTSeriesSelect(rtSeries);
-      } else {
-        // Clear RT structures if no RT series found
-        console.log(`No RT structures found in any study`);
-        setRTStructures(null);
       }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
