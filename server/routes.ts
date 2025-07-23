@@ -1273,23 +1273,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 const permanentPath = filePathMap[metadata.sopInstanceUID];
                 
                 if (permanentPath && fs.existsSync(permanentPath)) {
-                  await storage.createImage({
-                    seriesId: dbSeries.id,
-                    sopInstanceUID: metadata.sopInstanceUID || generateUID(),
-                    instanceNumber: parseInt(metadata.instanceNumber) || 1,
-                    filePath: permanentPath,  // Use permanent path
-                    fileName: metadata.fileName || path.basename(permanentPath),
-                    fileSize: fs.statSync(permanentPath).size,
-                    imagePosition: metadata.imagePosition || null,
-                    imageOrientation: metadata.imageOrientation || null,
-                    pixelSpacing: metadata.pixelSpacing || null,
-                    sliceLocation: metadata.sliceLocation || null,
-                    windowCenter: metadata.windowCenter || null,
-                    windowWidth: metadata.windowWidth || null,
-                    metadata: { imported: true },
-                  });
+                  try {
+                    await storage.createImage({
+                      seriesId: dbSeries.id,
+                      sopInstanceUID: metadata.sopInstanceUID || generateUID(),
+                      instanceNumber: parseInt(metadata.instanceNumber) || 1,
+                      filePath: permanentPath,  // Use permanent path
+                      fileName: metadata.fileName || path.basename(permanentPath),
+                      fileSize: fs.statSync(permanentPath).size,
+                      imagePosition: metadata.imagePosition || null,
+                      imageOrientation: metadata.imageOrientation || null,
+                      pixelSpacing: metadata.pixelSpacing || null,
+                      sliceLocation: metadata.sliceLocation ? String(metadata.sliceLocation) : null,
+                      windowCenter: metadata.windowCenter ? String(metadata.windowCenter) : null,
+                      windowWidth: metadata.windowWidth ? String(metadata.windowWidth) : null,
+                      metadata: { imported: true },
+                    });
+                    console.log(`Created image: ${metadata.sopInstanceUID} -> ${permanentPath}`);
+                  } catch (imageError) {
+                    console.error(`Failed to create image ${metadata.sopInstanceUID}:`, imageError);
+                    console.error('Image metadata:', {
+                      sopInstanceUID: metadata.sopInstanceUID,
+                      seriesId: dbSeries.id,
+                      permanentPath
+                    });
+                  }
                 } else {
                   console.log(`Permanent file not found for SOP Instance UID: ${metadata.sopInstanceUID}`);
+                  console.log(`Expected path: ${permanentPath}`);
                 }
               } else {
                 console.log(`Skipping duplicate image: ${metadata.sopInstanceUID}`);
