@@ -116,6 +116,23 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
     // Return a simple placeholder URL or use the first image
     return `/api/series/${seriesId}/thumbnail`;
   };
+
+  // Parse DICOM date format (YYYYMMDD) to JavaScript Date
+  const parseDicomDate = (dateStr: string): Date | null => {
+    if (!dateStr) return null;
+    
+    // Check if it's YYYYMMDD format (8 digits)
+    if (/^\d{8}$/.test(dateStr)) {
+      const year = parseInt(dateStr.substring(0, 4));
+      const month = parseInt(dateStr.substring(4, 6)) - 1; // JS months are 0-indexed
+      const day = parseInt(dateStr.substring(6, 8));
+      return new Date(year, month, day);
+    }
+    
+    // Try standard date parsing for other formats
+    const parsed = Date.parse(dateStr);
+    return isNaN(parsed) ? null : new Date(parsed);
+  };
   
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete patient ${patient.patientName}? This will delete all associated studies, series, and images.`)) {
@@ -217,9 +234,10 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <Calendar className="h-4 w-4" />
                   <span>{
-                    study.studyDate && !isNaN(Date.parse(study.studyDate))
-                      ? format(new Date(study.studyDate), 'MMMM d, yyyy')
-                      : study.studyDate || 'Date N/A'
+                    (() => {
+                      const date = parseDicomDate(study.studyDate);
+                      return date ? format(date, 'MMMM d, yyyy') : 'Date N/A';
+                    })()
                   }</span>
                 </div>
                 <div className="flex items-center gap-2">
