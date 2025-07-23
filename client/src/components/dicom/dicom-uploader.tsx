@@ -84,6 +84,7 @@ export function DICOMUploader() {
   const [error, setError] = useState<string | null>(null);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const [unprocessedFiles, setUnprocessedFiles] = useState<UnprocessedFile[]>([]);
+  const [triageSessions, setTriageSessions] = useState<any[]>([]);
 
   const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -115,8 +116,9 @@ export function DICOMUploader() {
         localStorage.removeItem('currentParseSessionId');
         localStorage.removeItem('uploadActive');
         
-        // Auto-refresh unprocessed files list to remove the processed item
+        // Auto-refresh both unprocessed files and triage sessions
         checkUnprocessedFiles();
+        checkTriageSessions();
       } else if (session.status === 'error') {
         setError(session.error || 'Parsing failed');
         setIsUploading(false);
@@ -146,12 +148,14 @@ export function DICOMUploader() {
       pollSessionStatus(sessionId);
     }
     
-    // Check for unprocessed files immediately
+    // Check for unprocessed files and triage sessions immediately
     checkUnprocessedFiles();
+    checkTriageSessions();
     
-    // Poll for unprocessed files every 3 seconds
+    // Poll for both unprocessed files and triage sessions every 3 seconds
     const interval = setInterval(() => {
       checkUnprocessedFiles();
+      checkTriageSessions();
     }, 3000);
     
     return () => clearInterval(interval);
@@ -166,6 +170,18 @@ export function DICOMUploader() {
       }
     } catch (error) {
       console.error('Error checking unprocessed files:', error);
+    }
+  };
+
+  const checkTriageSessions = async () => {
+    try {
+      const response = await fetch('/api/triage-sessions');
+      if (response.ok) {
+        const data = await response.json();
+        setTriageSessions(data.sessions || []);
+      }
+    } catch (error) {
+      console.error('Error checking triage sessions:', error);
     }
   };
 
@@ -430,42 +446,55 @@ export function DICOMUploader() {
   const handleImportTriageSession = async (sessionId: string) => {
     try {
       setIsImporting(true);
+      setError(null);
       
-      // Get the triage session data
-      const response = await fetch(`/api/triage-sessions/${sessionId}`);
+      // Use the enhanced triage import endpoint
+      const response = await fetch('/api/import-triage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+      
       if (!response.ok) {
-        throw new Error('Failed to get triage session');
+        const errorText = await response.text();
+        console.error('Triage import failed:', errorText);
+        throw new Error(`Failed to import from triage: ${errorText}`);
       }
       
-      const triageSession = await response.json();
+      console.log('Triage import successful');
       
-      // Import the parsed data to database
-      const importResponse = await apiRequest('/api/import-dicom', {
-        method: 'POST',
-        body: JSON.stringify(triageSession.parseResult),
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // Show success toast
+      toast({
+        title: "Import successful",
+        description: "Successfully imported DICOM files to database.",
       });
       
-      // Delete the triage session after successful import
-      await fetch(`/api/triage-sessions/${sessionId}`, {
-        method: 'DELETE'
-      });
-      
-      // Refresh data
+      // Invalidate queries to refresh the UI
       queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
       queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/series'] });
       
-      // Remove from triage list
+      // Remove from triage list and refresh
       setTriageSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+      checkTriageSessions();
+      checkUnprocessedFiles();
       
-      // Show success message
-      setLocation('/patients');
+      // Navigate to patient manager
+      setTimeout(() => {
+        setLocation('/');
+      }, 1000);
       
     } catch (error) {
       console.error('Error importing triage session:', error);
-      setError('Failed to import session');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to import session';
+      setError(errorMessage);
+      
+      // Show error toast
+      toast({
+        title: "Import failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsImporting(false);
     }
@@ -519,14 +548,61 @@ export function DICOMUploader() {
   return (
     <div className="space-y-6">
 
-      {/* Unprocessed Files */}
-      {unprocessedFiles.length > 0 && !isUploading && (
+      {/* Ready to Import - Triage Sessions */}
+      {triageSessions.length > 0 && !isUploading && (
+        <Card className="border-green-600 bg-green-900/20">
+          <CardHeader>
+            <CardTitle className="text-green-300 flex items-center gap-2">
+              <FileCheck className="w-5 h-5" />
+              Ready to Import
+            </CardTitle>
+            <p className="text-green-200 text-sm">Parsed DICOM files ready for database import</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {triageSessions.map((session) => (
+              <div key={session.sessionId} className="flex items-center justify-between p-3 bg-green-800/20 rounded-lg">
+                <div>
+                  <p className="text-white font-medium">
+                    {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.totalImages || 0} images
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    Parsed {new Date(session.timestamp).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleImportTriageSession(session.sessionId)}
+                    disabled={isImporting}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Database className="w-4 h-4 mr-2" />
+                    {isImporting ? 'Importing...' : 'Import to Database'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeleteTriageSession(session.sessionId)}
+                    className="border-red-600 text-red-300 hover:bg-red-600/20"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Unprocessed Files - Fallback for orphaned files */}
+      {unprocessedFiles.length > 0 && !isUploading && triageSessions.length === 0 && (
         <Card className="border-orange-600 bg-orange-900/20">
           <CardHeader>
             <CardTitle className="text-orange-300 flex items-center gap-2">
               <AlertCircle className="w-5 h-5" />
-              Unprocessed Files Found
+              Orphaned Files Found
             </CardTitle>
+            <p className="text-orange-200 text-sm">Files that weren't automatically processed - manual processing required</p>
           </CardHeader>
           <CardContent className="space-y-3">
             {unprocessedFiles.map((file) => (

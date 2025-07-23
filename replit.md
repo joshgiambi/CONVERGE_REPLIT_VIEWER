@@ -129,6 +129,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Automatic Upload-to-Parse Workflow Implementation - COMPLETED
+  - ✅ Implemented automatic parsing workflow: Upload → Auto-Parse → Triage → Import  
+  - ✅ Added triage sessions state management and UI display
+  - ✅ Created "Ready to Import" section as primary interface for parsed files
+  - ✅ Modified "Unprocessed Files" to be fallback section for orphaned files only
+  - ✅ Files now automatically move to triage after parsing completion
+  - ✅ Enhanced import handler to use triage import endpoint with proper cleanup
+  - ✅ Added comprehensive polling for both triage sessions and unprocessed files
+  - ✅ Upload flow now seamless: user uploads → system auto-parses → shows "Ready to Import" → user clicks import
+  - Manual "Process" button now only appears as fallback when automatic processing fails
+  - System maintains clean separation: active parsing vs ready-to-import vs orphaned files
 - July 23, 2025: Unprocessed Files Cleanup System Completion - COMPLETED
   - ✅ Fixed critical uploadSessionId preservation through parsing → triage → import workflow
   - ✅ Enhanced debug logging for uploadSessionId tracking at all workflow stages
