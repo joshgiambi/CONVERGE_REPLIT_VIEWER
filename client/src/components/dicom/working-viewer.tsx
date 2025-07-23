@@ -1013,6 +1013,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Pre-compute MRI transformations for performance
   const precomputeMRITransformations = (mriImages: any[], registrationMatrix: number[]) => {
     console.log("Pre-computing MRI transformations for performance optimization...");
+    console.log(`Processing ${mriImages.length} MRI images`);
     
     // Convert flat array to 4x4 matrix
     const regMatrix4x4 = [
@@ -1033,6 +1034,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return result;
     };
     
+    // Log the first few MRI positions before and after transformation
+    console.log("\n=== MRI Transformation Debug ===");
+    console.log("Registration matrix:", registrationMatrix);
+    
     // Transform all MRI positions to CT space
     const transformed = mriImages.map((mriImage, index) => {
       const mriPos = mriImage.imagePosition;
@@ -1046,6 +1051,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
       const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
+      
+      // Log first 3 and last 3 transformations
+      if (index < 3 || index >= mriImages.length - 3) {
+        console.log(`MRI[${index}] slice ${mriImage.sliceLocation}mm:`);
+        console.log(`  Original position: [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}]`);
+        console.log(`  Transformed to CT: [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
+        console.log(`  Z in CT space: ${mriTransformed[2].toFixed(1)}mm`);
+      }
       
       return {
         original: mriImage,
@@ -1064,7 +1077,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         min: Math.min(...zValues),
         max: Math.max(...zValues)
       };
-      console.log(`MRI Z-range in CT space: [${mriZRangeInCTSpace.current.min.toFixed(1)}, ${mriZRangeInCTSpace.current.max.toFixed(1)}]`);
+      console.log(`\nMRI Z-range after transformation:`);
+      console.log(`  Original MRI range: -74.4mm to 161.6mm`);
+      console.log(`  After registration: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
+      console.log(`  CT slice range: 325.5mm to 723.5mm`);
+      console.log(`  Overlap region: ${Math.max(mriZRangeInCTSpace.current.min, 325.5).toFixed(1)}mm to ${Math.min(mriZRangeInCTSpace.current.max, 723.5).toFixed(1)}mm`);
     }
     
     // Clear cache to force recomputation with new data
