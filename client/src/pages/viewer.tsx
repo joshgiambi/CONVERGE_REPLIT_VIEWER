@@ -377,7 +377,7 @@ export default function Viewer() {
             </div>
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
               {exportItems.map((item) => (
-                <div key={item.id} className="flex items-center space-x-2 p-2 hover:bg-gray-800 rounded">
+                <div key={item.id} className="flex items-center space-x-2 p-2 hover:bg-gray-700/50 rounded transition-colors">
                   <Checkbox
                     id={item.id}
                     checked={selectedExportItems.has(item.id)}
