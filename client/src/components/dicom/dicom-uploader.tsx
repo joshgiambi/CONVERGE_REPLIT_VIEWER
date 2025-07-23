@@ -650,34 +650,81 @@ export function DICOMUploader() {
           </CardHeader>
           <CardContent className="space-y-3">
             {triageSessions.map((session) => (
-              <div key={session.sessionId} className="flex items-center justify-between p-3 bg-green-800/20 rounded-lg">
-                <div>
-                  <p className="text-white font-medium">
-                    {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.data?.length || session.parseResult?.totalFiles || 0} images
-                  </p>
-                  <p className="text-sm text-gray-400">
-                    Parsed {new Date(session.timestamp).toLocaleString()}
-                  </p>
+              <div key={session.sessionId} className="space-y-3 p-4 bg-green-800/20 rounded-lg">
+                {/* Session Summary */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-medium">
+                      {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.data?.length || session.parseResult?.totalFiles || 0} images
+                    </p>
+                    <p className="text-sm text-gray-400">
+                      Parsed {new Date(session.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleImportTriageSession(session.sessionId)}
+                      disabled={isImporting}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Database className="w-4 h-4 mr-2" />
+                      {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDeleteTriageSession(session.sessionId)}
+                      className="border-red-600 text-red-300 hover:bg-red-600/20"
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => handleImportTriageSession(session.sessionId)}
-                    disabled={isImporting}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    <Database className="w-4 h-4 mr-2" />
-                    {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDeleteTriageSession(session.sessionId)}
-                    className="border-red-600 text-red-300 hover:bg-red-600/20"
-                  >
-                    Delete
-                  </Button>
-                </div>
+                
+                {/* Patient Details */}
+                {session.parseResult?.patientPreviews && session.parseResult.patientPreviews.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {session.parseResult.patientPreviews.map((patient: any, idx: number) => (
+                      <div key={idx} className="bg-gray-800/50 rounded p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <p className="text-white font-medium">{patient.patientName || 'Anonymous'}</p>
+                            <p className="text-sm text-gray-400">ID: {patient.patientID} • {patient.studyCount} studies</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-gray-300">{patient.totalImages} images</p>
+                            <p className="text-xs text-gray-500">{patient.modalities?.join(', ')}</p>
+                          </div>
+                        </div>
+                        
+                        {/* RT Structures if present */}
+                        {patient.rtStructures && patient.rtStructures.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-700">
+                            <p className="text-xs text-gray-400 mb-1">RT Structures:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {patient.rtStructures.slice(0, 5).map((struct: any, structIdx: number) => (
+                                <span 
+                                  key={structIdx}
+                                  className="text-xs px-2 py-0.5 rounded"
+                                  style={{ 
+                                    backgroundColor: `rgba(${struct.color[0]}, ${struct.color[1]}, ${struct.color[2]}, 0.3)`,
+                                    color: `rgb(${struct.color[0]}, ${struct.color[1]}, ${struct.color[2]})`
+                                  }}
+                                >
+                                  {struct.name}
+                                </span>
+                              ))}
+                              {patient.rtStructures.length > 5 && (
+                                <span className="text-xs text-gray-500">+{patient.rtStructures.length - 5} more</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>
