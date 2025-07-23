@@ -77,6 +77,16 @@ const parsingSessions = new Map<string, {
   files?: Express.Multer.File[];
 }>();
 
+// Store parsed but not imported sessions (triage)
+const triageSessions = new Map<string, {
+  sessionId: string;
+  parseResult: any;
+  uploadSessionId: string;
+  timestamp: number;
+  patientCount: number;
+  imageCount: number;
+}>();
+
 // Function to extract ZIP files
 async function extractZipFile(zipPath: string, destDir: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
@@ -2272,6 +2282,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get triage (parsed but not imported) sessions
+  app.get("/api/triage-sessions", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sessions = Array.from(triageSessions.values())
+        .sort((a, b) => b.timestamp - a.timestamp); // Newest first
+      
+      res.json({ sessions });
+    } catch (error) {
+      console.error('Error getting triage sessions:', error);
+      res.status(500).json({ error: 'Failed to get triage sessions' });
+    }
+  });
+
+  // Get specific triage session data
+  app.get("/api/triage-sessions/:sessionId", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sessionId } = req.params;
+      const session = triageSessions.get(sessionId);
+      
+      if (!session) {
+        return res.status(404).json({ error: 'Triage session not found' });
+      }
+      
+      res.json(session);
+    } catch (error) {
+      console.error('Error getting triage session:', error);
+      res.status(500).json({ error: 'Failed to get triage session' });
+    }
+  });
+
   // Clear unprocessed files
   app.delete("/api/unprocessed-files/:sessionId", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -2285,10 +2325,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Remove the directory and all its contents
       fs.rmSync(uploadPath, { recursive: true, force: true });
       
+      // Also clean up any related triage sessions
+      for (const [triageId, triageSession] of triageSessions.entries()) {
+        if (triageSession.uploadSessionId === sessionId) {
+          triageSessions.delete(triageId);
+        }
+      }
+      
       res.json({ success: true, message: 'Files cleared successfully' });
     } catch (error) {
       console.error('Error clearing files:', error);
       res.status(500).json({ error: 'Failed to clear files' });
+    }
+  });
+
+  // Delete triage session
+  app.delete("/api/triage-sessions/:sessionId", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sessionId } = req.params;
+      const session = triageSessions.get(sessionId);
+      
+      if (!session) {
+        return res.status(404).json({ error: 'Triage session not found' });
+      }
+
+      // Remove triage session
+      triageSessions.delete(sessionId);
+      
+      // Also clean up upload files if they exist
+      const uploadPath = path.join(process.cwd(), 'uploads', session.uploadSessionId);
+      if (fs.existsSync(uploadPath)) {
+        fs.rmSync(uploadPath, { recursive: true, force: true });
+      }
+      
+      res.json({ success: true, message: 'Triage session deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting triage session:', error);
+      res.status(500).json({ error: 'Failed to delete triage session' });
     }
   });
 
@@ -2607,6 +2680,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: `Successfully parsed ${successCount} files, ${errorCount} errors`,
         patientPreviews
       };
+
+      // Move to triage after parsing completion
+      const uploadSessionId = session.files?.[0]?.destination?.split('/').pop() || '';
+      console.log(`Moving session ${session.sessionId} to triage with ${patientPreviews.length} patients and ${successCount} images`);
+      triageSessions.set(session.sessionId, {
+        sessionId: session.sessionId,
+        parseResult: session.result,
+        uploadSessionId: uploadSessionId,
+        timestamp: Date.now(),
+        patientCount: patientPreviews.length,
+        imageCount: successCount
+      });
+      console.log(`Triage sessions now has ${triageSessions.size} entries`);
       
     } catch (error) {
       console.error('Error in async DICOM processing:', error);

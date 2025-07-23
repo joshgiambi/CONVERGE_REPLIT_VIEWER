@@ -129,6 +129,17 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Triage Folder System Implementation - COMPLETED
+  - ✅ Implemented triage folder system to separate upload → parse → import workflow states
+  - ✅ Added server-side triageSessions storage for parsed but not imported files
+  - ✅ Created API endpoints: GET/DELETE /api/triage-sessions for managing triage sessions
+  - ✅ Enhanced DICOM uploader UI with "Ready to Import" section showing parsed sessions
+  - ✅ Added import functionality directly from triage sessions with one-click import
+  - ✅ Improved workflow clarity: raw uploads go to unprocessed, parsed files go to triage, imported files go to database
+  - ✅ Fixed confusing UI where same files appeared in multiple states simultaneously
+  - ✅ Added triage session metadata display showing patient/image counts and timestamps
+  - ✅ Implemented cleanup functionality to remove triage sessions after successful import
+  - Rationale: User identified workflow confusion where parsed files appeared as both "unprocessed" and "import data" - triage system creates clear state separation
 - July 23, 2025: ZIP File Upload Support - COMPLETED
   - ✅ Fixed ZIP file upload issue by adding extraction capability
   - ✅ Imported yauzl library for ZIP file extraction
