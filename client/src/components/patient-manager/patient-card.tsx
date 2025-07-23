@@ -170,7 +170,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               )}
               <div>
                 <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
-                <p className="text-sm text-gray-500">ID: {patient.patientID}</p>
+                <p className="text-base font-bold text-gray-400">{patient.patientID}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge 
@@ -218,7 +218,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                   <Calendar className="h-4 w-4" />
                   <span>{
                     study.studyDate && !isNaN(Date.parse(study.studyDate))
-                      ? format(new Date(study.studyDate), 'MMM d, yyyy')
+                      ? format(new Date(study.studyDate), 'MMMM d, yyyy')
                       : study.studyDate || 'Date N/A'
                   }</span>
                 </div>
@@ -256,7 +256,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                     className="bg-purple-900/20 text-purple-400 border-purple-600/50"
                   >
                     <Layers className="h-3 w-3 mr-1" />
-                    Fusion Ready
+                    Fused Images
                   </Badge>
                 )}
               </div>
