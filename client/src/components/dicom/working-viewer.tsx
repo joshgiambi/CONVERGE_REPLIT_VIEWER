@@ -992,7 +992,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   // Load secondary series images for fusion
   useEffect(() => {
     const loadSecondaryImages = async () => {
-      if (!secondarySeriesId) {
+      // Check if secondarySeriesId is valid (not null, not 'none', and a valid number)
+      if (!secondarySeriesId || secondarySeriesId === 'none' || isNaN(Number(secondarySeriesId))) {
         setSecondaryImages([]);
         setSecondaryImageCache(new Map());
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
@@ -1517,7 +1518,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   };
   
   const renderFusionOverlay = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    if (!secondaryImages.length || !secondarySeriesId) {
+    if (!secondaryImages.length || !secondarySeriesId || secondarySeriesId === 'none') {
       console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId);
       return;
     }

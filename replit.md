@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Fixed Fusion "None" Selection Database Errors - COMPLETED
+  - ✅ Fixed critical bug where selecting "none" in fusion panel caused database errors
+  - ✅ Added validation in loadSecondaryImages to check for invalid secondarySeriesId values
+  - ✅ Enhanced validation to prevent API calls with string "none" or NaN values
+  - ✅ Updated renderFusionOverlay to handle "none" string values properly
+  - ✅ System now gracefully handles null/invalid secondary series selections
+  - Previous issue: "invalid input syntax for type integer: 'none'" database errors
+  - Solution: Added comprehensive validation before all API calls using secondarySeriesId
 - July 23, 2025: Fusion System Enhancement - Registration Parsing and Grey REG Pills - COMPLETED
   - ✅ Fixed fusion control panel not appearing for PET/CT cases by adding automatic registration parsing
   - ✅ Added registration matrix parsing when clicking REG files before initiating fusion
