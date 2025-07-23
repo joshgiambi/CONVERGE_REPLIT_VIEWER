@@ -165,8 +165,14 @@ export function DICOMUploader() {
   const onDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
+    console.log(`Selected ${acceptedFiles.length} files for upload`);
+    
+    // Show warning if partial selection might have occurred
+    if (acceptedFiles.length === 500 || acceptedFiles.length === 1000) {
+      setError(`Note: Exactly ${acceptedFiles.length} files selected. Browser may have limited selection. Consider using ZIP format for large datasets.`);
+    }
+
     setIsUploading(true);
-    setError(null);
     setParseResult(null);
     setParseSession(null);
     setUploadProgress(0);
@@ -179,6 +185,10 @@ export function DICOMUploader() {
       acceptedFiles.forEach(file => {
         formData.append('files', file);
       });
+      
+      // Log file count and total size
+      const totalSize = acceptedFiles.reduce((sum, file) => sum + file.size, 0);
+      console.log(`Uploading ${acceptedFiles.length} files, total size: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
 
       // Start parsing session
       const response = await fetch('/api/parse-dicom-session', {
@@ -357,10 +367,14 @@ export function DICOMUploader() {
     onDrop,
     accept: {
       'application/dicom': ['.dcm'],
-      'application/octet-stream': ['.dcm']
+      'application/octet-stream': ['.dcm'],
+      'application/zip': ['.zip']
     },
     disabled: isUploading,
-    multiple: true
+    multiple: true,
+    maxFiles: 5000, // Increased limit for large datasets
+    noClick: false,
+    noKeyboard: false
   });
 
   const getModalityColor = (modality?: string) => {
@@ -470,7 +484,13 @@ export function DICOMUploader() {
                 {isDragActive ? 'Drop DICOM files here' : 'Drag & drop DICOM files here'}
               </p>
               <p className="text-sm text-gray-400 mb-4">
-                Supports .dcm files, ZIP archives, and folders • Up to 1000 files per batch
+                Supports .dcm files, ZIP archives, and folders • Up to 5000 files per batch
+              </p>
+              <p className="text-xs text-gray-600">
+                For large datasets (&gt;500 files), ZIP format recommended for reliable upload
+              </p>
+              <p className="text-xs text-orange-400 mt-2">
+                Browser file pickers may limit selection to 500-1000 files
               </p>
               <Button variant="outline" className="border-indigo-600 text-indigo-300">
                 Or click to browse files

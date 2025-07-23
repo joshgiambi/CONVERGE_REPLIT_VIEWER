@@ -38,7 +38,11 @@ const upload = multer({
       // Keep original filename
       cb(null, file.originalname);
     }
-  })
+  }),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB per file
+    files: 5000 // Increased to 5000 files per upload
+  }
 });
 
 // In-memory storage for RT structure modifications
