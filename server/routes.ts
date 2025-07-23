@@ -1232,10 +1232,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Create images for each file (skip duplicates)
             for (const metadata of seriesFiles) {
-              // Use the original file path from the triage session
-              const permanentPath = metadata.filePath;
+              // Reconstruct file path from upload session
+              const uploadDir = path.join(__dirname, '../uploads', triageSession.uploadSessionId);
+              const originalPath = path.join(uploadDir, metadata.filename);
+              
+              // Check for file in upload directory (handling ZIP extraction subdirectories)
+              let actualFilePath = originalPath;
+              if (!fs.existsSync(originalPath)) {
+                // Look for file in subdirectories (ZIP extracted files)
+                const findFileInDir = (dir: string, filename: string): string | null => {
+                  if (!fs.existsSync(dir)) return null;
+                  
+                  const files = fs.readdirSync(dir, { withFileTypes: true });
+                  for (const file of files) {
+                    const fullPath = path.join(dir, file.name);
+                    if (file.isDirectory()) {
+                      const found = findFileInDir(fullPath, filename);
+                      if (found) return found;
+                    } else if (file.name === filename) {
+                      return fullPath;
+                    }
+                  }
+                  return null;
+                };
+                
+                const foundPath = findFileInDir(uploadDir, metadata.filename);
+                if (foundPath) {
+                  actualFilePath = foundPath;
+                } else {
+                  console.log(`File not found: ${metadata.filename}`);
+                  continue; // Skip this file if not found
+                }
+              }
 
-              if (fs.existsSync(permanentPath)) {
+              if (fs.existsSync(actualFilePath)) {
                 // Check if image already exists
                 const existingImage = await storage.getImageByUID(metadata.sopInstanceUID);
                 
@@ -1244,14 +1274,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     seriesId: dbSeries.id,
                     sopInstanceUID: metadata.sopInstanceUID || generateUID(),
                     instanceNumber: parseInt(metadata.instanceNumber) || 1,
-                    filePath: permanentPath,
+                    filePath: actualFilePath,
                     fileName: metadata.filename,
-                    fileSize: fs.statSync(permanentPath).size,
+                    fileSize: fs.statSync(actualFilePath).size,
                     metadata: { imported: true },
                   });
                 } else {
                   console.log(`Skipping duplicate image: ${metadata.sopInstanceUID}`);
                 }
+              } else {
+                console.log(`File does not exist: ${actualFilePath}`);
               }
             }
 
