@@ -84,6 +84,7 @@ export function DICOMUploader() {
   const [error, setError] = useState<string | null>(null);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const [unprocessedFiles, setUnprocessedFiles] = useState<UnprocessedFile[]>([]);
+  const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
@@ -117,8 +118,9 @@ export function DICOMUploader() {
         localStorage.removeItem('currentParseSessionId');
         localStorage.removeItem('uploadActive');
       } else {
-        // Continue polling
-        setTimeout(() => pollSessionStatus(sessionId), 500);
+        // Continue polling - use shorter interval initially for faster feedback
+        const pollInterval = session.progress < 10 ? 100 : 500;
+        setTimeout(() => pollSessionStatus(sessionId), pollInterval);
       }
     } catch (error) {
       console.error('Error polling session:', error);
@@ -198,11 +200,11 @@ export function DICOMUploader() {
       console.log('Saved to localStorage:', localStorage.getItem('currentParseSessionId'));
       setSavedSessionId(sessionId);
       
-      // Start polling for progress
-      pollSessionStatus(sessionId);
+      // Set initial progress to show activity immediately
+      setUploadProgress(1);
       
-      // Set initial progress to show activity
-      setUploadProgress(5);
+      // Start polling for progress immediately
+      pollSessionStatus(sessionId);
 
     } catch (error) {
       console.error('Upload error:', error);
@@ -281,9 +283,20 @@ export function DICOMUploader() {
   };
   
   const handleProcessUnprocessedFiles = async (sessionId: string) => {
+    console.log('Processing unprocessed files for sessionId:', sessionId);
+    setProcessingFileId(sessionId);
+    
     try {
       const unprocessedFile = unprocessedFiles.find(f => f.sessionId === sessionId);
-      if (!unprocessedFile) return;
+      if (!unprocessedFile) {
+        console.error('Unprocessed file not found for sessionId:', sessionId);
+        setProcessingFileId(null);
+        return;
+      }
+      
+      // Clear any existing state
+      setParseResult(null);
+      setError(null);
       
       // Create a new parse session from existing upload directory
       const parseResponse = await fetch('/api/parse-dicom-session/from-existing', {
@@ -293,7 +306,8 @@ export function DICOMUploader() {
       });
       
       if (!parseResponse.ok) {
-        throw new Error('Failed to start parsing session');
+        const errorData = await parseResponse.json();
+        throw new Error(errorData.error || 'Failed to start parsing session');
       }
       
       const data = await parseResponse.json();
@@ -303,15 +317,17 @@ export function DICOMUploader() {
       localStorage.setItem('currentParseSessionId', data.sessionId);
       setSavedSessionId(data.sessionId);
       setIsUploading(true);
+      setUploadProgress(1);
       pollSessionStatus(data.sessionId);
-      setUploadProgress(5);
       
-      // Remove from unprocessed list
+      // Remove from unprocessed list immediately
       setUnprocessedFiles(prev => prev.filter(f => f.sessionId !== sessionId));
       
     } catch (error) {
       console.error('Error processing files:', error);
-      setError('Failed to process files');
+      setError(error instanceof Error ? error.message : 'Failed to process files');
+    } finally {
+      setProcessingFileId(null);
     }
   };
   
@@ -384,9 +400,10 @@ export function DICOMUploader() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleProcessUnprocessedFiles(file.sessionId)}
-                    className="border-green-600 text-green-300 hover:bg-green-600/20"
+                    disabled={processingFileId === file.sessionId}
+                    className="border-green-600 text-green-300 hover:bg-green-600/20 disabled:opacity-50"
                   >
-                    Process
+                    {processingFileId === file.sessionId ? 'Processing...' : 'Process'}
                   </Button>
                   <Button
                     size="sm"
