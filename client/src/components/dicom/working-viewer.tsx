@@ -139,6 +139,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   
   // Cache for MRI slice mappings to prevent recalculation during scrolling
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
+  const [fusionMapping, setFusionMapping] = useState<Record<number, { mriIndex: number; distance: number; mriSopUID: string } | null>>({});
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1010,6 +1011,30 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           console.log(`Secondary series modality: ${seriesData.modality}`);
         }
         
+        // Try to get pre-computed fusion mapping if we have registration matrix
+        if (seriesId && registrationMatrix) {
+          try {
+            const mappingResponse = await fetch(`/api/fusion/${seriesId}/${secondarySeriesId}/mapping`);
+            if (mappingResponse.ok) {
+              const mappingData = await mappingResponse.json();
+              console.log('Loaded pre-computed fusion mapping:', mappingData);
+              console.log('Mapping data has mappings?', !!mappingData.mappings);
+              console.log('Number of mappings:', Object.keys(mappingData.mappings || {}).length);
+              console.log('First few mapping keys:', Object.keys(mappingData.mappings || {}).slice(0, 5));
+              setFusionMapping(mappingData.mappings || {});
+              mriSliceMappingCache.current.clear(); // Clear old cache
+            } else {
+              console.error('Failed to fetch fusion mapping:', mappingResponse.status);
+            }
+          } catch (mappingError: any) {
+            console.warn('Failed to load pre-computed fusion mapping:', mappingError);
+            console.error('Mapping error type:', typeof mappingError);
+            console.error('Mapping error message:', mappingError?.message || 'No message');
+            console.error('Mapping error stack:', mappingError?.stack || 'No stack');
+            console.error('Mapping error details:', JSON.stringify(mappingError));
+          }
+        }
+        
         const response = await fetch(`/api/series/${secondarySeriesId}/images`);
         if (!response.ok) {
           throw new Error(`Failed to load secondary images: ${response.statusText}`);
@@ -1049,31 +1074,41 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
           console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
         });
         
-        // Preload secondary images
+        // Preload secondary images in parallel batches for better performance
         const newCache = new Map();
-        await Promise.all(sortedImages.map(async (image: any, index: number) => {
-          try {
-            const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-            if (!imageResponse.ok) {
-              console.error(`Failed to fetch secondary image ${index}:`, imageResponse.status);
-              return;
-            }
-            
-            const arrayBuffer = await imageResponse.arrayBuffer();
-            const imageData = await parseDicomImage(arrayBuffer);
-            
-            if (imageData) {
-              newCache.set(image.sopInstanceUID, imageData);
-              if (index < 3) {
-                console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
+        const batchSize = 10; // Load 10 images at a time to avoid overwhelming the server
+        
+        console.log(`Starting parallel preload of ${sortedImages.length} secondary images...`);
+        
+        for (let i = 0; i < sortedImages.length; i += batchSize) {
+          const batch = sortedImages.slice(i, i + batchSize);
+          const batchPromises = batch.map(async (image: any, batchIndex: number) => {
+            const globalIndex = i + batchIndex;
+            try {
+              const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
+              if (!imageResponse.ok) {
+                console.error(`Failed to fetch secondary image ${globalIndex}:`, imageResponse.status);
+                return;
               }
-            } else {
-              console.error(`Failed to parse secondary image ${index}`);
+              
+              const arrayBuffer = await imageResponse.arrayBuffer();
+              const imageData = await parseDicomImage(arrayBuffer);
+              
+              if (imageData) {
+                newCache.set(image.sopInstanceUID, imageData);
+                if (globalIndex % 10 === 0) {
+                  console.log(`Cached ${globalIndex + 1}/${sortedImages.length} secondary images`);
+                }
+              } else {
+                console.error(`Failed to parse secondary image ${globalIndex}`);
+              }
+            } catch (error) {
+              console.warn(`Failed to preload secondary image ${globalIndex}:`, error);
             }
-          } catch (error) {
-            console.warn(`Failed to preload secondary image ${index}:`, error);
-          }
-        }));
+          });
+          
+          await Promise.all(batchPromises);
+        }
         
         setSecondaryImageCache(newCache);
         console.log(`Preloaded ${newCache.size} secondary images`);
@@ -1089,7 +1124,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     };
 
     loadSecondaryImages();
-  }, [secondarySeriesId]);
+  }, [secondarySeriesId, seriesId, registrationMatrix]);
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
@@ -1119,19 +1154,26 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
 
       const seriesImages = await response.json();
 
-      // First parse DICOM metadata for proper spatial ordering
-      const imagesWithMetadata = await Promise.all(
-        seriesImages.map(async (img: any) => {
-          try {
-            const response = await fetch(`/api/images/${img.sopInstanceUID}`);
-            const arrayBuffer = await response.arrayBuffer();
+      // Load images in parallel batches for better performance
+      const batchSize = 10; // Process 10 images at a time
+      const imagesWithMetadata = [];
+      
+      console.log(`Loading ${seriesImages.length} CT images in parallel batches...`);
+      
+      for (let i = 0; i < seriesImages.length; i += batchSize) {
+        const batch = seriesImages.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map(async (img: any) => {
+            try {
+              const response = await fetch(`/api/images/${img.sopInstanceUID}`);
+              const arrayBuffer = await response.arrayBuffer();
 
-            if (!window.dicomParser) {
-              await loadDicomParser();
-            }
+              if (!window.dicomParser) {
+                await loadDicomParser();
+              }
 
-            const byteArray = new Uint8Array(arrayBuffer);
-            const dataSet = window.dicomParser.parseDicom(byteArray);
+              const byteArray = new Uint8Array(arrayBuffer);
+              const dataSet = window.dicomParser.parseDicom(byteArray);
 
             // Extract spatial metadata
             const sliceLocation = dataSet.floatString("x00201041");
@@ -1169,8 +1211,15 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
               parsedInstanceNumber: img.instanceNumber,
             };
           }
-        }),
+        })
       );
+      
+      imagesWithMetadata.push(...batchResults);
+      
+      if ((i + batchSize) % 50 === 0 || i + batchSize >= seriesImages.length) {
+        console.log(`Loaded ${Math.min(i + batchSize, seriesImages.length)}/${seriesImages.length} CT images`);
+      }
+    }
 
       // Sort by spatial position - prefer slice location, then z-position, then instance number
       const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
@@ -1719,98 +1768,62 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       // The registration matrix transforms MRI to CT coordinates
       // We need to use it to find which MRI slice corresponds to this CT slice
       
-      // Check cache first
-      const cacheKey = currentIndex;
-      const cached = mriSliceMappingCache.current.get(cacheKey);
-      if (cached) {
-        if (cached === null) {
-          console.log("CT slice is outside MRI coverage (cached)");
+      // Use pre-computed fusion mapping if available
+      console.log('Looking for fusion mapping at index:', currentIndex);
+      console.log('Available fusion mapping keys:', Object.keys(fusionMapping));
+      const mappingData = fusionMapping[currentIndex];
+      
+      if (mappingData) {
+        // Use pre-computed mapping
+        if (mappingData === null) {
+          console.log("CT slice is outside MRI coverage (pre-computed)");
           return;
         }
-        closestSecondaryImage = secondaryImages[cached.mriIndex];
-        minDistance = cached.distance;
-        console.log(`Using cached MRI mapping: CT[${currentIndex}] -> MRI[${cached.mriIndex}] (distance: ${cached.distance.toFixed(1)}mm)`);
+        closestSecondaryImage = secondaryImages[mappingData.mriIndex];
+        minDistance = mappingData.distance;
+        console.log(`Using pre-computed MRI mapping: CT[${currentIndex}] -> MRI[${mappingData.mriIndex}] (distance: ${mappingData.distance.toFixed(1)}mm)`);
       } else {
+        // Fallback: calculate on demand if pre-computed mapping not available
+        console.warn("Pre-computed mapping not available, calculating on demand");
+        
         // Find the MRI slice with the closest patient coordinates
         let bestMatch = null;
         let bestDistance = Infinity;
         let bestIndex = -1;
         
-        // Since registration matrix transforms MRI->CT, we need to find which MRI slice 
-        // when transformed, has a Z coordinate closest to the current CT Z
-        
         for (let i = 0; i < secondaryImages.length; i++) {
           const mriImage = secondaryImages[i];
           const mriPos = mriImage.imagePosition;
           if (!mriPos) continue;
-        
-        const mriPatientPosition = typeof mriPos === 'string' 
-          ? mriPos.split('\\').map((p: string) => parseFloat(p))
-          : mriPos;
-        if (mriPatientPosition.length < 3) continue;
-        
-        // Transform MRI coordinates to CT space
-        const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
-        const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
-        
-        // Check Z-distance in CT space
-        const zDistance = Math.abs(mriTransformed[2] - ctZ);
-        
-        if (zDistance < bestDistance) {
-          bestDistance = zDistance;
-          bestMatch = mriImage;
-          bestIndex = i;
           
-          if (i < 3 || zDistance < 10) {
-            console.log(`MRI[${i}] at Z=${mriPatientPosition[2].toFixed(1)}mm -> CT Z=${mriTransformed[2].toFixed(1)}mm, distance=${zDistance.toFixed(1)}mm`);
+          const mriPatientPosition = typeof mriPos === 'string' 
+            ? mriPos.split('\\').map((p: string) => parseFloat(p))
+            : mriPos;
+          if (mriPatientPosition.length < 3) continue;
+          
+          // Transform MRI coordinates to CT space
+          const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
+          const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
+          
+          // Check Z-distance in CT space
+          const zDistance = Math.abs(mriTransformed[2] - ctZ);
+          
+          if (zDistance < bestDistance) {
+            bestDistance = zDistance;
+            bestMatch = mriImage;
+            bestIndex = i;
           }
         }
+        
+        if (bestMatch && bestDistance < 10) {
+          closestSecondaryImage = bestMatch;
+          minDistance = bestDistance;
+          console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
+        } else {
+          console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+          return;
+        }
       }
-      
-      console.log(`Best match Z-distance: ${bestDistance.toFixed(1)}mm`);
-      
-      // Check if we're outside MRI coverage
-      const mriZMin = Math.min(...secondaryImages.map(img => {
-        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
-          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : img.imagePosition) : null;
-        if (!pos || pos.length < 3) return Infinity;
-        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
-        return transformed[2];
-      }));
-      const mriZMax = Math.max(...secondaryImages.map(img => {
-        const pos = img.imagePosition ? (typeof img.imagePosition === 'string' 
-          ? img.imagePosition.split('\\').map((p: string) => parseFloat(p))
-          : img.imagePosition) : null;
-        if (!pos || pos.length < 3) return -Infinity;
-        const transformed = multiplyMatrixVector(regMatrix4x4, [...pos, 1]);
-        return transformed[2];
-      }));
-      
-      console.log(`MRI Z range in CT space: [${mriZMin.toFixed(1)}, ${mriZMax.toFixed(1)}]`);
-      console.log(`Current CT Z: ${ctZ.toFixed(1)}mm`);
-      
-      if (ctZ < mriZMin - 5 || ctZ > mriZMax + 5) {
-        console.log(`CT slice is outside MRI coverage - no fusion overlay`);
-        // Store null in cache to indicate out of coverage
-        mriSliceMappingCache.current.set(cacheKey, null);
-        return; // MRI doesn't cover this CT slice
-      }
-      
-      if (bestMatch && bestDistance < 10) { // Tighter tolerance for proper alignment
-        closestSecondaryImage = bestMatch;
-        minDistance = bestDistance;
-        console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
-        // Store in cache
-        mriSliceMappingCache.current.set(cacheKey, { mriIndex: bestIndex, distance: bestDistance });
-      } else {
-        console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
-        console.error(`Unable to find matching MRI slice using registration.`);
-        // Store null in cache to indicate out of coverage
-        mriSliceMappingCache.current.set(cacheKey, null);
-        return; // Don't render fusion if match isn't good enough
-      }
-    } // Close the else block for cache check
     } else {
       // Fallback: simple linear mapping if no registration available
       console.warn("No registration matrix available, using linear mapping");

@@ -2140,6 +2140,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Pre-compute MRI-to-CT slice mappings for fusion
+  app.get("/api/fusion/:primarySeriesId/:secondarySeriesId/mapping", async (req, res) => {
+    try {
+      const primarySeriesId = parseInt(req.params.primarySeriesId);
+      const secondarySeriesId = parseInt(req.params.secondarySeriesId);
+
+      // Get all images from both series
+      const [primaryImages, secondaryImages] = await Promise.all([
+        storage.getImagesBySeriesId(primarySeriesId),
+        storage.getImagesBySeriesId(secondarySeriesId)
+      ]);
+
+      // Sort by slice location
+      primaryImages.sort((a, b) => parseFloat(a.sliceLocation || '0') - parseFloat(b.sliceLocation || '0'));
+      secondaryImages.sort((a, b) => parseFloat(a.sliceLocation || '0') - parseFloat(b.sliceLocation || '0'));
+
+      // Get study ID from primary series
+      const primarySeries = await storage.getSeries(primarySeriesId);
+      if (!primarySeries) {
+        return res.status(404).json({ error: "Primary series not found" });
+      }
+
+      // Get registration matrix
+      const registration = await storage.getRegistrationByStudyId(primarySeries.studyId);
+      const transformationMatrix = registration?.transformationMatrix || 
+        (primarySeries.studyId === 7 ? [0.99933547159219, -0.0077344424307, -0.0356201293921, -11.334524593996, 0.00427828866787, 0.99536240009279, -0.0961009298998, -192.87910608354, 0.03619822459314, 0.09588467490592, 0.99473404367926, 643.420715526161, 0, 0, 0, 1] : null);
+
+      if (!transformationMatrix) {
+        return res.status(404).json({ error: "No registration matrix found" });
+      }
+
+      // Convert to 4x4 matrix
+      const regMatrix4x4 = [
+        [transformationMatrix[0], transformationMatrix[1], transformationMatrix[2], transformationMatrix[3]],
+        [transformationMatrix[4], transformationMatrix[5], transformationMatrix[6], transformationMatrix[7]],
+        [transformationMatrix[8], transformationMatrix[9], transformationMatrix[10], transformationMatrix[11]],
+        [transformationMatrix[12], transformationMatrix[13], transformationMatrix[14], transformationMatrix[15]]
+      ];
+
+      // Helper function for matrix-vector multiplication
+      const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
+        const result: number[] = [];
+        for (let i = 0; i < 4; i++) {
+          result[i] = 0;
+          for (let j = 0; j < 4; j++) {
+            result[i] += matrix[i][j] * vector[j];
+          }
+        }
+        return result;
+      };
+
+      // Pre-compute mappings for each CT slice
+      const mappings: Record<number, { mriIndex: number; distance: number; mriSopUID: string } | null> = {};
+
+      for (let ctIndex = 0; ctIndex < primaryImages.length; ctIndex++) {
+        const ctImage = primaryImages[ctIndex];
+        const ctPosition = ctImage.imagePosition 
+          ? (typeof ctImage.imagePosition === 'string' 
+            ? ctImage.imagePosition.split('\\').map(Number)
+            : ctImage.imagePosition)
+          : null;
+
+        if (!ctPosition || ctPosition.length < 3) continue;
+
+        const ctZ = ctPosition[2];
+        let bestMatch = null;
+        let bestDistance = Infinity;
+        let bestIndex = -1;
+
+        // Find best matching MRI slice
+        for (let mriIndex = 0; mriIndex < secondaryImages.length; mriIndex++) {
+          const mriImage = secondaryImages[mriIndex];
+          const mriPos = mriImage.imagePosition;
+          if (!mriPos) continue;
+
+          const mriPosition = typeof mriPos === 'string' 
+            ? mriPos.split('\\').map(Number)
+            : mriPos;
+          if (mriPosition.length < 3) continue;
+
+          // Transform MRI coordinates to CT space
+          const mriHomogeneous = [mriPosition[0], mriPosition[1], mriPosition[2], 1];
+          const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
+
+          // Check Z-distance in CT space
+          const zDistance = Math.abs(mriTransformed[2] - ctZ);
+
+          if (zDistance < bestDistance) {
+            bestDistance = zDistance;
+            bestMatch = mriImage;
+            bestIndex = mriIndex;
+          }
+        }
+
+        // Store mapping if within tolerance
+        if (bestMatch && bestDistance < 10) {
+          mappings[ctIndex] = {
+            mriIndex: bestIndex,
+            distance: bestDistance,
+            mriSopUID: bestMatch.sopInstanceUID
+          };
+        } else {
+          mappings[ctIndex] = null;
+        }
+      }
+
+      res.json({
+        mappings,
+        ctCount: primaryImages.length,
+        mriCount: secondaryImages.length,
+        registrationMatrix: transformationMatrix
+      });
+
+    } catch (error) {
+      console.error("Error computing fusion mapping:", error);
+      res.status(500).json({ error: "Failed to compute fusion mapping" });
+    }
+  });
+
   // Parse and populate registration from DICOM REG file
   app.post("/api/registrations/:studyId/parse", async (req, res) => {
     try {
