@@ -45,11 +45,14 @@ export default function Viewer() {
         console.log('All patient IDs in studies:', studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })));
         
         let study;
+        let patient = null;
+        
         if (studyId) {
           study = studies.find((s: any) => s.id === parseInt(studyId));
           console.log('Found study by ID:', study);
         } else if (patientId) {
-          // Find first study for this patient
+          // Find patient and all their studies
+          
           // First try exact match on patientID
           study = studies.find((s: any) => s.patientID === patientId);
           console.log('Found study by exact patientID match:', study);
@@ -57,7 +60,7 @@ export default function Viewer() {
           // If not found, try to find by patient name containing the ID (for fusion dataset)
           if (!study) {
             const patientQuery = await fetch('/api/patients').then(res => res.json());
-            const patient = patientQuery.find((p: any) => p.patientID === patientId);
+            patient = patientQuery.find((p: any) => p.patientID === patientId);
             console.log('Found patient with patientID:', patientId, 'patient:', patient);
             
             if (patient) {
@@ -72,8 +75,15 @@ export default function Viewer() {
         }
         
         if (study) {
-          console.log('Setting studyData with:', study);
-          setStudyData({ studies: [study] });
+          // If we found a study by patient, get ALL studies for that patient
+          if (patientId && patient) {
+            const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
+            console.log('Found all studies for patient:', patientStudies);
+            setStudyData({ studies: patientStudies, patient });
+          } else {
+            console.log('Setting studyData with single study:', study);
+            setStudyData({ studies: [study] });
+          }
         } else {
           console.log('NO STUDY FOUND!');
         }

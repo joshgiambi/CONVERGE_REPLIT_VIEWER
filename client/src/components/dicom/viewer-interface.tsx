@@ -60,20 +60,26 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   }, [selectedForEdit, rtStructures]);
 
-  // Fetch series data for the study
+  // Fetch series data for all studies
   const { data: seriesData, isLoading } = useQuery({
-    queryKey: ['/api/studies', studyData.studies[0]?.id, 'series'],
+    queryKey: ['/api/studies', studyData.studies?.map((s: any) => s.id), 'series'],
     queryFn: async () => {
-      const studyId = studyData.studies[0]?.id;
-      if (!studyId) throw new Error('No study ID');
+      if (!studyData.studies || studyData.studies.length === 0) throw new Error('No studies');
       
-      const response = await fetch(`/api/studies/${studyId}/series`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch series: ${response.statusText}`);
+      // Fetch series for all studies and combine them
+      const allSeries = [];
+      for (const study of studyData.studies) {
+        const response = await fetch(`/api/studies/${study.id}/series`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch series for study ${study.id}: ${response.statusText}`);
+        }
+        const series = await response.json();
+        // Add study info to each series for reference
+        allSeries.push(...series.map((s: any) => ({ ...s, studyId: study.id, studyDate: study.studyDate })));
       }
-      return response.json();
+      return allSeries;
     },
-    enabled: !!studyData.studies?.[0]?.id,
+    enabled: !!studyData.studies?.length,
   });
 
   useEffect(() => {
@@ -96,11 +102,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
       if (rtSeries) {
-        console.log(`Loading RT structures for study ${studyData.studies[0]?.id}`);
+        console.log(`Loading RT structures for study ${rtSeries.studyId}`);
         handleRTSeriesSelect(rtSeries);
       } else {
-        // Clear RT structures if no RT series found for this study
-        console.log(`No RT structures found for study ${studyData.studies[0]?.id}`);
+        // Clear RT structures if no RT series found
+        console.log(`No RT structures found in any study`);
         setRTStructures(null);
       }
     }
