@@ -20,6 +20,7 @@ interface SeriesSelectorProps {
   windowLevel: WindowLevel;
   onWindowLevelChange: (windowLevel: WindowLevel) => void;
   studyId?: number;
+  studyIds?: number[];
   rtStructures?: any;
   onRTStructureLoad?: (rtStructures: any) => void;
   onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
