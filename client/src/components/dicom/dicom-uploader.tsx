@@ -548,6 +548,72 @@ export function DICOMUploader() {
   return (
     <div className="space-y-6">
 
+      {/* Upload Area - Always at top */}
+      <Card className="border-2 border-dashed border-indigo-600 bg-black/20">
+        <div
+          {...getRootProps()}
+          className={`p-8 text-center cursor-pointer transition-colors ${
+            isDragActive ? 'bg-indigo-800/20' : 'hover:bg-indigo-800/10'
+          } ${isUploading ? 'pointer-events-none opacity-50' : ''}`}
+        >
+          <input {...getInputProps()} />
+          <Upload className={`w-12 h-12 mx-auto mb-4 ${isDragActive ? 'text-indigo-400' : 'text-indigo-500'}`} />
+          
+          {isUploading ? (
+            <div className="space-y-4">
+              <p className="text-lg text-white">
+                {parseSession?.currentFile ? 'Processing DICOM files...' : 'Uploading files...'}
+              </p>
+              <Progress value={uploadProgress} className="w-full max-w-md mx-auto" />
+              {parseSession?.currentFile ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-400">
+                    File {parseSession.progress} of {parseSession.total} ({uploadProgress}%)
+                  </p>
+                  <p className="text-xs text-gray-500 truncate max-w-md mx-auto">
+                    {parseSession.currentFile}
+                  </p>
+                  <p className="text-xs text-gray-500 italic">
+                    You can navigate away - parsing continues in background
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">{uploadProgress}% complete</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-lg text-white">
+                {isDragActive ? 'Drop DICOM files here' : 'Drag & drop DICOM files here'}
+              </p>
+              <p className="text-sm text-gray-400">
+                Supports .dcm files, ZIP archives, and folders
+              </p>
+              <div className="space-y-3">
+                <Button variant="outline" className="border-indigo-600 text-indigo-300">
+                  Click to browse files
+                </Button>
+                <div className="text-xs text-gray-600 space-y-1">
+                  <p>Up to 5000 files per batch</p>
+                  <p>ZIP format recommended for large datasets</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Session Recovery Notice */}
+      {savedSessionId && isUploading && !parseSession && (
+        <Card className="border-yellow-600 bg-yellow-900/20">
+          <div className="p-4">
+            <p className="text-yellow-300 text-sm">
+              Recovering parsing session {savedSessionId}...
+            </p>
+          </div>
+        </Card>
+      )}
+
       {/* Ready to Import - Triage Sessions */}
       {triageSessions.length > 0 && !isUploading && (
         <Card className="border-green-600 bg-green-900/20">
@@ -637,72 +703,6 @@ export function DICOMUploader() {
           </CardContent>
         </Card>
       )}
-
-      {/* Session Recovery Notice */}
-      {savedSessionId && isUploading && !parseSession && (
-        <Card className="border-yellow-600 bg-yellow-900/20">
-          <div className="p-4">
-            <p className="text-yellow-300 text-sm">
-              Recovering parsing session {savedSessionId}...
-            </p>
-          </div>
-        </Card>
-      )}
-
-      {/* Upload Area */}
-      <Card className="border-2 border-dashed border-indigo-600 bg-black/20">
-        <div
-          {...getRootProps()}
-          className={`p-8 text-center cursor-pointer transition-colors ${
-            isDragActive ? 'bg-indigo-800/20' : 'hover:bg-indigo-800/10'
-          } ${isUploading ? 'pointer-events-none opacity-50' : ''}`}
-        >
-          <input {...getInputProps()} />
-          <Upload className={`w-12 h-12 mx-auto mb-4 ${isDragActive ? 'text-indigo-400' : 'text-indigo-500'}`} />
-          
-          {isUploading ? (
-            <div className="space-y-4">
-              <p className="text-lg text-white">
-                {parseSession?.currentFile ? 'Processing DICOM files...' : 'Uploading files...'}
-              </p>
-              <Progress value={uploadProgress} className="w-full max-w-md mx-auto" />
-              {parseSession?.currentFile ? (
-                <div className="space-y-2">
-                  <p className="text-sm text-gray-400">
-                    File {parseSession.progress} of {parseSession.total} ({uploadProgress}%)
-                  </p>
-                  <p className="text-xs text-gray-500 truncate max-w-md mx-auto">
-                    {parseSession.currentFile}
-                  </p>
-                  <p className="text-xs text-gray-500 italic">
-                    You can navigate away - parsing continues in background
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400">{uploadProgress}% complete</p>
-              )}
-            </div>
-          ) : (
-            <div>
-              <p className="text-lg text-white mb-2">
-                {isDragActive ? 'Drop DICOM files here' : 'Drag & drop DICOM files here'}
-              </p>
-              <p className="text-sm text-gray-400 mb-4">
-                Supports .dcm files, ZIP archives, and folders • Up to 5000 files per batch
-              </p>
-              <p className="text-xs text-gray-600">
-                For large datasets (&gt;500 files), ZIP format recommended for reliable upload
-              </p>
-              <p className="text-xs text-orange-400 mt-2">
-                Browser file pickers may limit selection to 500-1000 files
-              </p>
-              <Button variant="outline" className="border-indigo-600 text-indigo-300">
-                Or click to browse files
-              </Button>
-            </div>
-          )}
-        </div>
-      </Card>
 
       {/* Error Display */}
       {error && (
