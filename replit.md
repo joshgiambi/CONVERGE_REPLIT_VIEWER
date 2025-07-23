@@ -129,6 +129,16 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Duplicate DICOM Import Protection System - COMPLETED
+  - ✅ Fixed critical duplicate key constraint error preventing large dataset imports
+  - ✅ Added duplicate checking logic to skip existing images during import process
+  - ✅ Enhanced recursive DICOM file detection for ZIP-extracted nested directories
+  - ✅ Successfully imported ESOPHAGUS_31 dataset (554 DICOM files) with 2 studies
+  - ✅ Fixed upload session recovery after server restart using triage system
+  - ✅ Import process now gracefully handles duplicate SOP Instance UIDs
+  - ✅ System automatically skips existing images while preserving new data integrity
+  - Previous issue: "duplicate key value violates unique constraint images_sop_instance_uid_unique"
+  - Solution: Added getImageByUID check before createImage to prevent duplicate insertions
 - July 23, 2025: Patient-Based Storage System Implementation - COMPLETED
   - ✅ Implemented structured patient storage system: storage/patients/{patientId}/{studyUID}/{seriesUID}/{sopUID}.dcm
   - ✅ Created PatientStorage class for managing DICOM file organization and storage lifecycle

@@ -1230,21 +1230,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             }
 
-            // Create images for each file
+            // Create images for each file (skip duplicates)
             for (const metadata of seriesFiles) {
               // Use the original file path from the triage session
               const permanentPath = metadata.filePath;
 
               if (fs.existsSync(permanentPath)) {
-                await storage.createImage({
-                  seriesId: dbSeries.id,
-                  sopInstanceUID: metadata.sopInstanceUID || generateUID(),
-                  instanceNumber: parseInt(metadata.instanceNumber) || 1,
-                  filePath: permanentPath,
-                  fileName: metadata.filename,
-                  fileSize: fs.statSync(permanentPath).size,
-                  metadata: { imported: true },
-                });
+                // Check if image already exists
+                const existingImage = await storage.getImageByUID(metadata.sopInstanceUID);
+                
+                if (!existingImage) {
+                  await storage.createImage({
+                    seriesId: dbSeries.id,
+                    sopInstanceUID: metadata.sopInstanceUID || generateUID(),
+                    instanceNumber: parseInt(metadata.instanceNumber) || 1,
+                    filePath: permanentPath,
+                    fileName: metadata.filename,
+                    fileSize: fs.statSync(permanentPath).size,
+                    metadata: { imported: true },
+                  });
+                } else {
+                  console.log(`Skipping duplicate image: ${metadata.sopInstanceUID}`);
+                }
               }
             }
 
