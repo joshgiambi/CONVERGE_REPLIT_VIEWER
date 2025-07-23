@@ -94,9 +94,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   // Update local structures when external ones change
   useEffect(() => {
     // Only update if actually changed to prevent unnecessary re-renders
-    console.log("RT Structures update - external:", externalRTStructures);
     if (externalRTStructures && externalRTStructures !== localRTStructures) {
-      console.log("Setting local RT structures:", externalRTStructures);
       setLocalRTStructures(externalRTStructures);
     }
   }, [externalRTStructures]);
@@ -1347,7 +1345,6 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
-        console.log("Image metadata loaded for ID:", imageId);
         
         // Cache the metadata
         metadataCache.current.set(imageId, metadata);
@@ -1356,7 +1353,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         // Frame of Reference UIDs are verified during data import
       }
     } catch (error) {
-      console.error("Failed to load image metadata:", error);
+      // Silent fail - metadata is optional
     }
   };
 
@@ -1425,18 +1422,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
-        console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
           await renderFusionOverlay(ctx, currentImage);
         } catch (fusionError: any) {
-          console.error("Error rendering fusion overlay:", fusionError);
-          console.error("Fusion error details:", {
-            message: fusionError.message,
-            stack: fusionError.stack,
-            secondarySeriesId,
-            secondaryImagesCount: secondaryImages.length,
-            fusionOpacity
-          });
           // Continue without fusion rather than failing entire image display
         }
       }
@@ -1811,15 +1799,13 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         if (bestMatch && bestDistance < 10) {
           closestSecondaryImage = bestMatch;
           minDistance = bestDistance;
-          console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
         } else {
-          console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+          // CT slice is outside MRI coverage - no fusion overlay
           return;
         }
       }
     } else {
       // Fallback: simple linear mapping if no registration available
-      console.warn("No registration matrix available, using linear mapping");
       
       const ctMinPos = 325.5;
       const ctMaxPos = 723.5;
@@ -2256,26 +2242,8 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
 
     const tolerance = 0.5; // mm tolerance for slice matching - reduced to only show contours on current slice
 
-    // CRITICAL DEBUG: Log all slice position sources for comparison
-    console.log(`🔍 SLICE POSITION DEBUG:
-      parsedSliceLocation: ${currentImage.parsedSliceLocation}
-      parsedZPosition: ${currentImage.parsedZPosition} 
-      imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
-      imageMetadata.imagePosition Z: ${currentImage.imageMetadata?.imagePosition 
-        ? (typeof currentImage.imageMetadata.imagePosition === 'string' 
-          ? currentImage.imageMetadata.imagePosition.split("\\")[2] 
-          : currentImage.imageMetadata.imagePosition[2])
-        : (currentImage.imagePosition 
-          ? (typeof currentImage.imagePosition === 'string' 
-            ? currentImage.imagePosition.split("\\")[2] 
-            : currentImage.imagePosition[2])
-          : "N/A")}
-      currentIndex: ${currentIndex}
-      FINAL currentSlicePosition: ${currentSlicePosition}mm`);
-    console.log(
-      `📋 Available structures:`,
-      localRTStructures?.structures?.map((s: any) => s.structureName) || [],
-    );
+    // Use slice position for contour filtering
+    // Filter contours by slice position
 
     // Get all RT structure Z positions to check coordinate space
     const allRTZPositions: number[] = [];

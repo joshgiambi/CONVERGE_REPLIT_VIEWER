@@ -53,7 +53,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   // Clear RT structures when patient changes
   useEffect(() => {
-    console.log('Patient changed, clearing RT structures. Patient ID:', studyData?.patient?.id);
     setRTStructures(null);
     setStructureVisibility(new Map());
     setSelectedStructures(new Set());
@@ -318,13 +317,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleContourUpdate = (payload: any) => {
-    console.log('Contour update received:', payload);
-    
     // Check if this is an action payload from ContourEditToolbar or full structures from WorkingViewer
     if (payload && payload.action) {
       // This is an action payload from ContourEditToolbar
       // Pass it directly to WorkingViewer's handleContourUpdate
-      console.log(`Received action: ${payload.action} for structure ${payload.structureId}`);
       if (workingViewerRef.current && workingViewerRef.current.handleContourUpdate) {
         workingViewerRef.current.handleContourUpdate(payload);
       }

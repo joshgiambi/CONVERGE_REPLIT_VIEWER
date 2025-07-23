@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -169,27 +169,33 @@ export function SeriesSelector({
         
         if (onAutoZoom) {
           const finalZoom = Math.max(0.5, Math.min(5, targetZoom));
-          console.log('Calling onAutoZoom with zoom:', finalZoom);
           onAutoZoom(finalZoom);
-        } else {
-          console.log('onAutoZoom callback not available');
         }
       }
     }
     
     // Pan to centroid
     if (autoLocalizeEnabled && onAutoLocalize) {
-      console.log('Calling onAutoLocalize with centroid:', centroidX, centroidY, centroidZ);
       onAutoLocalize(centroidX, centroidY, centroidZ);
-    } else {
-      console.log('onAutoLocalize not available or disabled. autoLocalizeEnabled:', autoLocalizeEnabled, 'onAutoLocalize:', !!onAutoLocalize);
     }
   };
 
+  // Cache for loaded RT series to prevent repeated API calls
+  const rtSeriesCache = useRef<Map<string, any[]>>(new Map());
+  
   // Load RT structure series for all studies
   useEffect(() => {
     const studyIdsToLoad = studyIds || (studyId ? [studyId] : []);
     if (studyIdsToLoad.length === 0) return;
+    
+    // Create cache key from study IDs
+    const cacheKey = studyIdsToLoad.sort().join(',');
+    
+    // Check if already loaded
+    if (rtSeriesCache.current.has(cacheKey)) {
+      setRTSeries(rtSeriesCache.current.get(cacheKey) || []);
+      return;
+    }
     
     const loadRTSeries = async () => {
       try {
@@ -204,10 +210,11 @@ export function SeriesSelector({
           }
         }
         
-        console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
+        // Cache the result
+        rtSeriesCache.current.set(cacheKey, allRTSeries);
         setRTSeries(allRTSeries);
       } catch (error) {
-        console.error('Error loading RT series:', error);
+        // Silent fail - RT structures are optional
       }
     };
     
