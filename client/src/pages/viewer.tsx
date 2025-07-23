@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CheckboxIndicator } from '@radix-ui/react-checkbox';
 import { Checkbox } from '@/components/ui/checkbox';
 
-export default function EnhancedViewer() {
+export default function Viewer() {
   const [studyData, setStudyData] = useState<any>(null);
   const [, setLocation] = useLocation();
   const [contourSettings, setContourSettings] = useState({ width: 2, opacity: 80 });

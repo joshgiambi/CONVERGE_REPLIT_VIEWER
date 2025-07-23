@@ -129,6 +129,16 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Viewer Consolidation and Patient Selection - COMPLETED
+  - ✅ Consolidated dual viewer system (dicom-viewer and enhanced-viewer) into a single unified viewer
+  - ✅ Renamed enhanced-viewer to just "viewer" for simplicity
+  - ✅ All viewer routes (/viewer, /dicom-viewer, /enhanced-viewer) now redirect to the unified viewer
+  - ✅ Removed redundant dicom-viewer.tsx file and associated code
+  - ✅ Added patient selection functionality to patient manager with checkboxes
+  - ✅ Implemented contextual Export and Merge buttons that appear when patients are selected
+  - ✅ Created export dialog showing all series from selected patients
+  - ✅ Added merge dialog with options to merge patients
+  - Rationale: The enhanced viewer had all features of the standard viewer plus RT structures, fusion, and contour editing, making the dual system unnecessary
 - July 23, 2025: RT Structure Management System Phase 1 - COMPLETED
   - ✅ Created comprehensive design document for RT structure management with time machine feature
   - ✅ Added new database tables: rt_structure_sets, rt_structures, rt_structure_contours, rt_structure_history
