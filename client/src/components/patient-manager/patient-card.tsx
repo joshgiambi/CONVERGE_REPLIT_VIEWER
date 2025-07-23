@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
@@ -12,10 +13,13 @@ interface PatientCardProps {
   patient: any;
   studies: any[];
   series: any[];
+  isSelectable?: boolean;
+  isSelected?: boolean;
+  onSelectionChange?: (selected: boolean) => void;
   onUpdate?: () => void;
 }
 
-export function PatientCard({ patient, studies, series, onUpdate }: PatientCardProps) {
+export function PatientCard({ patient, studies, series, isSelectable, isSelected, onSelectionChange, onUpdate }: PatientCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
@@ -157,6 +161,13 @@ export function PatientCard({ patient, studies, series, onUpdate }: PatientCardP
         <div className="flex justify-between items-start">
           <div className="flex-1">
             <div className="flex items-center gap-4">
+              {isSelectable && (
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={(checked) => onSelectionChange?.(checked as boolean)}
+                  className="h-5 w-5 border-gray-600 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+                />
+              )}
               <div>
                 <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
                 <p className="text-sm text-gray-500">ID: {patient.patientID}</p>

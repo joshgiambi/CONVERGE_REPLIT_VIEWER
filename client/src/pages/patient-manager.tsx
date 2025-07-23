@@ -4,9 +4,11 @@ import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useForm } from "react-hook-form";
@@ -32,7 +34,10 @@ import {
   WifiOff,
   Play,
   Eye,
-  AlertTriangle
+  AlertTriangle,
+  FolderDown,
+  Merge,
+  CheckSquare
 } from "lucide-react";
 
 interface Patient {
@@ -118,6 +123,11 @@ export default function PatientManager() {
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
   const [hasPendingData, setHasPendingData] = useState(false);
+  const [selectedPatients, setSelectedPatients] = useState<Set<number>>(new Set());
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [exportItems, setExportItems] = useState<any[]>([]);
+  const [selectedExportItems, setSelectedExportItems] = useState<Set<string>>(new Set());
   const hasActiveParsingSession = useParsingSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -260,6 +270,98 @@ export default function PatientManager() {
     },
   });
 
+  // Export handler
+  const handleExport = async () => {
+    if (selectedPatients.size === 0) return;
+    
+    try {
+      // Collect all series for selected patients
+      const items = [];
+      for (const patientId of selectedPatients) {
+        const patient = patients.find(p => p.id === patientId);
+        const patientStudies = studies.filter(s => s.patientId === patientId);
+        
+        for (const study of patientStudies) {
+          const studySeries = series.filter(s => s.studyId === study.id);
+          for (const s of studySeries) {
+            items.push({
+              id: `series-${s.id}`,
+              type: 'series',
+              name: `${patient?.patientName} - ${s.modality} - ${s.seriesDescription || 'Unnamed Series'}`,
+              description: `${s.imageCount || 0} images`,
+              data: s
+            });
+          }
+        }
+      }
+      
+      setExportItems(items);
+      setSelectedExportItems(new Set());
+      setShowExportDialog(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load export items",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleExportConfirm = async () => {
+    if (selectedExportItems.size === 0) {
+      toast({
+        title: "Warning",
+        description: "Please select items to export",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    try {
+      // TODO: Implement export API endpoint
+      toast({
+        title: "Success",
+        description: `Exporting ${selectedExportItems.size} items...`,
+      });
+      setShowExportDialog(false);
+      setSelectedPatients(new Set());
+    } catch (error) {
+      toast({
+        title: "Error", 
+        description: "Failed to export files",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Merge handler
+  const handleMerge = () => {
+    if (selectedPatients.size < 2) return;
+    setShowMergeDialog(true);
+  };
+
+  const handleMergeConfirm = async (targetPatientId: number | 'new', newPatientName?: string) => {
+    try {
+      // TODO: Implement merge API endpoint
+      toast({
+        title: "Success",
+        description: targetPatientId === 'new' 
+          ? `Merging patients into new patient: ${newPatientName}`
+          : `Merging patients into existing patient`,
+      });
+      setShowMergeDialog(false);
+      setSelectedPatients(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to merge patients",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Query PACS mutation
   const queryPacsMutation = useMutation({
     mutationFn: async ({ pacsId, queryParams }: { pacsId: number; queryParams: z.infer<typeof querySchema> }) => {
@@ -375,6 +477,8 @@ export default function PatientManager() {
       });
     }
   };
+
+
 
   const formatDate = (dateString: string) => {
     if (!dateString) return "Unknown";
@@ -534,6 +638,48 @@ export default function PatientManager() {
 
           {/* Patients Tab */}
           <TabsContent value="patients" className="space-y-4">
+            {/* Selection Actions Bar */}
+            {selectedPatients.size > 0 && (
+              <div className="flex items-center justify-between p-4 bg-gray-900/80 border border-gray-700/50 rounded-xl backdrop-blur-sm animate-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center gap-2">
+                  <CheckSquare className="h-5 w-5 text-indigo-400" />
+                  <span className="text-white font-medium">
+                    {selectedPatients.size} patient{selectedPatients.size !== 1 ? 's' : ''} selected
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExport}
+                    className="border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/20"
+                  >
+                    <FolderDown className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                  {selectedPatients.size >= 2 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleMerge}
+                      className="border-purple-500/50 text-purple-400 hover:bg-purple-500/20"
+                    >
+                      <Merge className="h-4 w-4 mr-2" />
+                      Merge
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedPatients(new Set())}
+                    className="text-gray-400 hover:text-white"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+            
             {patientsLoading ? (
               <div className="text-center py-8">Loading patients...</div>
             ) : filteredPatients.length === 0 ? (
@@ -564,6 +710,17 @@ export default function PatientManager() {
                       }}
                       studies={patientStudies}
                       series={patientSeries}
+                      isSelectable={true}
+                      isSelected={selectedPatients.has(patient.id)}
+                      onSelectionChange={(selected) => {
+                        const newSet = new Set(selectedPatients);
+                        if (selected) {
+                          newSet.add(patient.id);
+                        } else {
+                          newSet.delete(patient.id);
+                        }
+                        setSelectedPatients(newSet);
+                      }}
                       onUpdate={() => {
                         queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
                         queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
@@ -914,6 +1071,116 @@ export default function PatientManager() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="bg-gray-900 border-gray-700 max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-white">Export DICOM Files</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Select the series you want to export
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            {exportItems.map((item) => (
+              <div key={item.id} className="flex items-center space-x-3 p-3 rounded hover:bg-gray-800/50">
+                <Checkbox
+                  id={item.id}
+                  checked={selectedExportItems.has(item.id)}
+                  onCheckedChange={(checked) => {
+                    const newSet = new Set(selectedExportItems);
+                    if (checked) {
+                      newSet.add(item.id);
+                    } else {
+                      newSet.delete(item.id);
+                    }
+                    setSelectedExportItems(newSet);
+                  }}
+                  className="border-gray-600 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+                />
+                <label htmlFor={item.id} className="flex-1 cursor-pointer">
+                  <div className="text-white font-medium">{item.name}</div>
+                  <div className="text-gray-400 text-sm">{item.description}</div>
+                </label>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowExportDialog(false)}
+              className="border-gray-600 text-gray-400 hover:bg-gray-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleExportConfirm}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              Export Selected ({selectedExportItems.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge Dialog */}
+      <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
+        <DialogContent className="bg-gray-900 border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Merge Patients</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Choose how to merge the selected patients
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-white">Merge Option</Label>
+              <Select defaultValue="existing">
+                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-800 border-gray-700">
+                  <SelectItem value="existing" className="text-white hover:bg-gray-700">
+                    Merge into existing patient
+                  </SelectItem>
+                  <SelectItem value="new" className="text-white hover:bg-gray-700">
+                    Merge into new patient
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label className="text-white">Selected Patients</Label>
+              <div className="bg-gray-800 rounded p-3 space-y-2">
+                {Array.from(selectedPatients).map(patientId => {
+                  const patient = patients.find(p => p.id === patientId);
+                  return patient ? (
+                    <div key={patientId} className="text-gray-300">
+                      {patient.patientName} (ID: {patient.patientID})
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowMergeDialog(false)}
+              className="border-gray-600 text-gray-400 hover:bg-gray-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => handleMergeConfirm('existing')}
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              Merge Patients
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

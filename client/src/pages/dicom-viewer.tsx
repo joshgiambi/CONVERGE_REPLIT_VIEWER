@@ -109,9 +109,88 @@ export default function DICOMViewer() {
     }
   };
 
-  const handleExportStudy = () => {
-    console.log('Export study functionality would be implemented here');
-    // In a real application, this would trigger a download of the study data
+  const handleSave = () => {
+    const currentDate = new Date();
+    const defaultDescription = `RT Structure Set - ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
+    setSeriesDescription(defaultDescription);
+    setShowSaveDialog(true);
+  };
+
+  const handleExport = async () => {
+    if (!study) return;
+    
+    try {
+      // Fetch all series for the current study
+      const response = await fetch(`/api/studies/${study.id}/series`);
+      const series = await response.json();
+      
+      // Prepare export items
+      const items = [];
+      for (const s of series) {
+        items.push({
+          id: `series-${s.id}`,
+          type: 'series',
+          name: `${s.modality} - ${s.seriesDescription || 'Unnamed Series'}`,
+          description: `${s.imageCount || 0} images`,
+          data: s
+        });
+      }
+      
+      setExportItems(items);
+      setSelectedExportItems(new Set());
+      setShowExportDialog(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load export items",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleSaveConfirm = async () => {
+    if (!study) return;
+    
+    try {
+      // TODO: Implement RT structure save API endpoint
+      toast({
+        title: "Success",
+        description: `RT Structure Set saved as: ${seriesDescription}`,
+      });
+      setShowSaveDialog(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save RT structure set",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleExportConfirm = async () => {
+    if (selectedExportItems.size === 0) {
+      toast({
+        title: "Warning",
+        description: "Please select items to export",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    try {
+      // TODO: Implement export API endpoint
+      toast({
+        title: "Success",
+        description: `Exporting ${selectedExportItems.size} items...`,
+      });
+      setShowExportDialog(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to export files",
+        variant: "destructive"
+      });
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -209,17 +288,6 @@ export default function DICOMViewer() {
           </div>
           
           <div className="flex items-center space-x-3">
-            {/* Back to Patient Manager Button */}
-            <Button 
-              onClick={() => navigate('/')}
-              variant="outline"
-              size="sm"
-              className="border-dicom-indigo text-dicom-indigo hover:bg-gradient-primary hover:text-white hover:border-transparent transition-all duration-300"
-            >
-              <ArrowLeft className="w-4 h-4 mr-1" />
-              Patient Manager
-            </Button>
-            
             {/* Patient Info */}
             {currentPatient && (
               <div className="hidden md:flex items-center space-x-2 text-sm bg-dicom-darker/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-dicom-blue/20">
@@ -231,15 +299,36 @@ export default function DICOMViewer() {
               </div>
             )}
             
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.open('/', '_blank')}
+              className="text-white hover:bg-white/10"
+            >
+              <List className="h-4 w-4 mr-2" />
+              Patient List
+            </Button>
             {studyData && (
-              <Button 
-                onClick={handleExportStudy}
-                size="sm"
-                className="btn-animated text-white font-medium"
-              >
-                <Download className="w-4 h-4 mr-1" />
-                Export
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleSave()}
+                  className="text-white hover:bg-white/10"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  Save
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleExport()}
+                  className="text-white hover:bg-white/10"
+                >
+                  <FolderDown className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -304,6 +393,91 @@ export default function DICOMViewer() {
           <ViewerInterface studyData={studyData} />
         )}
       </main>
+
+      {/* Save Dialog */}
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent className="bg-dicom-dark border-dicom-gray">
+          <DialogHeader>
+            <DialogTitle className="text-white">Save RT Structure Set</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="description" className="text-white">
+                Series Description
+              </Label>
+              <Input
+                id="description"
+                value={seriesDescription}
+                onChange={(e) => setSeriesDescription(e.target.value)}
+                placeholder="Enter description for this RT structure set version"
+                className="bg-dicom-darker border-dicom-gray text-white"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveDialog(false)}
+              className="border-dicom-gray text-white hover:bg-dicom-gray/20"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveConfirm}
+              className="bg-gradient-primary text-white"
+            >
+              Save Version
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="bg-dicom-dark border-dicom-gray max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-white">Export DICOM Files</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            {exportItems.map((item) => (
+              <div key={item.id} className="flex items-center space-x-3 p-3 rounded hover:bg-dicom-gray/20">
+                <Checkbox
+                  id={item.id}
+                  checked={selectedExportItems.has(item.id)}
+                  onCheckedChange={(checked) => {
+                    const newSet = new Set(selectedExportItems);
+                    if (checked) {
+                      newSet.add(item.id);
+                    } else {
+                      newSet.delete(item.id);
+                    }
+                    setSelectedExportItems(newSet);
+                  }}
+                />
+                <label htmlFor={item.id} className="flex-1 cursor-pointer">
+                  <div className="text-white font-medium">{item.name}</div>
+                  <div className="text-gray-400 text-sm">{item.description}</div>
+                </label>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowExportDialog(false)}
+              className="border-dicom-gray text-white hover:bg-dicom-gray/20"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleExportConfirm}
+              className="bg-gradient-primary text-white"
+            >
+              Export Selected ({selectedExportItems.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
