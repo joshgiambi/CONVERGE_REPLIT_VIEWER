@@ -145,6 +145,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     mriSopUID: string;
     interpolationWeights?: { index: number; weight: number }[] 
   } | null>>({});
+  
+  // Cache for image metadata to prevent repeated loading
+  const metadataCache = useRef<Map<number, any>>(new Map());
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1159,73 +1162,30 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       }
 
       const seriesImages = await response.json();
-
-      // Load images in parallel batches for better performance
-      const batchSize = 10; // Process 10 images at a time
-      const imagesWithMetadata = [];
       
-      console.log(`Loading ${seriesImages.length} CT images in parallel batches...`);
+      console.log(`Processing metadata for ${seriesImages.length} CT images...`);
       
-      for (let i = 0; i < seriesImages.length; i += batchSize) {
-        const batch = seriesImages.slice(i, i + batchSize);
-        const batchResults = await Promise.all(
-          batch.map(async (img: any) => {
-            try {
-              const response = await fetch(`/api/images/${img.sopInstanceUID}`);
-              const arrayBuffer = await response.arrayBuffer();
-
-              if (!window.dicomParser) {
-                await loadDicomParser();
-              }
-
-              const byteArray = new Uint8Array(arrayBuffer);
-              const dataSet = window.dicomParser.parseDicom(byteArray);
-
-            // Extract spatial metadata
-            const sliceLocation = dataSet.floatString("x00201041");
-            const imagePosition = dataSet.string("x00200032");
-            const instanceNumber = dataSet.intString("x00200013");
-
-            // Parse image position (z-coordinate is third value)
-            let zPosition = null;
-            if (imagePosition) {
-              const positions = imagePosition
-                .split("\\")
-                .map((p: string) => parseFloat(p));
-              zPosition = positions[2];
-            }
-
-            return {
-              ...img,
-              parsedSliceLocation: sliceLocation
-                ? parseFloat(sliceLocation)
-                : null,
-              parsedZPosition: zPosition,
-              parsedInstanceNumber: instanceNumber
-                ? parseInt(instanceNumber)
-                : img.instanceNumber,
-            };
-          } catch (error) {
-            console.warn(
-              `Failed to parse DICOM metadata for ${img.fileName}:`,
-              error,
-            );
-            return {
-              ...img,
-              parsedSliceLocation: null,
-              parsedZPosition: null,
-              parsedInstanceNumber: img.instanceNumber,
-            };
-          }
-        })
-      );
-      
-      imagesWithMetadata.push(...batchResults);
-      
-      if ((i + batchSize) % 50 === 0 || i + batchSize >= seriesImages.length) {
-        console.log(`Loaded ${Math.min(i + batchSize, seriesImages.length)}/${seriesImages.length} CT images`);
-      }
-    }
+      // Use metadata already provided by the API - no need to load full DICOM files!
+      const imagesWithMetadata = seriesImages.map((img: any) => {
+        // Parse z-position from imagePosition if available
+        let zPosition = null;
+        if (img.imagePosition) {
+          const positions = img.imagePosition
+            .split("\\")
+            .map((p: string) => parseFloat(p));
+          zPosition = positions[2];
+        }
+        
+        // Parse slice location
+        const sliceLocation = img.sliceLocation ? parseFloat(img.sliceLocation) : null;
+        
+        return {
+          ...img,
+          parsedSliceLocation: sliceLocation,
+          parsedZPosition: zPosition,
+          parsedInstanceNumber: img.instanceNumber || null,
+        };
+      });
 
       // Sort by spatial position - prefer slice location, then z-position, then instance number
       const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
@@ -1256,7 +1216,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       setImages(sortedImages);
       setCurrentIndex(0);
 
-      // Preload all images immediately
+      // Preload all images immediately - this is the ONLY time we load the actual DICOM files
       preloadAllImages(sortedImages);
     } catch (error: any) {
       setError(error.message);
@@ -1376,11 +1336,21 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   };
 
   const loadImageMetadata = async (imageId: number) => {
+    // Check cache first
+    if (metadataCache.current.has(imageId)) {
+      const cachedMetadata = metadataCache.current.get(imageId);
+      setImageMetadata(cachedMetadata);
+      return;
+    }
+    
     try {
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
-        console.log("Image metadata:", metadata);
+        console.log("Image metadata loaded for ID:", imageId);
+        
+        // Cache the metadata
+        metadataCache.current.set(imageId, metadata);
         setImageMetadata(metadata);
 
         // Frame of Reference UIDs are verified during data import
