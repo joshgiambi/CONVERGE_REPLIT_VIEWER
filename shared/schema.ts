@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, jsonb, boolean, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 import { z } from "zod";
@@ -175,6 +175,83 @@ export const registrations = pgTable("registrations", {
   metadata: text("metadata"), // Additional metadata as JSON
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// RT Structure Set table to store metadata and associations
+export const rtStructureSets = pgTable("rt_structure_sets", {
+  id: serial("id").primaryKey(),
+  seriesId: integer("series_id").references(() => series.id),
+  studyId: integer("study_id").references(() => studies.id),
+  referencedSeriesId: integer("referenced_series_id").references(() => series.id), // The CT/MRI series this RT struct is based on
+  frameOfReferenceUID: text("frame_of_reference_uid"),
+  structureSetLabel: text("structure_set_label"),
+  structureSetDate: text("structure_set_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Individual structures within an RT structure set
+export const rtStructures = pgTable("rt_structures", {
+  id: serial("id").primaryKey(),
+  rtStructureSetId: integer("rt_structure_set_id").references(() => rtStructureSets.id),
+  roiNumber: integer("roi_number"),
+  structureName: text("structure_name"),
+  color: integer("color").array(), // RGB values
+  isVisible: boolean("is_visible").default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Contour data for each structure
+export const rtStructureContours = pgTable("rt_structure_contours", {
+  id: serial("id").primaryKey(),
+  rtStructureId: integer("rt_structure_id").references(() => rtStructures.id),
+  slicePosition: doublePrecision("slice_position"),
+  points: doublePrecision("points").array(), // Flattened array of x,y,z coordinates
+  isPredicted: boolean("is_predicted").default(false),
+  predictionConfidence: doublePrecision("prediction_confidence"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// RT structure history for time machine feature
+export const rtStructureHistory = pgTable("rt_structure_history", {
+  id: serial("id").primaryKey(),
+  rtStructureSetId: integer("rt_structure_set_id").references(() => rtStructureSets.id),
+  userId: integer("user_id"), // For future user tracking
+  actionType: text("action_type"), // 'create', 'update', 'delete', 'brush', 'grow', 'boolean_op', etc.
+  actionDetails: text("action_details"), // JSON string with detailed information
+  affectedStructureIds: integer("affected_structure_ids").array(),
+  snapshot: text("snapshot"), // JSON string with complete state snapshot
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+// Type definitions for RT structures
+export const insertRTStructureSetSchema = createInsertSchema(rtStructureSets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertRTStructureSet = z.infer<typeof insertRTStructureSetSchema>;
+export type RTStructureSet = typeof rtStructureSets.$inferSelect;
+
+export const insertRTStructureSchema = createInsertSchema(rtStructures).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertRTStructure = z.infer<typeof insertRTStructureSchema>;
+export type RTStructure = typeof rtStructures.$inferSelect;
+
+export const insertRTStructureContourSchema = createInsertSchema(rtStructureContours).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertRTStructureContour = z.infer<typeof insertRTStructureContourSchema>;
+export type RTStructureContour = typeof rtStructureContours.$inferSelect;
+
+export const insertRTStructureHistorySchema = createInsertSchema(rtStructureHistory).omit({
+  id: true,
+  timestamp: true,
+});
+export type InsertRTStructureHistory = z.infer<typeof insertRTStructureHistorySchema>;
+export type RTStructureHistory = typeof rtStructureHistory.$inferSelect;
 
 export const insertRegistrationSchema = createInsertSchema(registrations).omit({
   id: true,

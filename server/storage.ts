@@ -1,4 +1,4 @@
-import { studies, series, images, patients, pacsConnections, patientTags, registrations, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration } from "@shared/schema";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
@@ -54,6 +54,37 @@ export interface IStorage {
   // RT Structure operations
   updateRTStructureName(structureId: number, name: string): Promise<void>;
   updateRTStructureColor(structureId: number, color: number[]): Promise<void>;
+  
+  // RT Structure Set operations
+  createRTStructureSet(data: InsertRTStructureSet): Promise<RTStructureSet>;
+  getRTStructureSet(id: number): Promise<RTStructureSet | null>;
+  getRTStructureSetsForPatient(patientId: number): Promise<RTStructureSet[]>;
+  getRTStructureSetBySeriesId(seriesId: number): Promise<RTStructureSet | null>;
+  updateRTStructureSet(id: number, data: Partial<RTStructureSet>): Promise<void>;
+  
+  // RT Structure operations
+  createRTStructure(data: InsertRTStructure): Promise<RTStructure>;
+  getRTStructuresBySetId(rtStructureSetId: number): Promise<RTStructure[]>;
+  updateRTStructure(id: number, data: Partial<RTStructure>): Promise<void>;
+  deleteRTStructure(id: number): Promise<void>;
+  
+  // RT Structure Contour operations
+  createRTStructureContours(data: InsertRTStructureContour[]): Promise<void>;
+  getRTStructureContours(rtStructureId: number): Promise<RTStructureContour[]>;
+  updateRTStructureContours(rtStructureId: number, contours: InsertRTStructureContour[]): Promise<void>;
+  deleteRTStructureContours(rtStructureId: number, slicePositions?: number[]): Promise<void>;
+  
+  // RT Structure History operations
+  createRTStructureHistory(data: InsertRTStructureHistory): Promise<RTStructureHistory>;
+  getRTStructureHistory(rtStructureSetId: number, options?: {
+    startDate?: Date;
+    endDate?: Date;
+    actionTypes?: string[];
+    structureIds?: number[];
+    limit?: number;
+    offset?: number;
+  }): Promise<RTStructureHistory[]>;
+  getRTStructureHistorySnapshot(historyId: number): Promise<RTStructureHistory | null>;
   
   // Registration operations
   createRegistration(data: InsertRegistration): Promise<Registration | null>;
@@ -566,6 +597,160 @@ export class DatabaseStorage implements IStorage {
       console.error('Error generating anatomical tags:', error);
       return [];
     }
+  }
+
+  // RT Structure Set operations
+  async createRTStructureSet(data: InsertRTStructureSet): Promise<RTStructureSet> {
+    const [result] = await db.insert(rtStructureSets).values(data).returning();
+    return result;
+  }
+
+  async getRTStructureSet(id: number): Promise<RTStructureSet | null> {
+    const [result] = await db.select().from(rtStructureSets).where(eq(rtStructureSets.id, id));
+    return result || null;
+  }
+
+  async getRTStructureSetsForPatient(patientId: number): Promise<RTStructureSet[]> {
+    // First get all studies for the patient
+    const patientStudies = await db
+      .select({ id: studies.id })
+      .from(studies)
+      .where(eq(studies.patientId, patientId));
+    
+    if (patientStudies.length === 0) return [];
+    
+    const studyIds = patientStudies.map(s => s.id);
+    
+    // Get all RT structure sets for those studies
+    const result = await db
+      .select()
+      .from(rtStructureSets)
+      .where(eq(rtStructureSets.studyId, studyIds[0])); // TODO: Handle multiple studies
+    
+    return result;
+  }
+
+  async getRTStructureSetBySeriesId(seriesId: number): Promise<RTStructureSet | null> {
+    const [result] = await db
+      .select()
+      .from(rtStructureSets)
+      .where(eq(rtStructureSets.seriesId, seriesId));
+    return result || null;
+  }
+
+  async updateRTStructureSet(id: number, data: Partial<RTStructureSet>): Promise<void> {
+    await db
+      .update(rtStructureSets)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(rtStructureSets.id, id));
+  }
+
+  // RT Structure operations
+  async createRTStructure(data: InsertRTStructure): Promise<RTStructure> {
+    const [result] = await db.insert(rtStructures).values(data).returning();
+    return result;
+  }
+
+  async getRTStructuresBySetId(rtStructureSetId: number): Promise<RTStructure[]> {
+    return await db
+      .select()
+      .from(rtStructures)
+      .where(eq(rtStructures.rtStructureSetId, rtStructureSetId));
+  }
+
+  async updateRTStructure(id: number, data: Partial<RTStructure>): Promise<void> {
+    await db.update(rtStructures).set(data).where(eq(rtStructures.id, id));
+  }
+
+  async deleteRTStructure(id: number): Promise<void> {
+    // First delete all contours for this structure
+    await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, id));
+    // Then delete the structure itself
+    await db.delete(rtStructures).where(eq(rtStructures.id, id));
+  }
+
+  // RT Structure Contour operations
+  async createRTStructureContours(data: InsertRTStructureContour[]): Promise<void> {
+    if (data.length === 0) return;
+    await db.insert(rtStructureContours).values(data);
+  }
+
+  async getRTStructureContours(rtStructureId: number): Promise<RTStructureContour[]> {
+    return await db
+      .select()
+      .from(rtStructureContours)
+      .where(eq(rtStructureContours.rtStructureId, rtStructureId));
+  }
+
+  async updateRTStructureContours(rtStructureId: number, contours: InsertRTStructureContour[]): Promise<void> {
+    // Delete existing contours
+    await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, rtStructureId));
+    // Insert new contours
+    if (contours.length > 0) {
+      await db.insert(rtStructureContours).values(contours);
+    }
+  }
+
+  async deleteRTStructureContours(rtStructureId: number, slicePositions?: number[]): Promise<void> {
+    if (slicePositions && slicePositions.length > 0) {
+      // Delete specific slice positions
+      // Note: This would need a more complex query with OR conditions
+      for (const pos of slicePositions) {
+        await db
+          .delete(rtStructureContours)
+          .where(
+            eq(rtStructureContours.rtStructureId, rtStructureId) &&
+            eq(rtStructureContours.slicePosition, pos)
+          );
+      }
+    } else {
+      // Delete all contours for this structure
+      await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, rtStructureId));
+    }
+  }
+
+  // RT Structure History operations
+  async createRTStructureHistory(data: InsertRTStructureHistory): Promise<RTStructureHistory> {
+    const [result] = await db.insert(rtStructureHistory).values(data).returning();
+    return result;
+  }
+
+  async getRTStructureHistory(
+    rtStructureSetId: number,
+    options?: {
+      startDate?: Date;
+      endDate?: Date;
+      actionTypes?: string[];
+      structureIds?: number[];
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<RTStructureHistory[]> {
+    let query = db
+      .select()
+      .from(rtStructureHistory)
+      .where(eq(rtStructureHistory.rtStructureSetId, rtStructureSetId))
+      .orderBy(desc(rtStructureHistory.timestamp));
+
+    // TODO: Add filtering by date range, action types, and structure IDs
+    
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+    
+    if (options?.offset) {
+      query = query.offset(options.offset);
+    }
+
+    return await query;
+  }
+
+  async getRTStructureHistorySnapshot(historyId: number): Promise<RTStructureHistory | null> {
+    const [result] = await db
+      .select()
+      .from(rtStructureHistory)
+      .where(eq(rtStructureHistory.id, historyId));
+    return result || null;
   }
 
   clearAll(): void {

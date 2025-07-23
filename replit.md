@@ -129,6 +129,16 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: RT Structure Management System Phase 1 - COMPLETED
+  - ✅ Created comprehensive design document for RT structure management with time machine feature
+  - ✅ Added new database tables: rt_structure_sets, rt_structures, rt_structure_contours, rt_structure_history
+  - ✅ Implemented persistent storage for RT structure modifications (replacing in-memory storage)
+  - ✅ Added complete storage interface with methods for RT structure CRUD operations
+  - ✅ Implemented DatabaseStorage methods for all RT structure operations
+  - ✅ Added type definitions and schemas for all new RT structure tables
+  - ✅ Designed API endpoints for RT structure management and history tracking
+  - ✅ Documented UI mockups for patient manager enhancements and time machine interface
+  - Next phase: Implement API endpoints and migrate existing RT structure data
 - July 18, 2025: Server-Side DICOM Parsing Sessions - COMPLETED
   - ✅ Implemented background parsing sessions that continue when user navigates away
   - ✅ Added `/api/parse-dicom-session` endpoint to start async parsing sessions
