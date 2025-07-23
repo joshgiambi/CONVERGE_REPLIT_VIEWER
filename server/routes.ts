@@ -1264,6 +1264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clean up: Remove triage session and unprocessed files
       console.log(`Cleaning up triage session: ${sessionId}`);
       console.log(`Upload session ID for cleanup: ${triageSession.uploadSessionId}`);
+      console.log(`Triage session data:`, triageSession);
       
       triageSessions.delete(sessionId);
       console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
@@ -1272,15 +1273,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (triageSession.uploadSessionId) {
         const uploadPath = path.join(process.cwd(), 'uploads', triageSession.uploadSessionId);
         console.log(`Attempting to delete upload path: ${uploadPath}`);
+        console.log(`Full path: ${uploadPath}`);
         
-        if (fs.existsSync(uploadPath)) {
-          fs.rmSync(uploadPath, { recursive: true, force: true });
-          console.log(`Successfully deleted upload directory: ${uploadPath}`);
-        } else {
-          console.log(`Upload directory not found: ${uploadPath}`);
+        try {
+          if (fs.existsSync(uploadPath)) {
+            const stats = fs.statSync(uploadPath);
+            console.log(`Directory exists, size: ${stats.isDirectory() ? 'directory' : 'file'}`);
+            fs.rmSync(uploadPath, { recursive: true, force: true });
+            console.log(`Successfully deleted upload directory: ${uploadPath}`);
+          } else {
+            console.log(`Upload directory not found: ${uploadPath}`);
+          }
+        } catch (cleanupError) {
+          console.error(`Error during cleanup:`, cleanupError);
         }
       } else {
-        console.log('No upload session ID found for cleanup');
+        console.log('No upload session ID found for cleanup - cannot clean up files');
       }
 
       res.json({ 

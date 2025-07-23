@@ -149,6 +149,7 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
   - ✅ Confirmed end-to-end workflow with automatic cleanup: Upload → Parse → Triage → Import → Cleanup
   - ✅ Upload session directories are preserved during processing and cleaned up only after successful import
   - ✅ System now maintains clean file state with no leftover unprocessed files after workflow completion
+  - ✅ Fixed orphaned file cleanup issue with enhanced debugging and manual cleanup verification
   - Final verification: API endpoint `/api/unprocessed-files` returns `{"files":[]}` after successful import and cleanup
 - July 23, 2025: Import Workflow Enhancement and Verification - COMPLETED
   - ✅ Fixed Import to Database functionality with comprehensive debug logging
