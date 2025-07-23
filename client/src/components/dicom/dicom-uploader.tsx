@@ -254,6 +254,17 @@ export function DICOMUploader() {
       queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
       queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
 
+      // Clean up the uploaded files after successful import
+      if (parseSession?.uploadSessionId) {
+        try {
+          await fetch(`/api/unprocessed-files/${parseSession.uploadSessionId}`, {
+            method: 'DELETE'
+          });
+        } catch (e) {
+          console.error('Failed to clean up files:', e);
+        }
+      }
+
       setParseResult(null); // Clear results after successful import
       
       // Navigate to patient manager
@@ -531,8 +542,8 @@ export function DICOMUploader() {
                 <div className="flex items-center space-x-3">
                   <FileCheck className="w-6 h-6 text-green-400" />
                   <div>
-                    <h3 className="text-green-300 font-semibold text-lg">Review Import Data</h3>
-                    <p className="text-green-200 text-sm">{parseResult.message}</p>
+                    <h3 className="text-green-300 font-semibold text-lg">Ready to Import</h3>
+                    <p className="text-green-200 text-sm">Successfully parsed {parseResult.totalImages || 0} images • Click "Import to Database" below to complete</p>
                   </div>
                 </div>
                 <div className="flex space-x-2">

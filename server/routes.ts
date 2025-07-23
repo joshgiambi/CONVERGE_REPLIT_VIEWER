@@ -2250,8 +2250,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Sort by upload time, newest first
       unprocessedFiles.sort((a, b) => b.uploadTime.getTime() - a.uploadTime.getTime());
+      
+      // Filter out sessions that have already been processed
+      const filteredFiles = [];
+      for (const file of unprocessedFiles) {
+        // Check if a parsing session exists for this upload session
+        const matchingSession = Array.from(parsingSessions.values()).find(
+          session => session.uploadSessionId === file.sessionId && session.status === 'complete'
+        );
+        
+        // Only include if no completed parsing session exists
+        if (!matchingSession) {
+          filteredFiles.push(file);
+        }
+      }
 
-      res.json({ files: unprocessedFiles });
+      res.json({ files: filteredFiles });
     } catch (error) {
       console.error('Error checking unprocessed files:', error);
       res.status(500).json({ error: 'Failed to check unprocessed files' });
