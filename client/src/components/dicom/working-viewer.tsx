@@ -983,7 +983,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       imagesLength: images.length
     });
     
-    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && images.length > 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && images.length > 0) {
       console.log('Registration matrix loaded, re-rendering fusion overlay');
       displayCurrentImage();
     }

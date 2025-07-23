@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -55,9 +55,12 @@ export function FusionControlPanel({
   // Determine secondary modality label
   const secondaryModality = mrSeries.length > 0 ? 'MR' : 'Secondary';
   
-  // Auto-select first MR series with valid slice locations
+  // Auto-select first MR series with valid slice locations (only on initial mount)
+  // Use a ref to track if we've already auto-selected
+  const hasAutoSelected = useRef(false);
+  
   useEffect(() => {
-    if (mrSeries.length > 0 && !selectedSecondaryId) {
+    if (mrSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
       // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
       const preferredSeries = mrSeries.find((s: any) => 
         s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
@@ -66,9 +69,10 @@ export function FusionControlPanel({
       const seriestoSelect = preferredSeries || mrSeries[0];
       console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
       
+      hasAutoSelected.current = true;
       onSecondarySeriesSelect(seriestoSelect.id);
     }
-  }, [mrSeries, selectedSecondaryId]);
+  }, [mrSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
