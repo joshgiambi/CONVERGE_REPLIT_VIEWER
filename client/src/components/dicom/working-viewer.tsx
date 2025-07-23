@@ -139,7 +139,12 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   
   // Cache for MRI slice mappings to prevent recalculation during scrolling
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
-  const [fusionMapping, setFusionMapping] = useState<Record<number, { mriIndex: number; distance: number; mriSopUID: string } | null>>({});
+  const [fusionMapping, setFusionMapping] = useState<Record<number, { 
+    mriIndex: number; 
+    distance: number; 
+    mriSopUID: string;
+    interpolationWeights?: { index: number; weight: number }[] 
+  } | null>>({});
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -998,6 +1003,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         setSecondaryImages([]);
         setSecondaryImageCache(new Map());
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
+        setFusionMapping({});
         setSecondaryModality('MR'); // Reset to default
         return;
       }
@@ -1014,7 +1020,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
         // Try to get pre-computed fusion mapping if we have registration matrix
         if (seriesId && registrationMatrix) {
           try {
-            const mappingResponse = await fetch(`/api/fusion/${seriesId}/${secondarySeriesId}/mapping`);
+            const mappingResponse = await fetch(`/api/fusion-mapping/${seriesId}/${secondarySeriesId}`);
             if (mappingResponse.ok) {
               const mappingData = await mappingResponse.json();
               console.log('Loaded pre-computed fusion mapping:', mappingData);
@@ -1312,7 +1318,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   };
 
   const preloadAllImages = async (imageList: any[]) => {
-    console.log("Starting to preload all images...");
+    console.log("Starting parallel batch preload of images...");
     if (!imageList || imageList.length === 0) {
       console.warn("No images to preload");
       setIsPreloading(false);
@@ -1320,35 +1326,52 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     }
     setIsPreloading(true);
     const newCache = new Map();
+    
+    // Batch loading optimization - load 10 images at a time
+    const BATCH_SIZE = 10;
+    
+    // Function to load a batch of images in parallel
+    const loadBatch = async (batch: typeof imageList, startIndex: number) => {
+      const batchPromises = batch.map(async (image, batchIndex) => {
+        const globalIndex = startIndex + batchIndex;
+        try {
+          const imageResponse = await fetch(
+            `/api/images/${image.sopInstanceUID}`,
+          );
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to load image ${globalIndex + 1}`);
+          }
 
-    // Load all images in parallel
-    const loadPromises = imageList.map(async (image, index) => {
-      try {
-        const imageResponse = await fetch(
-          `/api/images/${image.sopInstanceUID}`,
-        );
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${index + 1}`);
+          const arrayBuffer = await imageResponse.arrayBuffer();
+          const imageData = await parseDicomImage(arrayBuffer);
+
+          if (imageData) {
+            newCache.set(image.sopInstanceUID, imageData);
+          }
+        } catch (error) {
+          console.warn(`Failed to preload image ${globalIndex + 1}:`, error);
         }
-
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        const imageData = await parseDicomImage(arrayBuffer);
-
-        if (imageData) {
-          newCache.set(image.sopInstanceUID, imageData);
-          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
-        }
-      } catch (error) {
-        console.warn(`Failed to preload image ${index + 1}:`, error);
-      }
-    });
-
-    // Wait for all images to load
-    await Promise.allSettled(loadPromises);
-    setImageCache(newCache);
+      });
+      
+      await Promise.all(batchPromises);
+    };
+    
+    // Load images in batches
+    for (let i = 0; i < imageList.length; i += BATCH_SIZE) {
+      const batch = imageList.slice(i, Math.min(i + BATCH_SIZE, imageList.length));
+      await loadBatch(batch, i);
+      
+      // Update progress and cache incrementally
+      const loaded = Math.min(i + BATCH_SIZE, imageList.length);
+      console.log(`Loaded ${loaded}/${imageList.length} images (${Math.round((loaded / imageList.length) * 100)}%)`);
+      
+      // Update cache after each batch for incremental loading
+      setImageCache(new Map(newCache));
+    }
+    
     setIsPreloading(false);
     console.log(
-      `Preloading complete: ${newCache.size}/${imageList.length} images cached`,
+      `Parallel batch preloading complete: ${newCache.size}/${imageList.length} images cached`,
     );
   };
 
@@ -1866,30 +1889,89 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       console.error(`✗ WARNING: No registration matrix - using fallback linear mapping!`);
     }
     
-    // Get the secondary image data from cache
-    let secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
-    if (!secondaryImageData) {
-      console.warn(`Secondary image not found in cache, attempting to load: ${closestSecondaryImage.sopInstanceUID}`);
+    // Check if we have pre-computed fusion mapping with interpolation weights
+    const mappingEntry = fusionMapping[currentIndex];
+    let interpolatedImageData: { data: Float32Array; width: number; height: number } | null = null;
+    
+    if (mappingEntry && mappingEntry.interpolationWeights && mappingEntry.interpolationWeights.length > 1) {
+      // Use B-spline interpolation with weighted blending
+      console.log(`Using B-spline interpolation with ${mappingEntry.interpolationWeights.length} MRI slices`);
       
-      // Try to load the image directly
-      try {
-        const imageResponse = await fetch(`/api/images/${closestSecondaryImage.sopInstanceUID}`);
-        if (imageResponse.ok) {
-          const arrayBuffer = await imageResponse.arrayBuffer();
-          secondaryImageData = await parseDicomImage(arrayBuffer);
-          
-          if (secondaryImageData) {
-            // Add to cache for future use
-            secondaryImageCache.set(closestSecondaryImage.sopInstanceUID, secondaryImageData);
+      const weightedImages: { data: Float32Array; weight: number }[] = [];
+      
+      for (const weight of mappingEntry.interpolationWeights) {
+        const mriImage = secondaryImages[weight.index];
+        if (!mriImage) continue;
+        
+        let imageData = secondaryImageCache.get(mriImage.sopInstanceUID);
+        if (!imageData) {
+          try {
+            const imageResponse = await fetch(`/api/images/${mriImage.sopInstanceUID}`);
+            if (imageResponse.ok) {
+              const arrayBuffer = await imageResponse.arrayBuffer();
+              imageData = await parseDicomImage(arrayBuffer);
+              if (imageData) {
+                secondaryImageCache.set(mriImage.sopInstanceUID, imageData);
+              }
+            }
+          } catch (error) {
+            console.error("Failed to load MRI image for interpolation:", error);
+            continue;
           }
         }
-      } catch (error) {
-        console.error("Failed to load secondary image:", error);
+        
+        if (imageData) {
+          weightedImages.push({ data: imageData.data, weight: weight.weight });
+        }
       }
       
+      // Perform weighted interpolation
+      if (weightedImages.length > 0) {
+        const width = secondaryImages[0].width || 512;
+        const height = secondaryImages[0].height || 512;
+        const interpolatedData = new Float32Array(width * height);
+        
+        // Weighted sum of pixel values
+        for (let i = 0; i < interpolatedData.length; i++) {
+          let sum = 0;
+          for (const img of weightedImages) {
+            sum += img.data[i] * img.weight;
+          }
+          interpolatedData[i] = sum;
+        }
+        
+        interpolatedImageData = { data: interpolatedData, width, height };
+        console.log("Applied B-spline interpolation for smooth MRI visualization");
+      }
+    }
+    
+    // Use interpolated data if available, otherwise use closest slice
+    let secondaryImageData = interpolatedImageData;
+    if (!secondaryImageData) {
+      secondaryImageData = secondaryImageCache.get(closestSecondaryImage.sopInstanceUID);
       if (!secondaryImageData) {
-        console.error("Could not load secondary image");
-        return;
+        console.warn(`Secondary image not found in cache, attempting to load: ${closestSecondaryImage.sopInstanceUID}`);
+        
+        // Try to load the image directly
+        try {
+          const imageResponse = await fetch(`/api/images/${closestSecondaryImage.sopInstanceUID}`);
+          if (imageResponse.ok) {
+            const arrayBuffer = await imageResponse.arrayBuffer();
+            secondaryImageData = await parseDicomImage(arrayBuffer);
+            
+            if (secondaryImageData) {
+              // Add to cache for future use
+              secondaryImageCache.set(closestSecondaryImage.sopInstanceUID, secondaryImageData);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to load secondary image:", error);
+        }
+        
+        if (!secondaryImageData) {
+          console.error("Could not load secondary image");
+          return;
+        }
       }
     }
     

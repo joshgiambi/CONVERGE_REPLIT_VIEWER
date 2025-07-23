@@ -129,6 +129,16 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Implemented Parallel Batch Loading Optimization - COMPLETED
+  - ✅ Fixed server overwhelm issue when loading large image sets by implementing batch loading
+  - ✅ Modified preloadAllImages function to load images in batches of 10 instead of all at once
+  - ✅ Each batch of 10 images loads in parallel, then waits before loading the next batch
+  - ✅ Added incremental progress logging showing percentage completion (e.g., "Loaded 50/200 images (25%)")
+  - ✅ Cache updates incrementally after each batch for smoother user experience
+  - ✅ Maintains parallel loading benefits while preventing too many concurrent server requests
+  - ✅ Secondary images (MRI) already had batch loading implemented, now primary images match
+  - Previous issue: Loading 200+ images simultaneously would overwhelm the server with concurrent requests
+  - Solution: Batch loading with 10 concurrent requests at a time, sequential batch processing
 - July 23, 2025: Fixed MRI Fusion Slice Position Display - COMPLETED
   - ✅ Removed confusing MRI slice position display during fusion viewing
   - ✅ Confirmed CT slice position is the correct reference frame for fusion
