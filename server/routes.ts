@@ -41,8 +41,8 @@ const upload = multer({
     }
   }),
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB per file
-    files: 5000 // Increased to 5000 files per upload
+    fileSize: 2 * 1024 * 1024 * 1024, // 2GB per file for large DICOM datasets
+    files: 5000 // Support up to 5000 files per upload
   }
 });
 
