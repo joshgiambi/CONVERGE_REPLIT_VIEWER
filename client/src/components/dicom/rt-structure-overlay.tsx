@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface RTContour {
   slicePosition: number;
@@ -52,22 +52,16 @@ export function RTStructureOverlay({
   animationTime,
   rtStructures: externalRTStructures
 }: RTStructureOverlayProps) {
-  // If external RT structures are provided, use them exclusively
-  // This component should NOT make its own API calls when structures are passed in
-  const rtStructures = externalRTStructures;
+  const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Use external RT structures if provided, otherwise load our own
+  const rtStructures = externalRTStructures || localRTStructures;
 
   // Load RT structures for the study (only if external structures not provided)
   useEffect(() => {
     if (externalRTStructures) {
-      // External structures are provided, don't load our own
-      setLocalRTStructures(null);
-      return;
-    }
-    
-    // Only load if we don't have cached data and no external structures
-    if (!studyId || rtStructureCache.current.has(studyId)) {
-      setLocalRTStructures(rtStructureCache.current.get(studyId) || null);
-      return;
+      return; // Skip loading if external structures are provided
     }
     
     const loadRTStructures = async () => {
@@ -77,6 +71,7 @@ export function RTStructureOverlay({
         // First get RT structure series for this study
         const response = await fetch(`/api/studies/${studyId}/rt-structures`);
         if (!response.ok) {
+          console.log('No RT structures found for this study');
           return;
         }
         
@@ -94,10 +89,8 @@ export function RTStructureOverlay({
         }
 
         const rtStructData = await contourResponse.json();
-        
-        // Cache the loaded data
-        rtStructureCache.current.set(studyId, rtStructData);
         setLocalRTStructures(rtStructData);
+        console.log(`Loaded RT structures with ${rtStructData.structures.length} ROIs`);
         
       } catch (error) {
         console.error('Error loading RT structures:', error);
@@ -106,8 +99,10 @@ export function RTStructureOverlay({
       }
     };
 
-    loadRTStructures();
-  }, [studyId]); // Remove externalRTStructures from dependencies
+    if (studyId) {
+      loadRTStructures();
+    }
+  }, [studyId, externalRTStructures]);
 
   // Handle right-click on predicted contours to confirm them
   useEffect(() => {

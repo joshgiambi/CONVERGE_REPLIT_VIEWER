@@ -129,26 +129,6 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
-- July 23, 2025: Fixed RT Structure Performance and Loading Display Issues - COMPLETED
-  - ✅ Fixed excessive RT structure API calls during scrolling by implementing proper caching
-  - ✅ Added rtStructureCache using useRef to prevent repeated API calls for the same study
-  - ✅ Enhanced image loading display to show "Loading image..." message while image data loads
-  - ✅ Increased scroll throttling delay from 10ms to 50ms to reduce excessive re-renders
-  - ✅ RT structure overlay now maintains smooth performance during fast scrolling
-  - ✅ Fixed initial blank screen issue by showing proper loading states
-  - ✅ Maintained data integrity while dramatically improving user experience
-  - Previous issue: RT structure overlay caused 10+ API calls per second during scrolling
-  - Solution: Comprehensive caching system with smart cache key management
-- July 23, 2025: Implemented Parallel Batch Loading Optimization - COMPLETED
-  - ✅ Fixed server overwhelm issue when loading large image sets by implementing batch loading
-  - ✅ Modified preloadAllImages function to load images in batches of 10 instead of all at once
-  - ✅ Each batch of 10 images loads in parallel, then waits before loading the next batch
-  - ✅ Added incremental progress logging showing percentage completion (e.g., "Loaded 50/200 images (25%)")
-  - ✅ Cache updates incrementally after each batch for smoother user experience
-  - ✅ Maintains parallel loading benefits while preventing too many concurrent server requests
-  - ✅ Secondary images (MRI) already had batch loading implemented, now primary images match
-  - Previous issue: Loading 200+ images simultaneously would overwhelm the server with concurrent requests
-  - Solution: Batch loading with 10 concurrent requests at a time, sequential batch processing
 - July 23, 2025: Fixed MRI Fusion Slice Position Display - COMPLETED
   - ✅ Removed confusing MRI slice position display during fusion viewing
   - ✅ Confirmed CT slice position is the correct reference frame for fusion

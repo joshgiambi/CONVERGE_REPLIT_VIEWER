@@ -169,14 +169,20 @@ export function SeriesSelector({
         
         if (onAutoZoom) {
           const finalZoom = Math.max(0.5, Math.min(5, targetZoom));
+          console.log('Calling onAutoZoom with zoom:', finalZoom);
           onAutoZoom(finalZoom);
+        } else {
+          console.log('onAutoZoom callback not available');
         }
       }
     }
     
     // Pan to centroid
     if (autoLocalizeEnabled && onAutoLocalize) {
+      console.log('Calling onAutoLocalize with centroid:', centroidX, centroidY, centroidZ);
       onAutoLocalize(centroidX, centroidY, centroidZ);
+    } else {
+      console.log('onAutoLocalize not available or disabled. autoLocalizeEnabled:', autoLocalizeEnabled, 'onAutoLocalize:', !!onAutoLocalize);
     }
   };
 
@@ -198,9 +204,10 @@ export function SeriesSelector({
           }
         }
         
+        console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
         setRTSeries(allRTSeries);
       } catch (error) {
-        // Silent fail - RT structures are optional
+        console.error('Error loading RT series:', error);
       }
     };
     
