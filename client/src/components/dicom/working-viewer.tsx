@@ -135,6 +135,7 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
+  const [secondaryModality, setSecondaryModality] = useState<string>('MR');
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -991,10 +992,19 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
       if (!secondarySeriesId) {
         setSecondaryImages([]);
         setSecondaryImageCache(new Map());
+        setSecondaryModality('MR'); // Reset to default
         return;
       }
 
       try {
+        // First fetch series info to get modality
+        const seriesResponse = await fetch(`/api/series/${secondarySeriesId}`);
+        if (seriesResponse.ok) {
+          const seriesData = await seriesResponse.json();
+          setSecondaryModality(seriesData.modality || 'MR');
+          console.log(`Secondary series modality: ${seriesData.modality}`);
+        }
+        
         const response = await fetch(`/api/series/${secondarySeriesId}/images`);
         if (!response.ok) {
           throw new Error(`Failed to load secondary images: ${response.statusText}`);
@@ -2723,10 +2733,20 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
             </Badge>
           )}
           {secondarySeriesId && secondaryImages.length > 0 && (
-            <Badge className="bg-purple-900 text-purple-200 flex items-center gap-1">
-              <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
-              MRI Fusion
-              <span className="text-purple-300">({Math.round(fusionOpacity * 100)}%)</span>
+            <Badge className={`flex items-center gap-1 ${
+              secondaryModality === 'PT' 
+                ? 'bg-yellow-900 text-yellow-200' 
+                : 'bg-purple-900 text-purple-200'
+            }`}>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${
+                secondaryModality === 'PT' 
+                  ? 'bg-yellow-400' 
+                  : 'bg-purple-400'
+              }`} />
+              {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
+              <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
+                ({Math.round(fusionOpacity * 100)}%)
+              </span>
             </Badge>
           )}
         </div>
