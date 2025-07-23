@@ -11,6 +11,7 @@ import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
+import { patientStorage } from './patient-storage';
 
 // Configure multer to use session-specific upload directories
 const upload = multer({ 
@@ -1269,17 +1270,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       triageSessions.delete(sessionId);
       console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
       
-      // NOTE: Do NOT delete upload files after import - they are needed for serving images
-      // The DICOM files in the upload directory are referenced by the database file_path column
-      // and are served by the /api/images/:sopInstanceUID endpoint
-      console.log(`Skipping upload file cleanup to preserve DICOM files for serving`);
-      console.log(`Upload files preserved at: ${triageSession.uploadSessionId ? path.join(process.cwd(), 'uploads', triageSession.uploadSessionId) : 'unknown path'}`);
-      
-      // Only clean up temporary parsing artifacts, not the actual DICOM files
-      if (triageSession.uploadSessionId) {
-        console.log(`Upload directory ${triageSession.uploadSessionId} preserved for image serving`);
+      // Move files to permanent patient storage and clean up temporary uploads
+      if (triageSession.uploadSessionId && triageSession.parseResult?.data) {
+        try {
+          console.log(`Moving files from temporary upload to permanent patient storage...`);
+          
+          // Move files to permanent storage and get new file path mappings
+          const filePathMap = await patientStorage.moveDatasetToPermanentStorage(
+            triageSession.uploadSessionId,
+            triageSession.parseResult.data
+          );
+          
+          // Update database file paths to point to permanent storage
+          for (const [sopInstanceUID, permanentPath] of Object.entries(filePathMap)) {
+            await db.update(imagesTable)
+              .set({ file_path: permanentPath })
+              .where(eq(imagesTable.sop_instance_uid, sopInstanceUID));
+          }
+          
+          console.log(`Updated ${Object.keys(filePathMap).length} database file paths to permanent storage`);
+          
+          // Clean up temporary upload directory
+          patientStorage.cleanupUploadDirectory(triageSession.uploadSessionId);
+          
+        } catch (error) {
+          console.error('Error during file migration to permanent storage:', error);
+          // Continue anyway - don't fail the import
+        }
       } else {
-        console.log('No upload session ID found - files may be orphaned');
+        console.log('No upload session ID or parsed data found - skipping file migration');
       }
 
       res.json({ 
@@ -2884,6 +2903,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       session.completedAt = new Date();
     }
   }
+
+  // Patient storage management endpoints
+  app.get("/api/storage/patients/:patientId", async (req: Request, res: Response) => {
+    try {
+      const { patientId } = req.params;
+      const storageInfo = patientStorage.getPatientStorageInfo(patientId);
+      
+      res.json({
+        patientId,
+        storage: storageInfo,
+        path: patientStorage.getPatientPath(patientId)
+      });
+    } catch (error) {
+      console.error('Error getting patient storage info:', error);
+      res.status(500).json({ error: "Failed to get storage information" });
+    }
+  });
+
+  app.get("/api/storage/overview", async (req: Request, res: Response) => {
+    try {
+      const storageBasePath = 'storage/patients';
+      const overview = {
+        basePath: storageBasePath,
+        patients: [] as any[]
+      };
+      
+      if (fs.existsSync(storageBasePath)) {
+        const patientDirs = fs.readdirSync(storageBasePath);
+        for (const patientId of patientDirs) {
+          const info = patientStorage.getPatientStorageInfo(patientId);
+          overview.patients.push({
+            patientId,
+            ...info
+          });
+        }
+      }
+      
+      res.json(overview);
+    } catch (error) {
+      console.error('Error getting storage overview:', error);
+      res.status(500).json({ error: "Failed to get storage overview" });
+    }
+  });
 
   return { close: () => {} } as Server;
 }

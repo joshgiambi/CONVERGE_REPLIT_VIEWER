@@ -129,6 +129,18 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Patient-Based Storage System Implementation - COMPLETED
+  - ✅ Implemented structured patient storage system: storage/patients/{patientId}/{studyUID}/{seriesUID}/{sopUID}.dcm
+  - ✅ Created PatientStorage class for managing DICOM file organization and storage lifecycle
+  - ✅ Updated import workflow to move files from temporary uploads to permanent patient storage
+  - ✅ Added automatic file path updates in database after successful import
+  - ✅ Implemented automatic cleanup of temporary upload directories after file migration
+  - ✅ Added patient storage management API endpoints for monitoring storage usage
+  - ✅ Files now organized by medical hierarchy instead of random upload session IDs
+  - ✅ Permanent storage ensures files persist even after import session cleanup
+  - ✅ Added storage overview endpoint to monitor patient data organization
+  - Previous issue: Files were deleted when upload sessions were cleaned up, breaking image serving
+  - Solution: Hierarchical patient storage with automatic migration during import process
 - July 23, 2025: Automatic Upload-to-Parse Workflow Implementation - COMPLETED
   - ✅ Implemented automatic parsing workflow: Upload → Auto-Parse → Triage → Import  
   - ✅ Added triage sessions state management and UI display
