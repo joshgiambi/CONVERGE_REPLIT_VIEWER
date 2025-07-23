@@ -52,23 +52,20 @@ export function RTStructureOverlay({
   animationTime,
   rtStructures: externalRTStructures
 }: RTStructureOverlayProps) {
-  const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // Cache to prevent repeated API calls
-  const rtStructureCache = useRef<Map<number, RTStructureSet>>(new Map());
-  
-  // Use external RT structures if provided, otherwise load our own
-  const rtStructures = externalRTStructures || localRTStructures;
+  // If external RT structures are provided, use them exclusively
+  // This component should NOT make its own API calls when structures are passed in
+  const rtStructures = externalRTStructures;
 
   // Load RT structures for the study (only if external structures not provided)
   useEffect(() => {
     if (externalRTStructures) {
-      return; // Skip loading if external structures are provided
+      // External structures are provided, don't load our own
+      setLocalRTStructures(null);
+      return;
     }
     
-    // Check cache first
-    if (rtStructureCache.current.has(studyId)) {
+    // Only load if we don't have cached data and no external structures
+    if (!studyId || rtStructureCache.current.has(studyId)) {
       setLocalRTStructures(rtStructureCache.current.get(studyId) || null);
       return;
     }
@@ -109,10 +106,8 @@ export function RTStructureOverlay({
       }
     };
 
-    if (studyId) {
-      loadRTStructures();
-    }
-  }, [studyId, externalRTStructures]);
+    loadRTStructures();
+  }, [studyId]); // Remove externalRTStructures from dependencies
 
   // Handle right-click on predicted contours to confirm them
   useEffect(() => {

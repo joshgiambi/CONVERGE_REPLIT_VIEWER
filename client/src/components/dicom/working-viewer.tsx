@@ -90,6 +90,9 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
+  
+  // Add throttling for scroll events
+  const scrollThrottleRef = useRef<number | null>(null);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -2558,21 +2561,21 @@ export const WorkingViewer = forwardRef<any, WorkingViewerProps>((props, ref) =>
     e.preventDefault();
     e.stopPropagation();
 
-    // ZOOM DISABLED FOR DEBUGGING
-    /*
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl+scroll for zoom
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom((prev) => Math.max(0.1, Math.min(5, prev * zoomFactor)));
-    } else {
-    */
+    // Clear any existing throttle timeout
+    if (scrollThrottleRef.current) {
+      clearTimeout(scrollThrottleRef.current);
+    }
+
+    // Throttle scroll events to reduce excessive API calls
+    scrollThrottleRef.current = window.setTimeout(() => {
       // Regular scroll for slice navigation
       if (e.deltaY > 0) {
         goToNext();
       } else {
         goToPrevious();
       }
-    //}
+      scrollThrottleRef.current = null;
+    }, 50); // 50ms throttle delay
   };
 
   // ZOOM FUNCTIONS DISABLED FOR DEBUGGING
