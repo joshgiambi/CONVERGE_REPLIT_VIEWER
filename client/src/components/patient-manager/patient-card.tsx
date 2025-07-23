@@ -186,8 +186,8 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 />
               )}
               <div>
-                <h3 className="text-lg font-semibold text-white">{patient.patientName}</h3>
-                <p className="text-base font-bold text-gray-400">{patient.patientID}</p>
+                <h3 className="text-xl font-semibold text-white">{patient.patientName}</h3>
+                <p className="text-base font-medium text-gray-400">{patient.patientID}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge 
