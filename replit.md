@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: Critical Import Data Loss Fix - COMPLETED
+  - ✅ Fixed CRITICAL bug where import process was deleting files before moving them to permanent storage
+  - ✅ Enhanced moveDatasetToPermanentStorage to search for files in subdirectories (handles ZIP extractions)
+  - ✅ Added safety check: upload directory is ONLY deleted if ALL files are successfully moved
+  - ✅ Fixed field name mismatch between parsing (filename) and import (fileName) processes
+  - ✅ Added comprehensive logging to track file movement and identify failures
+  - ✅ Import now throws error and preserves upload directory if any files fail to move
+  - ✅ Previous issue: "Permanent file not found" errors - files were deleted without being moved
+  - ✅ Solution: Move files FIRST, verify success, THEN cleanup - never delete on partial failure
 - July 23, 2025: Duplicate DICOM Import Protection System - COMPLETED
   - ✅ Fixed critical duplicate key constraint error preventing large dataset imports
   - ✅ Added duplicate checking logic to skip existing images during import process

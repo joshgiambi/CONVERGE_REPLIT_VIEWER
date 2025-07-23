@@ -1179,6 +1179,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (triageSession.uploadSessionId && triageSession.parseResult?.data) {
         try {
           console.log(`Moving files from temporary upload to permanent patient storage FIRST...`);
+          console.log(`Upload session ID: ${triageSession.uploadSessionId}`);
+          console.log(`Number of files to move: ${triageSession.parseResult.data.length}`);
+          
+          // Log first few file paths to debug
+          const sampleFiles = triageSession.parseResult.data.slice(0, 3);
+          sampleFiles.forEach((file: any) => {
+            console.log(`Sample file - fileName: ${file.fileName}, filePath: ${file.filePath}`);
+          });
           
           // Move files to permanent storage and get new file path mappings
           filePathMap = await patientStorage.moveDatasetToPermanentStorage(
@@ -1189,7 +1197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`Successfully moved ${Object.keys(filePathMap).length} files to permanent storage`);
         } catch (error) {
           console.error('Error during file migration to permanent storage:', error);
-          return res.status(500).json({ error: "Failed to move files to permanent storage" });
+          return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to move files to permanent storage" });
         }
       }
 
@@ -1291,22 +1299,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Clean up: Remove triage session and temporary files
-      console.log(`Cleaning up triage session: ${sessionId}`);
-      console.log(`Upload session ID for cleanup: ${triageSession.uploadSessionId}`);
+      // Only clean up if all files were successfully moved
+      const movedFileCount = Object.keys(filePathMap).length;
+      const totalFileCount = data.length;
       
-      triageSessions.delete(sessionId);
-      console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
-      
-      // Clean up temporary upload directory (files already moved to permanent storage)
-      if (triageSession.uploadSessionId) {
-        try {
-          patientStorage.cleanupUploadDirectory(triageSession.uploadSessionId);
-          console.log(`Cleaned up temporary upload directory: ${triageSession.uploadSessionId}`);
-        } catch (error) {
-          console.error('Error cleaning up upload directory:', error);
-          // Continue anyway - don't fail the import
+      if (movedFileCount === totalFileCount) {
+        // All files moved successfully, safe to clean up
+        console.log(`All ${movedFileCount} files moved successfully. Cleaning up triage session: ${sessionId}`);
+        console.log(`Upload session ID for cleanup: ${triageSession.uploadSessionId}`);
+        
+        triageSessions.delete(sessionId);
+        console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
+        
+        // Clean up temporary upload directory
+        if (triageSession.uploadSessionId) {
+          try {
+            patientStorage.cleanupUploadDirectory(triageSession.uploadSessionId);
+            console.log(`Cleaned up temporary upload directory: ${triageSession.uploadSessionId}`);
+          } catch (error) {
+            console.error('Error cleaning up upload directory:', error);
+          }
         }
+      } else {
+        // Some files failed to move, DO NOT clean up
+        console.error(`WARNING: Only ${movedFileCount} of ${totalFileCount} files were moved successfully`);
+        console.error(`Preserving triage session and upload directory to prevent data loss`);
+        console.error(`Upload directory preserved at: uploads/${triageSession.uploadSessionId}`);
       }
 
       res.json({ 
@@ -2812,6 +2830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const dicomData = {
             filename: file.originalname,
+            fileName: file.originalname,  // Add both for compatibility
             filePath: file.path,
             ...metadata
           };

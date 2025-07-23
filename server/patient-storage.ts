@@ -92,6 +92,13 @@ export class PatientStorage {
 
     console.log(`Moving dataset from ${uploadPath} to permanent patient storage...`);
 
+    // Build a map of all DICOM files in the upload directory
+    const availableFiles = this.findAllDicomFiles(uploadPath);
+    console.log(`Found ${availableFiles.size} DICOM files in upload directory`);
+
+    let successCount = 0;
+    let failedCount = 0;
+
     for (const data of parsedData) {
       try {
         const {
@@ -99,18 +106,41 @@ export class PatientStorage {
           studyInstanceUID,
           seriesInstanceUID,
           sopInstanceUID,
-          fileName
+          fileName,
+          filePath
         } = data;
 
         if (!patientID || !studyInstanceUID || !seriesInstanceUID || !sopInstanceUID) {
           console.warn(`Skipping file with missing metadata: ${fileName}`);
+          failedCount++;
           continue;
         }
 
-        const sourceFile = path.join(uploadPath, fileName);
+        // Try to find the file using multiple strategies
+        let sourceFile: string | undefined;
         
-        if (!fs.existsSync(sourceFile)) {
-          console.warn(`Source file not found: ${sourceFile}`);
+        // Strategy 1: Use filePath if available (from parsing)
+        if (filePath && fs.existsSync(filePath)) {
+          sourceFile = filePath;
+        }
+        // Strategy 2: Try direct path
+        else if (fs.existsSync(path.join(uploadPath, fileName))) {
+          sourceFile = path.join(uploadPath, fileName);
+        }
+        // Strategy 3: Search in available files map by filename
+        else {
+          for (const [fullPath, name] of availableFiles.entries()) {
+            if (name === fileName || name.endsWith(fileName) || fullPath.endsWith(fileName)) {
+              sourceFile = fullPath;
+              break;
+            }
+          }
+        }
+
+        if (!sourceFile || !fs.existsSync(sourceFile)) {
+          console.error(`ERROR: Source file not found for ${fileName} (SOP: ${sopInstanceUID})`);
+          console.error(`  Tried paths: ${filePath}, ${path.join(uploadPath, fileName)}`);
+          failedCount++;
           continue;
         }
 
@@ -123,14 +153,51 @@ export class PatientStorage {
         );
 
         filePathMap[sopInstanceUID] = permanentPath;
+        successCount++;
 
       } catch (error) {
         console.error(`Error moving file ${data.fileName}:`, error);
+        failedCount++;
       }
     }
 
-    console.log(`Moved ${Object.keys(filePathMap).length} files to permanent storage`);
+    console.log(`Successfully moved ${successCount} files to permanent storage`);
+    if (failedCount > 0) {
+      console.error(`CRITICAL: Failed to move ${failedCount} files - DO NOT DELETE UPLOAD DIRECTORY`);
+      // Throw error to prevent cleanup if files failed to move
+      throw new Error(`Failed to move ${failedCount} files to permanent storage. Upload directory preserved.`);
+    }
+    
     return filePathMap;
+  }
+
+  /**
+   * Find all DICOM files recursively in a directory
+   */
+  private findAllDicomFiles(dirPath: string): Map<string, string> {
+    const fileMap = new Map<string, string>();
+    
+    const findFiles = (dir: string) => {
+      try {
+        const items = fs.readdirSync(dir);
+        
+        for (const item of items) {
+          const itemPath = path.join(dir, item);
+          const stat = fs.statSync(itemPath);
+          
+          if (stat.isDirectory()) {
+            findFiles(itemPath);
+          } else if (item.toLowerCase().endsWith('.dcm') || !path.extname(item)) {
+            fileMap.set(itemPath, item);
+          }
+        }
+      } catch (error) {
+        console.error(`Error reading directory ${dir}:`, error);
+      }
+    };
+    
+    findFiles(dirPath);
+    return fileMap;
   }
 
   /**
