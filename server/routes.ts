@@ -1173,6 +1173,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         study.series.get(seriesKey).push(metadata);
       }
 
+      // CRITICAL: Move files to permanent storage BEFORE creating database records
+      let filePathMap: Record<string, string> = {};
+      
+      if (triageSession.uploadSessionId && triageSession.parseResult?.data) {
+        try {
+          console.log(`Moving files from temporary upload to permanent patient storage FIRST...`);
+          
+          // Move files to permanent storage and get new file path mappings
+          filePathMap = await patientStorage.moveDatasetToPermanentStorage(
+            triageSession.uploadSessionId,
+            triageSession.parseResult.data
+          );
+          
+          console.log(`Successfully moved ${Object.keys(filePathMap).length} files to permanent storage`);
+        } catch (error) {
+          console.error('Error during file migration to permanent storage:', error);
+          return res.status(500).json({ error: "Failed to move files to permanent storage" });
+        }
+      }
+
       const results = [];
 
       for (const [patientKey, patientData] of patientMap) {
@@ -1232,58 +1252,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Create images for each file (skip duplicates)
             for (const metadata of seriesFiles) {
-              // Reconstruct file path from upload session
-              const uploadDir = path.join(process.cwd(), 'uploads', triageSession.uploadSessionId);
-              const originalPath = path.join(uploadDir, metadata.filename);
+              // Check if image already exists
+              const existingImage = await storage.getImageByUID(metadata.sopInstanceUID);
               
-              // Check for file in upload directory (handling ZIP extraction subdirectories)
-              let actualFilePath = originalPath;
-              if (!fs.existsSync(originalPath)) {
-                // Look for file in subdirectories (ZIP extracted files)
-                const findFileInDir = (dir: string, filename: string): string | null => {
-                  if (!fs.existsSync(dir)) return null;
-                  
-                  const files = fs.readdirSync(dir, { withFileTypes: true });
-                  for (const file of files) {
-                    const fullPath = path.join(dir, file.name);
-                    if (file.isDirectory()) {
-                      const found = findFileInDir(fullPath, filename);
-                      if (found) return found;
-                    } else if (file.name === filename) {
-                      return fullPath;
-                    }
-                  }
-                  return null;
-                };
+              if (!existingImage) {
+                // Use permanent path from filePathMap
+                const permanentPath = filePathMap[metadata.sopInstanceUID];
                 
-                const foundPath = findFileInDir(uploadDir, metadata.filename);
-                if (foundPath) {
-                  actualFilePath = foundPath;
-                } else {
-                  console.log(`File not found: ${metadata.filename}`);
-                  continue; // Skip this file if not found
-                }
-              }
-
-              if (fs.existsSync(actualFilePath)) {
-                // Check if image already exists
-                const existingImage = await storage.getImageByUID(metadata.sopInstanceUID);
-                
-                if (!existingImage) {
+                if (permanentPath && fs.existsSync(permanentPath)) {
                   await storage.createImage({
                     seriesId: dbSeries.id,
                     sopInstanceUID: metadata.sopInstanceUID || generateUID(),
                     instanceNumber: parseInt(metadata.instanceNumber) || 1,
-                    filePath: actualFilePath,
+                    filePath: permanentPath,  // Use permanent path
                     fileName: metadata.filename,
-                    fileSize: fs.statSync(actualFilePath).size,
+                    fileSize: fs.statSync(permanentPath).size,
                     metadata: { imported: true },
                   });
                 } else {
-                  console.log(`Skipping duplicate image: ${metadata.sopInstanceUID}`);
+                  console.log(`Permanent file not found for SOP Instance UID: ${metadata.sopInstanceUID}`);
                 }
               } else {
-                console.log(`File does not exist: ${actualFilePath}`);
+                console.log(`Skipping duplicate image: ${metadata.sopInstanceUID}`);
               }
             }
 
@@ -1301,43 +1291,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Clean up: Remove triage session and unprocessed files
+      // Clean up: Remove triage session and temporary files
       console.log(`Cleaning up triage session: ${sessionId}`);
       console.log(`Upload session ID for cleanup: ${triageSession.uploadSessionId}`);
-      console.log(`Triage session data:`, triageSession);
       
       triageSessions.delete(sessionId);
       console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
       
-      // Move files to permanent patient storage and clean up temporary uploads
-      if (triageSession.uploadSessionId && triageSession.parseResult?.data) {
+      // Clean up temporary upload directory (files already moved to permanent storage)
+      if (triageSession.uploadSessionId) {
         try {
-          console.log(`Moving files from temporary upload to permanent patient storage...`);
-          
-          // Move files to permanent storage and get new file path mappings
-          const filePathMap = await patientStorage.moveDatasetToPermanentStorage(
-            triageSession.uploadSessionId,
-            triageSession.parseResult.data
-          );
-          
-          // Update database file paths to point to permanent storage
-          for (const [sopInstanceUID, permanentPath] of Object.entries(filePathMap)) {
-            await db.update(imagesTable)
-              .set({ filePath: permanentPath })
-              .where(eq(imagesTable.sopInstanceUID, sopInstanceUID));
-          }
-          
-          console.log(`Updated ${Object.keys(filePathMap).length} database file paths to permanent storage`);
-          
-          // Clean up temporary upload directory
           patientStorage.cleanupUploadDirectory(triageSession.uploadSessionId);
-          
+          console.log(`Cleaned up temporary upload directory: ${triageSession.uploadSessionId}`);
         } catch (error) {
-          console.error('Error during file migration to permanent storage:', error);
+          console.error('Error cleaning up upload directory:', error);
           // Continue anyway - don't fail the import
         }
-      } else {
-        console.log('No upload session ID or parsed data found - skipping file migration');
       }
 
       res.json({ 
