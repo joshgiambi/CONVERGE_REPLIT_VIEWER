@@ -64,6 +64,7 @@ export function SeriesSelector({
   const [expandedGroups, setExpandedGroups] = useState<Map<string, boolean>>(new Map());
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [groupingEnabled, setGroupingEnabled] = useState(true);
+  const [hoveredRegSeries, setHoveredRegSeries] = useState<number | null>(null);
   // Calculate allVisible dynamically based on current visibility state
   const allVisible = useMemo(() => {
     if (!rtStructures?.structures || structureVisibility.size === 0) return true;
@@ -508,6 +509,8 @@ export function SeriesSelector({
                                 p-2 rounded-lg border cursor-pointer transition-all duration-200
                                 ${selectedSeries?.id === seriesItem.id
                                   ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                                  : hoveredRegSeries && (ctSeries.length > 0 || mrSeries.length > 0 || ptSeries.length > 0)
+                                  ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                   : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
                                 }
                               `}
@@ -593,6 +596,8 @@ export function SeriesSelector({
                                           ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
                                           : selectedSeries?.id === mrS.id
                                           ? 'bg-purple-500/20 border-purple-500 shadow-lg'
+                                          : hoveredRegSeries
+                                          ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                           : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
                                         } border
                                       `}
@@ -646,6 +651,8 @@ export function SeriesSelector({
                                         w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
                                         ${selectedSeries?.id === ptS.id
                                           ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
+                                          : hoveredRegSeries
+                                          ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                           : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
                                         } border
                                       `}
@@ -708,36 +715,53 @@ export function SeriesSelector({
                           </div>
                         ))}
                         
-                        {/* Registration Series - Show at bottom as non-interactive metadata */}
+                        {/* Registration Series - Simple pill-shaped display */}
                         {regSeries.length > 0 && (
-                          <div className="mt-4 pt-4 border-t border-gray-700">
-                            <div className="text-xs text-gray-500 mb-2">Registration Files</div>
-                            {regSeries.map((seriesItem) => (
-                              <div
-                                key={seriesItem.id}
-                                className="p-2 rounded-lg bg-gray-900/50 border border-gray-700/50 opacity-70"
-                              >
-                                <div className="flex items-center space-x-2">
+                          <div className="mt-4 space-y-2">
+                            {regSeries.map((seriesItem) => {
+                              // For now, we'll use a simple heuristic to find the two series to fuse
+                              // In a real implementation, we'd parse the REG file to get the referenced series UIDs
+                              // Priority: CT as primary, then MR/PT as secondary
+                              const ctSeries = series.find(s => s.modality === 'CT');
+                              const mrSeries = series.find(s => s.modality === 'MR');
+                              const ptSeries = series.find(s => s.modality === 'PT');
+                              
+                              // Determine primary and secondary series based on available modalities
+                              let primarySeries = ctSeries;
+                              let secondarySeries = mrSeries || ptSeries;
+                              
+                              // If no CT, could be MR-to-MR or other combinations
+                              if (!primarySeries && mrSeries) {
+                                primarySeries = mrSeries;
+                                secondarySeries = series.find(s => s.modality === 'MR' && s.id !== mrSeries.id);
+                              }
+                              
+                              return (
+                                <div
+                                  key={seriesItem.id}
+                                  className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs hover:bg-gray-700/50 transition-colors cursor-pointer"
+                                  onMouseEnter={() => setHoveredRegSeries(seriesItem.id)}
+                                  onMouseLeave={() => setHoveredRegSeries(null)}
+                                  onClick={() => {
+                                    // Open primary with secondary fusion when clicking REG
+                                    if (primarySeries && secondarySeries) {
+                                      onSeriesSelect(primarySeries);
+                                      if (onSecondarySeriesSelect) {
+                                        // Small delay to ensure primary is selected first
+                                        setTimeout(() => {
+                                          onSecondarySeriesSelect(secondarySeries.id);
+                                        }, 100);
+                                      }
+                                    }
+                                  }}
+                                >
                                   <Link className="w-3 h-3 text-gray-500" />
-                                  <div className="flex-1">
-                                    <div className="flex items-center justify-between">
-                                      <Badge 
-                                        variant="outline" 
-                                        className="text-xs border-gray-600 text-gray-500"
-                                      >
-                                        {seriesItem.modality}
-                                      </Badge>
-                                      <span className="text-xs text-gray-600">
-                                        Enables fusion
-                                      </span>
-                                    </div>
-                                    <h4 className="text-xs text-gray-400 mt-1 truncate">
-                                      {seriesItem.seriesDescription || 'Image Registration'}
-                                    </h4>
-                                  </div>
+                                  <span className="text-gray-400">
+                                    {seriesItem.modality} • {seriesItem.seriesDescription || 'Registration'}
+                                  </span>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </>
