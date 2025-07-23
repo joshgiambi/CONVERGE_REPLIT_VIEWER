@@ -3,7 +3,7 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Trash2 } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
@@ -402,15 +402,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 Advanced Viewer
               </Button>
             </Link>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleDelete()}
-              className="bg-red-600 hover:bg-red-700 text-white border border-red-500"
-            >
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete
-            </Button>
           </div>
           
           <Button
