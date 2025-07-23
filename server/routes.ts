@@ -1269,26 +1269,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       triageSessions.delete(sessionId);
       console.log(`Triage session ${sessionId} deleted. Remaining sessions: ${triageSessions.size}`);
       
-      // Clean up the upload files
+      // NOTE: Do NOT delete upload files after import - they are needed for serving images
+      // The DICOM files in the upload directory are referenced by the database file_path column
+      // and are served by the /api/images/:sopInstanceUID endpoint
+      console.log(`Skipping upload file cleanup to preserve DICOM files for serving`);
+      console.log(`Upload files preserved at: ${triageSession.uploadSessionId ? path.join(process.cwd(), 'uploads', triageSession.uploadSessionId) : 'unknown path'}`);
+      
+      // Only clean up temporary parsing artifacts, not the actual DICOM files
       if (triageSession.uploadSessionId) {
-        const uploadPath = path.join(process.cwd(), 'uploads', triageSession.uploadSessionId);
-        console.log(`Attempting to delete upload path: ${uploadPath}`);
-        console.log(`Full path: ${uploadPath}`);
-        
-        try {
-          if (fs.existsSync(uploadPath)) {
-            const stats = fs.statSync(uploadPath);
-            console.log(`Directory exists, size: ${stats.isDirectory() ? 'directory' : 'file'}`);
-            fs.rmSync(uploadPath, { recursive: true, force: true });
-            console.log(`Successfully deleted upload directory: ${uploadPath}`);
-          } else {
-            console.log(`Upload directory not found: ${uploadPath}`);
-          }
-        } catch (cleanupError) {
-          console.error(`Error during cleanup:`, cleanupError);
-        }
+        console.log(`Upload directory ${triageSession.uploadSessionId} preserved for image serving`);
       } else {
-        console.log('No upload session ID found for cleanup - cannot clean up files');
+        console.log('No upload session ID found - files may be orphaned');
       }
 
       res.json({ 
