@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 23, 2025: ZIP File Upload Support - COMPLETED
+  - ✅ Fixed ZIP file upload issue by adding extraction capability
+  - ✅ Imported yauzl library for ZIP file extraction
+  - ✅ Added extractZipFile function to handle ZIP extraction
+  - ✅ Modified upload endpoint to detect and extract ZIP files before processing
+  - ✅ System now extracts DICOM files from ZIP archives automatically
+  - ✅ Supports mixed uploads of both ZIP files and individual DICOM files
+  - ✅ Cleans up ZIP files after successful extraction
+  - ✅ Only processes .dcm files or files without extensions from ZIP archives
 - July 23, 2025: Viewer Consolidation and Patient Selection - COMPLETED
   - ✅ Consolidated dual viewer system (dicom-viewer and enhanced-viewer) into a single unified viewer
   - ✅ Renamed enhanced-viewer to just "viewer" for simplicity

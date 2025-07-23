@@ -10,6 +10,7 @@ import { db } from "./db";
 import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
+import yauzl from 'yauzl';
 
 // Configure multer to use session-specific upload directories
 const upload = multer({ 
@@ -71,6 +72,61 @@ const parsingSessions = new Map<string, {
   completedAt?: Date;
   files?: Express.Multer.File[];
 }>();
+
+// Function to extract ZIP files
+async function extractZipFile(zipPath: string, destDir: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const extractedFiles: string[] = [];
+    
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      zipfile.readEntry();
+      
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry
+          zipfile.readEntry();
+        } else {
+          // File entry
+          const outputPath = path.join(destDir, entry.fileName);
+          const outputDir = path.dirname(outputPath);
+          
+          // Create directory if it doesn't exist
+          if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+          }
+          
+          zipfile.openReadStream(entry, (err, readStream) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            
+            const writeStream = fs.createWriteStream(outputPath);
+            readStream.pipe(writeStream);
+            
+            writeStream.on('close', () => {
+              extractedFiles.push(outputPath);
+              zipfile.readEntry();
+            });
+            
+            writeStream.on('error', reject);
+          });
+        }
+      });
+      
+      zipfile.on('end', () => {
+        resolve(extractedFiles);
+      });
+      
+      zipfile.on('error', reject);
+    });
+  });
+}
 
 function isDICOMFile(filePath: string): boolean {
   try {
@@ -2294,6 +2350,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use the upload session ID from multer
       const uploadSessionId = (req as any).uploadSessionId;
+      const uploadDir = path.join('uploads', uploadSessionId);
+      
+      // Extract any ZIP files first
+      const allFiles: Express.Multer.File[] = [];
+      
+      for (const file of files) {
+        if (file.originalname.toLowerCase().endsWith('.zip')) {
+          console.log(`Extracting ZIP file: ${file.originalname}`);
+          try {
+            const extractedPaths = await extractZipFile(file.path, uploadDir);
+            console.log(`Extracted ${extractedPaths.length} files from ${file.originalname}`);
+            
+            // Convert extracted files to multer file format
+            for (const extractedPath of extractedPaths) {
+              const filename = path.basename(extractedPath);
+              if (filename.toLowerCase().endsWith('.dcm') || !path.extname(filename)) {
+                allFiles.push({
+                  fieldname: 'files',
+                  originalname: filename,
+                  encoding: '7bit',
+                  mimetype: 'application/dicom',
+                  destination: uploadDir,
+                  filename: filename,
+                  path: extractedPath,
+                  size: fs.statSync(extractedPath).size
+                } as Express.Multer.File);
+              }
+            }
+            
+            // Delete the ZIP file after extraction
+            fs.unlinkSync(file.path);
+          } catch (extractError) {
+            console.error(`Failed to extract ZIP file ${file.originalname}:`, extractError);
+          }
+        } else {
+          // Regular file, add to list
+          allFiles.push(file);
+        }
+      }
+      
+      if (allFiles.length === 0) {
+        return res.status(400).json({ error: "No DICOM files found after extraction" });
+      }
       
       // Generate session ID
       const sessionId = `parse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -2304,9 +2403,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadSessionId,
         status: 'parsing' as const,
         progress: 0,
-        total: Math.min(files.length, 1000),
+        total: Math.min(allFiles.length, 1000),
         startedAt: new Date(),
-        files: files.slice(0, 1000)
+        files: allFiles.slice(0, 1000)
       };
       
       parsingSessions.set(sessionId, session);
@@ -2317,8 +2416,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         sessionId,
         total: session.total,
-        message: files.length > 1000 
-          ? `Started parsing first 1000 of ${files.length} files. Please upload remaining files in a separate batch.`
+        message: allFiles.length > 1000 
+          ? `Started parsing first 1000 of ${allFiles.length} files. Please upload remaining files in a separate batch.`
           : `Started parsing ${session.total} files`
       });
       
