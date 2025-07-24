@@ -129,6 +129,15 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 24, 2025: Critical Fusion System Fixes - Size and Range Issues - COMPLETED
+  - ✅ Fixed critical function call bug: replaced `precomputeMRITransformations` with correct `computeTransformedMRIPositions`
+  - ✅ Fixed MRI size scaling issue: MRI was 3x larger than CT due to canvas scaling instead of 1:1 pixel mapping
+  - ✅ Added Z-range enforcement: MRI fusion now only renders within MRI coverage area (463-698mm)
+  - ✅ MRI no longer continues rendering same image outside its valid Z-range
+  - ✅ Fixed size mismatch: MRI and CT now display at same physical dimensions using 1:1 pixel mapping
+  - ✅ Enhanced Z-range checking with 5mm tolerance for smooth transitions
+  - Previous issue: MRI appeared 3x too large and rendered continuously outside valid range
+  - Solution: Proper 1:1 pixel scaling and strict Z-range enforcement for accurate fusion
 - July 24, 2025: Fusion System Integration and Cleanup - COMPLETED
   - ✅ Fixed critical syntax errors in working-viewer.tsx that caused application crashes
   - ✅ Successfully integrated new fusion utility functions from fusion-utils.ts

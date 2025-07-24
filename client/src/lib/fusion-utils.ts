@@ -166,6 +166,19 @@ export async function renderFusionOverlay(
   canvasWidth: number,
   canvasHeight: number
 ) {
+  // CRITICAL: Check if CT slice is within MRI Z-range
+  if (transformedMRI.length > 0) {
+    const zValues = transformedMRI.map(t => t.zInCT);
+    const minZ = Math.min(...zValues);
+    const maxZ = Math.max(...zValues);
+    
+    // Only render fusion if CT slice is within MRI coverage range
+    if (ctSliceZ < minZ - 5 || ctSliceZ > maxZ + 5) { // 5mm tolerance
+      console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion`);
+      return;
+    }
+  }
+
   // Get the interpolated MRI data for this CT slice
   const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache);
   if (!mriData) return; // nothing to draw
@@ -201,10 +214,11 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // Compute scaling to cover canvas
-  const scale = Math.min(canvasWidth / mriData.width, canvasHeight / mriData.height);
-  const w = mriData.width * scale;
-  const h = mriData.height * scale;
+  // CRITICAL FIX: Match CT physical dimensions instead of canvas scaling
+  // MRI and CT should have the same physical size on screen, not scale to fit canvas
+  // Use 1:1 pixel mapping since both images are in the same coordinate space after registration
+  const w = mriData.width;
+  const h = mriData.height;
   const x = (canvasWidth - w) / 2 + panX;
   const y = (canvasHeight - h) / 2 + panY;
 
