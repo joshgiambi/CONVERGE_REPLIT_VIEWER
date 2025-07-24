@@ -1668,6 +1668,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
     const ctImageMetadata = imageMetadata || {};
     
+    // Define CT coordinates at function scope for use throughout
+    let ctX = -249.51171875, ctY = -465.51171875, ctZ = ctSlicePosition;
+    
     // Find the matching MRI slice using registration transformation
     let closestSecondaryImage;
     let minDistance = Infinity;
@@ -1709,7 +1712,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Get CT image position
       const ctImagePosition = ctImageMetadata.imagePosition || primaryImage.imagePosition;
-      let ctX = -249.51171875, ctY = -465.51171875, ctZ = ctSlicePosition;
       
       if (ctImagePosition) {
         const positions = typeof ctImagePosition === 'string'
