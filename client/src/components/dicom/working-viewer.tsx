@@ -93,6 +93,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
+  const [fusionAvailable, setFusionAvailable] = useState(true);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1036,27 +1037,43 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     // Log the first few MRI positions before and after transformation
     console.log("\n=== MRI Transformation Debug ===");
-    console.log("Registration matrix:", registrationMatrix);
+    console.log("Registration matrix (as flat array):", registrationMatrix);
+    console.log("Registration matrix 4x4:");
+    console.log(`  [${regMatrix4x4[0].map(v => v.toFixed(3)).join(', ')}]`);
+    console.log(`  [${regMatrix4x4[1].map(v => v.toFixed(3)).join(', ')}]`);
+    console.log(`  [${regMatrix4x4[2].map(v => v.toFixed(3)).join(', ')}]`);
+    console.log(`  [${regMatrix4x4[3].map(v => v.toFixed(3)).join(', ')}]`);
+    
+    // Check if we have valid MRI images with positions
+    const validMRICount = mriImages.filter(img => img.imagePosition).length;
+    console.log(`Valid MRI images with positions: ${validMRICount}/${mriImages.length}`);
     
     // Transform all MRI positions to CT space
     const transformed = mriImages.map((mriImage, index) => {
       const mriPos = mriImage.imagePosition;
-      if (!mriPos) return null;
+      if (!mriPos) {
+        console.warn(`MRI image ${index} has no imagePosition metadata`);
+        return null;
+      }
       
       const mriPatientPosition = typeof mriPos === 'string' 
         ? mriPos.split('\\').map((p: string) => parseFloat(p))
         : mriPos;
         
-      if (mriPatientPosition.length < 3) return null;
+      if (mriPatientPosition.length < 3) {
+        console.warn(`MRI image ${index} has invalid position data:`, mriPos);
+        return null;
+      }
       
       const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
       const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
       
-      // Log first 3 and last 3 transformations
+      // Log first 3 and last 3 transformations with more detail
       if (index < 3 || index >= mriImages.length - 3) {
-        console.log(`MRI[${index}] slice ${mriImage.sliceLocation}mm:`);
+        console.log(`\nMRI[${index}] Instance ${mriImage.instanceNumber}, slice ${mriImage.sliceLocation}mm:`);
         console.log(`  Original position: [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}]`);
-        console.log(`  Transformed to CT: [${mriTransformed.slice(0,3).map(v => v.toFixed(1)).join(', ')}]`);
+        console.log(`  Homogeneous coords: [${mriHomogeneous.map(v => v.toFixed(1)).join(', ')}]`);
+        console.log(`  Transformed result: [${mriTransformed.map(v => v.toFixed(1)).join(', ')}]`);
         console.log(`  Z in CT space: ${mriTransformed[2].toFixed(1)}mm`);
       }
       
@@ -1835,8 +1852,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         [currentRegistrationMatrix[12], currentRegistrationMatrix[13], currentRegistrationMatrix[14], currentRegistrationMatrix[15]]
       ];
       
-      // CRITICAL FIX: The registration matrix transforms CT to MRI coordinates (per replit.md)
-      // We need to INVERT it to transform MRI to CT for slice matching
+      // The registration matrix transforms MRI to CT coordinates
+      // We use it directly to find which MRI slice corresponds to this CT slice
       
       // Check cache first
       const cacheKey = currentIndex;
@@ -1856,9 +1873,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           // Quick check if CT is outside MRI range
           if (mriZRangeInCTSpace.current) {
             if (ctZ < mriZRangeInCTSpace.current.min - 5 || ctZ > mriZRangeInCTSpace.current.max + 5) {
-              console.log(`CT slice is outside MRI coverage - no fusion overlay`);
+              console.log(`CT slice at ${ctZ.toFixed(1)}mm is outside MRI coverage (${mriZRangeInCTSpace.current.min.toFixed(1)}-${mriZRangeInCTSpace.current.max.toFixed(1)}mm)`);
               mriSliceMappingCache.current.set(cacheKey, null);
+              
+              // Update fusion availability indicator
+              setFusionAvailable(false);
               return;
+            } else {
+              setFusionAvailable(true);
             }
           }
           
@@ -1915,9 +1937,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             const actualIndex = secondaryImages.indexOf(bestMatch);
             console.log(`✓ Found MRI slice: ${bestMatch.sliceLocation}mm (Z-distance: ${bestDistance.toFixed(1)}mm)`);
             mriSliceMappingCache.current.set(cacheKey, { mriIndex: actualIndex, distance: bestDistance });
+            setFusionAvailable(true);
           } else {
             console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
             mriSliceMappingCache.current.set(cacheKey, null);
+            setFusionAvailable(false);
             return;
           }
         } else {
