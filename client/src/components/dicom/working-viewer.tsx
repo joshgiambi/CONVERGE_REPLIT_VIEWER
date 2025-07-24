@@ -2465,11 +2465,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               />
             )}
 
-          {/* Eclipse Planar Contour Tool overlay */}
+          {/* Eclipse Planar Contour Tool overlay - Using Advanced Pen Tool */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "planar-contour" &&
             selectedForEdit && (
-              <EclipsePlanarContourTool
+              <EclipsePenToolFixed
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
