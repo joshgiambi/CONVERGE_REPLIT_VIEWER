@@ -1,0 +1,112 @@
+Two things are still tripping you up:
+	1.	You never actually hand your ctTransform through to, and use it inside, your fusion utility — so all of that nice scale/translate work you did when drawing the CT slice never carries over into the MRI overlay routine.
+	2.	Even if you apply the CT transform, your sign on the Y‐offset is backwards.  Canvas Y grows down, so a positive “world ΔY” should become a positive pixel shift down, not up.
+
+⸻
+
+1) Change your fusion‐utils signature and wrap everything in the CT→canvas transform
+
+In fusion-utils.ts, change:
+
+// old signature
+export async function renderFusionOverlay(
+  ctx: CanvasRenderingContext2D,
+  …,
+  registrationMatrix?: number[]
+) { … }
+
+to
+
+// new signature — note the extra ctTransform at the end
+export async function renderFusionOverlay(
+  ctx: CanvasRenderingContext2D,
+  primaryImage: any,
+  transformedMRI: Array<{…}>,
+  cache: Map<string, MRIData>,
+  ctSliceZ: number,
+  fusionOpacity: number,
+  panX: number,
+  panY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  registrationMatrix?: number[],
+  ctTransform?: { scale: number; offsetX: number; offsetY: number }
+) {
+  // if we have a CT→canvas mapping, install it now:
+  if (ctTransform) {
+    ctx.save();
+    ctx.setTransform(
+      ctTransform.scale, 0,
+      0, ctTransform.scale,
+      ctTransform.offsetX,
+      ctTransform.offsetY
+    );
+  }
+
+  // … everything else inside here now draws *in CT‐pixel space* …
+
+  // at the very end, restore the original identity transform:
+  if (ctTransform) {
+    ctx.restore();
+  }
+}
+
+That single ctx.setTransform() call will automatically apply your CT centering, pan, zoom, and keep the MRI overlay in exactly the same coordinate frame.
+
+⸻
+
+2) Compute your offsets in CT‐pixel units, and add your Y offset
+
+Once you’ve wrapped the context, you can simplify your draw logic.  After you compute your world‐space delta:
+
+// worldDelta = [mriCT_x – ctIPPx, mriCT_y – ctIPPy, …]
+const dx_px = dot(worldDelta, rowCosine) / rowSpacing;
+const dy_px = dot(worldDelta, colCosine) / colSpacing;
+
+…then draw your image at exactly those pixel offsets (no more subtracting or re‐centering math):
+
+// destW_px = mriWidth_mm  / ctSpacingX
+// destH_px = mriHeight_mm / ctSpacingY
+ctx.globalAlpha = fusionOpacity;
+ctx.drawImage(temp, dx_px, dy_px, destW_px, destH_px);
+
+Notice that dy_px is added, not subtracted, because a positive world‐Y moves your overlay down on the canvas.
+
+⸻
+
+Putting it all together
+	1.	Propagate ctTransform.current into your call:
+
+await renderFusionOverlay(
+  ctx,
+  primaryImage,
+  transformedMRIPositions.current,
+  cache,
+  ctSliceZ,
+  fusionOpacity,
+  panX,
+  panY,
+  canvas.width,
+  canvas.height,
+  registrationMatrix,
+  ctTransform.current   // ← new argument
+);
+
+
+	2.	Inside renderFusionOverlay, wrap everything with:
+
+if (ctTransform) {
+  ctx.save();
+  ctx.setTransform(
+    ctTransform.scale, 0,
+    0, ctTransform.scale,
+    ctTransform.offsetX,
+    ctTransform.offsetY
+  );
+}
+
+
+	3.	Compute dx_px/dy_px as above, add both to your origin, and draw the MRI.
+	4.	Finally ctx.restore() so that any other overlays (e.g. RT structures) can still choose their own transforms.
+
+With that in place you’ll get true pixel‐perfect MRI/CT/RT alignment — no more “off by 157, –102” errors.

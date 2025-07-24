@@ -178,6 +178,17 @@ export async function renderFusionOverlay(
   registrationMatrix?: number[],
   ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null
 ) {
+  // Apply CT transform if available - this puts us in the same coordinate system as the CT
+  if (ctTransform) {
+    ctx.save();
+    ctx.setTransform(
+      ctTransform.scale, 0,
+      0, ctTransform.scale,
+      ctTransform.offsetX,
+      ctTransform.offsetY
+    );
+  }
+
   // STRICT Z-range check: Only render fusion within actual MRI coverage
   if (transformedMRI.length > 0) {
     const zValues = transformedMRI.map(t => t.zInCT);
@@ -187,6 +198,7 @@ export async function renderFusionOverlay(
     // Only render fusion if CT slice is within MRI coverage range
     if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
       console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
+      if (ctTransform) ctx.restore();
       return; // Exit early - no fusion rendering
     }
   }
@@ -394,84 +406,71 @@ export async function renderFusionOverlay(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   
-  // Apply the CT transform if available to ensure exact same coordinate system
+  // We're now in CT coordinate space thanks to the setTransform at the beginning
+  // Compute the offset using the expert's recommended approach
   if (ctTransform && registrationMatrix && actualSecondaryImage) {
-    console.log('🔥 Applying ctx.setTransform: Putting MRI in exact CT coordinate system');
-    // Apply the same transform that was used for CT
-    ctx.setTransform(
-      ctTransform.scale, 0,
-      0, ctTransform.scale,
-      ctTransform.offsetX,
-      ctTransform.offsetY
-    );
+    console.log('🔥 Computing MRI position in CT coordinate space');
     
-    // We're now in the CT's transformed coordinate system
-    // The CT image is drawn at (0, 0) in this coordinate system
-    // We need to figure out where to draw the MRI relative to this
-    
-    // Get image positions in world coordinates
+    // Get image positions and orientations
     const ctIPP = toNumberArray(primaryImage.imagePosition);
     const mriIPP = toNumberArray(actualSecondaryImage.imagePosition);
     
-    // Get MRI and CT centers in physical space
-    const mriCenterX = mriIPP[0] + (w / 2) * mriSpacingArr[1];
-    const mriCenterY = mriIPP[1] + (h / 2) * mriSpacingArr[0];
-    const mriCenterZ = mriIPP[2];
+    // Get CT orientation vectors (row and column cosines)
+    const ctOrientation = toNumberArray(primaryImage.imageOrientation);
+    const rowCosine = [ctOrientation[0], ctOrientation[1], ctOrientation[2]];
+    const colCosine = [ctOrientation[3], ctOrientation[4], ctOrientation[5]];
     
-    const ctCenterX = ctIPP[0] + (ctTransform.imageWidth / 2) * ctSpacingArr[1];
-    const ctCenterY = ctIPP[1] + (ctTransform.imageHeight / 2) * ctSpacingArr[0];
+    // Transform MRI origin to CT coordinate space
+    const mriVector = [...mriIPP, 1];
+    const mriCT_x = registrationMatrix[0] * mriVector[0] + registrationMatrix[1] * mriVector[1] + 
+                    registrationMatrix[2] * mriVector[2] + registrationMatrix[3] * mriVector[3];
+    const mriCT_y = registrationMatrix[4] * mriVector[0] + registrationMatrix[5] * mriVector[1] + 
+                    registrationMatrix[6] * mriVector[2] + registrationMatrix[7] * mriVector[3];
+    const mriCT_z = registrationMatrix[8] * mriVector[0] + registrationMatrix[9] * mriVector[1] + 
+                    registrationMatrix[10] * mriVector[2] + registrationMatrix[11] * mriVector[3];
     
-    // Transform MRI center to CT coordinate space
-    const mriCenterVector = [mriCenterX, mriCenterY, mriCenterZ, 1];
-    const mriCenterCT_x = registrationMatrix[0] * mriCenterVector[0] + registrationMatrix[1] * mriCenterVector[1] + 
-                          registrationMatrix[2] * mriCenterVector[2] + registrationMatrix[3] * mriCenterVector[3];
-    const mriCenterCT_y = registrationMatrix[4] * mriCenterVector[0] + registrationMatrix[5] * mriCenterVector[1] + 
-                          registrationMatrix[6] * mriCenterVector[2] + registrationMatrix[7] * mriCenterVector[3];
+    // Calculate world delta (MRI origin in CT space - CT origin)
+    const worldDelta = [
+      mriCT_x - ctIPP[0],
+      mriCT_y - ctIPP[1],
+      mriCT_z - ctIPP[2]
+    ];
     
-    // Calculate the offset from CT center to transformed MRI center in mm
-    const offsetX_mm = mriCenterCT_x - ctCenterX;
-    const offsetY_mm = mriCenterCT_y - ctCenterY;
+    // Helper function for dot product
+    function dot(v1: number[], v2: number[]): number {
+      return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+    }
     
-    // Convert mm offset to pixels
-    const offsetX_px = offsetX_mm / ctSpacingArr[1];  // X uses column spacing
-    const offsetY_px = offsetY_mm / ctSpacingArr[0];  // Y uses row spacing
+    // Project world delta onto CT image axes to get pixel offsets
+    const dx_px = dot(worldDelta, rowCosine) / ctSpacingArr[1];  // Column spacing for X
+    const dy_px = dot(worldDelta, colCosine) / ctSpacingArr[0];  // Row spacing for Y
     
-    // Calculate final position
-    // The CT is drawn centered at (256, 256) in its 512x512 space
-    // We need to position the MRI relative to this center
-    const ctImageCenterX = ctTransform.imageWidth / 2;
-    const ctImageCenterY = ctTransform.imageHeight / 2;
+    // Calculate MRI size in CT pixels
+    const destW_px = (w * mriSpacingArr[1]) / ctSpacingArr[1];
+    const destH_px = (h * mriSpacingArr[0]) / ctSpacingArr[0];
     
-    // Calculate where to draw the MRI
-    const drawX = ctImageCenterX - (w / 2) + offsetX_px;
-    const drawY = ctImageCenterY - (h / 2) - offsetY_px;  // Negative because Y is inverted
+    // Draw MRI at the computed offset (adding dy_px since canvas Y grows down)
+    ctx.drawImage(temp, dx_px, dy_px, destW_px, destH_px);
     
-    // Draw MRI at the calculated position
-    ctx.drawImage(temp, drawX, drawY, w, h);
-    
-    console.log(`✓ MRI drawn using ctx.setTransform approach:`);
+    console.log(`✓ MRI drawn using expert's approach:`);
     console.log(`  CT IPP: [${ctIPP[0].toFixed(1)}, ${ctIPP[1].toFixed(1)}, ${ctIPP[2].toFixed(1)}]mm`);
     console.log(`  MRI IPP: [${mriIPP[0].toFixed(1)}, ${mriIPP[1].toFixed(1)}, ${mriIPP[2].toFixed(1)}]mm`);
-    console.log(`  MRI center: [${mriCenterX.toFixed(1)}, ${mriCenterY.toFixed(1)}, ${mriCenterZ.toFixed(1)}]mm`);
-    console.log(`  CT center: [${ctCenterX.toFixed(1)}, ${ctCenterY.toFixed(1)}]mm`);
-    console.log(`  MRI center→CT: [${mriCenterCT_x.toFixed(1)}, ${mriCenterCT_y.toFixed(1)}]mm`);
-    console.log(`  Offset (mm): [${offsetX_mm.toFixed(1)}, ${offsetY_mm.toFixed(1)}]`);
-    console.log(`  Offset (px): [${offsetX_px.toFixed(1)}, ${offsetY_px.toFixed(1)}]`);
-    console.log(`  Draw at: (${drawX.toFixed(1)}, ${drawY.toFixed(1)})`);
+    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
+    console.log(`  World delta: [${worldDelta[0].toFixed(1)}, ${worldDelta[1].toFixed(1)}, ${worldDelta[2].toFixed(1)}]mm`);
+    console.log(`  Pixel offsets: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
+    console.log(`  MRI size in CT pixels: ${destW_px.toFixed(1)}x${destH_px.toFixed(1)}px`);
   } else {
-    // Fallback to calculated positions if no ctTransform
-    if (!drawX || !drawY || !drawW || !drawH) {
-      // Basic centered positioning if draw variables not calculated
-      drawX = (canvasWidth - w) / 2;
-      drawY = (canvasHeight - h) / 2;
-      drawW = w;
-      drawH = h;
-    }
-    ctx.drawImage(temp, drawX, drawY, drawW, drawH);
-    console.log(`✓ MRI overlay drawn (fallback): size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)})`);
+    // Fallback to centered positioning if no transform
+    const drawX = (canvasWidth - w) / 2;
+    const drawY = (canvasHeight - h) / 2;
+    ctx.drawImage(temp, drawX, drawY, w, h);
+    console.log(`✓ MRI overlay drawn (fallback): centered at (${drawX.toFixed(1)},${drawY.toFixed(1)})`);
   }
   
-  ctx.restore();
-  
   console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+  
+  // Restore the original transform so RT structures can use their own transforms
+  if (ctTransform) {
+    ctx.restore();
+  }
 }
