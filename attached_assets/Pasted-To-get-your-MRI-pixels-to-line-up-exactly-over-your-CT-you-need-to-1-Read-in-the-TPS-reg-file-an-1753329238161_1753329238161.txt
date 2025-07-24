@@ -1,0 +1,83 @@
+To get your MRI pixels to line up exactly over your CT, you need to:
+	1.	Read in the TPS reg-file and grab its 4×4 matrix T (usually given in patient/world coordinates).
+	2.	Map each MRI‐pixel → patient: use its DICOM
+	•	ImagePositionPatient (tag 0020,0032) → Pmr0
+	•	ImageOrientationPatient (tag 0020,0037) → two direction vectors u (row), v (col)
+	•	PixelSpacing (tag 0028,0030) → [Δrow, Δcol]
+For a pixel at index (i,j) (column = i, row = j),
+
+// out: [x,y,z] in patient coords
+function mriIndexToPatient(i:number, j:number) {
+  // u = [ux,uy,uz], v = [vx,vy,vz]
+  return [
+    Pmr0[0] + u[0]*j*Δrow + v[0]*i*Δcol,
+    Pmr0[1] + u[1]*j*Δrow + v[1]*i*Δcol,
+    Pmr0[2] + u[2]*j*Δrow + v[2]*i*Δcol
+  ];
+}
+
+
+	3.	Apply the TPS-exported transform:
+
+function transformPatient(pt:[number,number,number]) {
+  // homogeneous multiply T * [x,y,z,1]
+  const [x,y,z] = pt;
+  return [
+    T[0]*x + T[1]*y + T[2]*z + T[3],
+    T[4]*x + T[5]*y + T[6]*z + T[7],
+    T[8]*x + T[9]*y + T[10]*z + T[11]
+  ];  
+}
+
+now pt_ct = transformPatient(pt_mri) sits in the CT’s patient coordinate frame.
+
+	4.	Map CT patient → CT‐pixel (and then canvas): invert the same DICOM mapping you used for the MRI, but with CT tags:
+
+function patientToCtIndex(x:number,y:number,z:number) {
+  const [Pct0, u_ct, v_ct, Δrow_ct, Δcol_ct] = /* from CT DICOM */;
+  // subtract origin, project onto the two axes:
+  const dx = x - Pct0[0],  dy = y - Pct0[1],  dz = z - Pct0[2];
+  const j_ct = (dx*u_ct[0] + dy*u_ct[1] + dz*u_ct[2]) / Δrow_ct;
+  const i_ct = (dx*v_ct[0] + dy*v_ct[1] + dz*v_ct[2]) / Δcol_ct;
+  return [i_ct, j_ct];
+}
+
+
+	5.	Draw your MRI slice on the CT canvas by converting (i_ct,j_ct) to canvas‐pixel positions (with your chosen scale and pan).
+
+⸻
+
+Putting that all together
+
+// 1) read T from your .reg file (flat 16-elt array in row-major)
+const T: number[] = [...];  
+
+// 2) DICOM tags for MRI & CT
+const mriPos0   = [...]   // ImagePositionPatient MRI
+const mriOrient = [...]   // ImageOrientationPatient MRI (6-elt)
+const mriSp     = [...]   // PixelSpacing MRI [Δrow,Δcol]
+
+const ctPos0    = [...]   // ImagePositionPatient CT
+const ctOrient  = [...]   // ImageOrientationPatient CT
+const ctSp      = [...]   // PixelSpacing CT [Δrow,Δcol]
+
+// helpers as above
+function indexToPatient(i,j,pos0,orient,sp) { ... }
+function applyReg(pt:T)          { /* mul T */ }
+function patientToIndex(x,y,z,pos0,orient,sp){ ... }
+
+// inside your render loop:
+const [iMRI,jMRI] = [colMRI,rowMRI];
+const pt0 = indexToPatient(iMRI,jMRI, mriPos0,mriOrient,mriSp);
+const [x_ct,y_ct,z_ct] = applyReg(pt0);
+const [iCT,jCT] = patientToIndex(x_ct,y_ct,z_ct, ctPos0,ctOrient,ctSp);
+
+// finally map (iCT,jCT) → canvas and draw...
+ctx.drawImage(
+  mriTempCanvas,
+  /* sx,sy = 0,0; sw=widthMRI,sh=heightMRI */,
+  /* dx = iCT*scale+panX, dy = jCT*scale+panY, 
+     dw = widthMRI*scale, dh = heightMRI*scale */
+);
+
+As long as your T really does map the MRI’s patient frame into your CT’s, these steps will put every MRI voxel exactly over its CT counterpart.

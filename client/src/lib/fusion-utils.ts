@@ -164,7 +164,8 @@ export async function renderFusionOverlay(
   panX: number,
   panY: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  registrationMatrix?: number[]
 ) {
   // CRITICAL: Check if CT slice is within MRI Z-range
   if (transformedMRI.length > 0) {
@@ -214,13 +215,53 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // CRITICAL FIX: Match CT physical dimensions instead of canvas scaling
-  // MRI and CT should have the same physical size on screen, not scale to fit canvas
-  // Use 1:1 pixel mapping since both images are in the same coordinate space after registration
+  // CRITICAL FIX: Apply registration matrix for proper X-Y positioning
   const w = mriData.width;
   const h = mriData.height;
-  const x = (canvasWidth - w) / 2 + panX;
-  const y = (canvasHeight - h) / 2 + panY;
+  
+  let offsetX = 0, offsetY = 0;
+  
+  if (registrationMatrix && registrationMatrix.length === 16) {
+    // Get the current MRI image from transformed array
+    const idx = findNearestMRIIndex(ctSliceZ, transformedMRI);
+    const currentMRI = idx !== null ? transformedMRI[idx].image : null;
+    
+    if (currentMRI && primaryImage) {
+      // Get metadata for both images
+      const ctPosition = primaryImage.imagePosition || [0, 0, ctSliceZ];
+      const ctPixelSpacing = primaryImage.pixelSpacing || [1, 1];
+      const mriPosition = currentMRI.imagePosition || [0, 0, 0];
+      const mriPixelSpacing = currentMRI.pixelSpacing || [1, 1];
+      
+      // Calculate physical centers in world coordinates
+      const ctCenterX = ctPosition[0] + (512 * ctPixelSpacing[0]) / 2; // CT is 512x512
+      const ctCenterY = ctPosition[1] + (512 * ctPixelSpacing[1]) / 2;
+      
+      const mriCenterX = mriPosition[0] + (w * mriPixelSpacing[0]) / 2;
+      const mriCenterY = mriPosition[1] + (h * mriPixelSpacing[1]) / 2;
+      const mriCenterZ = mriPosition[2];
+      
+      // Transform MRI center to CT space using registration matrix
+      const transformedMRICenter = [
+        registrationMatrix[0] * mriCenterX + registrationMatrix[1] * mriCenterY + registrationMatrix[2] * mriCenterZ + registrationMatrix[3],
+        registrationMatrix[4] * mriCenterX + registrationMatrix[5] * mriCenterY + registrationMatrix[6] * mriCenterZ + registrationMatrix[7]
+      ];
+      
+      // Calculate offset in world coordinates and convert to pixels
+      const worldOffsetX = transformedMRICenter[0] - ctCenterX;
+      const worldOffsetY = transformedMRICenter[1] - ctCenterY;
+      
+      // Convert world offset to pixel offset (using CT pixel spacing as reference)
+      offsetX = worldOffsetX / ctPixelSpacing[0];
+      offsetY = worldOffsetY / ctPixelSpacing[1];
+      
+      console.log(`🎯 Registration positioning: CT center=(${ctCenterX.toFixed(1)}, ${ctCenterY.toFixed(1)}), MRI center transformed=(${transformedMRICenter[0].toFixed(1)}, ${transformedMRICenter[1].toFixed(1)}), pixel offset=(${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
+    }
+  }
+  
+  // Apply registration offset to centering calculation
+  const x = (canvasWidth - w) / 2 + panX + offsetX;
+  const y = (canvasHeight - h) / 2 + panY + offsetY;
 
   // Draw with global alpha
   ctx.save();
