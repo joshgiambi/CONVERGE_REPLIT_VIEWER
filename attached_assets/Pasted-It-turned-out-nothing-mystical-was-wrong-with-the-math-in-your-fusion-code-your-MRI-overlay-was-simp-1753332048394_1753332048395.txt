@@ -1,0 +1,62 @@
+It turned out nothing mystical was wrong with the math in your fusion code—your MRI overlay was simply being laid down in a different “CT‐to‐canvas” coordinate system than your CT itself.  In other words, you draw your CT like this:
+
+// in render16BitImage()
+const baseScale = Math.min(canvasW/width, canvasH/height);
+const scaledW   = width  * baseScale;
+const scaledH   = height * baseScale;
+const offsetX   = (canvasW - scaledW)/2 + panX;
+const offsetY   = (canvasH - scaledH)/2 + panY;
+ctx.drawImage(tempCanvas, offsetX, offsetY, scaledW, scaledH);
+
+…but in your fusion code you recompute a new “center”:
+
+const baseX = (canvasW - destW)/2 + panX;
+const baseY = (canvasH - destH)/2 + panY;
+drawX = baseX + dx_px;
+drawY = baseY - dy_px;
+ctx.drawImage(temp, drawX, drawY, destW, destH);
+
+The problem is that destW/destH and dx_px/dy_px are in CT‐pixel units, whereas the CT itself was already scaled up (by baseScale) when you drew it.  If your CT DICOM was 512×512 but your canvas is 1024×1024, baseScale is 2×, so every CT pixel is actually two canvas pixels.  Your fusion code never multiplies by that same 2×, so the overlay ends up “off” by exactly that scale factor.
+
+⸻
+
+How to fix it
+	1.	Extract your CT→canvas transform into shared variables.
+Compute your CT’s scale, offsetX and offsetY once in render16BitImage (or in its parent) and pass them into your fusion routine.
+
+// compute once
+const ctScale   = Math.min(canvasW/width, canvasH/height);
+const ctOffsetX = (canvasW - width*ctScale)/2 + panX;
+const ctOffsetY = (canvasH - height*ctScale)/2 + panY;
+
+
+	2.	Use the same transform for both CT and MRI.
+In your fusion overlay, instead of recomputing (canvasW - destW)/2, do:
+
+const destW_canvas = destW * ctScale;
+const destH_canvas = destH * ctScale;
+const drawX        = ctOffsetX + dx_px * ctScale;
+const drawY        = ctOffsetY - dy_px * ctScale;
+ctx.drawImage(temp, drawX, drawY, destW_canvas, destH_canvas);
+
+Now your MRI will snap exactly onto the CT.
+
+	3.	Or even simpler: use a single ctx.setTransform.
+
+ctx.save();
+// CT pixels → canvas pixels
+ctx.setTransform(ctScale, 0, 0, ctScale, ctOffsetX, ctOffsetY);
+// draw CT
+ctx.putImageData(ctImageData, 0, 0);
+// then draw MRI at CT‐pixel positions (destW, destH, dx_px, dy_px)
+ctx.globalAlpha = fusionOpacity;
+ctx.drawImage(temp, dx_px, -dy_px, destW, destH);
+ctx.restore();
+
+This way you never have to mentally juggle two different centering formulas—everything lives in CT-pixel-space, and the one setTransform handles the canvas mapping.
+
+⸻
+
+TL;DR
+
+Your CT is being scaled/panned by a factor (baseScale, offsetX, offsetY) that your fusion code wasn’t re-using.  If you multiply both your MRI overlay’s size and its pixel offsets by exactly the same CT→canvas scale and offset, the “mystery” lateral shift disappears and everything lines up perfectly.

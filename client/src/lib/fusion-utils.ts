@@ -175,7 +175,8 @@ export async function renderFusionOverlay(
   panY: number,
   canvasWidth: number,
   canvasHeight: number,
-  registrationMatrix?: number[]
+  registrationMatrix?: number[],
+  ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null
 ) {
   // STRICT Z-range check: Only render fusion within actual MRI coverage
   if (transformedMRI.length > 0) {
@@ -261,9 +262,9 @@ export async function renderFusionOverlay(
   
   console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${destW.toFixed(1)}x${destH.toFixed(1)}`);
   
-  // Center-to-center positioning
-  let drawX = (canvasWidth - destW) / 2 + panX;
-  let drawY = (canvasHeight - destH) / 2 + panY;
+  // Use the same coordinate system as CT rendering - NO independent centering
+  let drawX: number;
+  let drawY: number;
   let drawW = destW;
   let drawH = destH;
   
@@ -326,9 +327,21 @@ export async function renderFusionOverlay(
     const dx_px = dot(delta, rowCosine) / colSpacing;  // Row direction / column spacing (X movement)
     const dy_px = dot(delta, colCosine) / rowSpacing;  // Column direction / row spacing (Y movement)
     
-    // 5) Apply pixel offsets to center-based draw position
-    const baseX = (canvasWidth - destW) / 2 + panX;
-    const baseY = (canvasHeight - destH) / 2 + panY;
+    // 5) Apply pixel offsets using the SAME coordinate system as CT rendering
+    let baseX: number;
+    let baseY: number;
+    
+    if (ctTransform) {
+      // Use the exact same coordinate system as the CT image
+      console.log(`✅ Using shared CT coordinate system: scale=${ctTransform.scale}, offset=(${ctTransform.offsetX}, ${ctTransform.offsetY})`);
+      baseX = ctTransform.offsetX;
+      baseY = ctTransform.offsetY;
+    } else {
+      // Fallback to independent centering if ctTransform not available
+      console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
+      baseX = (canvasWidth - destW) / 2 + panX;
+      baseY = (canvasHeight - destH) / 2 + panY;
+    }
     
     drawX = baseX + dx_px;   // Add X offset (positive = right)
     drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)

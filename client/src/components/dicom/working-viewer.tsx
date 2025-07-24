@@ -148,6 +148,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
   // Pre-computed transformed MRI positions for fast lookup
   const transformedMRIPositions = useRef<Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>>([]); 
+  // CT transform for fusion coordinate system alignment
+  const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -1464,6 +1466,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
+      // Debug: Check if ctTransform was populated by render16BitImage
+      console.log('🔍 After render16BitImage, ctTransform:', ctTransform.current);
+      
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
@@ -1573,6 +1578,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
 
+    // Store CT transform for fusion overlay to use the same coordinate system
+    ctTransform.current = {
+      scale: totalScale,
+      offsetX: x,
+      offsetY: y,
+      imageWidth: width,
+      imageHeight: height
+    };
+
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
@@ -1665,7 +1679,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
-    // Call the new fusion utility function with registration matrix
+    // Call the new fusion utility function with registration matrix and shared CT coordinate system
     await renderFusionOverlay(
       ctx,
       primaryImage,
@@ -1677,7 +1691,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       panY,
       canvas.width,
       canvas.height,
-      registrationMatrix
+      registrationMatrix,
+      ctTransform.current
     );
     
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);

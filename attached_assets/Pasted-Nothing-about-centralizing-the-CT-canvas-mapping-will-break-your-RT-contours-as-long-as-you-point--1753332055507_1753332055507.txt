@@ -1,0 +1,68 @@
+Nothing about centralizing the CT→canvas mapping will “break” your RT contours—as long as you point both your fusion and your contour‐drawing routines through the exact same transform, everything stays locked together. In fact, refactoring to a single, shared CT‐pixel → canvas‐pixel transform is the most bullet-proof way to guarantee that MRI, CT and RT‐structure overlays all line up perfectly.
+
+⸻
+
+Two ways to do it
+
+1) Compute and reuse (scale, offsetX, offsetY)
+
+Pull your CT draw logic out into three numbers:
+
+// once per frame, inside displayCurrentImage()
+const canvasW = canvas.width, canvasH = canvas.height;
+const ctW = ctImageWidth, ctH = ctImageHeight;
+const ctScale   = Math.min(canvasW/ctW, canvasH/ctH);
+const ctOffsetX = (canvasW - ctW*ctScale)/2 + panX;
+const ctOffsetY = (canvasH - ctH*ctScale)/2 + panY;
+
+// draw CT
+ctx.drawImage(tempCanvas, ctOffsetX, ctOffsetY, ctW*ctScale, ctH*ctScale);
+
+// pass ctScale, ctOffsetX/Y into both fusion and contour routines
+renderFusionOverlay( /*…, */ ctScale, ctOffsetX, ctOffsetY);
+renderRTStructures(    /*…, */ ctScale, ctOffsetX, ctOffsetY);
+
+Then in both functions you convert world or CT‐pixel positions into canvas exactly the same way:
+
+// inside fusion:
+const destWc = destW * ctScale;
+const destHc = destH * ctScale;
+const drawX  = ctOffsetX + dx_px * ctScale;
+const drawY  = ctOffsetY - dy_px * ctScale;
+ctx.drawImage(temp, drawX, drawY, destWc, destHc);
+
+// inside drawContour():
+const canvasX = ctOffsetX + pixelX * ctScale;
+const canvasY = ctOffsetY + pixelY * ctScale;
+ctx.lineTo(canvasX, canvasY);
+
+Because your RT‐contours already compute pixelX/pixelY from DICOM and then scale/offset them for canvas, just swap in ctScale/ctOffsetX,Y instead of re-centering.  Nothing else needs to change.
+
+⸻
+
+2) Use a single ctx.setTransform(...) call
+
+Even easier is to push the CT mapping into the canvas transform:
+
+ctx.save();
+
+// everything from here on lives in CT-pixel space
+ctx.setTransform(ctScale, 0, 0, ctScale, ctOffsetX, ctOffsetY);
+
+// draw CT at (0,0) in CT-pixels
+ctx.drawImage(ctTemp, 0, 0, ctW, ctH);
+
+// draw MRI overlay at (dx_px, –dy_px) in CT-pixels
+ctx.globalAlpha = fusionOpacity;
+ctx.drawImage(mriTemp, dx_px, -dy_px, destW, destH);
+
+// draw contours with world→CT→pixel math, but no extra scale/offset
+drawContoursInCTSpace(...);
+
+ctx.restore();
+
+As long as you never bypass that one transform, CT, MRI and RT structures will all ride the same coordinate system.
+
+⸻
+
+Bottom line:  If you simply apply your fusion offsets in the same CT‐to‐canvas coordinate space you already use for your CT and RT‐structure routines, you’ll get rock-solid alignment—and no, it won’t “mess up” your structures.  In fact, it’s the best way to guarantee they all stay in perfect register.
