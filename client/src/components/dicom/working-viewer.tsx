@@ -19,7 +19,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay as renderFusionOverlayUtil } from "@/lib/fusion-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -1647,7 +1647,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (!canvas) return;
     
     // Call the new fusion utility function with registration matrix
-    await renderFusionOverlayUtil(
+    await renderFusionOverlay(
       ctx,
       primaryImage,
       transformedMRIPositions.current,
