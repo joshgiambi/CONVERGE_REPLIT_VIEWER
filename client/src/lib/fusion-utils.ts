@@ -178,15 +178,18 @@ export async function renderFusionOverlay(
   registrationMatrix?: number[],
   ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null
 ) {
+  // Save the current context state before applying any transforms
+  ctx.save();
+  
   // Apply CT transform if available - this puts us in the same coordinate system as the CT
   if (ctTransform) {
-    ctx.save();
     ctx.setTransform(
       ctTransform.scale, 0,
       0, ctTransform.scale,
       ctTransform.offsetX,
       ctTransform.offsetY
     );
+    console.log('🎯 Applied CT transform for fusion overlay');
   }
 
   // STRICT Z-range check: Only render fusion within actual MRI coverage
@@ -198,7 +201,7 @@ export async function renderFusionOverlay(
     // Only render fusion if CT slice is within MRI coverage range
     if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
       console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
-      if (ctTransform) ctx.restore();
+      ctx.restore(); // Always restore the context
       return; // Exit early - no fusion rendering
     }
   }

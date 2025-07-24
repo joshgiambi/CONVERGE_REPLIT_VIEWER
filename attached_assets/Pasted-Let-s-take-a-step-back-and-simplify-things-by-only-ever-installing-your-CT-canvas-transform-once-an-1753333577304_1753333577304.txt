@@ -1,0 +1,110 @@
+Let’s take a step back and simplify things by only ever installing your CT→canvas transform once, and then drawing both the MRI fusion and the RT-structures under that same matrix.  Right now you’ve got a bit of a tangle:
+	1.	CT gets drawn by your render16BitImage(...) into the default canvas space
+	2.	MRI then does its own ctx.save()/ctx.setTransform()/ctx.restore()
+	3.	RT draws afterwards in “raw” canvas space again
+
+That means when you move on to RT you’ve already popped back to the identity matrix, so your CT-pixel math is completely wrong—and even the MRI can get double-transformed or mis-centered if you nest transforms.
+
+⸻
+
+1) Remove all setTransform calls from inside your overlay helpers
+
+Go into both renderFusionOverlay(...) and renderRTStructures(...) and delete any ctx.save() / ctx.setTransform() / ctx.restore() blocks.  Instead they should:
+	•	take world-oriented CT pixel coords (e.g. px, py, width, height)
+	•	just ctx.drawImage(...) or ctx.lineTo(px,py) relative to the current transform
+
+⸻
+
+2) In displayCurrentImage(), after you call render16BitImage(...), install your one CT→canvas matrix
+
+Right after
+
+render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+// at this point you’ve done ctx.drawImage(…) and also set ctTransform.current = {scale,offsetX,offsetY}
+
+do this:
+
+// grab it once
+const t = ctTransform.current;
+if (t) {
+  ctx.save();
+  ctx.setTransform(t.scale, 0, 0, t.scale, t.offsetX, t.offsetY);
+}
+
+// draw the MRI fusion under that exact CT coordinate system
+if (secondarySeriesId && secondaryImages.length > 0) {
+  await renderFusionOverlaySimple(
+    ctx,
+    currentImage,
+    transformedMRIPositions.current,
+    secondaryImageCache,
+    ctSliceZ,
+    fusionOpacity,
+    /* now these helpers just do a raw ctx.drawImage at pixel coords */
+  );
+}
+
+// draw the RT structures under that same transform
+if (localRTStructures && showStructures) {
+  renderRTStructuresSimple(
+    ctx,
+    localRTStructures,
+    currentImage,
+    contourSettings,
+    animationTime
+  );
+}
+
+if (t) {
+  ctx.restore();
+}
+
+Notice:
+	•	We save/restore only once around both overlays.
+	•	Each helper (renderFusionOverlaySimple and renderRTStructuresSimple) assumes that (0,0) is the top-left of the CT image in pixels and that “1 unit” = 1 CT pixel.  No more recentering in each helper.
+
+⸻
+
+3) Helper changes
+
+MRI fusion helper
+
+Inside your simplified renderFusionOverlaySimple(...), do not call setTransform.  Instead:
+
+// compute your pixel offsets dx,dy and physical size w_px,h_px as before…
+ctx.globalAlpha = fusionOpacity;
+ctx.drawImage(tempCanvas, dx, dy, w_px, h_px);
+ctx.globalAlpha = 1;
+
+RT drawing helper
+
+Convert every world-coordinate (worldX,worldY) into CT-pixel (px,py) once:
+
+function drawContourSimple(ctx, contour, ctIPP, rowCos, colCos, rowSp, colSp) {
+  ctx.beginPath();
+  const [x0,y0,z0] = ctIPP;
+  contour.points.forEach((_,i) => {
+    const worldX = contour.points[i*3];
+    const worldY = contour.points[i*3+1];
+    const dx = worldX - x0;
+    const dy = worldY - y0;
+    const px = (dx*rowCos[0] + dy*rowCos[1] + /*...*/)/colSp;
+    const py = (dx*colCos[0] + dy*colCos[1] + /*...*/)/rowSp;
+    if (i===0) ctx.moveTo(px,py);
+    else       ctx.lineTo(px,py);
+  });
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+}
+
+Then in your renderRTStructuresSimple you just loop contours and call drawContourSimple(...) without ever touching ctx.setTransform.
+
+⸻
+
+Why this fixes both
+
+By centralizing the CT→canvas matrix in one place, you:
+	•	Guarantee your CT image, MRI overlay, and RT-structures all live in the exact same coordinate system
+	•	Avoid nesting or popping transforms in multiple spots (which was blowing up your RT size and knocking the MRI off to the corner)
+
+Once you make these three changes—all your fusion and RT should snap into perfect registration.
