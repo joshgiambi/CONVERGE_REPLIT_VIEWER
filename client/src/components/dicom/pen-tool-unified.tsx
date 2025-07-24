@@ -153,10 +153,16 @@ export function PenToolUnified({
     if (!isActive || !canvasRef.current) return;
     if (e.button !== 0) return; // Only left click
     
-    const rect = canvasRef.current.getBoundingClientRect();
+    console.log('🖱️ Pen tool mouse down', { isActive, button: e.button });
+    
+    // Use the event target's bounding rect to handle both main and overlay canvas
+    const targetElement = e.target as HTMLElement;
+    const rect = targetElement.getBoundingClientRect();
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    console.log('🖱️ Click detected at:', { canvasX, canvasY, worldPoint });
     
     // Check for morphable region
     const morphRegion = findMorphableRegion([canvasX, canvasY]);
@@ -351,17 +357,21 @@ export function PenToolUnified({
   useEffect(() => {
     if (!isActive || !canvasRef.current) return;
     
-    const canvas = canvasRef.current;
+    console.log('🎯 Setting up pen tool event listeners', { isActive });
+    
+    // Use overlay canvas for events when available
+    const eventCanvas = overlayCanvasRef.current || canvasRef.current;
+    console.log('📍 Attaching events to:', overlayCanvasRef.current ? 'overlay canvas' : 'main canvas');
     
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       handleRightClick(e);
     };
     
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('contextmenu', handleContextMenu);
+    eventCanvas.addEventListener('mousedown', handleMouseDown);
+    eventCanvas.addEventListener('mousemove', handleMouseMove);
+    eventCanvas.addEventListener('mouseup', handleMouseUp);
+    eventCanvas.addEventListener('contextmenu', handleContextMenu);
     
     // Global mouse up to handle mouse leaving canvas
     const handleGlobalMouseUp = (e: MouseEvent) => {
@@ -370,13 +380,20 @@ export function PenToolUnified({
     window.addEventListener('mouseup', handleGlobalMouseUp);
     
     return () => {
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('contextmenu', handleContextMenu);
+      eventCanvas.removeEventListener('mousedown', handleMouseDown);
+      eventCanvas.removeEventListener('mousemove', handleMouseMove);
+      eventCanvas.removeEventListener('mouseup', handleMouseUp);
+      eventCanvas.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isActive, canvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
+  }, [isActive, canvasRef, overlayCanvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
+  
+  // Ensure overlay canvas is available by running this effect first
+  useEffect(() => {
+    if (!overlayCanvasRef.current) {
+      overlayCanvasRef.current = document.createElement('canvas');
+    }
+  }, []);
   
   // Reset when deactivated
   useEffect(() => {
@@ -413,13 +430,19 @@ export function PenToolUnified({
     const canvas = canvasRef.current;
     const overlay = overlayCanvasRef.current;
     
+    console.log('🎨 Setting up overlay canvas', { 
+      isActive, 
+      canvasSize: { width: canvas.width, height: canvas.height },
+      canvasOffset: { left: canvas.offsetLeft, top: canvas.offsetTop }
+    });
+    
     // Match overlay canvas size to main canvas
     overlay.width = canvas.width;
     overlay.height = canvas.height;
     overlay.style.position = 'absolute';
     overlay.style.left = canvas.offsetLeft + 'px';
     overlay.style.top = canvas.offsetTop + 'px';
-    overlay.style.pointerEvents = 'none';
+    overlay.style.pointerEvents = isActive ? 'auto' : 'none'; // Allow events when active
     overlay.style.zIndex = '1000';
     
     if (canvas.parentElement && !canvas.parentElement.contains(overlay)) {
