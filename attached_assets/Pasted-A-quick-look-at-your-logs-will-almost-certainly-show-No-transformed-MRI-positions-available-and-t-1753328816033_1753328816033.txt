@@ -1,0 +1,55 @@
+A quick look at your logs will almost certainly show:
+
+No transformed MRI positions available
+
+and then the overlay never gets drawn, because in your renderFusionOverlayNew you’ve got:
+
+if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
+  console.log("No transformed MRI positions available");
+  return;
+}
+
+That guard will fire anytime you haven’t filled transformedMRIPositions.current with anything—so even though you’ve loaded secondaryImages and your registrationMatrix is set, you never actually call
+
+computeTransformedMRIPositions(secondaryImages, registrationMatrix)
+  .then(transformed => transformedMRIPositions.current = transformed);
+
+instead, in your secondary‐load effect you do:
+
+console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
+precomputeMRITransformations(sortedImages, registrationMatrix);
+
+but precomputeMRITransformations is nowhere imported or defined—you meant to call computeTransformedMRIPositions. Because of that typo your transformedMRIPositions array remains empty, so your overlay routine always bails out before drawing.
+
+⸻
+
+What you need to do:
+	1.	Replace that bogus precomputeMRITransformations(...) call with the real util and actually stash its result in your ref:
+
+useEffect(() => {
+  if (registrationMatrix && secondaryImages.length > 0) {
+    const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+    transformedMRIPositions.current = transformed;
+    // now you can optionally force a redraw
+    displayCurrentImage();
+  }
+}, [registrationMatrix, secondaryImages]);
+
+
+	2.	Remove the early‐exit guard (or at least log it less aggressively) once you know transforms are being computed:
+
+if (transformedMRIPositions.current.length === 0) {
+  // only warn once, or better yet show a little spinner
+  return;
+}
+
+
+	3.	Verify in your console that:
+
+✓ Fusion overlay rendered: CT=…mm, opacity=…, MRI slices=…
+
+actually appears. If you still don’t see MRI on the CT canvas, double-check that:
+	•	secondaryImageCache actually contains the slice you expect (inspect actualCache.get(…) inside your util)
+	•	Your util’s drawing code (renderFusionOverlayUtil) is using the same canvas size / pan / scale that you passed in.
+
+Once your transformedMRIPositions ref is properly populated, the guard won’t trip and your fused MRI slice should paint on top of the CT image.

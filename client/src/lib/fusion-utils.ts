@@ -113,9 +113,13 @@ export function interpolateMRI(
   
   const baseData = cache.get(best.image.sopInstanceUID);
   if (!baseData) {
-    console.warn(`MRI image data not found in cache: ${best.image.sopInstanceUID}`);
+    console.error(`CRITICAL: MRI image data not found in cache: ${best.image.sopInstanceUID}`);
+    console.log(`Cache keys available:`, Array.from(cache.keys()).slice(0, 5));
+    console.log(`Cache size:`, cache.size);
     return null;
   }
+  
+  console.log(`✓ Found MRI data in cache: ${baseData.width}x${baseData.height}, ${baseData.data.length} pixels`);
 
   // Determine neighbor spacing
   const prev = transformed[idx - 1];
@@ -173,11 +177,24 @@ export async function renderFusionOverlay(
   const tctx = temp.getContext('2d');
   if (!tctx) return;
 
-  // Draw MRI as grayscale
+  // Draw MRI as grayscale with enhanced contrast
   const imgData = tctx.createImageData(mriData.width, mriData.height);
   const { data } = imgData;
+  
+  // Find min/max values for proper scaling
+  let min = mriData.data[0], max = mriData.data[0];
   for (let i = 0; i < mriData.data.length; i++) {
-    const v = Math.max(0, Math.min(255, Math.round((mriData.data[i] - 0) / (255 - 0) * 255)));
+    min = Math.min(min, mriData.data[i]);
+    max = Math.max(max, mriData.data[i]);
+  }
+  
+  const range = max - min;
+  console.log(`MRI pixel range: ${min.toFixed(1)} to ${max.toFixed(1)} (range: ${range.toFixed(1)})`);
+  
+  for (let i = 0; i < mriData.data.length; i++) {
+    // Scale pixel values from min-max to 0-255 for better contrast
+    const normalized = range > 0 ? (mriData.data[i] - min) / range : 0;
+    const v = Math.max(0, Math.min(255, Math.round(normalized * 255)));
     const idx4 = i * 4;
     data[idx4] = data[idx4+1] = data[idx4+2] = v;
     data[idx4+3] = 255;
@@ -200,4 +217,14 @@ export async function renderFusionOverlay(
   ctx.restore();
   
   console.log(`✓ MRI overlay drawn: size=${w.toFixed(1)}x${h.toFixed(1)}, pos=(${x.toFixed(1)},${y.toFixed(1)}), opacity=${fusionOpacity}`);
+  
+  // Add a visible test overlay for debugging (red border around MRI)
+  if (fusionOpacity > 0.5) {
+    ctx.save();
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+    console.log(`🔴 DEBUG: Added red border around MRI overlay at (${x.toFixed(1)},${y.toFixed(1)}) size ${w.toFixed(1)}x${h.toFixed(1)}`);
+  }
 }
