@@ -1700,8 +1700,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   // Coordinate transformation functions for pen tool
-  const worldToCanvas = (worldX: number, worldY: number, worldZ: number): { x: number; y: number } => {
-    if (!imageMetadata) return { x: 0, y: 0 };
+  const worldToCanvas = (worldX: number, worldY: number): [number, number] => {
+    if (!imageMetadata) return [0, 0];
     
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
     const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
@@ -1709,19 +1709,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const pixelX = (worldX - imagePositionX) / colSpacing;
     const pixelY = (worldY - imagePositionY) / rowSpacing;
     
-    return { x: pixelX, y: pixelY };
+    return [pixelX, pixelY];
   };
   
-  const canvasToWorld = (canvasX: number, canvasY: number): { x: number; y: number; z: number } => {
-    if (!imageMetadata) return { x: 0, y: 0, z: 0 };
+  const canvasToWorld = (canvasX: number, canvasY: number): [number, number] => {
+    if (!imageMetadata) return [0, 0];
     
-    const [imagePositionX, imagePositionY, imagePositionZ] = imageMetadata.imagePosition.split("\\").map(parseFloat);
+    const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
     const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
     
     const worldX = imagePositionX + (canvasX * colSpacing);
     const worldY = imagePositionY + (canvasY * rowSpacing);
     
-    return { x: worldX, y: worldY, z: imagePositionZ };
+    return [worldX, worldY];
   };
 
   const renderRTStructures = (

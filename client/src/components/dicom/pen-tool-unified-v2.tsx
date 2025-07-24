@@ -46,7 +46,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const CONTOUR_HOVER_DISTANCE = 10;
   
   // Get current Z position
-  const currentZ = imageMetadata?.imagePosition?.[2] || 0;
+  const currentZ = imageMetadata?.imagePosition ? 
+    parseFloat(imageMetadata.imagePosition.split("\\")[2]) : 0;
   
   // Find existing contours at current slice
   const getContoursAtCurrentSlice = useCallback(() => {
@@ -148,6 +149,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    console.log('Pen tool click:', { canvasX, canvasY, worldPoint });
     
     // Check if near a vertex for morphing
     const nearVertex = findNearestVertex(canvasX, canvasY);
