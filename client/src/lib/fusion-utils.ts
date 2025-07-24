@@ -393,9 +393,58 @@ export async function renderFusionOverlay(
   ctx.globalAlpha = fusionOpacity;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(temp, drawX, drawY, drawW, drawH);
+  
+  // Apply the CT transform if available to ensure exact same coordinate system
+  if (ctTransform && registrationMatrix && actualSecondaryImage) {
+    console.log('🔥 Applying ctx.setTransform: Putting MRI in exact CT coordinate system');
+    // Apply the same transform that was used for CT
+    ctx.setTransform(
+      ctTransform.scale, 0,
+      0, ctTransform.scale,
+      ctTransform.offsetX,
+      ctTransform.offsetY
+    );
+    
+    // Helper function defined inline since it's not in outer scope
+    function toNumberArray(sp: string|string[]|number[]) {
+      if (Array.isArray(sp)) return sp.map(Number);
+      if (typeof sp === "string") return sp.split("\\").map(Number);
+      return [1, 1, 1];
+    }
+    
+    // Now we're in CT pixel space - convert positions to CT pixels
+    const ctIPP = toNumberArray(primaryImage.imagePosition);
+    const mriIPP = toNumberArray(actualSecondaryImage.imagePosition);
+    
+    // Transform MRI origin to CT coordinate space
+    const mriVector = [...mriIPP, 1];
+    const mriCT_x = registrationMatrix[0] * mriVector[0] + registrationMatrix[1] * mriVector[1] + 
+                     registrationMatrix[2] * mriVector[2] + registrationMatrix[3] * mriVector[3];
+    const mriCT_y = registrationMatrix[4] * mriVector[0] + registrationMatrix[5] * mriVector[1] + 
+                     registrationMatrix[6] * mriVector[2] + registrationMatrix[7] * mriVector[3];
+    
+    // Convert from mm to CT pixels
+    const mriPixelX = (mriCT_x - ctIPP[0]) / ctSpacingArr[1];  // X uses column spacing
+    const mriPixelY = (mriCT_y - ctIPP[1]) / ctSpacingArr[0];  // Y uses row spacing
+    
+    // Draw at pixel position (Y is inverted in DICOM)
+    ctx.drawImage(temp, mriPixelX, -mriPixelY, w, h);
+    
+    console.log(`✓ MRI drawn in CT pixel space: pos=(${mriPixelX.toFixed(1)}, ${-mriPixelY.toFixed(1)}) pixels, size=${w}x${h}`);
+  } else {
+    // Fallback to calculated positions if no ctTransform
+    if (!drawX || !drawY || !drawW || !drawH) {
+      // Basic centered positioning if draw variables not calculated
+      drawX = (canvasWidth - w) / 2;
+      drawY = (canvasHeight - h) / 2;
+      drawW = w;
+      drawH = h;
+    }
+    ctx.drawImage(temp, drawX, drawY, drawW, drawH);
+    console.log(`✓ MRI overlay drawn (fallback): size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)})`);
+  }
+  
   ctx.restore();
   
-  console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
-  console.log(`🔍 Draw bounds check: X=${drawX.toFixed(1)} to ${(drawX + drawW).toFixed(1)}, Y=${drawY.toFixed(1)} to ${(drawY + drawH).toFixed(1)}, Canvas=${canvasWidth}x${canvasHeight}`);
+  console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
 }
