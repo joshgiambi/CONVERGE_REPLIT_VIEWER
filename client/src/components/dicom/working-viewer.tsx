@@ -1942,7 +1942,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
             mriSliceMappingCache.current.set(cacheKey, null);
             setFusionAvailable(false);
-            return;
+            // Don't return - let it fall through to linear mapping fallback
           }
         } else {
           // Fallback to computing on-the-fly if pre-computed data not available
