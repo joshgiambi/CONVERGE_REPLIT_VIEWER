@@ -1679,14 +1679,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
-    // Apply CT transform before rendering fusion
-    const t = ctTransform.current;
-    if (t) {
-      ctx.save();
-      ctx.setTransform(t.scale, 0, 0, t.scale, t.offsetX, t.offsetY);
-    }
-    
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
+    // DO NOT apply transform here - fusion-utils handles its own transforms
     await renderFusionOverlay(
       ctx,
       primaryImage,
@@ -1701,11 +1695,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       registrationMatrix,
       ctTransform.current
     );
-    
-    // Restore transform after fusion
-    if (t) {
-      ctx.restore();
-    }
     
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };

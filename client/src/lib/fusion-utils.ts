@@ -288,25 +288,26 @@ export async function renderFusionOverlay(
     actualSecondaryImage = distances[0]?.image;
   }
 
+  // Helper function to normalize arrays
+  const toNumberArray = (sp: string|string[]|number[]) => {
+    if (Array.isArray(sp)) return sp.map(Number);
+    if (typeof sp === "string") return sp.split("\\").map(Number);
+    return [1, 1, 1]; // fallback
+  };
+  
+  // Matrix multiplication helper
+  const multiplyMatrixVector = (matrix: number[], vector: number[]): number[] => {
+    const [x, y, z, w] = vector;
+    return [
+      matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3] * w,
+      matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7] * w,
+      matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11] * w,
+      matrix[12] * x + matrix[13] * y + matrix[14] * z + matrix[15] * w
+    ];
+  };
+
   // Apply registration matrix transformation if available
   if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage) {
-    // Helper function to normalize arrays
-    function toNumberArray(sp: string|string[]|number[]) {
-      if (Array.isArray(sp)) return sp.map(Number);
-      if (typeof sp === "string") return sp.split("\\").map(Number);
-      return [1, 1, 1]; // fallback
-    }
-    
-    // Matrix multiplication helper
-    function multiplyMatrixVector(matrix: number[], vector: number[]): number[] {
-      const [x, y, z, w] = vector;
-      return [
-        matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3] * w,
-        matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7] * w,
-        matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11] * w,
-        matrix[12] * x + matrix[13] * y + matrix[14] * z + matrix[15] * w
-      ];
-    }
     
     // PROPER DICOM COORDINATE TRANSFORMATION using ImageOrientationPatient
     
@@ -342,17 +343,29 @@ export async function renderFusionOverlay(
     if (ctTransform) {
       // Use the exact same coordinate system as the CT image
       console.log(`✅ Using shared CT coordinate system: scale=${ctTransform.scale}, offset=(${ctTransform.offsetX}, ${ctTransform.offsetY})`);
+      
+      // Apply CT's scale to the MRI dimensions and offsets
+      drawW = destW * ctTransform.scale;
+      drawH = destH * ctTransform.scale;
+      
+      // Scale the pixel offsets as well
+      const scaledDxPx = dx_px * ctTransform.scale;
+      const scaledDyPx = dy_px * ctTransform.scale;
+      
       baseX = ctTransform.offsetX;
       baseY = ctTransform.offsetY;
+      
+      drawX = baseX + scaledDxPx;   // Add scaled X offset
+      drawY = baseY - scaledDyPx;   // Subtract scaled Y offset
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
       baseX = (canvasWidth - destW) / 2 + panX;
       baseY = (canvasHeight - destH) / 2 + panY;
+      
+      drawX = baseX + dx_px;   // Add X offset (positive = right)
+      drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
     }
-    
-    drawX = baseX + dx_px;   // Add X offset (positive = right)
-    drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
     
     console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION (CORRECTED):`);
     console.log({
@@ -445,8 +458,15 @@ export async function renderFusionOverlay(
     const destW_px = (w * mriSpacingArr[1]) / ctSpacingArr[1];
     const destH_px = (h * mriSpacingArr[0]) / ctSpacingArr[0];
     
-    // Draw MRI at the computed offset (adding dy_px since canvas Y grows down)
-    ctx.drawImage(temp, dx_px, dy_px, destW_px, destH_px);
+    // Apply CT transform scale to both position and dimensions
+    const scale = ctTransform.scale;
+    const scaledX = dx_px * scale;
+    const scaledY = dy_px * scale;
+    const scaledW = destW_px * scale;
+    const scaledH = destH_px * scale;
+    
+    // Draw MRI at the scaled position and size
+    ctx.drawImage(temp, scaledX, scaledY, scaledW, scaledH);
     
     console.log(`✓ MRI drawn using expert's approach:`);
     console.log(`  CT IPP: [${ctIPP[0].toFixed(1)}, ${ctIPP[1].toFixed(1)}, ${ctIPP[2].toFixed(1)}]mm`);
