@@ -1646,7 +1646,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // Call the new fusion utility function
+    // Call the new fusion utility function with registration matrix
     await renderFusionOverlayUtil(
       ctx,
       primaryImage,
@@ -1657,7 +1657,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       panX,
       panY,
       canvas.width,
-      canvas.height
+      canvas.height,
+      registrationMatrix
     );
     
     console.log(`✓ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
@@ -2509,13 +2510,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}
-              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id : 'none')}
+              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id : null)}
               opacity={fusionOpacity}
               onOpacityChange={props.onFusionOpacityChange}
               isVisible={true}
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
-              selectedSecondaryId={secondarySeriesId && secondarySeriesId !== 'none' ? secondarySeriesId : null}
+              selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
             />
           )}
         </div>
