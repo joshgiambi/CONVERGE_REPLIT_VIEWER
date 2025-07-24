@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as ClipperLib from 'js-angusj-clipper';
 
 interface PenToolUnifiedV2Props {
   isActive: boolean;
@@ -112,7 +113,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   }, [points, worldToCanvas]);
   
   // Complete the shape and apply boolean operation
-  const completeShape = useCallback((addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
+  const completeShape = useCallback(async (addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
     if (points.length < 3) return;
     
     const finalPoints = [...points];
@@ -120,26 +121,100 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       finalPoints.push(finalPoint);
     }
     
-    // Convert to world coordinates flat array
-    const worldPoints: number[] = [];
-    finalPoints.forEach(([x, y]) => {
-      worldPoints.push(x, y, currentZ);
-    });
+    // Convert to ClipperLib format (scale by 1000 for integer precision)
+    const SCALE = 1000;
+    const newPolygon = finalPoints.map(([x, y]) => ({
+      x: Math.round(x * SCALE),
+      y: Math.round(y * SCALE)
+    }));
     
-    // Determine operation based on start mode
-    const action = startMode === 'ADD' ? 'add_contour' : 'subtract_contour';
+    // Get existing contours at current slice
+    const existingContours = getContoursAtCurrentSlice();
     
-    onContourUpdate(action, {
-      structureId: selectedStructure,
-      points: worldPoints,
-      imageMetadata
-    });
+    if (existingContours.length === 0) {
+      // No existing contours, just add the new one
+      const worldPoints: number[] = [];
+      finalPoints.forEach(([x, y]) => {
+        worldPoints.push(x, y, currentZ);
+      });
+      
+      onContourUpdate('add_contour', {
+        structureId: selectedStructure,
+        points: worldPoints,
+        imageMetadata
+      });
+    } else {
+      // Perform boolean operations with existing contours
+      try {
+        await ClipperLib.loadNativeClipperLibInstanceAsync(
+          ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
+        );
+        
+        const clipper = new ClipperLib.Clipper();
+        const solution: ClipperLib.Path[] = [];
+        
+        // Convert existing contours to ClipperLib format
+        const existingPaths: ClipperLib.Path[] = existingContours.map(contour => {
+          const path: ClipperLib.IntPoint[] = [];
+          for (let i = 0; i < contour.points.length; i += 3) {
+            path.push({
+              x: Math.round(contour.points[i] * SCALE),
+              y: Math.round(contour.points[i + 1] * SCALE)
+            });
+          }
+          return path;
+        });
+        
+        if (startMode === 'ADD') {
+          // Union operation
+          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
+          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
+          clipper.execute(ClipperLib.ClipType.Union, solution);
+        } else {
+          // Difference operation
+          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
+          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
+          clipper.execute(ClipperLib.ClipType.Difference, solution);
+        }
+        
+        // Convert solution back to world coordinates
+        const resultContours: number[][] = solution.map(path => {
+          const worldPoints: number[] = [];
+          path.forEach(point => {
+            worldPoints.push(point.x / SCALE, point.y / SCALE, currentZ);
+          });
+          return worldPoints;
+        });
+        
+        // Send updated contours
+        onContourUpdate('replace_all_contours', {
+          structureId: selectedStructure,
+          contours: resultContours,
+          imageMetadata
+        });
+        
+      } catch (error) {
+        console.error('Boolean operation failed:', error);
+        // Fallback: just add/subtract as before
+        const worldPoints: number[] = [];
+        finalPoints.forEach(([x, y]) => {
+          worldPoints.push(x, y, currentZ);
+        });
+        
+        const action = startMode === 'ADD' ? 'add_contour' : 'subtract_contour';
+        onContourUpdate(action, {
+          structureId: selectedStructure,
+          points: worldPoints,
+          imageMetadata
+        });
+      }
+    }
     
     // Reset state
     setPoints([]);
     setIsDrawingContinuous(false);
     setStartMode(null);
-  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate]);
+  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate, getContoursAtCurrentSlice]);
   
   // Handle mouse down
   const handleMouseDown = useCallback((e: MouseEvent) => {
@@ -343,38 +418,58 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const structureColor = structure?.color || [255, 255, 0];
     const colorStr = `rgb(${structureColor[0]}, ${structureColor[1]}, ${structureColor[2]})`;
     
-    // Draw existing vertex hover indicators
-    if (hoveredVertex && !isDrawingContinuous && !isDraggingVertex) {
-      const contours = getContoursAtCurrentSlice();
-      const contour = contours[hoveredVertex.contourIdx];
-      if (contour) {
-        const points = contour.points;
-        
+    // Draw existing contours with vertex indicators when hovering
+    const contours = getContoursAtCurrentSlice();
+    contours.forEach((contour: any, contourIdx: number) => {
+      // Draw faint contour outline
+      ctx.strokeStyle = colorStr;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath();
+      
+      const points = contour.points;
+      for (let i = 0; i < points.length; i += 3) {
+        const [cx, cy] = worldToCanvas(points[i], points[i + 1]);
+        if (i === 0) {
+          ctx.moveTo(cx, cy);
+        } else {
+          ctx.lineTo(cx, cy);
+        }
+      }
+      ctx.closePath();
+      ctx.stroke();
+      
+      // Draw vertex dots if hovering near this contour or if vertex is hovered
+      if (hoveredVertex && hoveredVertex.contourIdx === contourIdx && !isDrawingContinuous && !isDraggingVertex) {
         // Draw all vertices as small circles
         ctx.fillStyle = colorStr;
-        ctx.globalAlpha = 0.6;
+        ctx.globalAlpha = 0.8;
         
         for (let i = 0; i < points.length; i += 3) {
           const [x, y] = worldToCanvas(points[i], points[i + 1]);
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fill();
+          
+          // Check if this is the hovered vertex
+          if (hoveredVertex.pointIdx === i) {
+            // Draw larger highlighted vertex
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = colorStr;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            // Draw normal vertex
+            ctx.fillStyle = colorStr;
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
-        
-        // Highlight hovered vertex
-        const [hx, hy] = worldToCanvas(
-          points[hoveredVertex.pointIdx], 
-          points[hoveredVertex.pointIdx + 1]
-        );
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = colorStr;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
       }
-    }
+    });
     
     // Draw current shape
     if (points.length > 0) {
@@ -401,19 +496,40 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       
       ctx.stroke();
       
-      // Draw first point larger if we have 3+ points
+      // Draw first point larger if we have 3+ points with bubble indicator
       if (points.length >= 3) {
         const [fx, fy] = worldToCanvas(points[0][0], points[0][1]);
-        ctx.globalAlpha = 0.3;
-        ctx.beginPath();
-        ctx.arc(fx, fy, CLOSE_THRESHOLD, 0, Math.PI * 2);
-        ctx.fill();
         
-        // Draw solid center
+        // Check if mouse is near first point to show bubble
+        if (currentMousePos) {
+          const dist = Math.sqrt((currentMousePos[0] - fx) ** 2 + (currentMousePos[1] - fy) ** 2);
+          if (dist < CLOSE_THRESHOLD) {
+            // Draw purple bubble
+            ctx.fillStyle = '#ff00ff';
+            ctx.globalAlpha = 0.4;
+            ctx.beginPath();
+            ctx.arc(fx, fy, CLOSE_THRESHOLD, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw bubble border
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.8;
+            ctx.stroke();
+          }
+        }
+        
+        // Draw solid center point
+        ctx.fillStyle = '#ff00ff';
         ctx.globalAlpha = 1;
         ctx.beginPath();
-        ctx.arc(fx, fy, 5, 0, Math.PI * 2);
+        ctx.arc(fx, fy, 6, 0, Math.PI * 2);
         ctx.fill();
+        
+        // Add white border for visibility
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
     }
     
