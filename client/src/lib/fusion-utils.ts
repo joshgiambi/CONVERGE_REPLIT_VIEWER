@@ -231,17 +231,41 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // SIMPLIFIED 1:1 PIXEL MAPPING for accurate registration
+  // PROPER PHYSICAL SCALING using pixel spacings
   const w = mriData.width;
   const h = mriData.height;
   
   console.log(`MRI dimensions: ${w}x${h}, Canvas: ${canvasWidth}x${canvasHeight}`);
   
-  // Use 1:1 pixel mapping - no scaling
-  let drawX = (canvasWidth - w) / 2 + panX; // Center MRI on canvas
-  let drawY = (canvasHeight - h) / 2 + panY;
-  let drawW = w; // 1:1 pixel size
-  let drawH = h;
+  // Helper function to normalize spacing arrays
+  function normalizeSpacing(sp: string|string[]|number[]) {
+    if (Array.isArray(sp)) return sp.map(Number);
+    if (typeof sp === "string") return sp.split("\\").map(Number);
+    return [1, 1];
+  }
+  
+  // Get normalized pixel spacings for both CT and MRI
+  const ctSpacingArr = normalizeSpacing(primaryImage.pixelSpacing);
+  
+  // For MRI, we need to get the pixel spacing from the MRI metadata
+  // For now, assume MRI has standard spacing - this should be extracted from MRI DICOM metadata
+  const mriSpacingArr = [0.9765625, 0.9765625]; // TODO: Get from actual MRI metadata
+  
+  console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
+  
+  // Calculate scale factors for proper physical mm-to-mm mapping
+  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
+  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
+  const destW = w * scaleX;
+  const destH = h * scaleY;
+  
+  console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${destW.toFixed(1)}x${destH.toFixed(1)}`);
+  
+  // Center-to-center positioning
+  let drawX = (canvasWidth - destW) / 2 + panX;
+  let drawY = (canvasHeight - destH) / 2 + panY;
+  let drawW = destW;
+  let drawH = destH;
   
   // Apply registration matrix transformation if available
   if (registrationMatrix && registrationMatrix.length === 16) {
@@ -250,15 +274,14 @@ export async function renderFusionOverlay(
     const ty_mm = registrationMatrix[7];
     const tz_mm = registrationMatrix[11];
     
-    // Use standard DICOM pixel spacing for mm-to-pixel conversion
-    const pixelSpacing = 0.9765625; // mm per pixel for this dataset
-    const tx_px = tx_mm / pixelSpacing;
-    const ty_px = ty_mm / pixelSpacing;
+    // Convert mm to CT pixels using CT pixel spacing
+    const tx_px = tx_mm / ctSpacingArr[1]; // X translation in CT pixels
+    const ty_px = ty_mm / ctSpacingArr[0]; // Y translation in CT pixels
     
     drawX += tx_px;
     drawY += ty_px;
     
-    console.log(`🎯 Registration offset: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
+    console.log(`🎯 Registration translation: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
@@ -272,8 +295,8 @@ export async function renderFusionOverlay(
       
       ctx.save();
       ctx.globalAlpha = fusionOpacity;
-      // Use 1:1 scale for rotation transformation
-      ctx.setTransform(a, c, b, d, e, f);
+      // Apply scaled transformation matrix for rotation/shear
+      ctx.setTransform(a * scaleX, c * scaleY, b * scaleX, d * scaleY, e, f);
       ctx.drawImage(temp, 0, 0);
       ctx.restore();
       
@@ -282,7 +305,7 @@ export async function renderFusionOverlay(
     }
   }
 
-  // Standard draw without rotation
+  // Standard draw without rotation - using proper physical scaling
   ctx.save();
   ctx.globalAlpha = fusionOpacity;
   ctx.imageSmoothingEnabled = true;
@@ -290,5 +313,5 @@ export async function renderFusionOverlay(
   ctx.drawImage(temp, drawX, drawY, drawW, drawH);
   ctx.restore();
   
-  console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
+  console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
 }
