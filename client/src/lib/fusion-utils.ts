@@ -257,10 +257,10 @@ export async function renderFusionOverlay(
   const ctSpacingArr = normalizeSpacing(primaryImage.pixelSpacing);
   
   // Use the same coordinate system as CT rendering - NO independent centering
-  let drawX: number;
-  let drawY: number;
-  let drawW: number;
-  let drawH: number;
+  let drawX: number = 0;
+  let drawY: number = 0;
+  let drawW: number = w;
+  let drawH: number = h;
   
   // Get the actual secondary image that was used for interpolation to access its metadata
   let actualSecondaryImage = null;
@@ -383,7 +383,7 @@ export async function renderFusionOverlay(
     console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
     console.log(`  World delta: [${delta[0].toFixed(1)}, ${delta[1].toFixed(1)}, ${delta[2].toFixed(1)}]mm`);
     console.log(`  Projected pixels: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
-    console.log(`  Final position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) vs center: (${baseX.toFixed(1)}, ${baseY.toFixed(1)})`);
+    console.log(`  Final MRI position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)})`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];

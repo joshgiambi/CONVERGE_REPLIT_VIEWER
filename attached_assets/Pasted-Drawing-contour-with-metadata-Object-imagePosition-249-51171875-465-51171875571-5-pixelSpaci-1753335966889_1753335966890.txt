@@ -1,0 +1,46 @@
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-465.51171875571.5", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+Loaded RT series for studies: 
+Array [7]
+ Found: 
+Array [{…}]
+Image metadata: 
+Object {imagePosition: "-249.51171875-465.51171875571.5", imageOrientation: "100010", pixelSpacing: "0.97656250.9765625", sliceLocation: "571.5", frameOfReferenceUID: "1.2.246.352.221.54681479530159130668242930727209070737", …}
+🔍 After render16BitImage, ctTransform: 
+Object {scale: 2, offsetX: 0, offsetY: 0, imageWidth: 512, imageHeight: 512}
+Rendering fusion for CT slice 123
+🎯 renderFusionOverlayNew called: 
+Object {secondaryImagesLength: 60, secondarySeriesId: 14, secondarySeriesType: "number", fusionOpacity: 0.5, hasRegistrationMatrix: true, …}
+🚀 About to call renderFusionOverlay with: 
+Object {ctSliceZ: 571.5, fusionOpacity: 0.5, canvasSize: "1024x1024", actualCacheSize: 60, transformedMRILength: 60}
+🎯 Rendering fusion overlay in CT coordinate space
+Found MRI slice for CT 571.5mm: MRI Z=571.1mm (distance: 0.4mm)
+✓ Found MRI data in cache: 384x384, 147456 pixels
+MRI pixel range: 0.0 to 2435.7 (range: 2435.7)
+MRI dimensions: 384x384, Canvas: 1024x1024
+CT spacing: [0.9765625, 0.9765625]mm, MRI spacing: [0.5, 0.5]mm
+Scale factors: X=0.512, Y=0.512, Dest size: 196.6x196.6
+✅ Using shared CT coordinate system: scale=2, offset=(0, 0)
+🎯 PROPER DICOM COORDINATE TRANSFORMATION (CORRECTED):
+Object {rowCosine: Array(3), colCosine: Array(3), rowSpacing: 0.9765625, colSpacing: 0.9765625, delta: Array(3), …}
+  CT IPP: [-249.51171875, -465.51171875, 571.5]mm
+  CT IOP row: [1.000, 0.000, 0.000]
+  CT IOP col: [0.000, 1.000, 0.000]
+  CT spacing: [0.9765625, 0.9765625]mm/px
+  MRI origin: [-88.736788073089, -171.64034604327, -52.911070916801]mm
+  MRI→CT: [-96.8, -359.0, 571.1]mm
+  World delta: [152.7, 106.5, -0.4]mm
+  Projected pixels: dx=156.4px, dy=109.0px
+Error rendering fusion overlay: 
+TypeError {}
+
+Fusion error details: 
+Object {message: "Cannot read properties of undefined (reading 'toFixed')", stack: "TypeError: Cannot read properties of undefined (reading 'toFixed')↵    at renderFusionOverlay…", secondarySeriesId: 14, secondaryImagesCount: 60, fusionOpacity: 0.5}
+
+🔍 SLICE POSITION DEBUG:
+      parsedSliceLocation: 571.5
+      parsedZPosition: 571.5 
+      imageMetadata.sliceLocation: 571.5
+      imageMetadata.imagePosition Z: 571.5
+      currentIndex: 123
+      FINAL currentSlicePosition: 571.5mm
