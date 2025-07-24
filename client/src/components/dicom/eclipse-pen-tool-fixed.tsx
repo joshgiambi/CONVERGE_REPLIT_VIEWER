@@ -429,7 +429,7 @@ export function EclipsePenToolFixed({
     if (!ctx || !isActive) return;
     
     // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas?.width || 0, canvas?.height || 0);
     
     // Get structure color
     const selectedStructureData = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
