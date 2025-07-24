@@ -29,8 +29,6 @@ export function PenToolUnified({
   panY = 0
 }: PenToolUnifiedProps) {
   
-  console.log('[PenTool] Component rendered:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
-  
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<[number, number, number][]>([]);
@@ -152,7 +150,6 @@ export function PenToolUnified({
   
   // Handle mouse down
   const handleMouseDown = useCallback((e: MouseEvent) => {
-    console.log('[PenTool] Mouse down:', { isActive, button: e.button });
     if (!isActive || !canvasRef.current) return;
     if (e.button !== 0) return; // Only left click
     
@@ -316,7 +313,6 @@ export function PenToolUnified({
   // Handle right click - place point at cursor then close
   const handleRightClick = useCallback((e: MouseEvent) => {
     e.preventDefault();
-    console.log('[PenTool] Right click:', { isDrawing, pathLength: currentPath.length });
     
     if (!isDrawing || currentPath.length < 2) return;
     if (!canvasRef.current) return;
@@ -491,14 +487,6 @@ export function PenToolUnified({
     
     // Clear overlay
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
-    
-    // Debug log render
-    if (isActive && (isDrawing || highlightedContour || mousePosition)) {
-      console.log('[PenTool] Rendering overlay:', { 
-        isActive, isDrawing, hasPath: currentPath.length > 0, 
-        mousePosition, highlightedContour: !!highlightedContour 
-      });
-    }
     
     // Get structure color
     const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
