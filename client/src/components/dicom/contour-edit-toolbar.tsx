@@ -438,9 +438,7 @@ export function ContourEditToolbar({
 
   const mainTools = [
     { id: 'brush', icon: Brush, label: 'Brush' },
-    { id: 'pen', icon: Pen, label: 'ITK-SNAP Pen' },
-    { id: 'planar-contour', icon: Pen, label: 'Eclipse Planar' },
-    { id: 'pen-original', icon: Pen, label: 'Original Pen' },
+    { id: 'planar-contour', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
     { id: 'margin', icon: Maximize2, label: 'Margin' },
