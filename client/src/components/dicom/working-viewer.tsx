@@ -1469,6 +1469,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Debug: Check if ctTransform was populated by render16BitImage
       console.log('🔍 After render16BitImage, ctTransform:', ctTransform.current);
       
+      // Apply CT transform ONCE for both fusion and RT structures
+      const t = ctTransform.current;
+      if (t) {
+        ctx.save();
+        ctx.setTransform(t.scale, 0, 0, t.scale, t.offsetX, t.offsetY);
+        console.log('🎯 Applied CT transform for overlays:', t);
+      }
+      
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
@@ -1500,6 +1508,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
         }
+      }
+      
+      // Restore the transform after drawing overlays
+      if (t) {
+        ctx.restore();
+        console.log('🎯 Restored transform after overlays');
       }
     } catch (error: any) {
       console.error("Error displaying image:", error);

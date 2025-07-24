@@ -178,19 +178,8 @@ export async function renderFusionOverlay(
   registrationMatrix?: number[],
   ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null
 ) {
-  // Save the current context state before applying any transforms
-  ctx.save();
-  
-  // Apply CT transform if available - this puts us in the same coordinate system as the CT
-  if (ctTransform) {
-    ctx.setTransform(
-      ctTransform.scale, 0,
-      0, ctTransform.scale,
-      ctTransform.offsetX,
-      ctTransform.offsetY
-    );
-    console.log('🎯 Applied CT transform for fusion overlay');
-  }
+  // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
+  console.log('🎯 Rendering fusion overlay in CT coordinate space');
 
   // STRICT Z-range check: Only render fusion within actual MRI coverage
   if (transformedMRI.length > 0) {
@@ -201,7 +190,6 @@ export async function renderFusionOverlay(
     // Only render fusion if CT slice is within MRI coverage range
     if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
       console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
-      ctx.restore(); // Always restore the context
       return; // Exit early - no fusion rendering
     }
   }
@@ -222,6 +210,11 @@ export async function renderFusionOverlay(
   const { data } = imgData;
   
   // Find min/max values for proper scaling
+  if (!mriData.data || mriData.data.length === 0) {
+    console.warn('MRI data is empty or invalid');
+    return;
+  }
+  
   let min = mriData.data[0], max = mriData.data[0];
   for (let i = 0; i < mriData.data.length; i++) {
     min = Math.min(min, mriData.data[i]);
@@ -229,7 +222,7 @@ export async function renderFusionOverlay(
   }
   
   const range = max - min;
-  console.log(`MRI pixel range: ${min.toFixed(1)} to ${max.toFixed(1)} (range: ${range.toFixed(1)})`);
+  console.log(`MRI pixel range: ${min?.toFixed?.(1) || min} to ${max?.toFixed?.(1) || max} (range: ${range?.toFixed?.(1) || range})`);
   
   for (let i = 0; i < mriData.data.length; i++) {
     // Scale pixel values from min-max to 0-255 for better contrast
@@ -391,12 +384,12 @@ export async function renderFusionOverlay(
       const e = drawX;
       const f = drawY;
       
-      ctx.save();
+      // NO SAVE/RESTORE - caller manages transforms
       ctx.globalAlpha = fusionOpacity;
       // Apply scaled transformation matrix for rotation/shear
       ctx.setTransform(a * scaleX, c * scaleY, b * scaleX, d * scaleY, e, f);
       ctx.drawImage(temp, 0, 0);
-      ctx.restore();
+      // NO RESTORE - caller will restore
       
       console.log(`✓ MRI overlay with rotation: transform=(${a.toFixed(3)}, ${b.toFixed(3)}, ${c.toFixed(3)}, ${d.toFixed(3)}), pos=(${e.toFixed(1)}, ${f.toFixed(1)})`);
       return;
@@ -472,8 +465,5 @@ export async function renderFusionOverlay(
   
   console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
   
-  // Restore the original transform so RT structures can use their own transforms
-  if (ctTransform) {
-    ctx.restore();
-  }
+  // NO RESTORE - caller manages the transform state
 }
