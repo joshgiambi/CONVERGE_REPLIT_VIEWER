@@ -1,0 +1,58 @@
+A few things to double-check now that you’ve switched to a true DICOM-based projection:
+	1.	Make sure you’ve pulled the right DICOM tags
+	•	In your code you call primaryImage.imageOrientation but the standard tag is ImageOrientationPatient (x00200037)—that’s the 6-element array [rX, rY, rZ, cX, cY, cZ].
+	•	Likewise PixelSpacing is x00280030 (two values: rowSpacing, colSpacing). If any of those come back as strings, split on “\” and Number(…) them.
+	2.	Swap your dot products
+We want
+
+// how much world-mm shift moves you along each image axis:
+pxOffsetX = dot(delta, rowCosine) / colSpacing;   // moving along world vector projected onto rows changes your **column** index
+pxOffsetY = dot(delta, colCosine) / rowSpacing;   // world → columns changes your **row** index
+
+But you did the opposite—i.e. you divided rowCosine by rowSpacing.  Try swapping those two lines and see if it flips your lateral vs. vertical offset.
+
+	3.	Log your cosines & signs
+Before you draw, add:
+
+console.log({
+  rowCosine,
+  colCosine,
+  rowSpacing,
+  colSpacing,
+  delta,
+  pxOffsetX,
+  pxOffsetY
+});
+
+and verify that:
+	•	rowCosine points roughly left→right in world space,
+	•	colCosine points roughly top→bottom,
+	•	a pure shift to the patient’s right yields a positive pxOffsetX.
+
+	4.	Check for a sign flip on Y
+Canvas Y grows down but DICOM Y grows up.  You’re doing drawY = baseY - dy_px, which is correct if dy_px is DICOM-upwards.  If you still see a vertical offset, try + dy_px instead—sometimes the IOP vectors are negated.
+	5.	Verify your registration matrix
+If your 4×4 matrix contains any rotation or scaling in the top-left 2×2 block, you can’t treat it as a pure translation + orientation.  In that case you must either:
+
+ctx.setTransform(
+  a*scaleX,  c*scaleY,
+  b*scaleX,  d*scaleY,
+  drawX,     drawY
+);
+ctx.drawImage(temp, 0, 0);
+
+where a,b,c,d = your matrix[0,1,4,5] entries.
+
+⸻
+
+TL;DR:
+	1.	Swap how you divide your dot-products:
+
+dx_px = dot(delta, rowCosine) / colSpacing;
+dy_px = dot(delta, colCosine) / rowSpacing;
+
+
+	2.	Double-check your DICOM tags (ImageOrientationPatient, PixelSpacing).
+	3.	Log everything (cosines, spacing, delta, px offsets) to confirm direction and sign.
+
+Once those three are in sync, your MRI overlay will land exactly where the CT anatomy is.

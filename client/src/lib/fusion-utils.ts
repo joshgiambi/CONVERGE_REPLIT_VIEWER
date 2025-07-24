@@ -322,8 +322,9 @@ export async function renderFusionOverlay(
     // 4) Project world offset onto CT image axes to get exact pixel offsets
     const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
     
-    const dx_px = dot(delta, colCosine) / colSpacing;  // Column direction / column spacing
-    const dy_px = dot(delta, rowCosine) / rowSpacing;  // Row direction / row spacing
+    // CORRECTED: Swap dot products as per DICOM specification
+    const dx_px = dot(delta, rowCosine) / colSpacing;  // Row direction / column spacing (X movement)
+    const dy_px = dot(delta, colCosine) / rowSpacing;  // Column direction / row spacing (Y movement)
     
     // 5) Apply pixel offsets to center-based draw position
     const baseX = (canvasWidth - destW) / 2 + panX;
@@ -332,7 +333,16 @@ export async function renderFusionOverlay(
     drawX = baseX + dx_px;   // Add X offset (positive = right)
     drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
     
-    console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION:`);
+    console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION (CORRECTED):`);
+    console.log({
+      rowCosine,
+      colCosine,
+      rowSpacing,
+      colSpacing,
+      delta,
+      pxOffsetX: dx_px,
+      pxOffsetY: dy_px
+    });
     console.log(`  CT IPP: [${ipp[0]}, ${ipp[1]}, ${ipp[2]}]mm`);
     console.log(`  CT IOP row: [${rowCosine[0].toFixed(3)}, ${rowCosine[1].toFixed(3)}, ${rowCosine[2].toFixed(3)}]`);
     console.log(`  CT IOP col: [${colCosine[0].toFixed(3)}, ${colCosine[1].toFixed(3)}, ${colCosine[2].toFixed(3)}]`);
