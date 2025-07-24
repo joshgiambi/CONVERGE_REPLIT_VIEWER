@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 24, 2025: Proper DICOM Coordinate Transformation Implementation - IN PROGRESS
+  - ⏳ Implemented proper DICOM coordinate transformation using ImageOrientationPatient vectors
+  - ⏳ Replaced simple translation approach with dot product projections onto CT image axes
+  - ⏳ Added proper handling of row/column cosines and pixel spacing for exact anatomical alignment
+  - ⏳ Fixed coordinate system to project world offset onto CT row/column directions using dot products
+  - ⏳ Testing required: User needs to scroll to MRI range (slice 100-150) to verify alignment accuracy
+  - Previous issue: X, Y, Z alignment still off after sign corrections due to improper coordinate transformation
+  - Solution: Full DICOM-compliant coordinate transformation respecting ImageOrientationPatient matrix
 - July 24, 2025: MRI Fusion System Restored - Function Import Fix - COMPLETED
   - ✅ Fixed critical renderFusionOverlay import error that prevented MRI visibility
   - ✅ Simplified pixel-to-pixel registration to prevent NaN coordinate errors 

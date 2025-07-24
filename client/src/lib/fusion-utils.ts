@@ -299,39 +299,49 @@ export async function renderFusionOverlay(
       ];
     }
     
-    // 1) CT origin (top-left pixel position in patient space)
-    const ctOrigin = toNumberArray(primaryImage.imagePosition);    // [x0, y0, z0]
+    // PROPER DICOM COORDINATE TRANSFORMATION using ImageOrientationPatient
     
-    // 2) MRI origin (from the secondary image that was selected for this slice)
-    const mriOrigin = toNumberArray(actualSecondaryImage.imagePosition);     // [x1, y1, z1]
+    // 1) Fetch CT's orientation and spacing from DICOM metadata
+    const ipp = toNumberArray(primaryImage.imagePosition);  // [X0, Y0, Z0]
+    const iop = toNumberArray(primaryImage.imageOrientation); // [rX, rY, rZ, cX, cY, cZ]
+    const rowCosine = iop.slice(0, 3);  // First 3 values: row direction cosines
+    const colCosine = iop.slice(3, 6);  // Last 3 values: column direction cosines
+    const [rowSpacing, colSpacing] = ctSpacingArr; // [mm per row, mm per col]
     
-    // 3) Transform MRI origin into CT space using the 4x4 registration matrix
-    const [mriCT_x, mriCT_y] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
+    // 2) Get MRI origin and transform to CT space using registration matrix
+    const mriOrigin = toNumberArray(actualSecondaryImage.imagePosition);  // [x1, y1, z1]
+    const [mriCT_x, mriCT_y, mriCT_z] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
     
-    // 4) Compute mm-offset between transformed MRI origin and CT origin
-    const dx_mm = mriCT_x - ctOrigin[0];
-    const dy_mm = mriCT_y - ctOrigin[1];
+    // 3) Compute world-space offset between transformed MRI origin and CT origin
+    const delta = [
+      mriCT_x - ipp[0],
+      mriCT_y - ipp[1], 
+      mriCT_z - ipp[2]
+    ];
     
-    // 5) Convert mm offset to CT pixels using CT pixel spacing
-    const dx_px = dx_mm / ctSpacingArr[1]; // column spacing (X)
-    const dy_px = dy_mm / ctSpacingArr[0]; // row spacing (Y)
+    // 4) Project world offset onto CT image axes to get exact pixel offsets
+    const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
     
-    // 6) Apply the origin-based offset to get true registration alignment
-    // Fixed coordinate mapping: corrected signs for proper anatomical alignment
-    drawX = (canvasWidth - destW) / 2 + panX - dx_px;  // Minus for correct X direction
-    drawY = (canvasHeight - destH) / 2 + panY - dy_px;  // Minus for correct Y direction (canvas Y grows down)
+    const dx_px = dot(delta, colCosine) / colSpacing;  // Column direction / column spacing
+    const dy_px = dot(delta, rowCosine) / rowSpacing;  // Row direction / row spacing
     
-    console.log(`🎯 DETAILED FUSION POSITIONING DEBUG:`);
-    console.log(`  CT slice Z: ${ctSliceZ}mm`);
-    console.log(`  MRI origin image position: (${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]})mm`);
-    console.log(`  CT origin: (${ctOrigin[0]}, ${ctOrigin[1]}, ${ctOrigin[2]})mm`);
-    console.log(`  MRI→CT origin: (${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)})mm`);
-    console.log(`  CT pixel spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm/px`);
-    console.log(`  Offset: (${dx_mm.toFixed(1)}, ${dy_mm.toFixed(1)})mm → (${dx_px.toFixed(1)}, ${dy_px.toFixed(1)})px`);
-    console.log(`  Canvas center: (${((canvasWidth - destW) / 2 + panX).toFixed(1)}, ${((canvasHeight - destH) / 2 + panY).toFixed(1)})`);
-    console.log(`  Final draw position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)})`);
-    console.log(`  Pixel shift from center: (${(-dx_px).toFixed(1)}, ${(-dy_px).toFixed(1)})px`);
-    console.log(`  Pan offset: (${panX}, ${panY})px`);
+    // 5) Apply pixel offsets to center-based draw position
+    const baseX = (canvasWidth - destW) / 2 + panX;
+    const baseY = (canvasHeight - destH) / 2 + panY;
+    
+    drawX = baseX + dx_px;   // Add X offset (positive = right)
+    drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
+    
+    console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION:`);
+    console.log(`  CT IPP: [${ipp[0]}, ${ipp[1]}, ${ipp[2]}]mm`);
+    console.log(`  CT IOP row: [${rowCosine[0].toFixed(3)}, ${rowCosine[1].toFixed(3)}, ${rowCosine[2].toFixed(3)}]`);
+    console.log(`  CT IOP col: [${colCosine[0].toFixed(3)}, ${colCosine[1].toFixed(3)}, ${colCosine[2].toFixed(3)}]`);
+    console.log(`  CT spacing: [${rowSpacing}, ${colSpacing}]mm/px`);
+    console.log(`  MRI origin: [${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]}]mm`);
+    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
+    console.log(`  World delta: [${delta[0].toFixed(1)}, ${delta[1].toFixed(1)}, ${delta[2].toFixed(1)}]mm`);
+    console.log(`  Projected pixels: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
+    console.log(`  Final position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) vs center: (${baseX.toFixed(1)}, ${baseY.toFixed(1)})`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
