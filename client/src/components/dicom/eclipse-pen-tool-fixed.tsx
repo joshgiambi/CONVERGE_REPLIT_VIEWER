@@ -84,7 +84,7 @@ export function EclipsePenToolFixed({
   const [selectedVertices, setSelectedVertices] = useState<Set<string>>(new Set());
   const [draggedVertexId, setDraggedVertexId] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState<[number, number] | null>(null);
-  const [originalVertexPositions, setOriginalVertexPositions] = useState<Map<string, [number, number, number]>>(new Map());
+  const [originalVertexPositions, setOriginalVertexPositions] = useState<Map<string, [number, number]>>(new Map());
   
   // Highlighting state
   const [highlightedContour, setHighlightedContour] = useState<ExistingContour | null>(null);
@@ -273,8 +273,8 @@ export function EclipsePenToolFixed({
           const p2 = contour.points[(i + 1) % contour.points.length];
           
           // Convert to screen coordinates
-          const [x1, y1] = worldToScreen([p1.x, p1.y, p1.z]);
-          const [x2, y2] = worldToScreen([p2.x, p2.y, p2.z]);
+          const [x1, y1] = worldToScreen([p1[0], p1[1], 0]);
+          const [x2, y2] = worldToScreen([p2[0], p2[1], 0]);
           
           // Calculate distance to line segment
           const dist = pointToLineDistance([screenX, screenY], [x1, y1], [x2, y2]);
@@ -372,11 +372,10 @@ export function EclipsePenToolFixed({
     console.log(`Accepting polygon with ${drawingMode} mode`);
     
     // Convert to contour points
-    const contourPoints = currentPolygon.vertices.map(v => ({
-      x: v.position[0],
-      y: v.position[1],
-      z: v.position[2]
-    }));
+    const contourPoints: number[] = [];
+    currentPolygon.vertices.forEach(v => {
+      contourPoints.push(v.position[0], v.position[1], v.position[2]);
+    });
     
     // Determine action based on drawing mode
     let action = 'add_contour';
@@ -388,12 +387,11 @@ export function EclipsePenToolFixed({
     }
     
     // Send update
-    handleContourUpdate({
-      roiNumber: selectedStructure,
-      sliceIndex: currentSlicePosition,
-      points: contourPoints,
+    onContourUpdate({
       action: action,
-      isClosed: true
+      structureIndex: selectedStructure,
+      slicePosition: currentSlicePosition,
+      contourPoints: contourPoints
     });
     
     // Save for paste functionality
@@ -401,7 +399,7 @@ export function EclipsePenToolFixed({
     
     // Reset for next polygon
     resetTool();
-  }, [currentPolygon, selectedStructure, currentSlicePosition, handleContourUpdate, resetTool, drawingMode]);
+  }, [currentPolygon, selectedStructure, currentSlicePosition, onContourUpdate, resetTool, drawingMode]);
   
   // Cancel current polygon
   const cancelPolygon = useCallback(() => {
@@ -528,9 +526,9 @@ export function EclipsePenToolFixed({
     // Continuous drawing mode
     if (isMouseDown && toolState === ToolState.DRAWING_CONTINUOUS && lastSampledPoint) {
       const distance = distance2D([screenX, screenY], lastSampledPoint);
-      if (distance >= SAMPLING_DISTANCE) {
+      if (distance >= CONTINUOUS_SAMPLE_DISTANCE) {
         // Add intermediate points
-        const steps = Math.floor(distance / SAMPLING_DISTANCE);
+        const steps = Math.floor(distance / CONTINUOUS_SAMPLE_DISTANCE);
         for (let i = 1; i <= steps; i++) {
           const t = i / steps;
           const interpX = lastSampledPoint[0] + (screenX - lastSampledPoint[0]) * t;
@@ -579,8 +577,8 @@ export function EclipsePenToolFixed({
               const originalPos = originalVertexPositions.get(v.id)!;
               const distance = distance2D(originalPos, draggedVertex.screenPosition);
               
-              if (distance < INFLUENCE_RADIUS) {
-                const influence = 1 - (distance / INFLUENCE_RADIUS);
+              if (distance < VERTEX_INFLUENCE_RADIUS) {
+                const influence = 1 - (distance / VERTEX_INFLUENCE_RADIUS);
                 const influencedDeltaX = deltaX * influence * influence; // Quadratic falloff
                 const influencedDeltaY = deltaY * influence * influence;
                 
@@ -705,7 +703,7 @@ export function EclipsePenToolFixed({
       ctx.beginPath();
       
       highlightedContour.points.forEach((point, index) => {
-        const [x, y] = worldToScreen([point.x, point.y, point.z]);
+        const [x, y] = worldToScreen([point[0], point[1], 0]);
         if (index === 0) {
           ctx.moveTo(x, y);
         } else {
