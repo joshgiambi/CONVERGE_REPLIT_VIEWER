@@ -384,12 +384,12 @@ export async function renderFusionOverlay(
       const e = drawX;
       const f = drawY;
       
-      // NO SAVE/RESTORE - caller manages transforms
+      ctx.save();
       ctx.globalAlpha = fusionOpacity;
       // Apply scaled transformation matrix for rotation/shear
       ctx.setTransform(a * scaleX, c * scaleY, b * scaleX, d * scaleY, e, f);
       ctx.drawImage(temp, 0, 0);
-      // NO RESTORE - caller will restore
+      ctx.restore();
       
       console.log(`✓ MRI overlay with rotation: transform=(${a.toFixed(3)}, ${b.toFixed(3)}, ${c.toFixed(3)}, ${d.toFixed(3)}), pos=(${e.toFixed(1)}, ${f.toFixed(1)})`);
       return;
