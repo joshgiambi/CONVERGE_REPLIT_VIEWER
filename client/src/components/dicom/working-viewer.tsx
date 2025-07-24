@@ -1183,6 +1183,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         
         // Pre-compute MRI positions in CT space if registration matrix is available
         if (registrationMatrix && registrationMatrix.length === 16) {
+          // Clear cache to force fresh computation with debug logs
+          transformedMRIPositions.current = [];
+          mriZRangeInCTSpace.current = null;
+          mriSliceMappingCache.current.clear();
+          console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
           precomputeMRITransformations(sortedImages, registrationMatrix);
         }
         
