@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
-import { EclipsePenToolFixed } from "./eclipse-pen-tool-fixed";
+import { PenToolUnified } from "./pen-tool-unified";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import { RTStructureOverlay } from "./rt-structure-overlay";
@@ -2443,7 +2443,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
-              <EclipsePenToolFixed
+              <PenToolUnified
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
@@ -2469,7 +2469,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {brushToolState?.isActive &&
             brushToolState?.tool === "planar-contour" &&
             selectedForEdit && (
-              <EclipsePenToolFixed
+              <PenToolUnified
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}

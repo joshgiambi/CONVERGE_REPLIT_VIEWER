@@ -799,53 +799,30 @@ export function ContourEditToolbar({
         ) : showSettings === 'planar-contour' ? (
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
-              <div className="text-sm text-gray-300 font-medium">Eclipse TPS Draw Planar Contour</div>
+              <div className="text-sm text-gray-300 font-medium">Pen Tool</div>
               <div className="text-xs text-gray-400">
-                Eclipse Treatment Planning System style planar contour tool with curved/straight line modes
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Drawing Mode</Label>
-                <Select value="point-by-point" onValueChange={() => {}}>
-                  <SelectTrigger className="w-32 h-7 bg-gray-800/50 border-gray-600 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="point-by-point">Point-by-Point</SelectItem>
-                    <SelectItem value="continuous">Continuous</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Line Style</Label>
-                <Select value="straight" onValueChange={() => {}}>
-                  <SelectTrigger className="w-32 h-7 bg-gray-800/50 border-gray-600 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="straight">Straight</SelectItem>
-                    <SelectItem value="curved">Curved</SelectItem>
-                  </SelectContent>
-                </Select>
+                Unified pen tool with automatic add/subtract based on starting position
               </div>
             </div>
             
             <div className="space-y-3">
               <div className="text-xs text-gray-400">
-                • Click to place vertices
+                • Left-click to place points
               </div>
               <div className="text-xs text-gray-400">
-                • Click near first vertex to close
+                • Hold left mouse to draw continuously
               </div>
               <div className="text-xs text-gray-400">
-                • Shift+Drag to move entire contour
+                • Right-click to close contour
               </div>
               <div className="text-xs text-gray-400">
-                • Click+Drag to reshape contour
+                • Hover near contours to highlight
               </div>
               <div className="text-xs text-gray-400">
-                • Right-click for precision slider
+                • Click & drag vertices to morph
+              </div>
+              <div className="text-xs text-gray-400">
+                • Draw inside to add, outside to subtract
               </div>
             </div>
           </div>

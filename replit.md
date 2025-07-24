@@ -202,6 +202,19 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 24, 2025: Unified Pen Tool Implementation and Settings Cleanup - COMPLETED ✅
+  - ✅ Created new PenToolUnified component implementing user's exact specifications
+  - ✅ Replaced EclipsePenToolFixed with PenToolUnified in working-viewer.tsx for both pen and planar-contour tools
+  - ✅ Removed drawing mode and line style options from planar-contour settings panel per user request
+  - ✅ Simplified settings panel to show unified pen tool instructions only
+  - ✅ Pen tool now operates in single unified mode (holding left = continuous, clicking = points)
+  - ✅ Right-click behavior: places point under cursor first, then closes contour
+  - ✅ Structures immediately merge with existing contours when closed
+  - ✅ CT scroll available but disabled while drawing
+  - ✅ Hover near contours highlights them, click & drag vertices to morph
+  - ✅ Drawing inside existing contour adds, outside subtracts automatically
+  - Implementation: pen-tool-unified.tsx with state management for dragging, hovering, and morphing
+  - User feedback: Settings panel cleanup makes interface cleaner and more intuitive
 - July 24, 2025: Simplified Fusion Registration to Direct Matrix Application - COMPLETED ✅
   - ✅ Removed all complex coordinate transformations and dot product calculations
   - ✅ Simplified to direct registration matrix application: transform MRI origin → calculate offset → convert to pixels → apply CT transform
