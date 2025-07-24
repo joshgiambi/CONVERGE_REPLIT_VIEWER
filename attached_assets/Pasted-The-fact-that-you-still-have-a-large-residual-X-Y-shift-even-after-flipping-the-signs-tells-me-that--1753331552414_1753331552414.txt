@@ -1,0 +1,75 @@
+The fact that you still have a large residual X–Y shift even after flipping the signs tells me that we’re still treating the world-to-pixel conversion as a pure translation + uniform mm→px scale, when in reality every slice has its own orientation vectors.  In DICOM you need three things to go from any world point to image pixels:
+	1.	ImagePositionPatient (IPP) – the world (mm) coordinates of the top-left (0,0) pixel.
+	2.	ImageOrientationPatient (IOP) – two 3-vectors (row cosine + column cosine) that tell you how world X/Y axes map onto image rows/cols.
+	3.	PixelSpacing – physical mm/pixel along those row/col directions.
+
+⸻
+
+1) Fetch your CT’s orientation and spacing:
+
+// from your CT DICOM metadata:
+const ipp = primaryImage.imagePositionPatient 
+              .split("\\").map(Number);      // [X0, Y0, Z0]
+const iop = primaryImage.imageOrientationPatient 
+              .split("\\").map(Number);      // [rX, rY, rZ, cX, cY, cZ]
+const rowCosine = iop.slice(0, 3);
+const colCosine = iop.slice(3, 6);
+const [rowSpacing, colSpacing] = primaryImage.pixelSpacing 
+                                   .split("\\").map(Number); // [mm per row, mm per col]
+
+
+⸻
+
+2) Compute the world-space offset between your transformed MRI origin and CT origin:
+
+// you already have your MRI origin in CT space (mriCT_x, mriCT_y, mriCT_z)
+// and your CT IPP (ipp)
+
+// Build delta world-vector:
+const delta = [
+  mriCT_x - ipp[0],
+  mriCT_y - ipp[1],
+  mriCT_z - ipp[2]
+];
+
+
+⸻
+
+3) Project that onto the CT image axes to get pixel offsets:
+
+// dot(a,b) helper
+function dot(a: number[], b: number[]) {
+  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+const dx_px =  dot(delta, rowCosine) / colSpacing;
+const dy_px =  dot(delta, colCosine) / rowSpacing;
+
+Notice how we divide by colSpacing for the rowCosine dot (since moving along a row changes your column index), and by rowSpacing for the columnCosine dot.
+
+⸻
+
+4) Apply those to your center-based draw position:
+
+const baseX = (canvasWidth  - destW) / 2 + panX;
+const baseY = (canvasHeight - destH) / 2 + panY;
+
+// Depending on your canvas coordinate system, you may need to flip Y:
+const drawX = baseX + dx_px;
+const drawY = baseY - dy_px;
+
+ctx.save();
+ctx.globalAlpha = fusionOpacity;
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(temp, drawX, drawY, destW, destH);
+ctx.restore();
+
+
+⸻
+
+Why this fixes your residual offset
+
+Previously we only used the translation components of the 4×4 matrix (registrationMatrix[3], [7], [11]) and treated both axes the same.  But if your CT is rotated relative to the patient coordinate system (e.g. non-axial gantry tilt, slight head tilt), the world Δ vector won’t lie purely along X or Y.  By projecting onto the row and column direction cosines and dividing by pixelSpacing, we get the exact pixel shifts you need to align MRI anatomy on top of CT.
+
+Once you plug this into your renderFusionOverlay (directly replacing the origin-based block), you should see the MRI land exactly over the CT in X, Y and Z.

@@ -321,13 +321,17 @@ export async function renderFusionOverlay(
     drawX = (canvasWidth - destW) / 2 + panX - dx_px;  // Minus for correct X direction
     drawY = (canvasHeight - destH) / 2 + panY - dy_px;  // Minus for correct Y direction (canvas Y grows down)
     
-    console.log(`🎯 Origin-based registration:`);
+    console.log(`🎯 DETAILED FUSION POSITIONING DEBUG:`);
+    console.log(`  CT slice Z: ${ctSliceZ}mm`);
+    console.log(`  MRI origin image position: (${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]})mm`);
     console.log(`  CT origin: (${ctOrigin[0]}, ${ctOrigin[1]}, ${ctOrigin[2]})mm`);
-    console.log(`  MRI origin: (${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]})mm`);
     console.log(`  MRI→CT origin: (${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)})mm`);
+    console.log(`  CT pixel spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm/px`);
     console.log(`  Offset: (${dx_mm.toFixed(1)}, ${dy_mm.toFixed(1)})mm → (${dx_px.toFixed(1)}, ${dy_px.toFixed(1)})px`);
-    console.log(`  Final draw position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) vs centered: (${((canvasWidth - destW) / 2 + panX).toFixed(1)}, ${((canvasHeight - destH) / 2 + panY).toFixed(1)})`);
-    console.log(`  Registration-based shift: X${-dx_px > 0 ? '+' : ''}${(-dx_px).toFixed(1)}px, Y${-dy_px > 0 ? '+' : ''}${(-dy_px).toFixed(1)}px from center`);
+    console.log(`  Canvas center: (${((canvasWidth - destW) / 2 + panX).toFixed(1)}, ${((canvasHeight - destH) / 2 + panY).toFixed(1)})`);
+    console.log(`  Final draw position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)})`);
+    console.log(`  Pixel shift from center: (${(-dx_px).toFixed(1)}, ${(-dy_px).toFixed(1)})px`);
+    console.log(`  Pan offset: (${panX}, ${panY})px`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
