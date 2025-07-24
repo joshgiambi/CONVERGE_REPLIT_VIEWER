@@ -1681,8 +1681,55 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return result;
     };
     
-    // Get the current CT slice position and image metadata
-    let ctSlicePosition = parseFloat(primaryImage.sliceLocation) || primaryImage.parsedSliceLocation || currentIndex;
+    // Get the current CT slice position from DICOM metadata - same logic as RT structures
+    let ctSlicePosition: number = (currentIndex + 1) * 3; // Default fallback
+    
+    // Priority 1: Use parsed slice location from DICOM
+    if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
+      ctSlicePosition = primaryImage.parsedSliceLocation;
+    }
+    // Priority 2: Use parsed Z position from DICOM
+    else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
+      ctSlicePosition = primaryImage.parsedZPosition;
+    }
+    // Priority 3: Extract from image metadata directly
+    else if (primaryImage.imageMetadata && primaryImage.imageMetadata.sliceLocation !== undefined) {
+      const parsed = parseFloat(primaryImage.imageMetadata.sliceLocation);
+      if (!isNaN(parsed)) {
+        ctSlicePosition = parsed;
+      }
+    }
+    // Priority 4: Extract Z from image position
+    else if (primaryImage.imageMetadata && primaryImage.imageMetadata.imagePosition) {
+      const imagePos = typeof primaryImage.imageMetadata.imagePosition === 'string'
+        ? primaryImage.imageMetadata.imagePosition.split("\\")
+        : primaryImage.imageMetadata.imagePosition;
+      if (imagePos && imagePos.length >= 3) {
+        const parsed = parseFloat(imagePos[2]);
+        if (!isNaN(parsed)) {
+          ctSlicePosition = parsed;
+        }
+      }
+    }
+    // Priority 5: Direct properties as fallback
+    else if (primaryImage.sliceLocation) {
+      const parsed = parseFloat(primaryImage.sliceLocation);
+      if (!isNaN(parsed)) {
+        ctSlicePosition = parsed;
+      }
+    }
+    else if (primaryImage.imagePosition) {
+      const imagePos = typeof primaryImage.imagePosition === 'string'
+        ? primaryImage.imagePosition.split("\\")
+        : primaryImage.imagePosition;
+      if (imagePos && imagePos.length >= 3) {
+        const parsed = parseFloat(imagePos[2]);
+        if (!isNaN(parsed)) {
+          ctSlicePosition = parsed;
+        }
+      }
+    }
+    
     const ctImageMetadata = imageMetadata || {};
     
     // Define CT coordinates at function scope for use throughout
@@ -1858,14 +1905,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Check cache first
       const cacheKey = currentIndex;
       const cached = mriSliceMappingCache.current.get(cacheKey);
-      if (cached) {
+      if (cached !== undefined) {
         if (cached === null) {
           console.log("CT slice is outside MRI coverage (cached)");
+          setFusionAvailable(false);
           return;
         }
-        closestSecondaryImage = secondaryImages[cached.mriIndex];
-        minDistance = cached.distance;
-        console.log(`Using cached MRI mapping: CT[${currentIndex}] -> MRI[${cached.mriIndex}] (distance: ${cached.distance.toFixed(1)}mm)`);
+        // Validate cached index
+        if (cached.mriIndex >= 0 && cached.mriIndex < secondaryImages.length) {
+          closestSecondaryImage = secondaryImages[cached.mriIndex];
+          minDistance = cached.distance;
+          console.log(`Using cached MRI mapping: CT[${currentIndex}] -> MRI[${cached.mriIndex}] (distance: ${cached.distance.toFixed(1)}mm)`);
+        } else {
+          console.error(`Invalid cached MRI index: ${cached.mriIndex}`);
+          mriSliceMappingCache.current.delete(cacheKey); // Remove invalid cache entry
+        }
       } else {
         // Use pre-computed transformations for fast lookup
         const startTime = performance.now();
@@ -1931,7 +1985,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           console.log(`⚡ Fast MRI lookup: Best match found in ${(performance.now() - startTime).toFixed(1)}ms (distance: ${bestDistance.toFixed(1)}mm)`);
           
-          if (bestMatch && bestDistance < 10) {
+          // Use a more generous tolerance to ensure MRI is visible throughout the overlapping range
+          // The MRI slice spacing after transformation might have larger gaps
+          const maxTolerance = 30; // mm - increased from 10mm to handle registration gaps
+          
+          if (bestMatch && bestDistance < maxTolerance) {
             closestSecondaryImage = bestMatch;
             minDistance = bestDistance;
             const actualIndex = secondaryImages.indexOf(bestMatch);
@@ -1939,7 +1997,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             mriSliceMappingCache.current.set(cacheKey, { mriIndex: actualIndex, distance: bestDistance });
             setFusionAvailable(true);
           } else {
-            console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
+            console.warn(`No MRI slice within ${maxTolerance}mm. Best distance: ${bestDistance.toFixed(1)}mm`);
             mriSliceMappingCache.current.set(cacheKey, null);
             setFusionAvailable(false);
             return; // No fusion if MRI slice too far away
