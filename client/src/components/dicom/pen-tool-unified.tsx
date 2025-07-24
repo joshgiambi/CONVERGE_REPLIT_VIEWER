@@ -159,9 +159,16 @@ export function PenToolUnified({
         canvasRef.current.style.pointerEvents = 'none';
       }
     } else {
-      // Start drawing
-      setIsDrawing(true);
-      setCurrentPath([worldPoint]);
+      // If already drawing, add point to path. Otherwise start new path
+      if (isDrawing) {
+        // Add point to existing path
+        setCurrentPath(prev => [...prev, worldPoint]);
+      } else {
+        // Start new drawing
+        setIsDrawing(true);
+        setCurrentPath([worldPoint]);
+      }
+      
       setIsMouseDown(true);
       setLastPoint([canvasX, canvasY]);
       
@@ -170,7 +177,7 @@ export function PenToolUnified({
         canvasRef.current.style.pointerEvents = 'none';
       }
     }
-  }, [isActive, canvasRef, canvasToWorld, findNearbyVertex]);
+  }, [isActive, canvasRef, canvasToWorld, findNearbyVertex, isDrawing]);
   
   // Handle mouse move
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -324,21 +331,7 @@ export function PenToolUnified({
   }, [isDrawing, currentPath, canvasRef, canvasToWorld, rtStructures, selectedStructure, 
       currentSlicePosition, isPointInsideContour, onContourUpdate]);
   
-  // Handle click (for adding individual points)
-  const handleClick = useCallback((e: MouseEvent) => {
-    if (!isActive || !isDrawing || isMouseDown) return;
-    if (e.button !== 0) return;
-    
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    
-    const canvasX = e.clientX - rect.left;
-    const canvasY = e.clientY - rect.top;
-    const worldPoint = canvasToWorld(canvasX, canvasY);
-    
-    setCurrentPath(prev => [...prev, worldPoint]);
-    setLastPoint([canvasX, canvasY]);
-  }, [isActive, isDrawing, isMouseDown, canvasRef, canvasToWorld]);
+
   
   // Setup event listeners
   useEffect(() => {
@@ -354,7 +347,6 @@ export function PenToolUnified({
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('click', handleClick);
     canvas.addEventListener('contextmenu', handleContextMenu);
     
     // Global mouse up to handle mouse leaving canvas
@@ -367,11 +359,10 @@ export function PenToolUnified({
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('click', handleClick);
       canvas.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isActive, canvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleClick, handleRightClick]);
+  }, [isActive, canvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
   
   // Reset when deactivated
   useEffect(() => {
@@ -387,6 +378,23 @@ export function PenToolUnified({
         canvasRef.current.style.pointerEvents = 'auto';
       }
     }
+  }, [isActive, canvasRef]);
+  
+  // Manage cursor style
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    if (isActive) {
+      canvasRef.current.style.cursor = 'crosshair';
+    } else {
+      canvasRef.current.style.cursor = '';
+    }
+    
+    return () => {
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = '';
+      }
+    };
   }, [isActive, canvasRef]);
   
   // Setup overlay canvas
