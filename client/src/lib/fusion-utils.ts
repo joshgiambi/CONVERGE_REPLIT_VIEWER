@@ -167,15 +167,16 @@ export async function renderFusionOverlay(
   canvasHeight: number,
   registrationMatrix?: number[]
 ) {
-  // Check if CT slice is within MRI Z-range but allow some flexibility
+  // STRICT Z-range check: Only render fusion within actual MRI coverage
   if (transformedMRI.length > 0) {
     const zValues = transformedMRI.map(t => t.zInCT);
     const minZ = Math.min(...zValues);
     const maxZ = Math.max(...zValues);
     
-    // Show a warning but still try to render if close to range
-    if (ctSliceZ < minZ - 20 || ctSliceZ > maxZ + 20) { // Increased tolerance to 20mm
-      console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, but attempting fusion anyway`);
+    // Only render fusion if CT slice is within MRI coverage range
+    if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
+      console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
+      return; // Exit early - no fusion rendering
     }
   }
 
@@ -211,11 +212,11 @@ export async function renderFusionOverlay(
     const idx4 = i * 4;
     data[idx4] = data[idx4+1] = data[idx4+2] = v;
     
-    // Make black/very dark pixels transparent to avoid blocking CT
-    if (v < 20) { // Threshold for black pixels
+    // Make only very dark background pixels transparent (more conservative threshold)
+    if (v < 5) { // Much lower threshold for true black background only
       data[idx4+3] = 0; // Fully transparent
     } else {
-      data[idx4+3] = 255; // Fully opaque
+      data[idx4+3] = 255; // Fully opaque for all anatomy
     }
   }
   tctx.putImageData(imgData, 0, 0);
@@ -233,13 +234,19 @@ export async function renderFusionOverlay(
   // Apply simple registration offset if available
   if (registrationMatrix && registrationMatrix.length === 16) {
     // Use translation components from registration matrix
-    const offsetX = registrationMatrix[3] * 0.5; // Scale down translation
-    const offsetY = registrationMatrix[7] * 0.5; 
+    const translationX = registrationMatrix[3]; // X translation in mm
+    const translationY = registrationMatrix[7]; // Y translation in mm
+    const translationZ = registrationMatrix[11]; // Z translation in mm
+    
+    // Convert mm to pixels (approximate pixel spacing ~0.98mm for this dataset)
+    const offsetX = translationX * 0.5; // Scale for pixel conversion
+    const offsetY = translationY * 0.5; 
     
     x += offsetX;
     y += offsetY;
     
-    console.log(`Applied registration offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
+    console.log(`🎯 Registration matrix translation: X=${translationX.toFixed(1)}mm, Y=${translationY.toFixed(1)}mm, Z=${translationZ.toFixed(1)}mm`);
+    console.log(`Applied pixel offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}) pixels`);
   }
 
   // Draw with global alpha
