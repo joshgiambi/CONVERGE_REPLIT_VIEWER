@@ -317,9 +317,9 @@ export async function renderFusionOverlay(
     const dy_px = dy_mm / ctSpacingArr[0]; // row spacing (Y)
     
     // 6) Apply the origin-based offset to get true registration alignment
-    // Fixed coordinate mapping: flip X sign for correct anatomical alignment
+    // Fixed coordinate mapping: corrected signs for proper anatomical alignment
     drawX = (canvasWidth - destW) / 2 + panX - dx_px;  // Minus for correct X direction
-    drawY = (canvasHeight - destH) / 2 + panY + dy_px;  // Plus for correct Y direction
+    drawY = (canvasHeight - destH) / 2 + panY - dy_px;  // Minus for correct Y direction (canvas Y grows down)
     
     console.log(`🎯 Origin-based registration:`);
     console.log(`  CT origin: (${ctOrigin[0]}, ${ctOrigin[1]}, ${ctOrigin[2]})mm`);
@@ -327,7 +327,7 @@ export async function renderFusionOverlay(
     console.log(`  MRI→CT origin: (${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)})mm`);
     console.log(`  Offset: (${dx_mm.toFixed(1)}, ${dy_mm.toFixed(1)})mm → (${dx_px.toFixed(1)}, ${dy_px.toFixed(1)})px`);
     console.log(`  Final draw position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) vs centered: (${((canvasWidth - destW) / 2 + panX).toFixed(1)}, ${((canvasHeight - destH) / 2 + panY).toFixed(1)})`);
-    console.log(`  Registration-based shift: X${-dx_px > 0 ? '+' : ''}${(-dx_px).toFixed(1)}px, Y${dy_px > 0 ? '+' : ''}${dy_px.toFixed(1)}px from center`);
+    console.log(`  Registration-based shift: X${-dx_px > 0 ? '+' : ''}${(-dx_px).toFixed(1)}px, Y${-dy_px > 0 ? '+' : ''}${(-dy_px).toFixed(1)}px from center`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
