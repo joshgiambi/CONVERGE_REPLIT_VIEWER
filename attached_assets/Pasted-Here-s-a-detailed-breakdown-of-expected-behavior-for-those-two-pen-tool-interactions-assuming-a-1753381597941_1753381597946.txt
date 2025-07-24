@@ -1,0 +1,115 @@
+Here’s a detailed breakdown of **expected behavior** for those two pen tool interactions, assuming a modern radiotherapy-style DICOM viewer (like Eclipse, MIM, or your app):
+
+---
+
+## 🖱️ 1. **Dragging a Point Near a Contour (Edit Mode)**
+
+### 🔍 When Mouse Approaches a Vertex:
+
+* The cursor **changes appearance** (e.g. to a "hand" or "grab" icon) when hovering close to an existing contour vertex (within a few pixels threshold, e.g. 5–10 px).
+* The vertex itself may **highlight** or flash to signal that it's editable.
+* This typically only works when the tool is in an “edit” or “adjust” mode — not draw.
+
+### 🧲 On Mouse Down (Near a Vertex):
+
+* The application enters a **drag mode**:
+
+  * Stores the index of the selected vertex.
+  * Locks all other vertices.
+  * Begins real-time update of the contour shape.
+
+### ➡️ On Mouse Move:
+
+* The vertex **follows the cursor**.
+* Adjacent segments deform accordingly.
+* The contour remains open (dynamic preview rendering).
+
+### 🖱️ On Mouse Up:
+
+* The vertex drops into its new location.
+* The contour is recomputed, possibly smoothed.
+* Data structure (e.g. list of coordinates or vector path) is updated.
+
+### 🧠 Developer Logic:
+
+```js
+onMouseDown(event) {
+  if (isNearVertex(event.position)) {
+    selectedVertex = getVertexIndex(event.position);
+    isDragging = true;
+  }
+}
+onMouseMove(event) {
+  if (isDragging) {
+    updateVertex(selectedVertex, event.position);
+    redrawContour();
+  }
+}
+onMouseUp(event) {
+  isDragging = false;
+}
+```
+
+---
+
+## ✏️ 2. **Clicking Outside a Contour and Drawing a Shape (Followed by Right-Click)**
+
+### 🖱️ On Left Click Outside Any Existing Contour:
+
+* The pen tool begins a **new freehand stroke**.
+* Mouse drag samples points into an array (e.g., `[x1, y1], [x2, y2], ...`).
+* A live line or filled region is rendered as the user draws.
+
+### 🔁 On Right-Click After Drawing:
+
+* The system **interprets the gesture as “complete shape”**.
+* **Contextual action is triggered** based on the current draw mode:
+
+  * If in **Add Mode**: shape is **unioned** with existing structure (or created as a new structure if none overlaps).
+  * If in **Subtract Mode**: shape is **subtracted** from any overlapping structures.
+
+### 🤖 Automatic Behavior
+
+* Shape is **auto-closed** (from last point back to first).
+* Optional smoothing or decimation may be applied.
+* Contour is added to the current slice in the RTSTRUCT.
+
+### 🧠 Developer Logic:
+
+```js
+let currentStroke = [];
+canvas.onMouseDown = (e) => { currentStroke.push(e.position); };
+canvas.onMouseMove = (e) => { if (mouseDown) currentStroke.push(e.position); };
+canvas.onRightClick = () => {
+  closeShape(currentStroke);
+  if (mode === "add") applyUnion(currentStroke);
+  else if (mode === "subtract") applySubtraction(currentStroke);
+  currentStroke = [];
+};
+```
+
+---
+
+## 🧪 Visual Feedback
+
+| Action                          | Cursor Icon          | Resulting UI Feedback                    |
+| ------------------------------- | -------------------- | ---------------------------------------- |
+| Hover near contour vertex       | "Grab"/pointer       | Vertex highlights                        |
+| Drag vertex                     | Drag icon            | Real-time deformation                    |
+| Left-draw + right-click outside | Pen icon → Confirmed | New shape added or subtracted with blink |
+
+---
+
+## 📌 Summary for Developer
+
+* **Dragging vertex** modifies existing contours in-place.
+* **Drawing outside + right-click** finalizes a new shape and applies it contextually (add/subtract).
+* Logic must distinguish between:
+
+  * `hover near vertex` vs. `freehand start`
+  * `left-drag` vs. `right-confirm`
+* Most implementations use `canvas` overlays or `WebGL` rendering with contour structures managed in memory and applied to masks/RTSTRUCTs on confirmation.
+
+---
+
+Let me know if you'd like this broken into diagrams, or if you want me to generate pseudocode or UI mockups.

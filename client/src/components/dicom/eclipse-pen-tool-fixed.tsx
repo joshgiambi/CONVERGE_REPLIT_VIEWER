@@ -1,14 +1,23 @@
-// Eclipse TPS-compliant Pen Tool Implementation
-// Fixed to match ITK-SNAP polygon tool behavior
+// Advanced Pen Tool Implementation
+// Supports continuous drawing, boolean operations, and vertex editing
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PenTool as PenIcon } from 'lucide-react';
 
-// Simplified Tool States - matching ITK-SNAP behavior
+// Tool States
 enum ToolState {
-  IDLE = 'IDLE',           // Tool selected, not drawing
-  DRAWING = 'DRAWING',     // Actively placing vertices
-  PREVIEW = 'PREVIEW',     // Polygon complete, preview before accept
+  IDLE = 'IDLE',                   // Tool selected, not drawing
+  DRAWING_DISCRETE = 'DRAWING_DISCRETE',     // Placing individual vertices
+  DRAWING_CONTINUOUS = 'DRAWING_CONTINUOUS', // Continuous line drawing (mouse down)
+  DRAGGING_VERTEX = 'DRAGGING_VERTEX',       // Editing existing vertex
+  PREVIEW = 'PREVIEW',             // Polygon complete, preview before accept
+}
+
+// Drawing modes based on starting position
+enum DrawingMode {
+  ADD = 'ADD',         // Started inside existing contour
+  SUBTRACT = 'SUBTRACT', // Started outside existing contour
+  NEW = 'NEW'          // No existing contours
 }
 
 interface Vertex {
@@ -23,6 +32,13 @@ interface Polygon {
   vertices: Vertex[];
   isClosed: boolean;
   sliceIndex: number;
+  drawingMode?: DrawingMode;
+}
+
+interface ExistingContour {
+  points: [number, number][];
+  roiNumber: number;
+  color: number[];
 }
 
 interface EclipsePenToolProps {
@@ -56,16 +72,30 @@ export function EclipsePenToolFixed({
   // Tool state
   const [toolState, setToolState] = useState<ToolState>(ToolState.IDLE);
   const [currentPolygon, setCurrentPolygon] = useState<Polygon | null>(null);
-  const [lastAcceptedPolygon, setLastAcceptedPolygon] = useState<Polygon | null>(null); // For paste functionality
+  const [lastAcceptedPolygon, setLastAcceptedPolygon] = useState<Polygon | null>(null);
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>(DrawingMode.NEW);
+  
+  // Continuous drawing state
+  const [isMouseDown, setIsMouseDown] = useState(false);
+  const [continuousPoints, setContinuousPoints] = useState<[number, number][]>([]);
+  const [lastSampledPoint, setLastSampledPoint] = useState<[number, number] | null>(null);
   
   // Editing state
   const [selectedVertices, setSelectedVertices] = useState<Set<string>>(new Set());
-  const [isDragging, setIsDragging] = useState(false);
+  const [draggedVertexId, setDraggedVertexId] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState<[number, number] | null>(null);
+  const [originalVertexPositions, setOriginalVertexPositions] = useState<Map<string, [number, number, number]>>(new Map());
+  
+  // Highlighting state
+  const [highlightedContour, setHighlightedContour] = useState<ExistingContour | null>(null);
+  const [nearbyVertexId, setNearbyVertexId] = useState<string | null>(null);
+  
+  // Selection state
   const [selectionBox, setSelectionBox] = useState<{
     start: [number, number];
     end: [number, number];
   } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   
   // Mouse tracking
   const [mousePosition, setMousePosition] = useState<[number, number]>([0, 0]);
@@ -77,8 +107,12 @@ export function EclipsePenToolFixed({
   // Configuration
   const VERTEX_RADIUS = 5;
   const VERTEX_SELECT_RADIUS = 10;
-  const CLOSE_THRESHOLD = 15; // pixels
+  const CLOSE_THRESHOLD = 20; // Larger for initial point
+  const INITIAL_POINT_THRESHOLD = 25; // Even larger hit area for first point
   const MIN_VERTICES = 3;
+  const CONTINUOUS_SAMPLE_DISTANCE = 5; // Minimum pixels between sampled points
+  const CONTOUR_HIGHLIGHT_DISTANCE = 10; // Distance to highlight existing contours
+  const VERTEX_INFLUENCE_RADIUS = 50; // Radius for vertex dragging influence
   
   // Initialize when activated
   useEffect(() => {
@@ -95,16 +129,6 @@ export function EclipsePenToolFixed({
   const generateUUID = () => {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
-  
-  // Reset tool state
-  const resetTool = useCallback(() => {
-    setToolState(ToolState.IDLE);
-    setCurrentPolygon(null);
-    setSelectedVertices(new Set());
-    setIsDragging(false);
-    setDragStartPos(null);
-    setSelectionBox(null);
-  }, []);
   
   // Coordinate transformation functions
   const screenToWorld = useCallback((screenX: number, screenY: number): [number, number, number] => {
@@ -171,6 +195,127 @@ export function EclipsePenToolFixed({
     return Math.sqrt(Math.pow(p2[0] - p1[0], 2) + Math.pow(p2[1] - p1[1], 2));
   };
   
+  // Get existing contours for current slice
+  const getExistingContours = useCallback((): ExistingContour[] => {
+    if (!rtStructures?.structures) return [];
+    
+    const contours: ExistingContour[] = [];
+    rtStructures.structures.forEach((structure: any) => {
+      const sliceContours = structure.sliceContours?.[currentSlicePosition];
+      if (sliceContours && sliceContours.length > 0) {
+        sliceContours.forEach((contour: any) => {
+          if (contour.points && contour.points.length > 0) {
+            const points: [number, number][] = [];
+            for (let i = 0; i < contour.points.length; i += 3) {
+              points.push([contour.points[i], contour.points[i + 1]]);
+            }
+            contours.push({
+              points,
+              roiNumber: structure.roiNumber,
+              color: structure.color || [255, 255, 255]
+            });
+          }
+        });
+      }
+    });
+    return contours;
+  }, [rtStructures, currentSlicePosition]);
+  
+  // Check if point is inside any contour
+  const isPointInsideContour = useCallback((point: [number, number], contour: ExistingContour): boolean => {
+    const { points } = contour;
+    let inside = false;
+    
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const xi = points[i][0], yi = points[i][1];
+      const xj = points[j][0], yj = points[j][1];
+      
+      const intersect = ((yi > point[1]) !== (yj > point[1]))
+          && (point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    
+    return inside;
+  }, []);
+  
+  // Find contour at point
+  const findContourAtPoint = useCallback((screenX: number, screenY: number): ExistingContour | null => {
+    const worldPos = screenToWorld(screenX, screenY);
+    const contours = getExistingContours();
+    
+    for (const contour of contours) {
+      if (contour.roiNumber === selectedStructure && isPointInsideContour([worldPos[0], worldPos[1]], contour)) {
+        return contour;
+      }
+    }
+    return null;
+  }, [getExistingContours, selectedStructure, screenToWorld, isPointInsideContour]);
+  
+  // Determine drawing mode based on starting position
+  const determineDrawingMode = useCallback((screenX: number, screenY: number): DrawingMode => {
+    const contour = findContourAtPoint(screenX, screenY);
+    if (!contour) return DrawingMode.NEW;
+    return contour ? DrawingMode.ADD : DrawingMode.SUBTRACT;
+  }, [findContourAtPoint]);
+  
+  // Find contour near a point
+  const findContourNearPoint = useCallback((screenX: number, screenY: number, threshold: number) => {
+    const contours = getExistingContours();
+    if (!contours.length) return null;
+    
+    const worldPos = screenToWorld(screenX, screenY);
+    
+    for (const contour of contours) {
+      if (contour.roiNumber === selectedStructure) {
+        // Check distance to contour edges
+        for (let i = 0; i < contour.points.length; i++) {
+          const p1 = contour.points[i];
+          const p2 = contour.points[(i + 1) % contour.points.length];
+          
+          // Convert to screen coordinates
+          const [x1, y1] = worldToScreen([p1.x, p1.y, p1.z]);
+          const [x2, y2] = worldToScreen([p2.x, p2.y, p2.z]);
+          
+          // Calculate distance to line segment
+          const dist = pointToLineDistance([screenX, screenY], [x1, y1], [x2, y2]);
+          if (dist < threshold) {
+            return contour;
+          }
+        }
+      }
+    }
+    return null;
+  }, [getExistingContours, selectedStructure, screenToWorld, worldToScreen]);
+  
+  // Distance from point to line segment
+  const pointToLineDistance = (point: [number, number], lineStart: [number, number], lineEnd: [number, number]): number => {
+    const dx = lineEnd[0] - lineStart[0];
+    const dy = lineEnd[1] - lineStart[1];
+    const lengthSquared = dx * dx + dy * dy;
+    
+    if (lengthSquared === 0) return distance2D(point, lineStart);
+    
+    const t = Math.max(0, Math.min(1, ((point[0] - lineStart[0]) * dx + (point[1] - lineStart[1]) * dy) / lengthSquared));
+    const projection: [number, number] = [lineStart[0] + t * dx, lineStart[1] + t * dy];
+    
+    return distance2D(point, projection);
+  };
+  
+  // Reset tool state
+  const resetTool = useCallback(() => {
+    setToolState(ToolState.IDLE);
+    setCurrentPolygon(null);
+    setSelectedVertices(new Set());
+    setDraggedVertexId(null);
+    setDragStartPos(null);
+    setHighlightedContour(null);
+    setNearbyVertexId(null);
+    setContinuousPoints([]);
+    setLastSampledPoint(null);
+    setIsMouseDown(false);
+    setOriginalVertexPositions(new Map());
+  }, []);
+  
   // Add vertex to polygon
   const addVertex = useCallback((screenX: number, screenY: number) => {
     const worldPos = screenToWorld(screenX, screenY);
@@ -191,7 +336,7 @@ export function EclipsePenToolFixed({
         sliceIndex: currentSlicePosition
       };
       setCurrentPolygon(newPolygon);
-      setToolState(ToolState.DRAWING);
+      setToolState(ToolState.DRAWING_DISCRETE);
       console.log('Started new polygon');
     } else {
       // Check if clicking near first vertex to close
@@ -224,30 +369,39 @@ export function EclipsePenToolFixed({
   const acceptPolygon = useCallback(() => {
     if (!currentPolygon || !currentPolygon.isClosed) return;
     
-    console.log('Accepting polygon');
+    console.log(`Accepting polygon with ${drawingMode} mode`);
     
     // Convert to contour points
-    const contourPoints: number[] = [];
-    currentPolygon.vertices.forEach(vertex => {
-      contourPoints.push(vertex.position[0], vertex.position[1], vertex.position[2]);
-    });
+    const contourPoints = currentPolygon.vertices.map(v => ({
+      x: v.position[0],
+      y: v.position[1],
+      z: v.position[2]
+    }));
+    
+    // Determine action based on drawing mode
+    let action = 'add_contour';
+    if (drawingMode === DrawingMode.SUBTRACT) {
+      action = 'subtract_contour';
+    } else if (drawingMode === DrawingMode.ADD) {
+      // For ADD mode, we should merge with existing contour
+      action = 'add_contour';
+    }
     
     // Send update
-    const payload = {
-      action: 'add_contour',
-      structureIndex: selectedStructure,
-      slicePosition: currentSlicePosition,
-      contourPoints: contourPoints
-    };
-    
-    onContourUpdate(payload);
+    handleContourUpdate({
+      roiNumber: selectedStructure,
+      sliceIndex: currentSlicePosition,
+      points: contourPoints,
+      action: action,
+      isClosed: true
+    });
     
     // Save for paste functionality
     setLastAcceptedPolygon(currentPolygon);
     
     // Reset for next polygon
     resetTool();
-  }, [currentPolygon, selectedStructure, currentSlicePosition, onContourUpdate, resetTool]);
+  }, [currentPolygon, selectedStructure, currentSlicePosition, handleContourUpdate, resetTool, drawingMode]);
   
   // Cancel current polygon
   const cancelPolygon = useCallback(() => {
@@ -312,9 +466,18 @@ export function EclipsePenToolFixed({
     const screenY = e.clientY - rect.top;
     
     if (e.button === 0) { // Left click
-      if (toolState === ToolState.IDLE || toolState === ToolState.DRAWING) {
-        // Add vertex
+      if (toolState === ToolState.IDLE || toolState === ToolState.DRAWING_DISCRETE) {
+        // Check if we should start continuous drawing
+        setIsMouseDown(true);
+        setLastSampledPoint([screenX, screenY]);
+        
+        // Determine drawing mode based on starting position
+        const mode = determineDrawingMode(screenX, screenY);
+        setDrawingMode(mode);
+        
+        // Add first vertex
         addVertex(screenX, screenY);
+        setToolState(ToolState.DRAWING_CONTINUOUS);
       } else if (toolState === ToolState.PREVIEW) {
         // Start selection box for editing
         setDragStartPos([screenX, screenY]);
@@ -328,13 +491,19 @@ export function EclipsePenToolFixed({
       if (toolState === ToolState.PREVIEW) {
         // Right-click to accept (ITK-SNAP behavior)
         acceptPolygon();
-      } else if (toolState === ToolState.DRAWING && currentPolygon && currentPolygon.vertices.length >= MIN_VERTICES) {
-        // Right-click to close polygon
-        setCurrentPolygon(prev => ({
-          ...prev!,
-          isClosed: true
-        }));
-        setToolState(ToolState.PREVIEW);
+      } else if ((toolState === ToolState.DRAWING_DISCRETE || toolState === ToolState.DRAWING_CONTINUOUS) && currentPolygon) {
+        // Right-click auto-complete: add point at cursor and close
+        if (currentPolygon.vertices.length >= 2) {
+          // Add vertex at current mouse position
+          addVertex(screenX, screenY);
+          
+          // Close polygon
+          setCurrentPolygon(prev => ({
+            ...prev!,
+            isClosed: true
+          }));
+          setToolState(ToolState.PREVIEW);
+        }
       }
     }
   }, [isActive, toolState, addVertex, acceptPolygon, currentPolygon]);
@@ -350,59 +519,153 @@ export function EclipsePenToolFixed({
     
     setMousePosition([screenX, screenY]);
     
+    // Highlight contour when cursor is near
+    if (!isMouseDown && (toolState === ToolState.DRAWING_DISCRETE || toolState === ToolState.DRAWING_CONTINUOUS)) {
+      const nearContour = findContourNearPoint(screenX, screenY, 10);
+      setHighlightedContour(nearContour);
+    }
+    
+    // Continuous drawing mode
+    if (isMouseDown && toolState === ToolState.DRAWING_CONTINUOUS && lastSampledPoint) {
+      const distance = distance2D([screenX, screenY], lastSampledPoint);
+      if (distance >= SAMPLING_DISTANCE) {
+        // Add intermediate points
+        const steps = Math.floor(distance / SAMPLING_DISTANCE);
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const interpX = lastSampledPoint[0] + (screenX - lastSampledPoint[0]) * t;
+          const interpY = lastSampledPoint[1] + (screenY - lastSampledPoint[1]) * t;
+          addVertex(interpX, interpY);
+        }
+        setLastSampledPoint([screenX, screenY]);
+      }
+    }
+    
     // Update selection box
-    if (dragStartPos && toolState === ToolState.PREVIEW) {
+    if (dragStartPos && toolState === ToolState.PREVIEW && !isDragging) {
       setSelectionBox({
         start: dragStartPos,
         end: [screenX, screenY]
       });
     }
     
-    // Drag selected vertices
+    // Drag selected vertices with influence
     if (isDragging && selectedVertices.size > 0 && currentPolygon) {
       const deltaX = screenX - dragStartPos![0];
       const deltaY = screenY - dragStartPos![1];
       
-      setCurrentPolygon(prev => ({
-        ...prev!,
-        vertices: prev!.vertices.map(v => {
-          if (selectedVertices.has(v.id)) {
-            const newScreenPos: [number, number] = [
-              v.screenPosition[0] + deltaX,
-              v.screenPosition[1] + deltaY
-            ];
-            return {
-              ...v,
-              screenPosition: newScreenPos,
-              position: screenToWorld(newScreenPos[0], newScreenPos[1])
-            };
-          }
-          return v;
-        })
-      }));
+      setCurrentPolygon(prev => {
+        if (!prev || !draggedVertexId) return prev;
+        
+        const draggedVertex = prev.vertices.find(v => v.id === draggedVertexId);
+        if (!draggedVertex) return prev;
+        
+        return {
+          ...prev,
+          vertices: prev.vertices.map(v => {
+            if (selectedVertices.has(v.id)) {
+              // Full movement for selected vertices
+              const newScreenPos: [number, number] = [
+                v.screenPosition[0] + deltaX,
+                v.screenPosition[1] + deltaY
+              ];
+              return {
+                ...v,
+                screenPosition: newScreenPos,
+                position: screenToWorld(newScreenPos[0], newScreenPos[1])
+              };
+            } else if (originalVertexPositions.has(v.id)) {
+              // Apply influence for nearby vertices
+              const originalPos = originalVertexPositions.get(v.id)!;
+              const distance = distance2D(originalPos, draggedVertex.screenPosition);
+              
+              if (distance < INFLUENCE_RADIUS) {
+                const influence = 1 - (distance / INFLUENCE_RADIUS);
+                const influencedDeltaX = deltaX * influence * influence; // Quadratic falloff
+                const influencedDeltaY = deltaY * influence * influence;
+                
+                const newScreenPos: [number, number] = [
+                  originalPos[0] + influencedDeltaX,
+                  originalPos[1] + influencedDeltaY
+                ];
+                return {
+                  ...v,
+                  screenPosition: newScreenPos,
+                  position: screenToWorld(newScreenPos[0], newScreenPos[1])
+                };
+              }
+            }
+            return v;
+          })
+        };
+      });
       
       setDragStartPos([screenX, screenY]);
     }
-  }, [isActive, dragStartPos, toolState, isDragging, selectedVertices, currentPolygon, screenToWorld]);
+  }, [isActive, dragStartPos, toolState, isDragging, selectedVertices, currentPolygon, screenToWorld, 
+      isMouseDown, lastSampledPoint, findContourNearPoint, addVertex, draggedVertexId, originalVertexPositions]);
   
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (!isActive) return;
     
-    if (e.button === 0 && toolState === ToolState.PREVIEW) {
-      if (selectionBox && !isDragging) {
-        // Complete selection
+    const rect = overlayCanvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    
+    if (e.button === 0) { // Left button release
+      setIsMouseDown(false);
+      
+      if (toolState === ToolState.DRAWING_CONTINUOUS) {
+        // End continuous drawing
+        setToolState(ToolState.DRAWING_DISCRETE);
+        setLastSampledPoint(null);
+      } else if (toolState === ToolState.PREVIEW && selectionBox) {
+        // End selection box
         selectVerticesInBox(selectionBox);
         setSelectionBox(null);
-      } else if (selectedVertices.size > 0) {
-        // Start dragging
-        setIsDragging(true);
+        
+        // Check if starting drag
+        if (selectedVertices.size > 0) {
+          // Find the closest selected vertex
+          let closestVertex: Vertex | null = null;
+          let minDist = Infinity;
+          
+          currentPolygon?.vertices.forEach(v => {
+            if (selectedVertices.has(v.id)) {
+              const [vx, vy] = worldToScreen(v.position);
+              const dist = distance2D([screenX, screenY], [vx, vy]);
+              if (dist < minDist) {
+                minDist = dist;
+                closestVertex = v;
+              }
+            }
+          });
+          
+          if (closestVertex && minDist < VERTEX_RADIUS * 2) {
+            setIsDragging(true);
+            setDraggedVertexId(closestVertex.id);
+            setDragStartPos([screenX, screenY]);
+            
+            // Store original positions for influence calculation
+            const positions = new Map<string, [number, number]>();
+            currentPolygon?.vertices.forEach(v => {
+              positions.set(v.id, [...v.screenPosition]);
+            });
+            setOriginalVertexPositions(positions);
+          }
+        }
+      } else if (isDragging) {
+        // End vertex dragging
+        setIsDragging(false);
+        setDraggedVertexId(null);
+        setDragStartPos(null);
+        setOriginalVertexPositions(new Map());
       }
     }
-    
-    if (isDragging) {
-      setIsDragging(false);
-    }
-  }, [isActive, toolState, selectionBox, isDragging, selectedVertices, selectVerticesInBox]);
+  }, [isActive, toolState, selectionBox, selectedVertices, currentPolygon, isDragging, 
+      selectVerticesInBox, worldToScreen]);
   
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (!isActive) return;
@@ -435,6 +698,24 @@ export function EclipsePenToolFixed({
     const selectedStructureData = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
     const structureColor = selectedStructureData?.color || [0, 255, 0];
     
+    // Draw highlighted contour if hovering
+    if (highlightedContour && !currentPolygon) {
+      ctx.strokeStyle = `rgba(${structureColor.join(',')}, 0.3)`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      
+      highlightedContour.points.forEach((point, index) => {
+        const [x, y] = worldToScreen([point.x, point.y, point.z]);
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.closePath();
+      ctx.stroke();
+    }
+    
     if (currentPolygon) {
       // Draw polygon edges
       ctx.strokeStyle = toolState === ToolState.PREVIEW ? '#00ff00' : `rgb(${structureColor.join(',')})`;
@@ -452,7 +733,7 @@ export function EclipsePenToolFixed({
       
       if (currentPolygon.isClosed) {
         ctx.closePath();
-      } else if (toolState === ToolState.DRAWING) {
+      } else if (toolState === ToolState.DRAWING_DISCRETE || toolState === ToolState.DRAWING_CONTINUOUS) {
         // Draw ghost line to mouse
         ctx.lineTo(mousePosition[0], mousePosition[1]);
       }
