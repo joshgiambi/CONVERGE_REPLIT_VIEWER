@@ -267,8 +267,20 @@ export async function renderFusionOverlay(
   let drawW = destW;
   let drawH = destH;
   
+  // Get the actual secondary image that was used for interpolation to access its metadata
+  let actualSecondaryImage = null;
+  if (transformedMRI.length > 0) {
+    // Find the MRI image closest to this CT slice
+    const distances = transformedMRI.map(t => ({
+      image: t.image,
+      distance: Math.abs(t.zInCT - ctSliceZ)
+    }));
+    distances.sort((a, b) => a.distance - b.distance);
+    actualSecondaryImage = distances[0]?.image;
+  }
+
   // Apply registration matrix transformation if available
-  if (registrationMatrix && registrationMatrix.length === 16 && secondaryImage) {
+  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage) {
     // Helper function to normalize arrays
     function toNumberArray(sp: string|string[]|number[]) {
       if (Array.isArray(sp)) return sp.map(Number);
@@ -291,7 +303,7 @@ export async function renderFusionOverlay(
     const ctOrigin = toNumberArray(primaryImage.imagePosition);    // [x0, y0, z0]
     
     // 2) MRI origin (from the secondary image that was selected for this slice)
-    const mriOrigin = toNumberArray(secondaryImage.imagePosition);     // [x1, y1, z1]
+    const mriOrigin = toNumberArray(actualSecondaryImage.imagePosition);     // [x1, y1, z1]
     
     // 3) Transform MRI origin into CT space using the 4x4 registration matrix
     const [mriCT_x, mriCT_y] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
@@ -345,4 +357,5 @@ export async function renderFusionOverlay(
   ctx.restore();
   
   console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+  console.log(`🔍 Draw bounds check: X=${drawX.toFixed(1)} to ${(drawX + drawW).toFixed(1)}, Y=${drawY.toFixed(1)} to ${(drawY + drawH).toFixed(1)}, Canvas=${canvasWidth}x${canvasHeight}`);
 }
