@@ -1,0 +1,490 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+
+interface PenToolUnifiedV2Props {
+  isActive: boolean;
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  imageMetadata: any;
+  worldToCanvas: (x: number, y: number) => [number, number];
+  canvasToWorld: (x: number, y: number) => [number, number];
+  selectedStructure: number | null;
+  rtStructures: any;
+  onContourUpdate: (action: string, data: any) => void;
+  color?: string;
+}
+
+export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
+  isActive,
+  canvasRef,
+  imageMetadata,
+  worldToCanvas,
+  canvasToWorld,
+  selectedStructure,
+  rtStructures,
+  onContourUpdate,
+  color
+}) => {
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  
+  // Drawing state
+  const [points, setPoints] = useState<[number, number][]>([]);
+  const [isDrawingContinuous, setIsDrawingContinuous] = useState(false);
+  const [currentMousePos, setCurrentMousePos] = useState<[number, number] | null>(null);
+  const [startMode, setStartMode] = useState<'ADD' | 'SUBTRACT' | null>(null);
+  
+  // Morphing state
+  const [hoveredVertex, setHoveredVertex] = useState<{ contourIdx: number; pointIdx: number } | null>(null);
+  const [isDraggingVertex, setIsDraggingVertex] = useState(false);
+  const [draggedVertex, setDraggedVertex] = useState<{ 
+    contourIdx: number; 
+    pointIdx: number; 
+    originalContour: number[];
+  } | null>(null);
+  
+  const CLOSE_THRESHOLD = 20; // Larger hit area for first vertex
+  const VERTEX_HIT_RADIUS = 10;
+  const CONTOUR_HOVER_DISTANCE = 10;
+  
+  // Get current Z position
+  const currentZ = imageMetadata?.imagePosition?.[2] || 0;
+  
+  // Find existing contours at current slice
+  const getContoursAtCurrentSlice = useCallback(() => {
+    if (!rtStructures?.structures || !selectedStructure) return [];
+    
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    if (!structure?.contours) return [];
+    
+    return structure.contours.filter((contour: any) => {
+      const contourZ = contour.points[2];
+      return Math.abs(contourZ - currentZ) < 0.1;
+    });
+  }, [rtStructures, selectedStructure, currentZ]);
+  
+  // Check if point is inside any contour
+  const isPointInsideContour = useCallback((x: number, y: number, contour: number[]) => {
+    let inside = false;
+    const points = contour;
+    
+    for (let i = 0, j = points.length - 3; i < points.length; j = i, i += 3) {
+      const xi = points[i], yi = points[i + 1];
+      const xj = points[j], yj = points[j + 1];
+      
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    
+    return inside;
+  }, []);
+  
+  // Find nearest vertex to cursor
+  const findNearestVertex = useCallback((canvasX: number, canvasY: number) => {
+    const contours = getContoursAtCurrentSlice();
+    const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    for (let contourIdx = 0; contourIdx < contours.length; contourIdx++) {
+      const contour = contours[contourIdx];
+      const points = contour.points;
+      
+      for (let i = 0; i < points.length; i += 3) {
+        const [cx, cy] = worldToCanvas(points[i], points[i + 1]);
+        const distance = Math.sqrt((canvasX - cx) ** 2 + (canvasY - cy) ** 2);
+        
+        if (distance < VERTEX_HIT_RADIUS) {
+          return { contourIdx, pointIdx: i };
+        }
+      }
+    }
+    
+    return null;
+  }, [getContoursAtCurrentSlice, worldToCanvas, canvasToWorld]);
+  
+  // Check if near first point for closing
+  const isNearFirstPoint = useCallback((canvasX: number, canvasY: number) => {
+    if (points.length === 0) return false;
+    
+    const [firstX, firstY] = worldToCanvas(points[0][0], points[0][1]);
+    const distance = Math.sqrt((canvasX - firstX) ** 2 + (canvasY - firstY) ** 2);
+    
+    return distance < CLOSE_THRESHOLD;
+  }, [points, worldToCanvas]);
+  
+  // Complete the shape and apply boolean operation
+  const completeShape = useCallback((addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
+    if (points.length < 3) return;
+    
+    const finalPoints = [...points];
+    if (addFinalPoint && finalPoint) {
+      finalPoints.push(finalPoint);
+    }
+    
+    // Convert to world coordinates flat array
+    const worldPoints: number[] = [];
+    finalPoints.forEach(([x, y]) => {
+      worldPoints.push(x, y, currentZ);
+    });
+    
+    // Determine operation based on start mode
+    const action = startMode === 'ADD' ? 'add_contour' : 'subtract_contour';
+    
+    onContourUpdate(action, {
+      structureId: selectedStructure,
+      points: worldPoints,
+      imageMetadata
+    });
+    
+    // Reset state
+    setPoints([]);
+    setIsDrawingContinuous(false);
+    setStartMode(null);
+  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate]);
+  
+  // Handle mouse down
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (!isActive || !canvasRef.current) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    // Check if near a vertex for morphing
+    const nearVertex = findNearestVertex(canvasX, canvasY);
+    if (nearVertex) {
+      const contours = getContoursAtCurrentSlice();
+      setIsDraggingVertex(true);
+      setDraggedVertex({
+        contourIdx: nearVertex.contourIdx,
+        pointIdx: nearVertex.pointIdx,
+        originalContour: [...contours[nearVertex.contourIdx].points]
+      });
+      return;
+    }
+    
+    // If drawing, check for closing
+    if (points.length > 0) {
+      if (isNearFirstPoint(canvasX, canvasY)) {
+        completeShape();
+        return;
+      }
+    }
+    
+    // Start new shape or add point
+    if (!startMode) {
+      // Determine if we're inside or outside existing contours
+      const contours = getContoursAtCurrentSlice();
+      let insideAnyContour = false;
+      
+      for (const contour of contours) {
+        if (isPointInsideContour(worldPoint[0], worldPoint[1], contour.points)) {
+          insideAnyContour = true;
+          break;
+        }
+      }
+      
+      setStartMode(insideAnyContour ? 'ADD' : 'SUBTRACT');
+    }
+    
+    // Add point
+    setPoints(prev => [...prev, worldPoint]);
+    
+    // Start continuous drawing if holding down
+    if (e.button === 0) { // Left button
+      setIsDrawingContinuous(true);
+    }
+  }, [isActive, canvasRef, canvasToWorld, findNearestVertex, getContoursAtCurrentSlice, 
+      points, isNearFirstPoint, completeShape, startMode, isPointInsideContour]);
+  
+  // Handle mouse move
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!canvasRef.current) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    setCurrentMousePos([canvasX, canvasY]);
+    
+    // Handle vertex dragging
+    if (isDraggingVertex && draggedVertex) {
+      const contours = getContoursAtCurrentSlice();
+      const newContour = [...draggedVertex.originalContour];
+      
+      // Update dragged vertex
+      newContour[draggedVertex.pointIdx] = worldPoint[0];
+      newContour[draggedVertex.pointIdx + 1] = worldPoint[1];
+      
+      // Apply proportional movement to nearby vertices
+      const draggedX = draggedVertex.originalContour[draggedVertex.pointIdx];
+      const draggedY = draggedVertex.originalContour[draggedVertex.pointIdx + 1];
+      const deltaX = worldPoint[0] - draggedX;
+      const deltaY = worldPoint[1] - draggedY;
+      
+      const INFLUENCE_RADIUS = 50; // pixels
+      
+      for (let i = 0; i < newContour.length; i += 3) {
+        if (i === draggedVertex.pointIdx) continue;
+        
+        const vx = draggedVertex.originalContour[i];
+        const vy = draggedVertex.originalContour[i + 1];
+        const distance = Math.sqrt((vx - draggedX) ** 2 + (vy - draggedY) ** 2);
+        
+        if (distance < INFLUENCE_RADIUS) {
+          const influence = 1 - (distance / INFLUENCE_RADIUS);
+          newContour[i] += deltaX * influence * 0.5;
+          newContour[i + 1] += deltaY * influence * 0.5;
+        }
+      }
+      
+      // Update contour
+      onContourUpdate('replace_contour', {
+        structureId: selectedStructure,
+        contourIndex: contours[draggedVertex.contourIdx].index,
+        points: newContour,
+        imageMetadata
+      });
+      
+      return;
+    }
+    
+    // Check for vertex hover
+    if (!isDrawingContinuous) {
+      const nearVertex = findNearestVertex(canvasX, canvasY);
+      setHoveredVertex(nearVertex);
+    }
+    
+    // Add points during continuous drawing
+    if (isDrawingContinuous) {
+      setPoints(prev => [...prev, worldPoint]);
+    }
+  }, [canvasRef, canvasToWorld, isDraggingVertex, draggedVertex, getContoursAtCurrentSlice,
+      selectedStructure, imageMetadata, onContourUpdate, isDrawingContinuous, findNearestVertex]);
+  
+  // Handle mouse up
+  const handleMouseUp = useCallback((e: MouseEvent) => {
+    if (e.button === 0) { // Left button
+      setIsDrawingContinuous(false);
+    }
+    
+    if (isDraggingVertex) {
+      setIsDraggingVertex(false);
+      setDraggedVertex(null);
+    }
+  }, [isDraggingVertex]);
+  
+  // Handle right click
+  const handleRightClick = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    
+    if (points.length < 2) return;
+    
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const worldPoint = canvasToWorld(canvasX, canvasY);
+    
+    // Auto-complete shape with current position
+    completeShape(true, worldPoint);
+  }, [points, canvasRef, canvasToWorld, completeShape]);
+  
+  // Setup overlay canvas
+  useEffect(() => {
+    if (!canvasRef.current || !isActive) return;
+    
+    const mainCanvas = canvasRef.current;
+    
+    if (!overlayCanvasRef.current) {
+      const overlayCanvas = document.createElement('canvas');
+      overlayCanvas.style.position = 'absolute';
+      overlayCanvas.style.left = '0';
+      overlayCanvas.style.top = '0';
+      overlayCanvas.style.pointerEvents = 'none';
+      overlayCanvas.style.width = mainCanvas.style.width;
+      overlayCanvas.style.height = mainCanvas.style.height;
+      overlayCanvas.width = mainCanvas.width;
+      overlayCanvas.height = mainCanvas.height;
+      
+      mainCanvas.parentElement?.appendChild(overlayCanvas);
+      overlayCanvasRef.current = overlayCanvas;
+    }
+    
+    // Update size if needed
+    if (overlayCanvasRef.current.width !== mainCanvas.width ||
+        overlayCanvasRef.current.height !== mainCanvas.height) {
+      overlayCanvasRef.current.width = mainCanvas.width;
+      overlayCanvasRef.current.height = mainCanvas.height;
+    }
+  }, [canvasRef, isActive]);
+  
+  // Render overlay with animation frame
+  const render = useCallback(() => {
+    if (!overlayCanvasRef.current) return;
+    
+    const ctx = overlayCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    
+    // Clear
+    ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+    
+    // Get structure color
+    const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
+    const structureColor = structure?.color || [255, 255, 0];
+    const colorStr = `rgb(${structureColor[0]}, ${structureColor[1]}, ${structureColor[2]})`;
+    
+    // Draw existing vertex hover indicators
+    if (hoveredVertex && !isDrawingContinuous && !isDraggingVertex) {
+      const contours = getContoursAtCurrentSlice();
+      const contour = contours[hoveredVertex.contourIdx];
+      if (contour) {
+        const points = contour.points;
+        
+        // Draw all vertices as small circles
+        ctx.fillStyle = colorStr;
+        ctx.globalAlpha = 0.6;
+        
+        for (let i = 0; i < points.length; i += 3) {
+          const [x, y] = worldToCanvas(points[i], points[i + 1]);
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // Highlight hovered vertex
+        const [hx, hy] = worldToCanvas(
+          points[hoveredVertex.pointIdx], 
+          points[hoveredVertex.pointIdx + 1]
+        );
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = colorStr;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+    
+    // Draw current shape
+    if (points.length > 0) {
+      ctx.strokeStyle = colorStr;
+      ctx.fillStyle = colorStr;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 1;
+      
+      // Draw lines
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = worldToCanvas(points[i][0], points[i][1]);
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      
+      // Draw preview line to cursor
+      if (currentMousePos && !isNearFirstPoint(currentMousePos[0], currentMousePos[1])) {
+        ctx.lineTo(currentMousePos[0], currentMousePos[1]);
+      }
+      
+      ctx.stroke();
+      
+      // Draw first point larger if we have 3+ points
+      if (points.length >= 3) {
+        const [fx, fy] = worldToCanvas(points[0][0], points[0][1]);
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.arc(fx, fy, CLOSE_THRESHOLD, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw solid center
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(fx, fy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    
+    // Set cursor style
+    if (hoveredVertex && !isDrawingContinuous) {
+      canvasRef.current!.style.cursor = 'grab';
+    } else if (isDraggingVertex) {
+      canvasRef.current!.style.cursor = 'grabbing';
+    } else if (points.length >= 3 && currentMousePos && isNearFirstPoint(currentMousePos[0], currentMousePos[1])) {
+      canvasRef.current!.style.cursor = 'pointer';
+    } else {
+      canvasRef.current!.style.cursor = 'crosshair';
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(render);
+  }, [points, currentMousePos, hoveredVertex, isDrawingContinuous, isDraggingVertex,
+      rtStructures, selectedStructure, worldToCanvas, getContoursAtCurrentSlice,
+      isNearFirstPoint, canvasRef]);
+  
+  // Start render loop
+  useEffect(() => {
+    if (!isActive) return;
+    
+    render();
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [isActive, render]);
+  
+  // Setup event listeners
+  useEffect(() => {
+    if (!isActive || !canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('contextmenu', handleRightClick);
+    
+    const handleGlobalMouseUp = (e: MouseEvent) => {
+      handleMouseUp(e);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    
+    return () => {
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('contextmenu', handleRightClick);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isActive, canvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
+  
+  // Reset when deactivated
+  useEffect(() => {
+    if (!isActive) {
+      setPoints([]);
+      setIsDrawingContinuous(false);
+      setCurrentMousePos(null);
+      setStartMode(null);
+      setHoveredVertex(null);
+      setIsDraggingVertex(false);
+      setDraggedVertex(null);
+    }
+  }, [isActive]);
+  
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (overlayCanvasRef.current?.parentElement) {
+        overlayCanvasRef.current.parentElement.removeChild(overlayCanvasRef.current);
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+  
+  return null;
+};

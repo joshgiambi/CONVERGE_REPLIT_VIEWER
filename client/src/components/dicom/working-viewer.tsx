@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
-import { PenToolUnified } from "./pen-tool-unified";
+import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import { RTStructureOverlay } from "./rt-structure-overlay";
@@ -2451,25 +2451,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
-              <PenToolUnified
+              <PenToolUnifiedV2
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
                 onContourUpdate={(payload: any) => {
                   handleContourUpdate(payload);
                 }}
-                zoom={zoom}
-                panX={panX}
-                panY={panY}
                 imageMetadata={imageMetadata}
+                worldToCanvas={worldToCanvas}
+                canvasToWorld={canvasToWorld}
               />
             )}
 
@@ -2477,25 +2469,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {brushToolState?.isActive &&
             brushToolState?.tool === "planar-contour" &&
             selectedForEdit && (
-              <PenToolUnified
+              <PenToolUnifiedV2
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
                 onContourUpdate={(payload: any) => {
                   handleContourUpdate(payload);
                 }}
-                zoom={zoom}
-                panX={panX}
-                panY={panY}
                 imageMetadata={imageMetadata}
+                worldToCanvas={worldToCanvas}
+                canvasToWorld={canvasToWorld}
               />
             )}
 
