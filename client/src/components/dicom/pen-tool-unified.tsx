@@ -551,7 +551,7 @@ export function PenToolUnified({
         // Draw first point bubble for closure detection
         if (i === 0 && currentPath.length >= MIN_POINTS_FOR_CONTOUR) {
           ctx.save();
-          ctx.strokeStyle = isNearFirstPoint ? '#9333ea' : colorStr;
+          ctx.strokeStyle = nearFirstPoint ? '#9333ea' : colorStr;
           ctx.lineWidth = 2;
           ctx.globalAlpha = 0.5;
           ctx.beginPath();
@@ -580,7 +580,7 @@ export function PenToolUnified({
     
   }, [overlayCanvasRef, highlightedContour, isDrawing, isMorphing, currentPath, 
       mousePosition, morphingVertices, rtStructures, selectedStructure, worldToCanvas,
-      isNearFirstPoint, isSubtracting, FIRST_POINT_BUBBLE_RADIUS, MIN_POINTS_FOR_CONTOUR,
+      nearFirstPoint, isSubtracting, FIRST_POINT_BUBBLE_RADIUS, MIN_POINTS_FOR_CONTOUR,
       MORPH_INFLUENCE_RADIUS]);
   
   // The overlay canvas is appended directly to the parent element in useEffect
