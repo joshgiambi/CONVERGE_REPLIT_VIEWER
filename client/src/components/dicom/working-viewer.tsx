@@ -19,6 +19,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
+import { computeTransformedMRIPositions, renderFusionOverlay as renderFusionOverlayUtil } from "@/lib/fusion-utils";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -996,7 +997,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        precomputeMRITransformations(secondaryImages, registrationMatrix);
+        const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+        transformedMRIPositions.current = transformed;
+        
+        // Calculate and store Z-range
+        if (transformed.length > 0) {
+          const zValues = transformed.map(item => item.zInCT);
+          mriZRangeInCTSpace.current = {
+            min: Math.min(...zValues),
+            max: Math.max(...zValues)
+          };
+        }
+        
+        // Clear cache to force recomputation with new data
+        mriSliceMappingCache.current.clear();
       }
       
       displayCurrentImage();
@@ -1005,105 +1019,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0 && transformedMRIPositions.current.length === 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      precomputeMRITransformations(secondaryImages, registrationMatrix);
+      const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+      transformedMRIPositions.current = transformed;
+      
+      // Calculate and store Z-range
+      if (transformed.length > 0) {
+        const zValues = transformed.map(item => item.zInCT);
+        mriZRangeInCTSpace.current = {
+          min: Math.min(...zValues),
+          max: Math.max(...zValues)
+        };
+        console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
+      }
+      
+      // Clear cache to force recomputation with new data
+      mriSliceMappingCache.current.clear();
     }
   }, [registrationMatrix, secondaryImages]);
   
-  // Pre-compute MRI transformations for performance
-  const precomputeMRITransformations = (mriImages: any[], registrationMatrix: number[]) => {
-    console.log("Pre-computing MRI transformations for performance optimization...");
-    console.log(`Processing ${mriImages.length} MRI images`);
-    
-    // Convert flat array to 4x4 matrix
-    const regMatrix4x4 = [
-      [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
-      [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6], registrationMatrix[7]],
-      [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
-      [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
-    ];
-    
-    const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
-      const result: number[] = [];
-      for (let i = 0; i < 4; i++) {
-        result[i] = 0;
-        for (let j = 0; j < 4; j++) {
-          result[i] += matrix[i][j] * vector[j];
-        }
-      }
-      return result;
-    };
-    
-    // Log the first few MRI positions before and after transformation
-    console.log("\n=== MRI Transformation Debug ===");
-    console.log("Registration matrix (as flat array):", registrationMatrix);
-    console.log("Registration matrix 4x4:");
-    console.log(`  [${regMatrix4x4[0].map(v => v.toFixed(3)).join(', ')}]`);
-    console.log(`  [${regMatrix4x4[1].map(v => v.toFixed(3)).join(', ')}]`);
-    console.log(`  [${regMatrix4x4[2].map(v => v.toFixed(3)).join(', ')}]`);
-    console.log(`  [${regMatrix4x4[3].map(v => v.toFixed(3)).join(', ')}]`);
-    
-    // Check if we have valid MRI images with positions
-    const validMRICount = mriImages.filter(img => img.imagePosition).length;
-    console.log(`Valid MRI images with positions: ${validMRICount}/${mriImages.length}`);
-    
-    // Transform all MRI positions to CT space
-    const transformed = mriImages.map((mriImage, index) => {
-      const mriPos = mriImage.imagePosition;
-      if (!mriPos) {
-        console.warn(`MRI image ${index} has no imagePosition metadata`);
-        return null;
-      }
-      
-      const mriPatientPosition = typeof mriPos === 'string' 
-        ? mriPos.split('\\').map((p: string) => parseFloat(p))
-        : mriPos;
-        
-      if (mriPatientPosition.length < 3) {
-        console.warn(`MRI image ${index} has invalid position data:`, mriPos);
-        return null;
-      }
-      
-      const mriHomogeneous = [mriPatientPosition[0], mriPatientPosition[1], mriPatientPosition[2], 1];
-      const mriTransformed = multiplyMatrixVector(regMatrix4x4, mriHomogeneous);
-      
-      // Log first 3 and last 3 transformations with more detail
-      if (index < 3 || index >= mriImages.length - 3) {
-        console.log(`\nMRI[${index}] Instance ${mriImage.instanceNumber}, slice ${mriImage.sliceLocation}mm:`);
-        console.log(`  Original position: [${mriPatientPosition.map(v => v.toFixed(1)).join(', ')}]`);
-        console.log(`  Homogeneous coords: [${mriHomogeneous.map(v => v.toFixed(1)).join(', ')}]`);
-        console.log(`  Transformed result: [${mriTransformed.map(v => v.toFixed(1)).join(', ')}]`);
-        console.log(`  Z in CT space: ${mriTransformed[2].toFixed(1)}mm`);
-      }
-      
-      return {
-        original: mriImage,
-        transformed: mriTransformed,
-        zInCT: mriTransformed[2]
-      };
-    }).filter(item => item !== null);
-    
-    // Store transformed positions
-    transformedMRIPositions.current = transformed;
-    
-    // Calculate and store Z-range
-    if (transformed.length > 0) {
-      const zValues = transformed.map(item => item.zInCT);
-      mriZRangeInCTSpace.current = {
-        min: Math.min(...zValues),
-        max: Math.max(...zValues)
-      };
-      console.log(`\nMRI Z-range after transformation:`);
-      console.log(`  Original MRI range: -74.4mm to 161.6mm`);
-      console.log(`  After registration: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
-      console.log(`  CT slice range: 325.5mm to 723.5mm`);
-      console.log(`  Overlap region: ${Math.max(mriZRangeInCTSpace.current.min, 325.5).toFixed(1)}mm to ${Math.min(mriZRangeInCTSpace.current.max, 723.5).toFixed(1)}mm`);
-    }
-    
-    // Clear cache to force recomputation with new data
-    mriSliceMappingCache.current.clear();
-  };
+
 
   // Load secondary series images for fusion
   useEffect(() => {
@@ -1648,18 +1584,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.putImageData(imageData, 0, 0);
   };
   
-  const renderFusionOverlay = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
     if (!secondaryImages.length || !secondarySeriesId || secondarySeriesId === 'none') {
       console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId);
       return;
     }
-    
-    console.log("Starting fusion overlay render...");
-    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
-    console.log("Secondary cache size:", actualCache.size);
-    console.log("Fusion opacity:", fusionOpacity);
-    console.log("Secondary images length:", secondaryImages.length);
-    console.log("Registration matrix available:", !!registrationMatrix);
     
     // If opacity is 0, skip rendering entirely
     if (fusionOpacity === 0) {
@@ -1667,22 +1596,56 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-
+    if (!registrationMatrix || registrationMatrix.length !== 16) {
+      console.error("CRITICAL: No registration matrix available - fusion cannot be displayed");
+      setFusionAvailable(false);
+      return;
+    }
     
-    // Helper function for matrix-vector multiplication (defined at top for use throughout)
-    const multiplyMatrixVector = (matrix: number[][], vector: number[]): number[] => {
-      const result: number[] = [];
-      for (let i = 0; i < 4; i++) {
-        result[i] = 0;
-        for (let j = 0; j < 4; j++) {
-          result[i] += matrix[i][j] * vector[j];
-        }
+    if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
+      console.log("No transformed MRI positions available");
+      return;
+    }
+    
+    // Get CT slice Z position
+    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
+    
+    // Try to get Z position from various sources in priority order
+    if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
+      ctSliceZ = primaryImage.parsedSliceLocation;
+    } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
+      ctSliceZ = primaryImage.parsedZPosition;
+    } else if (primaryImage.sliceLocation) {
+      const parsed = parseFloat(primaryImage.sliceLocation);
+      if (!isNaN(parsed)) ctSliceZ = parsed;
+    } else if (primaryImage.imagePosition) {
+      const imagePos = typeof primaryImage.imagePosition === 'string'
+        ? primaryImage.imagePosition.split("\\")
+        : primaryImage.imagePosition;
+      if (imagePos && imagePos.length >= 3) {
+        const parsed = parseFloat(imagePos[2]);
+        if (!isNaN(parsed)) ctSliceZ = parsed;
       }
-      return result;
-    };
+    }
     
-    // Get the current CT slice position from DICOM metadata - same logic as RT structures
-    let ctSlicePosition: number = (currentIndex + 1) * 3; // Default fallback
+    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    // Call the new fusion utility
+    await renderFusionOverlayUtil(
+      ctx,
+      primaryImage,
+      transformedMRIPositions.current,
+      actualCache,
+      ctSliceZ,
+      fusionOpacity,
+      panX,
+      panY,
+      canvas.width,
+      canvas.height
+    );
+  };
     
     // Priority 1: Use parsed slice location from DICOM
     if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
