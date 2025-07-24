@@ -147,7 +147,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Pre-computed MRI Z-range in CT space for performance
   const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
   // Pre-computed transformed MRI positions for fast lookup
-  const transformedMRIPositions = useRef<Array<{ original: any; transformed: number[]; zInCT: number }>>([]); 
+  const transformedMRIPositions = useRef<Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>>([]); 
 
   // Zoom and pan state - DISABLED FOR DEBUGGING
   const zoom = 1; // Fixed zoom for debugging
@@ -992,7 +992,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       imagesLength: images.length
     });
     
-    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && images.length > 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && Number(secondarySeriesId) && images.length > 0) {
       console.log('Registration matrix loaded, re-rendering fusion overlay');
       
       // Pre-compute MRI transformations if we have secondary images loaded

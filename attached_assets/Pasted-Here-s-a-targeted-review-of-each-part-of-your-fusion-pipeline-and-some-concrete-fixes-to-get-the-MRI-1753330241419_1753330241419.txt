@@ -1,0 +1,119 @@
+Here’s a targeted review of each part of your fusion pipeline and some concrete fixes to get the MRI sitting exactly on your CT:
+
+⸻
+
+1. computeTransformedMRIPositions
+
+export function computeTransformedMRIPositions(…){
+  // … you build M correctly and do:
+  const hom = [pos[0], pos[1], pos[2], 1];
+  const [,, z,] = multiplyMatrixVector(M, hom);
+  return { zInCT: z, image: img };
+}
+
+What’s missing
+	•	You’re only extracting the Z—so later you assume center‐to‐center alignment in X/Y.
+	•	You aren’t accounting for any rotation or shear that might be embedded in the 3×3 submatrix.
+
+Fix
+Compute all three transformed world coordinates, not just Z:
+
+const [xInCT, yInCT, zInCT] = multiplyMatrixVector(M, hom).slice(0,3);
+return { xInCT, yInCT, zInCT, image: img };
+
+That gives you full XYZ in the CT frame.
+
+⸻
+
+2. interpolateMRI
+
+const best = transformed[idx];
+… if (!prev || !next) return baseData;
+…
+if (w <= 0.1) return prevData;
+if (w >= 0.9) return nextData;
+… // otherwise blend prev & next
+
+What’s off
+	•	You throw away blending if you’re within 10% of either neighbor—this can introduce sudden jumps.
+
+Fix
+Always blend with weight w (0→1) no matter how small:
+
+if (!prevData || !nextData) return baseData;
+for (let i = 0; i < len; i++) {
+  interp[i] = prevData.data[i] * (1-w) + nextData.data[i] * w;
+}
+return { data: interp, width, height };
+
+
+⸻
+
+3. renderFusionOverlay
+
+A) True mm→pixel scaling
+
+You need to derive the canvas‐scale from your CT image’s pixel spacing, not hard-coded 0.5:
+
+// Suppose you have CT metadata:
+const ctPixelSpacingX = ctImageMetadata.pixelSpacing[0]; // mm per pixel
+const ctPixelSpacingY = ctImageMetadata.pixelSpacing[1];
+
+const scaleX = canvasWidth  / (ctImageWidth  * ctPixelSpacingX);
+const scaleY = canvasHeight / (ctImageHeight * ctPixelSpacingY);
+const baseScale = Math.min(scaleX, scaleY);
+
+Now any translation in mm (from your registrationMatrix) becomes:
+
+const tx_mm = registrationMatrix[3];
+const ty_mm = registrationMatrix[7];
+const tx_px = tx_mm / ctPixelSpacingX * baseScale;
+const ty_px = ty_mm / ctPixelSpacingY * baseScale;
+
+B) Center‐to‐center alignment using CT origin
+
+// Center the CT image:
+const offsetX = (canvasWidth  - ctImageWidth*baseScale) / 2;
+const offsetY = (canvasHeight - ctImageHeight*baseScale) / 2;
+
+// Final MRI draw‐position in px:
+const drawX = offsetX + tx_px + panX;
+const drawY = offsetY + ty_px + panY;
+
+ctx.save();
+ctx.globalAlpha = fusionOpacity;
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(tempCanvas, drawX, drawY,  
+              mriData.width * baseScale,  
+              mriData.height * baseScale);
+ctx.restore();
+
+C) Handle rotation/shear
+
+If your registration matrix also contains rotation, you can directly apply it in Canvas:
+
+// Extract 2×2 rotation+scale from M:
+const a = M[0][0], b = M[0][1];
+const c = M[1][0], d = M[1][1];
+// And translation in pixels:
+const e = offsetX + (M[0][3]/ctPixelSpacingX)*baseScale;
+const f = offsetY + (M[1][3]/ctPixelSpacingY)*baseScale;
+
+ctx.save();
+ctx.globalAlpha = fusionOpacity;
+ctx.setTransform(a*baseScale, c*baseScale,  b*baseScale, d*baseScale,  e, f);
+ctx.drawImage(tempCanvas, 0, 0);
+ctx.restore();
+
+This will rotate+scale+translate the MRI exactly into the CT’s canvas coordinate frame.
+
+⸻
+
+4. Quick checklist
+	1.	Compute and log xInCT, yInCT, zInCT for a sample MRI slice—make sure they actually fall where you expect in the CT coordinate system.
+	2.	Compute your baseScale from the CT pixel spacing & canvas size—do not hardcode.
+	3.	Convert all mm offsets (translation, slice‐spacing, etc.) → pixels via mm ÷ ctPixelSpacing × baseScale.
+	4.	Use ctx.setTransform(...) if the registration matrix has rotation/scale—otherwise you’ll get only translation.
+
+Once you switch to a real mm→px conversion and, if needed, apply the full 2×2+translation from your matrix, your MRI will “lock on” to your CT exactly. Let me know if any step still looks off!

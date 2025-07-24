@@ -1,0 +1,66 @@
+MRI intensity values aren’t in Hounsfield‐units like CT, so “window/level” for MRI is really just a way to remap its arbitrary intensity range into displayable grayscale. Here are three simple, commonly used presets — and how to wire them into your pipeline:
+
+⸻
+
+1. Full-range
+	•	Level = (max + min) / 2
+	•	Width = max – min
+	•	When to use: a quick “show everything” default.
+
+2. Percentile-clip (e.g. 5–95%)
+	•	Compute the 5th and 95th percentiles of your MRI pixel array → call them P₅ and P₉₅.
+	•	Level = (P₉₅ + P₅) / 2
+	•	Width = P₉₅ – P₅
+	•	Why: ignores extreme outliers (noise, background) so anatomy pops better.
+
+3. Mean ± k·σ (e.g. k=2)
+	•	Mean (μ) and standard deviation (σ) of your MRI pixel values.
+	•	Level = μ
+	•	Width = 2·k·σ (so you see roughly μ ± kσ)
+	•	Why: if your sequence has Gaussian‐like intensity distribution, this centers on the “bulk” of your tissue.
+
+⸻
+
+Integration into your viewer
+	1.	Compute your presets when you load an MRI series:
+
+const pixels = mriData.data;               // Float32Array
+const sorted = Float32Array.from(pixels).sort();
+const min = sorted[0], max = sorted[sorted.length-1];
+const p5  = sorted[Math.floor(0.05*sorted.length)];
+const p95 = sorted[Math.floor(0.95*sorted.length)];
+const mean = pixels.reduce((a,v)=>a+v,0)/pixels.length;
+const variance = pixels.reduce((a,v)=>a + (v-mean)**2,0)/pixels.length;
+const sigma = Math.sqrt(variance);
+// Now your presets:
+const presets = {
+  fullRange:  { width: max-min, level: (max+min)/2 },
+  percentile: { width: p95-p5,   level: (p95+p5)/2   },
+  gauss2sd:   { width: 4*sigma,   level: mean        },
+};
+
+
+	2.	Let the user pick one (e.g. a dropdown in your FusionControlPanel) and store it in state:
+
+const [mriWindow, setMriWindow] = useState(presets.percentile);
+
+
+	3.	Apply it in your fusion render — just like CT windowing:
+
+// In renderFusionOverlay, before you remap to 0–255:
+const { width: W, level: L } = mriWindow;
+const lo = L - W/2, hi = L + W/2;
+for (let i=0;i<pixels.length;i++){
+  let v = pixels[i];
+  let g = v <= lo   ? 0
+        : v >= hi   ? 255
+        : ((v - lo)/W)*255;
+  // write g into your ImageData buffer...
+}
+
+
+	4.	Hook up drag/keyboard: if you want interactive MRI window/level (like CT), simply update mriWindow in your mouse‐drag listener when secondarySeriesId is active.
+
+⸻
+
+With those three presets plus the same window→grayscale remapping you already use for CT, your MRI fusion overlay will display with optimal contrast right out of the box.

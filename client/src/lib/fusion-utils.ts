@@ -37,12 +37,24 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
       ? img.imagePosition.map(Number)
       : img.imagePosition.split('\\').map(Number);
     const hom = [pos[0], pos[1], pos[2], 1];
-    const [,, z,] = multiplyMatrixVector(M, hom);
-    return { zInCT: z, image: img };
+    const [xInCT, yInCT, zInCT] = multiplyMatrixVector(M, hom).slice(0, 3);
+    return { xInCT, yInCT, zInCT, image: img };
   });
 
   // Sort ascending by zInCT
   transformed.sort((a, b) => a.zInCT - b.zInCT);
+  
+  // Debug: Log sample transformed coordinates
+  if (transformed.length > 0) {
+    const first = transformed[0];
+    const middle = transformed[Math.floor(transformed.length / 2)];
+    const last = transformed[transformed.length - 1];
+    console.log(`🔍 Sample MRI→CT coordinate transformations:`);
+    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in CT space`);
+  }
+  
   return transformed;
 }
 
@@ -53,7 +65,7 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
  * @param transformed Array from computeTransformedMRIPositions
  * @returns Index of best match, or null if none
  */
-export function findNearestMRIIndex(ctZ: number, transformed: Array<{zInCT: number, image: any}>): number | null {
+export function findNearestMRIIndex(ctZ: number, transformed: Array<{xInCT: number, yInCT: number, zInCT: number, image: any}>): number | null {
   if (!transformed.length) return null;
   let low = 0, high = transformed.length - 1, bestIdx = 0;
   let bestDist = Infinity;
@@ -98,7 +110,7 @@ export function findNearestMRIIndex(ctZ: number, transformed: Array<{zInCT: numb
  */
 export function interpolateMRI(
   ctZ: number, 
-  transformed: Array<{zInCT: number, image: any}>, 
+  transformed: Array<{xInCT: number, yInCT: number, zInCT: number, image: any}>, 
   cache: Map<string, {data: Float32Array, width: number, height: number}>
 ): {data: Float32Array, width: number, height: number} | null {
   const idx = findNearestMRIIndex(ctZ, transformed);
@@ -134,14 +146,12 @@ export function interpolateMRI(
 
   // Linear weight between prev and next
   const w = (ctZ - lowerZ) / (upperZ - lowerZ);
-  if (w <= 0.1) return cache.get(prev.image.sopInstanceUID) || baseData;
-  if (w >= 0.9) return cache.get(next.image.sopInstanceUID) || baseData;
 
   const prevData = cache.get(prev.image.sopInstanceUID);
   const nextData = cache.get(next.image.sopInstanceUID);
   if (!prevData || !nextData) return baseData;
 
-  // Interpolate pixel-wise
+  // Always blend with weight w (0→1) no matter how small - eliminates sudden jumps
   const length = baseData.data.length;
   const interp = new Float32Array(length);
   for (let i = 0; i < length; i++) {
@@ -157,7 +167,7 @@ export function interpolateMRI(
 export async function renderFusionOverlay(
   ctx: CanvasRenderingContext2D,
   primaryImage: any,
-  transformedMRI: Array<{zInCT: number, image: any}>,
+  transformedMRI: Array<{xInCT: number, yInCT: number, zInCT: number, image: any}>,
   secondaryImageCache: Map<string, {data: Float32Array, width: number, height: number}>,
   ctSliceZ: number,
   fusionOpacity: number,
@@ -221,41 +231,77 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // SIMPLIFIED REGISTRATION: Use center-to-center alignment that WORKS
+  // PROPER MM-TO-PIXEL SCALING using CT metadata
   const w = mriData.width;
   const h = mriData.height;
   
-  // START WITH CENTERED POSITIONING
-  let x = (canvasWidth - w) / 2 + panX;
-  let y = (canvasHeight - h) / 2 + panY;
+  // Get CT pixel spacing for proper mm-to-pixel conversion
+  const ctPixelSpacing = primaryImage.pixelSpacing ? primaryImage.pixelSpacing.split('\\').map(Number) : [0.9765625, 0.9765625];
+  const ctPixelSpacingX = ctPixelSpacing[1]; // Column spacing (X)
+  const ctPixelSpacingY = ctPixelSpacing[0]; // Row spacing (Y)
   
-  console.log(`BASIC MRI positioning: center at (${x.toFixed(1)}, ${y.toFixed(1)}) for ${w}x${h} MRI`);
+  // Calculate proper scaling from CT dimensions
+  const ctImageWidth = 512; // Standard CT matrix size
+  const ctImageHeight = 512;
+  const scaleX = canvasWidth / (ctImageWidth * ctPixelSpacingX);
+  const scaleY = canvasHeight / (ctImageHeight * ctPixelSpacingY);
+  const baseScale = Math.min(scaleX, scaleY);
   
-  // Apply simple registration offset if available
+  // Center the CT image on canvas
+  const offsetX = (canvasWidth - ctImageWidth * baseScale) / 2;
+  const offsetY = (canvasHeight - ctImageHeight * baseScale) / 2;
+  
+  console.log(`CT pixel spacing: ${ctPixelSpacingX.toFixed(3)}mm x ${ctPixelSpacingY.toFixed(3)}mm, base scale: ${baseScale.toFixed(3)}`);
+  
+  let drawX = offsetX + panX;
+  let drawY = offsetY + panY;
+  let drawW = w * baseScale;
+  let drawH = h * baseScale;
+  
+  // Apply registration matrix transformation if available
   if (registrationMatrix && registrationMatrix.length === 16) {
-    // Use translation components from registration matrix
-    const translationX = registrationMatrix[3]; // X translation in mm
-    const translationY = registrationMatrix[7]; // Y translation in mm
-    const translationZ = registrationMatrix[11]; // Z translation in mm
+    // Extract translation in mm
+    const tx_mm = registrationMatrix[3];
+    const ty_mm = registrationMatrix[7];
+    const tz_mm = registrationMatrix[11];
     
-    // Convert mm to pixels (approximate pixel spacing ~0.98mm for this dataset)
-    const offsetX = translationX * 0.5; // Scale for pixel conversion
-    const offsetY = translationY * 0.5; 
+    // Convert mm translation to pixels
+    const tx_px = (tx_mm / ctPixelSpacingX) * baseScale;
+    const ty_px = (ty_mm / ctPixelSpacingY) * baseScale;
     
-    x += offsetX;
-    y += offsetY;
+    drawX += tx_px;
+    drawY += ty_px;
     
-    console.log(`🎯 Registration matrix translation: X=${translationX.toFixed(1)}mm, Y=${translationY.toFixed(1)}mm, Z=${translationZ.toFixed(1)}mm`);
-    console.log(`Applied pixel offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}) pixels`);
+    console.log(`🎯 Registration translation: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)}, ${tz_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
+    
+    // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
+    const a = registrationMatrix[0], b = registrationMatrix[1];
+    const c = registrationMatrix[4], d = registrationMatrix[5];
+    const hasRotation = Math.abs(a - 1) > 0.001 || Math.abs(b) > 0.001 || Math.abs(c) > 0.001 || Math.abs(d - 1) > 0.001;
+    
+    if (hasRotation) {
+      // Apply full transformation matrix for rotation/shear
+      const e = drawX;
+      const f = drawY;
+      
+      ctx.save();
+      ctx.globalAlpha = fusionOpacity;
+      ctx.setTransform(a * baseScale, c * baseScale, b * baseScale, d * baseScale, e, f);
+      ctx.drawImage(temp, 0, 0);
+      ctx.restore();
+      
+      console.log(`✓ MRI overlay with rotation: transform=(${a.toFixed(3)}, ${b.toFixed(3)}, ${c.toFixed(3)}, ${d.toFixed(3)}), pos=(${e.toFixed(1)}, ${f.toFixed(1)})`);
+      return;
+    }
   }
 
-  // Draw with global alpha
+  // Standard draw without rotation
   ctx.save();
   ctx.globalAlpha = fusionOpacity;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(temp, x, y, w, h);
+  ctx.drawImage(temp, drawX, drawY, drawW, drawH);
   ctx.restore();
   
-  console.log(`✓ MRI overlay drawn: size=${w.toFixed(1)}x${h.toFixed(1)}, pos=(${x.toFixed(1)},${y.toFixed(1)}), opacity=${fusionOpacity}`);
+  console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
 }
