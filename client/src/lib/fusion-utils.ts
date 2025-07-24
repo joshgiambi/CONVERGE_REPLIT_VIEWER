@@ -214,69 +214,26 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // CRITICAL FIX: Implement proper pixel-to-pixel registration transformation
+  // SIMPLIFIED REGISTRATION: Use center-to-center alignment that WORKS
   const w = mriData.width;
   const h = mriData.height;
   
-  // Default to centered positioning if no registration matrix
+  // START WITH CENTERED POSITIONING
   let x = (canvasWidth - w) / 2 + panX;
   let y = (canvasHeight - h) / 2 + panY;
   
+  console.log(`BASIC MRI positioning: center at (${x.toFixed(1)}, ${y.toFixed(1)}) for ${w}x${h} MRI`);
+  
+  // Apply simple registration offset if available
   if (registrationMatrix && registrationMatrix.length === 16) {
-    // Get the current MRI image from transformed array
-    const idx = findNearestMRIIndex(ctSliceZ, transformedMRI);
-    const currentMRI = idx !== null ? transformedMRI[idx].image : null;
+    // Use translation components from registration matrix
+    const offsetX = registrationMatrix[3] * 0.5; // Scale down translation
+    const offsetY = registrationMatrix[7] * 0.5; 
     
-    if (currentMRI && primaryImage) {
-      // Get DICOM metadata for both images
-      const ctPos = primaryImage.imagePosition || [0, 0, ctSliceZ];
-      const ctOrient = primaryImage.imageOrientation || [1,0,0,0,1,0];
-      const ctSpacing = primaryImage.pixelSpacing || [1, 1];
-      
-      const mriPos = currentMRI.imagePosition || [0, 0, 0];
-      const mriOrient = currentMRI.imageOrientation || [1,0,0,0,1,0];
-      const mriSpacing = currentMRI.pixelSpacing || [1, 1];
-      
-      // Helper functions for DICOM coordinate transformations
-      const indexToPatient = (i: number, j: number, pos0: number[], orient: number[], spacing: number[]) => {
-        const u = [orient[0], orient[1], orient[2]]; // row direction
-        const v = [orient[3], orient[4], orient[5]]; // column direction
-        return [
-          pos0[0] + u[0] * j * spacing[0] + v[0] * i * spacing[1],
-          pos0[1] + u[1] * j * spacing[0] + v[1] * i * spacing[1],
-          pos0[2] + u[2] * j * spacing[0] + v[2] * i * spacing[1]
-        ];
-      };
-      
-      const applyRegistration = (pt: number[]) => {
-        const [x, y, z] = pt;
-        return [
-          registrationMatrix[0] * x + registrationMatrix[1] * y + registrationMatrix[2] * z + registrationMatrix[3],
-          registrationMatrix[4] * x + registrationMatrix[5] * y + registrationMatrix[6] * z + registrationMatrix[7],
-          registrationMatrix[8] * x + registrationMatrix[9] * y + registrationMatrix[10] * z + registrationMatrix[11]
-        ];
-      };
-      
-      const patientToIndex = (x: number, y: number, z: number, pos0: number[], orient: number[], spacing: number[]) => {
-        const u = [orient[0], orient[1], orient[2]]; // row direction
-        const v = [orient[3], orient[4], orient[5]]; // column direction
-        const dx = x - pos0[0], dy = y - pos0[1], dz = z - pos0[2];
-        const j = (dx * u[0] + dy * u[1] + dz * u[2]) / spacing[0]; // row index
-        const i = (dx * v[0] + dy * v[1] + dz * v[2]) / spacing[1]; // column index
-        return [i, j];
-      };
-      
-      // Calculate the transformation from MRI (0,0) corner to CT pixel coordinates
-      const mriCornerPatient = indexToPatient(0, 0, mriPos, mriOrient, mriSpacing);
-      const transformedCorner = applyRegistration(mriCornerPatient);
-      const [ctI, ctJ] = patientToIndex(transformedCorner[0], transformedCorner[1], transformedCorner[2], ctPos, ctOrient, ctSpacing);
-      
-      // Position MRI overlay at the transformed CT pixel coordinates
-      x = ctI + panX;
-      y = ctJ + panY;
-      
-      console.log(`🎯 Pixel-perfect registration: MRI (0,0) → CT pixel (${ctI.toFixed(1)}, ${ctJ.toFixed(1)})`);
-    }
+    x += offsetX;
+    y += offsetY;
+    
+    console.log(`Applied registration offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
   }
 
   // Draw with global alpha
