@@ -1,0 +1,63 @@
+What we’ve been doing so far is centering the MRI overlay and then applying just the translation terms (M[0][3], M[1][3]) from your 4×4 into CT pixels. That gets you the right Z-plane and the right overall shift, but it doesn’t account for the fact that the two image grids may have completely different origins in patient space.
+
+⸻
+
+Compute the true X,Y offset from image origins
+	1.	Grab each image’s world‐space origin (DICOM ImagePositionPatient).
+	2.	Transform the MRI origin into CT space using the full 4×4.
+	3.	Subtract the CT origin from that transformed MRI origin → gives you an (ΔX, ΔY) in mm.
+	4.	Divide by CT pixel spacing → gives you (Δcol, Δrow) in CT pixels.
+	5.	Apply that to your drawX/drawY instead of just the M[0][3]/M[1][3] terms.
+
+⸻
+
+Snippet
+
+// (inside renderFusionOverlay, after you pick `best.image` and `M` is your 4×4)
+
+function toNumberArray(sp: string|string[]|number[]) {
+  if (Array.isArray(sp))        return sp.map(Number);
+  if (typeof sp === "string")   return sp.split("\\").map(Number);
+  return [1,1,1]; // fallback
+}
+
+// 1) CT origin (top-left pixel position in patient space)
+const ctOrigin = toNumberArray(primaryImage.imagePosition);    // [x0, y0, z0]
+
+// 2) MRI origin
+const mriOrigin = toNumberArray(best.image.imagePosition);     // [x1, y1, z1]
+
+// 3) Transform MRI origin into CT space
+const [mriCT_x, mriCT_y /*, mriCT_z*/] = multiplyMatrixVector(M, [...mriOrigin, 1]);
+
+// 4) Compute mm‐offset
+const dx_mm = mriCT_x - ctOrigin[0];
+const dy_mm = mriCT_y - ctOrigin[1];
+
+// 5) Convert to CT pixels
+const [ct_dy, ct_dx] = toNumberArray(primaryImage.pixelSpacing); // [rowSpacing, colSpacing]
+const dx_px = dx_mm / ct_dx;
+const dy_px = dy_mm / ct_dy;
+
+// 6) Use THAT instead of just M[0][3], M[1][3]
+let drawX = (canvasWidth - destW)/2 + panX + dx_px;
+let drawY = (canvasHeight - destH)/2 + panY - dy_px;  
+// Note the “- dy_px” because canvas Y grows _down_ while patient Y grows _up_
+
+ctx.save();
+ctx.globalAlpha = fusionOpacity;
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(temp, drawX, drawY, destW, destH);
+ctx.restore();
+
+
+⸻
+
+Why this works
+	•	ImagePositionPatient tells you exactly where the top-left of each 512×512 grid sits in patient‐space (mm).
+	•	By transforming the MRI’s ImagePosition with your full affine, you land it into CT’s coordinate system.
+	•	The delta from CT’s own ImagePosition gives you the precise X/Y shift you need.
+	•	Converting that mm‐delta → pixel‐delta with CT’s spacing makes the MRI pixels line up perfectly under the CT.
+
+Give that a shot and your MRI should slide into the exact XY position you want.

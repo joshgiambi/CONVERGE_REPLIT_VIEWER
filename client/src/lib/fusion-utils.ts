@@ -268,20 +268,51 @@ export async function renderFusionOverlay(
   let drawH = destH;
   
   // Apply registration matrix transformation if available
-  if (registrationMatrix && registrationMatrix.length === 16) {
-    // Extract translation components (in mm)
-    const tx_mm = registrationMatrix[3];
-    const ty_mm = registrationMatrix[7];
-    const tz_mm = registrationMatrix[11];
+  if (registrationMatrix && registrationMatrix.length === 16 && secondaryImage) {
+    // Helper function to normalize arrays
+    function toNumberArray(sp: string|string[]|number[]) {
+      if (Array.isArray(sp)) return sp.map(Number);
+      if (typeof sp === "string") return sp.split("\\").map(Number);
+      return [1, 1, 1]; // fallback
+    }
     
-    // Convert mm to CT pixels using CT pixel spacing
-    const tx_px = tx_mm / ctSpacingArr[1]; // X translation in CT pixels
-    const ty_px = ty_mm / ctSpacingArr[0]; // Y translation in CT pixels
+    // Matrix multiplication helper
+    function multiplyMatrixVector(matrix: number[], vector: number[]): number[] {
+      const [x, y, z, w] = vector;
+      return [
+        matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3] * w,
+        matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7] * w,
+        matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11] * w,
+        matrix[12] * x + matrix[13] * y + matrix[14] * z + matrix[15] * w
+      ];
+    }
     
-    drawX += tx_px;
-    drawY += ty_px;
+    // 1) CT origin (top-left pixel position in patient space)
+    const ctOrigin = toNumberArray(primaryImage.imagePosition);    // [x0, y0, z0]
     
-    console.log(`🎯 Registration translation: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
+    // 2) MRI origin (from the secondary image that was selected for this slice)
+    const mriOrigin = toNumberArray(secondaryImage.imagePosition);     // [x1, y1, z1]
+    
+    // 3) Transform MRI origin into CT space using the 4x4 registration matrix
+    const [mriCT_x, mriCT_y] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
+    
+    // 4) Compute mm-offset between transformed MRI origin and CT origin
+    const dx_mm = mriCT_x - ctOrigin[0];
+    const dy_mm = mriCT_y - ctOrigin[1];
+    
+    // 5) Convert mm offset to CT pixels using CT pixel spacing
+    const dx_px = dx_mm / ctSpacingArr[1]; // column spacing (X)
+    const dy_px = dy_mm / ctSpacingArr[0]; // row spacing (Y)
+    
+    // 6) Apply the origin-based offset to get true registration alignment
+    drawX = (canvasWidth - destW) / 2 + panX + dx_px;
+    drawY = (canvasHeight - destH) / 2 + panY - dy_px; // Note the minus for Y-axis flip
+    
+    console.log(`🎯 Origin-based registration:`);
+    console.log(`  CT origin: (${ctOrigin[0]}, ${ctOrigin[1]}, ${ctOrigin[2]})mm`);
+    console.log(`  MRI origin: (${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]})mm`);
+    console.log(`  MRI→CT origin: (${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)})mm`);
+    console.log(`  Offset: (${dx_mm.toFixed(1)}, ${dy_mm.toFixed(1)})mm → (${dx_px.toFixed(1)}, ${dy_px.toFixed(1)})px`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
