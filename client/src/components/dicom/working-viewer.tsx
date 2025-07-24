@@ -1986,24 +1986,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [currentIndex, images, onSlicePositionChange]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Check if brush tool is active - if so, skip pan functionality
-    const isBrushActive =
-      brushToolState?.isActive && brushToolState?.tool === "brush";
+    // Check if any drawing tool is active - if so, skip pan functionality
+    const isDrawingToolActive =
+      brushToolState?.isActive && 
+      (brushToolState?.tool === "brush" || 
+       brushToolState?.tool === "pen" || 
+       brushToolState?.tool === "planar-contour");
 
-    // Only prevent default and stop propagation if brush tool is NOT active
-    if (!isBrushActive) {
+    // Only prevent default and stop propagation if drawing tool is NOT active
+    if (!isDrawingToolActive) {
       e.preventDefault();
       e.stopPropagation();
     }
 
-    if (e.button === 0 && !isBrushActive) {
-      // Left click for pan (disabled during brush mode)
+    if (e.button === 0 && !isDrawingToolActive) {
+      // Left click for pan (disabled during drawing mode)
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
       setLastPanX(panX);
       setLastPanY(panY);
-    } else if (e.button === 2 && !isBrushActive) {
-      // Right click for window/level (disabled during brush mode)
+    } else if (e.button === 2 && !isDrawingToolActive) {
+      // Right click for window/level (disabled during drawing mode)
       const startX = e.clientX;
       const startY = e.clientY;
       const startWindow = currentWindowLevel.width;
@@ -2040,12 +2043,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Skip pan functionality if brush tool is active
-    const isBrushActive =
-      brushToolState?.isActive && brushToolState?.tool === "brush";
+    // Skip pan functionality if any drawing tool is active
+    const isDrawingToolActive =
+      brushToolState?.isActive && 
+      (brushToolState?.tool === "brush" || 
+       brushToolState?.tool === "pen" || 
+       brushToolState?.tool === "planar-contour");
 
-    // Only handle pan if brush tool is NOT active
-    if (isDragging && !isBrushActive) {
+    // Only handle pan if drawing tool is NOT active
+    if (isDragging && !isDrawingToolActive) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
       setPanX(lastPanX + deltaX);
@@ -2054,11 +2060,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCanvasMouseUp = () => {
-    // Skip pan functionality if brush tool is active
-    const isBrushActive =
-      brushToolState?.isActive && brushToolState?.tool === "brush";
+    // Skip pan functionality if any drawing tool is active
+    const isDrawingToolActive =
+      brushToolState?.isActive && 
+      (brushToolState?.tool === "brush" || 
+       brushToolState?.tool === "pen" || 
+       brushToolState?.tool === "planar-contour");
 
-    if (!isBrushActive) {
+    if (!isDrawingToolActive) {
       setIsDragging(false);
     }
   };
