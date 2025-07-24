@@ -282,15 +282,17 @@ export async function renderFusionOverlay(
   
   console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
   
-  // Calculate scale factors for proper physical mm-to-mm mapping
-  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
-  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
+  // Calculate scale factors - MRI should appear at same physical size as CT
+  // If CT spacing is 0.97mm and MRI spacing is 1.95mm, then 1 MRI pixel = 2 CT pixels
+  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // How many CT pixels per MRI pixel
+  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; 
   
-  // Calculate MRI size in CT pixel coordinates
-  drawW = w * scaleX;
-  drawH = h * scaleY;
+  // Calculate MRI size in canvas pixels (accounting for CT's zoom)
+  const ctScale = ctTransform?.scale || 1;
+  drawW = w * scaleX * ctScale;  // Apply both physical scaling and CT zoom
+  drawH = h * scaleY * ctScale;
   
-  console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
+  console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
   // Helper function to normalize arrays
   const toNumberArray = (sp: string|string[]|number[]) => {
@@ -351,10 +353,10 @@ export async function renderFusionOverlay(
       // Don't scale drawW/drawH here - they're already in CT pixel space
       // The canvas transform will handle the zoom scaling
       
-      // The canvas transform is already applied, CT is at (0,0) in transformed space
-      // Just use the pixel offsets directly
-      drawX = dx_px;   // X offset from CT origin
-      drawY = dy_px;   // Y offset from CT origin
+      // The CT is rendered with a transform that includes pan and zoom
+      // We need to apply the same transform to the MRI position
+      drawX = ctTransform.offsetX + (dx_px * ctTransform.scale);   // Apply pan and scale to X offset
+      drawY = ctTransform.offsetY + (dy_px * ctTransform.scale);   // Apply pan and scale to Y offset
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
