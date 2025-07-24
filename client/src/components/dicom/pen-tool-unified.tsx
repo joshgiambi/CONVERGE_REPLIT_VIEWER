@@ -169,11 +169,6 @@ export function PenToolUnified({
       setOriginalPoints([...morphRegion.contour.points]);
       setHighlightedContour(morphRegion.contour);
       setIsMouseDown(true);
-      
-      // Disable scrolling during morphing
-      if (canvasRef.current) {
-        canvasRef.current.style.pointerEvents = 'none';
-      }
     } else {
       // Start drawing
       if (!isDrawing) {
@@ -196,11 +191,6 @@ export function PenToolUnified({
       }
       
       setIsMouseDown(true);
-      
-      // Disable scrolling during drawing
-      if (canvasRef.current) {
-        canvasRef.current.style.pointerEvents = 'none';
-      }
     }
   }, [isActive, canvasRef, canvasToWorld, findMorphableRegion, isDrawing,
       rtStructures, selectedStructure, currentSlicePosition, isPointInsideContour]);
@@ -286,11 +276,6 @@ export function PenToolUnified({
     
     setIsMouseDown(false);
     
-    // Re-enable scrolling
-    if (canvasRef.current) {
-      canvasRef.current.style.pointerEvents = 'auto';
-    }
-    
     if (isMorphing) {
       setIsMorphing(false);
       setMorphingContour(null);
@@ -357,11 +342,6 @@ export function PenToolUnified({
     setCurrentPath([]);
     setIsSubtracting(false);
     setNearFirstPoint(false);
-    
-    // Re-enable scrolling
-    if (canvasRef.current) {
-      canvasRef.current.style.pointerEvents = 'auto';
-    }
   }, [isDrawing, currentPath, canvasRef, canvasToWorld, rtStructures, selectedStructure, 
       currentSlicePosition, isPointInsideContour, onContourUpdate]);
   
@@ -406,40 +386,15 @@ export function PenToolUnified({
       setIsMouseDown(false);
       setIsMorphing(false);
       setHighlightedContour(null);
-      
-      // Re-enable scrolling
-      if (canvasRef.current) {
-        canvasRef.current.style.pointerEvents = 'auto';
-      }
     }
   }, [isActive, canvasRef]);
   
-  // Manage cursor style with custom blue transparent cursor
+  // Set cursor style
   useEffect(() => {
     if (!canvasRef.current) return;
     
     if (isActive) {
-      // Create custom cursor using data URL - blue transparent circle
-      const cursorSize = 20;
-      const cursorCanvas = document.createElement('canvas');
-      cursorCanvas.width = cursorSize;
-      cursorCanvas.height = cursorSize;
-      const ctx = cursorCanvas.getContext('2d');
-      
-      if (ctx) {
-        // Draw blue transparent circle
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue with 30% opacity
-        ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; // Blue with 80% opacity
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(cursorSize / 2, cursorSize / 2, cursorSize / 2 - 1, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        
-        // Create data URL for cursor
-        const cursorDataUrl = cursorCanvas.toDataURL();
-        canvasRef.current.style.cursor = `url(${cursorDataUrl}) ${cursorSize / 2} ${cursorSize / 2}, auto`;
-      }
+      canvasRef.current.style.cursor = 'crosshair';
     } else {
       canvasRef.current.style.cursor = '';
     }
