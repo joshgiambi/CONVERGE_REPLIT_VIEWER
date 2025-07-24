@@ -1942,7 +1942,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             console.warn(`No MRI slice close enough. Best distance: ${bestDistance.toFixed(1)}mm`);
             mriSliceMappingCache.current.set(cacheKey, null);
             setFusionAvailable(false);
-            // Don't return - let it fall through to linear mapping fallback
+            return; // No fusion if MRI slice too far away
           }
         } else {
           // Fallback to computing on-the-fly if pre-computed data not available
@@ -1954,29 +1954,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       } // Close the else block for cache check
     } else {
-      // Fallback: simple linear mapping if no registration available
-      console.warn("No registration matrix available, using linear mapping");
-      
-      const ctMinPos = 325.5;
-      const ctMaxPos = 723.5;
-      const ctRange = ctMaxPos - ctMinPos;
-      
-      const mriMinPos = parseFloat(secondaryImages[0].sliceLocation);
-      const mriMaxPos = parseFloat(secondaryImages[secondaryImages.length - 1].sliceLocation);
-      const mriRange = Math.abs(mriMaxPos - mriMinPos);
-      
-      const ctRatio = (ctSlicePosition - ctMinPos) / ctRange;
-      let mriTargetPos = mriMinPos > mriMaxPos 
-        ? mriMinPos - (ctRatio * mriRange)
-        : mriMinPos + (ctRatio * mriRange);
-      
-      for (const secondaryImage of secondaryImages) {
-        const distance = Math.abs(parseFloat(secondaryImage.sliceLocation) - mriTargetPos);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestSecondaryImage = secondaryImage;
-        }
-      }
+      // NO FALLBACK - fusion requires registration matrix
+      console.error("CRITICAL: No registration matrix available - fusion cannot be displayed");
+      setFusionAvailable(false);
+      return;
     }
     
     if (!closestSecondaryImage) {
@@ -1989,11 +1970,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     console.log(`Secondary image SOP UID: ${closestSecondaryImage.sopInstanceUID}`);
     
     // Verify we're using registration matrix
-    if (registrationMatrix) {
-      console.log(`✓ Using DICOM registration matrix for fusion alignment`);
-    } else {
-      console.error(`✗ WARNING: No registration matrix - using fallback linear mapping!`);
+    if (!registrationMatrix) {
+      console.error(`CRITICAL: No registration matrix - fusion should not be rendering!`);
+      return;
     }
+    console.log(`✓ Using DICOM registration matrix for fusion alignment`);
     
     // Get the secondary image data from cache (use window reference to avoid closure issues)
     const currentCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
