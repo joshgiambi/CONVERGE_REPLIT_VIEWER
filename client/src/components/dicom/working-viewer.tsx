@@ -2382,9 +2382,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             ref={canvasRef}
             width={1024}
             height={1024}
-            onMouseDown={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseDown}
-            onMouseMove={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseMove}
-            onMouseUp={brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original") ? undefined : handleCanvasMouseUp}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
             onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
               handleCanvasWheel(e);
@@ -2401,7 +2401,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
-              pointerEvents: brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original" || brushToolState?.tool === "planar-contour") ? "none" : "auto",
             }}
           />
 
