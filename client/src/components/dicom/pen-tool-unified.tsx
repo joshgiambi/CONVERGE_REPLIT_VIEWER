@@ -1,5 +1,5 @@
-// Unified Pen Tool - Single mode with continuous/point drawing
-// Right-click places point then closes, immediate contour merging
+// Unified Pen Tool - Complete implementation with all features
+// Continuous drawing, morphing, proper closure detection
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -29,28 +29,34 @@ export function PenToolUnified({
   panY = 0
 }: PenToolUnifiedProps) {
   
+  console.log('[PenTool] Component rendered:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
+  
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<[number, number, number][]>([]);
   const [isMouseDown, setIsMouseDown] = useState(false);
-  const [lastPoint, setLastPoint] = useState<[number, number] | null>(null);
+  const [mousePosition, setMousePosition] = useState<[number, number]>([0, 0]);
   
   // Morphing state
   const [isMorphing, setIsMorphing] = useState(false);
   const [morphingContour, setMorphingContour] = useState<any>(null);
+  const [morphingVertices, setMorphingVertices] = useState<number[]>([]);
   const [dragStartPoint, setDragStartPoint] = useState<[number, number] | null>(null);
-  const [nearbyVertex, setNearbyVertex] = useState<{index: number, distance: number} | null>(null);
+  const [originalPoints, setOriginalPoints] = useState<number[]>([]);
   
   // Highlighted region state
   const [highlightedContour, setHighlightedContour] = useState<any>(null);
-  const [mousePosition, setMousePosition] = useState<[number, number]>([0, 0]);
+  const [nearFirstPoint, setNearFirstPoint] = useState(false);
+  const [isSubtracting, setIsSubtracting] = useState(false);
   
   // Canvas refs
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   
   // Configuration
-  const MORPH_INFLUENCE_RADIUS = 50;
-  const VERTEX_DETECTION_RADIUS = 10;
+  const MORPH_INFLUENCE_RADIUS = 60;
+  const VERTEX_DETECTION_RADIUS = 15;
+  const FIRST_POINT_BUBBLE_RADIUS = 12;
+  const MIN_POINTS_FOR_CONTOUR = 3;
   const MIN_MOVE_DISTANCE = 2;
   
   // Coordinate transformation
@@ -86,36 +92,45 @@ export function PenToolUnified({
     return [canvasX, canvasY];
   }, [imageMetadata, zoom, panX, panY]);
   
-  // Find nearby vertex for morphing
-  const findNearbyVertex = useCallback((point: [number, number]): {contour: any, index: number, distance: number} | null => {
+  // Find morphable region around cursor
+  const findMorphableRegion = useCallback((point: [number, number]): {contour: any, vertices: number[]} | null => {
     if (!rtStructures?.structures) return null;
-    
-    let nearestVertex = null;
-    let minDistance = VERTEX_DETECTION_RADIUS;
     
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     if (!structure?.contours) return null;
     
-    structure.contours.forEach((contour: any) => {
+    for (const contour of structure.contours) {
       if (Math.abs(contour.slicePosition - currentSlicePosition) < 0.5) {
+        const vertices: number[] = [];
+        let foundNearby = false;
+        
+        // Check each vertex
         for (let i = 0; i < contour.points.length; i += 3) {
           const [cx, cy] = worldToCanvas(contour.points[i], contour.points[i + 1]);
           const dist = Math.sqrt(Math.pow(cx - point[0], 2) + Math.pow(cy - point[1], 2));
           
-          if (dist < minDistance) {
-            minDistance = dist;
-            nearestVertex = {
-              contour,
-              index: i / 3,
-              distance: dist
-            };
+          if (dist < VERTEX_DETECTION_RADIUS) {
+            foundNearby = true;
+            // Add vertices within influence radius
+            for (let j = 0; j < contour.points.length; j += 3) {
+              const [vx, vy] = worldToCanvas(contour.points[j], contour.points[j + 1]);
+              const vDist = Math.sqrt(Math.pow(vx - cx, 2) + Math.pow(vy - cy, 2));
+              if (vDist < MORPH_INFLUENCE_RADIUS) {
+                vertices.push(j / 3);
+              }
+            }
+            break;
           }
         }
+        
+        if (foundNearby && vertices.length > 0) {
+          return { contour, vertices: Array.from(new Set(vertices)).sort((a, b) => a - b) };
+        }
       }
-    });
+    }
     
-    return nearestVertex;
-  }, [rtStructures, selectedStructure, currentSlicePosition, worldToCanvas, VERTEX_DETECTION_RADIUS]);
+    return null;
+  }, [rtStructures, selectedStructure, currentSlicePosition, worldToCanvas, VERTEX_DETECTION_RADIUS, MORPH_INFLUENCE_RADIUS]);
   
   // Check if point is inside contour
   const isPointInsideContour = useCallback((point: [number, number, number], contour: any): boolean => {
@@ -137,6 +152,7 @@ export function PenToolUnified({
   
   // Handle mouse down
   const handleMouseDown = useCallback((e: MouseEvent) => {
+    console.log('[PenTool] Mouse down:', { isActive, button: e.button });
     if (!isActive || !canvasRef.current) return;
     if (e.button !== 0) return; // Only left click
     
@@ -145,13 +161,16 @@ export function PenToolUnified({
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
-    // Check for nearby vertex to morph
-    const nearby = findNearbyVertex([canvasX, canvasY]);
-    if (nearby && nearby.distance < VERTEX_DETECTION_RADIUS) {
+    // Check for morphable region
+    const morphRegion = findMorphableRegion([canvasX, canvasY]);
+    if (morphRegion && !isDrawing) {
+      // Start morphing
       setIsMorphing(true);
-      setMorphingContour(nearby.contour);
-      setNearbyVertex(nearby);
+      setMorphingContour(morphRegion.contour);
+      setMorphingVertices(morphRegion.vertices);
       setDragStartPoint([canvasX, canvasY]);
+      setOriginalPoints([...morphRegion.contour.points]);
+      setHighlightedContour(morphRegion.contour);
       setIsMouseDown(true);
       
       // Disable scrolling during morphing
@@ -159,25 +178,35 @@ export function PenToolUnified({
         canvasRef.current.style.pointerEvents = 'none';
       }
     } else {
-      // If already drawing, add point to path. Otherwise start new path
-      if (isDrawing) {
-        // Add point to existing path
-        setCurrentPath(prev => [...prev, worldPoint]);
-      } else {
-        // Start new drawing
+      // Start drawing
+      if (!isDrawing) {
         setIsDrawing(true);
         setCurrentPath([worldPoint]);
+        
+        // Check if starting inside existing contour (for subtraction)
+        const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
+        if (structure?.contours) {
+          let startedInside = false;
+          for (const contour of structure.contours) {
+            if (Math.abs(contour.slicePosition - currentSlicePosition) < 0.5 && 
+                isPointInsideContour(worldPoint, contour)) {
+              startedInside = true;
+              break;
+            }
+          }
+          setIsSubtracting(startedInside);
+        }
       }
       
       setIsMouseDown(true);
-      setLastPoint([canvasX, canvasY]);
       
       // Disable scrolling during drawing
       if (canvasRef.current) {
         canvasRef.current.style.pointerEvents = 'none';
       }
     }
-  }, [isActive, canvasRef, canvasToWorld, findNearbyVertex, isDrawing]);
+  }, [isActive, canvasRef, canvasToWorld, findMorphableRegion, isDrawing,
+      rtStructures, selectedStructure, currentSlicePosition, isPointInsideContour]);
   
   // Handle mouse move
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -188,36 +217,43 @@ export function PenToolUnified({
     const canvasY = e.clientY - rect.top;
     setMousePosition([canvasX, canvasY]);
     
-    // Highlight nearby contours
+    // Check if near first point when drawing
+    if (isDrawing && currentPath.length >= MIN_POINTS_FOR_CONTOUR && currentPath.length > 0) {
+      const [firstX, firstY] = worldToCanvas(currentPath[0][0], currentPath[0][1]);
+      const dist = Math.sqrt(Math.pow(canvasX - firstX, 2) + Math.pow(canvasY - firstY, 2));
+      setNearFirstPoint(dist < FIRST_POINT_BUBBLE_RADIUS);
+    } else {
+      setNearFirstPoint(false);
+    }
+    
+    // Highlight morphable regions when not drawing
     if (!isDrawing && !isMorphing) {
-      const nearby = findNearbyVertex([canvasX, canvasY]);
-      setHighlightedContour(nearby?.contour || null);
-      setNearbyVertex(nearby);
+      const morphRegion = findMorphableRegion([canvasX, canvasY]);
+      setHighlightedContour(morphRegion?.contour || null);
+      if (morphRegion) {
+        setMorphingVertices(morphRegion.vertices);
+      }
     }
     
     // Handle morphing
-    if (isMorphing && isMouseDown && morphingContour && dragStartPoint && nearbyVertex) {
+    if (isMorphing && isMouseDown && morphingContour && dragStartPoint && originalPoints) {
       const dx = canvasX - dragStartPoint[0];
       const dy = canvasY - dragStartPoint[1];
       
-      // Apply morphing with influence falloff
-      const newPoints = [...morphingContour.points];
-      const vertexIndex = nearbyVertex.index * 3;
-      
-      for (let i = 0; i < newPoints.length; i += 3) {
-        const [px, py] = worldToCanvas(newPoints[i], newPoints[i + 1]);
-        const dist = Math.sqrt(
-          Math.pow(px - worldToCanvas(morphingContour.points[vertexIndex], morphingContour.points[vertexIndex + 1])[0], 2) +
-          Math.pow(py - worldToCanvas(morphingContour.points[vertexIndex], morphingContour.points[vertexIndex + 1])[1], 2)
-        );
+      // Apply morphing to selected vertices with smooth falloff
+      const newPoints = [...originalPoints];
+      morphingVertices.forEach(vertexIdx => {
+        const idx = vertexIdx * 3;
+        const [vx, vy] = worldToCanvas(originalPoints[idx], originalPoints[idx + 1]);
         
-        if (dist < MORPH_INFLUENCE_RADIUS) {
-          const influence = 1 - (dist / MORPH_INFLUENCE_RADIUS);
-          const [wx, wy] = canvasToWorld(px + dx * influence, py + dy * influence);
-          newPoints[i] = wx;
-          newPoints[i + 1] = wy;
-        }
-      }
+        // Calculate influence based on distance from drag start
+        const dist = Math.sqrt(Math.pow(vx - dragStartPoint[0], 2) + Math.pow(vy - dragStartPoint[1], 2));
+        const influence = Math.max(0, 1 - (dist / MORPH_INFLUENCE_RADIUS));
+        
+        const [wx, wy] = canvasToWorld(vx + dx * influence, vy + dy * influence);
+        newPoints[idx] = wx;
+        newPoints[idx + 1] = wy;
+      });
       
       // Update contour
       onContourUpdate({
@@ -226,26 +262,26 @@ export function PenToolUnified({
         sliceIndex: currentSlicePosition,
         contourData: newPoints
       });
-      
-      setDragStartPoint([canvasX, canvasY]);
     }
     
-    // Handle continuous drawing
-    if (isDrawing && isMouseDown && lastPoint) {
+    // Handle continuous drawing when mouse is down
+    if (isDrawing && isMouseDown && currentPath.length > 0) {
+      const lastPath = currentPath[currentPath.length - 1];
+      const [lastX, lastY] = worldToCanvas(lastPath[0], lastPath[1]);
       const dist = Math.sqrt(
-        Math.pow(canvasX - lastPoint[0], 2) + 
-        Math.pow(canvasY - lastPoint[1], 2)
+        Math.pow(canvasX - lastX, 2) + 
+        Math.pow(canvasY - lastY, 2)
       );
       
       if (dist > MIN_MOVE_DISTANCE) {
         const worldPoint = canvasToWorld(canvasX, canvasY);
         setCurrentPath(prev => [...prev, worldPoint]);
-        setLastPoint([canvasX, canvasY]);
       }
     }
-  }, [isDrawing, isMorphing, isMouseDown, morphingContour, dragStartPoint, nearbyVertex, 
-      canvasRef, findNearbyVertex, worldToCanvas, canvasToWorld, onContourUpdate, 
-      selectedStructure, currentSlicePosition, lastPoint]);
+  }, [isDrawing, isMorphing, isMouseDown, morphingContour, dragStartPoint, morphingVertices,
+      originalPoints, currentPath, canvasRef, findMorphableRegion, worldToCanvas, canvasToWorld, 
+      onContourUpdate, selectedStructure, currentSlicePosition, MIN_POINTS_FOR_CONTOUR, 
+      FIRST_POINT_BUBBLE_RADIUS, MORPH_INFLUENCE_RADIUS]);
   
   // Handle mouse up
   const handleMouseUp = useCallback((e: MouseEvent) => {
@@ -280,6 +316,7 @@ export function PenToolUnified({
   // Handle right click - place point at cursor then close
   const handleRightClick = useCallback((e: MouseEvent) => {
     e.preventDefault();
+    console.log('[PenTool] Right click:', { isDrawing, pathLength: currentPath.length });
     
     if (!isDrawing || currentPath.length < 2) return;
     if (!canvasRef.current) return;
@@ -322,7 +359,8 @@ export function PenToolUnified({
     // Reset drawing state
     setIsDrawing(false);
     setCurrentPath([]);
-    setLastPoint(null);
+    setIsSubtracting(false);
+    setNearFirstPoint(false);
     
     // Re-enable scrolling
     if (canvasRef.current) {
@@ -380,12 +418,32 @@ export function PenToolUnified({
     }
   }, [isActive, canvasRef]);
   
-  // Manage cursor style
+  // Manage cursor style with custom blue transparent cursor
   useEffect(() => {
     if (!canvasRef.current) return;
     
     if (isActive) {
-      canvasRef.current.style.cursor = 'crosshair';
+      // Create custom cursor using data URL - blue transparent circle
+      const cursorSize = 20;
+      const cursorCanvas = document.createElement('canvas');
+      cursorCanvas.width = cursorSize;
+      cursorCanvas.height = cursorSize;
+      const ctx = cursorCanvas.getContext('2d');
+      
+      if (ctx) {
+        // Draw blue transparent circle
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue with 30% opacity
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; // Blue with 80% opacity
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cursorSize / 2, cursorSize / 2, cursorSize / 2 - 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // Create data URL for cursor
+        const cursorDataUrl = cursorCanvas.toDataURL();
+        canvasRef.current.style.cursor = `url(${cursorDataUrl}) ${cursorSize / 2} ${cursorSize / 2}, auto`;
+      }
     } else {
       canvasRef.current.style.cursor = '';
     }
@@ -433,6 +491,14 @@ export function PenToolUnified({
     
     // Clear overlay
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+    
+    // Debug log render
+    if (isActive && (isDrawing || highlightedContour || mousePosition)) {
+      console.log('[PenTool] Rendering overlay:', { 
+        isActive, isDrawing, hasPath: currentPath.length > 0, 
+        mousePosition, highlightedContour: !!highlightedContour 
+      });
+    }
     
     // Get structure color
     const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
@@ -488,18 +554,30 @@ export function PenToolUnified({
       
       // Draw vertices
       ctx.fillStyle = colorStr;
-      currentPath.forEach(point => {
+      currentPath.forEach((point, i) => {
         const [x, y] = worldToCanvas(point[0], point[1]);
         ctx.beginPath();
         ctx.arc(x, y, 3, 0, Math.PI * 2);
         ctx.fill();
+        
+        // Draw first point bubble for closure detection
+        if (i === 0 && currentPath.length >= MIN_POINTS_FOR_CONTOUR) {
+          ctx.save();
+          ctx.strokeStyle = isNearFirstPoint ? '#9333ea' : colorStr;
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.arc(x, y, FIRST_POINT_BUBBLE_RADIUS, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
       });
       
       ctx.restore();
     }
     
     // Draw morph influence radius
-    if (isMorphing && nearbyVertex && mousePosition) {
+    if (isMorphing && morphingVertices.length > 0 && mousePosition) {
       ctx.save();
       ctx.strokeStyle = colorStr;
       ctx.lineWidth = 1;
@@ -513,7 +591,11 @@ export function PenToolUnified({
     }
     
   }, [overlayCanvasRef, highlightedContour, isDrawing, isMorphing, currentPath, 
-      mousePosition, nearbyVertex, rtStructures, selectedStructure, worldToCanvas]);
+      mousePosition, morphingVertices, rtStructures, selectedStructure, worldToCanvas,
+      isNearFirstPoint, isSubtracting, FIRST_POINT_BUBBLE_RADIUS, MIN_POINTS_FOR_CONTOUR,
+      MORPH_INFLUENCE_RADIUS]);
   
-  return <canvas ref={overlayCanvasRef} style={{ pointerEvents: 'none' }} />;
+  // The overlay canvas is appended directly to the parent element in useEffect
+  // So we return null since the canvas is managed manually
+  return null;
 }
