@@ -1141,7 +1141,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           mriZRangeInCTSpace.current = null;
           mriSliceMappingCache.current.clear();
           console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
-          precomputeMRITransformations(sortedImages, registrationMatrix);
+          
+          // Compute transformed MRI positions and store in ref
+          const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
+          transformedMRIPositions.current = transformed;
+          console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
+          
+          // Compute Z-range bounds for optimization
+          if (transformed.length > 0) {
+            const zValues = transformed.map(t => t.zInCT);
+            mriZRangeInCTSpace.current = {
+              min: Math.min(...zValues),
+              max: Math.max(...zValues)
+            };
+            console.log(`✓ MRI Z-range in CT space: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
+          }
         }
         
         // Trigger re-render to show fusion overlay with delay to ensure state is updated

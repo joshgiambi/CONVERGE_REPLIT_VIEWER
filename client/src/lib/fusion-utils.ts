@@ -217,14 +217,4 @@ export async function renderFusionOverlay(
   ctx.restore();
   
   console.log(`✓ MRI overlay drawn: size=${w.toFixed(1)}x${h.toFixed(1)}, pos=(${x.toFixed(1)},${y.toFixed(1)}), opacity=${fusionOpacity}`);
-  
-  // Add a visible test overlay for debugging (red border around MRI)
-  if (fusionOpacity > 0.5) {
-    ctx.save();
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, w, h);
-    ctx.restore();
-    console.log(`🔴 DEBUG: Added red border around MRI overlay at (${x.toFixed(1)},${y.toFixed(1)}) size ${w.toFixed(1)}x${h.toFixed(1)}`);
-  }
 }
