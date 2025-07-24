@@ -288,8 +288,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
-    // Auto-complete shape with current position
-    completeShape(true, worldPoint);
+    console.log('Right click - completing shape with point:', worldPoint);
+    
+    // Add final point and complete shape
+    setPoints(prev => [...prev, worldPoint]);
+    
+    // Complete immediately after adding point
+    setTimeout(() => {
+      completeShape(true);
+    }, 10);
   }, [points, canvasRef, canvasToWorld, completeShape]);
   
   // Setup overlay canvas
