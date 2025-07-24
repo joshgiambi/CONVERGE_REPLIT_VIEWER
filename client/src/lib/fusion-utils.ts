@@ -312,101 +312,42 @@ export async function renderFusionOverlay(
     ];
   };
 
-  // Apply registration matrix transformation if available
-  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage) {
+  // SIMPLIFIED: Apply registration matrix directly
+  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
     
-    // PROPER DICOM COORDINATE TRANSFORMATION using ImageOrientationPatient
-    
-    // 1) Fetch CT's orientation and spacing from DICOM metadata
-    const ipp = toNumberArray(primaryImage.imagePosition);  // [X0, Y0, Z0]
-    const iop = toNumberArray(primaryImage.imageOrientation); // [rX, rY, rZ, cX, cY, cZ]
-    const rowCosine = iop.slice(0, 3);  // First 3 values: row direction cosines
-    const colCosine = iop.slice(3, 6);  // Last 3 values: column direction cosines
-    const [rowSpacing, colSpacing] = ctSpacingArr; // [mm per row, mm per col]
-    
-    // 2) Get MRI origin and transform to CT space using registration matrix
+    // Get CT and MRI origins in world coordinates
+    const ctOrigin = toNumberArray(primaryImage.imagePosition);  // [X0, Y0, Z0]
     const mriOrigin = toNumberArray(actualSecondaryImage.imagePosition);  // [x1, y1, z1]
+    const [rowSpacing, colSpacing] = ctSpacingArr; // CT pixel spacing
+    
+    // Transform MRI origin to CT space using registration matrix
     const [mriCT_x, mriCT_y, mriCT_z] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
     
-    // 3) Compute world-space offset between transformed MRI origin and CT origin
-    const delta = [
-      mriCT_x - ipp[0],
-      mriCT_y - ipp[1], 
-      mriCT_z - ipp[2]
-    ];
+    // Calculate world-space offset between transformed MRI origin and CT origin
+    const worldOffsetX = mriCT_x - ctOrigin[0];
+    const worldOffsetY = mriCT_y - ctOrigin[1];
     
-    // 4) Project world offset onto CT image axes to get exact pixel offsets
-    const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    // Convert world offset to pixel offset - simple division by pixel spacing
+    const pixelOffsetX = worldOffsetX / colSpacing;  // X uses column spacing  
+    const pixelOffsetY = worldOffsetY / rowSpacing;  // Y uses row spacing
     
-    // CORRECTED: Swap dot products as per DICOM specification
-    const dx_px = dot(delta, rowCosine) / colSpacing;  // Row direction / column spacing (X movement)
-    const dy_px = dot(delta, colCosine) / rowSpacing;  // Column direction / row spacing (Y movement)
+    // Apply CT's canvas transform to the MRI position
+    drawX = ctTransform.offsetX + (pixelOffsetX * ctTransform.scale);
+    drawY = ctTransform.offsetY + (pixelOffsetY * ctTransform.scale);
     
-    // 5) Apply pixel offsets using the SAME coordinate system as CT rendering
-    let baseX: number;
-    let baseY: number;
-    
-    if (ctTransform) {
-      // Use the exact same coordinate system as the CT image
-      console.log(`✅ Using shared CT coordinate system: scale=${ctTransform.scale}, offset=(${ctTransform.offsetX}, ${ctTransform.offsetY})`);
-      
-      // Don't scale drawW/drawH here - they're already in CT pixel space
-      // The canvas transform will handle the zoom scaling
-      
-      // The CT is rendered with a transform that includes pan and zoom
-      // We need to apply the same transform to the MRI position
-      drawX = ctTransform.offsetX + (dx_px * ctTransform.scale);   // Apply pan and scale to X offset
-      drawY = ctTransform.offsetY + (dy_px * ctTransform.scale);   // Apply pan and scale to Y offset
-    } else {
-      // Fallback to independent centering if ctTransform not available
-      console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
-      baseX = (canvasWidth - drawW) / 2 + panX;
-      baseY = (canvasHeight - drawH) / 2 + panY;
-      
-      drawX = baseX + dx_px;   // Add X offset (positive = right)
-      drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
-    }
-    
-    console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION (CORRECTED):`);
-    console.log({
-      rowCosine,
-      colCosine,
-      rowSpacing,
-      colSpacing,
-      delta,
-      pxOffsetX: dx_px,
-      pxOffsetY: dy_px
-    });
-    console.log(`  CT IPP: [${ipp[0]}, ${ipp[1]}, ${ipp[2]}]mm`);
-    console.log(`  CT IOP row: [${rowCosine[0].toFixed(3)}, ${rowCosine[1].toFixed(3)}, ${rowCosine[2].toFixed(3)}]`);
-    console.log(`  CT IOP col: [${colCosine[0].toFixed(3)}, ${colCosine[1].toFixed(3)}, ${colCosine[2].toFixed(3)}]`);
-    console.log(`  CT spacing: [${rowSpacing}, ${colSpacing}]mm/px`);
-    console.log(`  MRI origin: [${mriOrigin[0]}, ${mriOrigin[1]}, ${mriOrigin[2]}]mm`);
-    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
-    console.log(`  World delta: [${delta[0].toFixed(1)}, ${delta[1].toFixed(1)}, ${delta[2].toFixed(1)}]mm`);
-    console.log(`  Projected pixels: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
-    console.log(`  Final MRI position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)})`);
-    
-    // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
-    const a = registrationMatrix[0], b = registrationMatrix[1];
-    const c = registrationMatrix[4], d = registrationMatrix[5];
-    const hasRotation = Math.abs(a - 1) > 0.001 || Math.abs(b) > 0.001 || Math.abs(c) > 0.001 || Math.abs(d - 1) > 0.001;
-    
-    if (hasRotation) {
-      // Apply full transformation matrix for rotation/shear
-      const e = drawX;
-      const f = drawY;
-      
-      ctx.save();
-      ctx.globalAlpha = fusionOpacity;
-      // Apply scaled transformation matrix for rotation/shear
-      ctx.setTransform(a * scaleX, c * scaleY, b * scaleX, d * scaleY, e, f);
-      ctx.drawImage(temp, 0, 0);
-      ctx.restore();
-      
-      console.log(`✓ MRI overlay with rotation: transform=(${a.toFixed(3)}, ${b.toFixed(3)}, ${c.toFixed(3)}, ${d.toFixed(3)}), pos=(${e.toFixed(1)}, ${f.toFixed(1)})`);
-      return;
-    }
+    console.log(`✅ SIMPLIFIED REGISTRATION:`);
+    console.log(`  CT origin: [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
+    console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
+    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
+    console.log(`  World offset: [${worldOffsetX.toFixed(1)}, ${worldOffsetY.toFixed(1)}]mm`);
+    console.log(`  Pixel offset: [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
+    console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
+    console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
+  } else if (!ctTransform) {
+    console.warn('⚠️ No CT transform available for fusion alignment');
+    // Fallback: center the MRI
+    drawX = (canvasWidth - drawW) / 2;
+    drawY = (canvasHeight - drawH) / 2;
   }
 
   // Standard draw without rotation - using proper physical scaling
