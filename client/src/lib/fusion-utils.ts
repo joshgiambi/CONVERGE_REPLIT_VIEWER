@@ -262,11 +262,28 @@ export async function renderFusionOverlay(
   
   console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${destW.toFixed(1)}x${destH.toFixed(1)}`);
   
-  // Use the same coordinate system as CT rendering - NO independent centering
-  let drawX: number;
-  let drawY: number;
-  let drawW = destW;
-  let drawH = destH;
+  // *** CRITICAL: Use ctx.setTransform to put MRI into the EXACT same coordinate system as CT ***
+  if (ctTransform) {
+    // Save current context state
+    ctx.save();
+    
+    // Set the EXACT same transform matrix used for CT rendering
+    ctx.setTransform(
+      ctTransform.scale, 0,
+      0, ctTransform.scale,
+      ctTransform.offsetX,
+      ctTransform.offsetY
+    );
+    
+    console.log(`🔥 Using ctx.setTransform: CT coordinate system applied to MRI rendering`);
+    console.log(`   Scale: ${ctTransform.scale}, Offset: (${ctTransform.offsetX}, ${ctTransform.offsetY})`);
+  }
+  
+  // Now we draw in CT-pixel coordinates directly
+  let drawX: number = 0; // Will be computed in CT pixel space
+  let drawY: number = 0; // Will be computed in CT pixel space
+  let drawW = w;  // Use original MRI pixel dimensions
+  let drawH = h;  // Use original MRI pixel dimensions
   
   // Get the actual secondary image that was used for interpolation to access its metadata
   let actualSecondaryImage = null;
@@ -281,7 +298,7 @@ export async function renderFusionOverlay(
   }
 
   // Apply registration matrix transformation if available
-  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage) {
+  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
     // Helper function to normalize arrays
     function toNumberArray(sp: string|string[]|number[]) {
       if (Array.isArray(sp)) return sp.map(Number);
