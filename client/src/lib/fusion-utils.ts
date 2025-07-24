@@ -222,7 +222,7 @@ export async function renderFusionOverlay(
   }
   
   const range = max - min;
-  console.log(`MRI pixel range: ${min?.toFixed?.(1) || min} to ${max?.toFixed?.(1) || max} (range: ${range?.toFixed?.(1) || range})`);
+  console.log(`MRI pixel range: ${min.toFixed(1)} to ${max.toFixed(1)} (range: ${range.toFixed(1)})`);
   
   for (let i = 0; i < mriData.data.length; i++) {
     // Scale pixel values from min-max to 0-255 for better contrast
