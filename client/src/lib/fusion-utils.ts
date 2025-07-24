@@ -253,28 +253,14 @@ export async function renderFusionOverlay(
     return [1, 1];
   }
   
-  // Get normalized pixel spacings for both CT and MRI
+  // Get normalized pixel spacings for CT
   const ctSpacingArr = normalizeSpacing(primaryImage.pixelSpacing);
-  
-  // For MRI, we need to get the pixel spacing from the MRI metadata
-  // For now, assume MRI has standard spacing - this should be extracted from MRI DICOM metadata
-  const mriSpacingArr = [0.9765625, 0.9765625]; // TODO: Get from actual MRI metadata
-  
-  console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
-  
-  // Calculate scale factors for proper physical mm-to-mm mapping
-  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
-  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
-  const destW = w * scaleX;
-  const destH = h * scaleY;
-  
-  console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${destW.toFixed(1)}x${destH.toFixed(1)}`);
   
   // Use the same coordinate system as CT rendering - NO independent centering
   let drawX: number;
   let drawY: number;
-  let drawW = destW;
-  let drawH = destH;
+  let drawW: number;
+  let drawH: number;
   
   // Get the actual secondary image that was used for interpolation to access its metadata
   let actualSecondaryImage = null;
@@ -287,6 +273,22 @@ export async function renderFusionOverlay(
     distances.sort((a, b) => a.distance - b.distance);
     actualSecondaryImage = distances[0]?.image;
   }
+
+  // Get MRI pixel spacing from the actual MRI metadata
+  let mriSpacingArr = [1, 1]; // Default fallback
+  if (actualSecondaryImage && actualSecondaryImage.pixelSpacing) {
+    mriSpacingArr = normalizeSpacing(actualSecondaryImage.pixelSpacing);
+  }
+  
+  console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
+  
+  // Calculate scale factors for proper physical mm-to-mm mapping
+  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
+  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
+  drawW = w * scaleX;
+  drawH = h * scaleY;
+  
+  console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
   // Helper function to normalize arrays
   const toNumberArray = (sp: string|string[]|number[]) => {
