@@ -287,12 +287,12 @@ export async function renderFusionOverlay(
   const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // How many CT pixels per MRI pixel
   const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; 
   
-  // Calculate MRI size in canvas pixels (accounting for CT's zoom)
+  // Calculate MRI size in canvas pixels - need to apply both physical scaling AND CT zoom
   const ctScale = ctTransform?.scale || 1;
-  drawW = w * scaleX * ctScale;  // Apply both physical scaling and CT zoom
+  drawW = w * scaleX * ctScale;  // Apply physical scaling AND CT zoom
   drawH = h * scaleY * ctScale;
   
-  console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
+  console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final MRI size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
   // Helper function to normalize arrays
   const toNumberArray = (sp: string|string[]|number[]) => {
