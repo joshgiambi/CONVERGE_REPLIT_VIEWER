@@ -356,7 +356,7 @@ export async function renderFusionOverlay(
       baseY = ctTransform.offsetY;
       
       drawX = baseX + scaledDxPx;   // Add scaled X offset
-      drawY = baseY - scaledDyPx;   // Subtract scaled Y offset
+      drawY = baseY + scaledDyPx;   // Add scaled Y offset (canvas Y grows down)
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
