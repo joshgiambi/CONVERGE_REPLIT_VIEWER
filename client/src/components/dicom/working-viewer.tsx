@@ -1632,7 +1632,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // Call the new fusion utility
+    // Call the new fusion utility function
     await renderFusionOverlayUtil(
       ctx,
       primaryImage,
@@ -1645,6 +1645,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width,
       canvas.height
     );
+    
+    console.log(`✓ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
 
   const renderRTStructures = (

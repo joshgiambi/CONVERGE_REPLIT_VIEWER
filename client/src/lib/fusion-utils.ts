@@ -102,11 +102,20 @@ export function interpolateMRI(
   cache: Map<string, {data: Float32Array, width: number, height: number}>
 ): {data: Float32Array, width: number, height: number} | null {
   const idx = findNearestMRIIndex(ctZ, transformed);
-  if (idx === null) return null;
+  if (idx === null) {
+    console.log(`No MRI index found for CT Z=${ctZ}mm`);
+    return null;
+  }
 
   const best = transformed[idx];
+  const distance = Math.abs(best.zInCT - ctZ);
+  console.log(`Found MRI slice for CT ${ctZ}mm: MRI Z=${best.zInCT.toFixed(1)}mm (distance: ${distance.toFixed(1)}mm)`);
+  
   const baseData = cache.get(best.image.sopInstanceUID);
-  if (!baseData) return null;
+  if (!baseData) {
+    console.warn(`MRI image data not found in cache: ${best.image.sopInstanceUID}`);
+    return null;
+  }
 
   // Determine neighbor spacing
   const prev = transformed[idx - 1];
@@ -189,4 +198,6 @@ export async function renderFusionOverlay(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(temp, x, y, w, h);
   ctx.restore();
+  
+  console.log(`✓ MRI overlay drawn: size=${w.toFixed(1)}x${h.toFixed(1)}, pos=(${x.toFixed(1)},${y.toFixed(1)}), opacity=${fusionOpacity}`);
 }
