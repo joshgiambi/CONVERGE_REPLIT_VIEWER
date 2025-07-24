@@ -1599,8 +1599,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    if (!secondaryImages.length || !secondarySeriesId || secondarySeriesId === 'none') {
-      console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId);
+    if (!secondaryImages.length || !secondarySeriesId || typeof secondarySeriesId !== 'number') {
+      console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
       return;
     }
     
