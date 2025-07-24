@@ -285,8 +285,18 @@ export async function renderFusionOverlay(
   // Calculate scale factors for proper physical mm-to-mm mapping
   const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
   const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
-  drawW = w * scaleX;
-  drawH = h * scaleY;
+  
+  // Since the canvas already has ctTransform applied, we need to account for that
+  if (ctTransform) {
+    // The canvas is already scaled by ctTransform.scale, so we need to draw the MRI
+    // at its size in CT pixels WITHOUT the canvas scale applied
+    drawW = (w * scaleX) / ctTransform.scale;
+    drawH = (h * scaleY) / ctTransform.scale;
+  } else {
+    // No canvas transform, use normal scaling
+    drawW = w * scaleX;
+    drawH = h * scaleY;
+  }
   
   console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
@@ -346,19 +356,16 @@ export async function renderFusionOverlay(
       // Use the exact same coordinate system as the CT image
       console.log(`✅ Using shared CT coordinate system: scale=${ctTransform.scale}, offset=(${ctTransform.offsetX}, ${ctTransform.offsetY})`);
       
-      // Apply CT's scale to the MRI dimensions and offsets
-      drawW = drawW * ctTransform.scale;
-      drawH = drawH * ctTransform.scale;
+      // Don't scale drawW/drawH here - they're already in CT pixel space
+      // The canvas transform will handle the zoom scaling
       
-      // Scale the pixel offsets as well
-      const scaledDxPx = dx_px * ctTransform.scale;
-      const scaledDyPx = dy_px * ctTransform.scale;
-      
+      // Calculate the base position where CT image starts
       baseX = ctTransform.offsetX;
       baseY = ctTransform.offsetY;
       
-      drawX = baseX + scaledDxPx;   // Add scaled X offset
-      drawY = baseY + scaledDyPx;   // Add scaled Y offset (canvas Y grows down)
+      // Since canvas is already scaled, we need to divide the pixel offsets by the scale
+      drawX = baseX + (dx_px / ctTransform.scale);   // Add scaled X offset
+      drawY = baseY + (dy_px / ctTransform.scale);   // Add scaled Y offset
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
@@ -417,72 +424,16 @@ export async function renderFusionOverlay(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   
-  // We're now in CT coordinate space thanks to the setTransform at the beginning
-  // Compute the offset using the expert's recommended approach
-  if (ctTransform && registrationMatrix && actualSecondaryImage) {
-    console.log('🔥 Computing MRI position in CT coordinate space');
-    
-    // Get image positions and orientations
-    const ctIPP = toNumberArray(primaryImage.imagePosition);
-    const mriIPP = toNumberArray(actualSecondaryImage.imagePosition);
-    
-    // Get CT orientation vectors (row and column cosines)
-    const ctOrientation = toNumberArray(primaryImage.imageOrientation);
-    const rowCosine = [ctOrientation[0], ctOrientation[1], ctOrientation[2]];
-    const colCosine = [ctOrientation[3], ctOrientation[4], ctOrientation[5]];
-    
-    // Transform MRI origin to CT coordinate space
-    const mriVector = [...mriIPP, 1];
-    const mriCT_x = registrationMatrix[0] * mriVector[0] + registrationMatrix[1] * mriVector[1] + 
-                    registrationMatrix[2] * mriVector[2] + registrationMatrix[3] * mriVector[3];
-    const mriCT_y = registrationMatrix[4] * mriVector[0] + registrationMatrix[5] * mriVector[1] + 
-                    registrationMatrix[6] * mriVector[2] + registrationMatrix[7] * mriVector[3];
-    const mriCT_z = registrationMatrix[8] * mriVector[0] + registrationMatrix[9] * mriVector[1] + 
-                    registrationMatrix[10] * mriVector[2] + registrationMatrix[11] * mriVector[3];
-    
-    // Calculate world delta (MRI origin in CT space - CT origin)
-    const worldDelta = [
-      mriCT_x - ctIPP[0],
-      mriCT_y - ctIPP[1],
-      mriCT_z - ctIPP[2]
-    ];
-    
-    // Helper function for dot product
-    function dot(v1: number[], v2: number[]): number {
-      return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
-    }
-    
-    // Project world delta onto CT image axes to get pixel offsets
-    const dx_px = dot(worldDelta, rowCosine) / ctSpacingArr[1];  // Column spacing for X
-    const dy_px = dot(worldDelta, colCosine) / ctSpacingArr[0];  // Row spacing for Y
-    
-    // Calculate MRI size in CT pixels
-    const destW_px = (w * mriSpacingArr[1]) / ctSpacingArr[1];
-    const destH_px = (h * mriSpacingArr[0]) / ctSpacingArr[0];
-    
-    // Apply CT transform scale to both position and dimensions
-    const scale = ctTransform.scale;
-    const scaledX = dx_px * scale;
-    const scaledY = dy_px * scale;
-    const scaledW = destW_px * scale;
-    const scaledH = destH_px * scale;
-    
-    // Draw MRI at the scaled position and size
-    ctx.drawImage(temp, scaledX, scaledY, scaledW, scaledH);
-    
-    console.log(`✓ MRI drawn using expert's approach:`);
-    console.log(`  CT IPP: [${ctIPP[0].toFixed(1)}, ${ctIPP[1].toFixed(1)}, ${ctIPP[2].toFixed(1)}]mm`);
-    console.log(`  MRI IPP: [${mriIPP[0].toFixed(1)}, ${mriIPP[1].toFixed(1)}, ${mriIPP[2].toFixed(1)}]mm`);
-    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
-    console.log(`  World delta: [${worldDelta[0].toFixed(1)}, ${worldDelta[1].toFixed(1)}, ${worldDelta[2].toFixed(1)}]mm`);
-    console.log(`  Pixel offsets: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
-    console.log(`  MRI size in CT pixels: ${destW_px.toFixed(1)}x${destH_px.toFixed(1)}px`);
+  // Draw the MRI using the already calculated position and size
+  if (drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined) {
+    ctx.drawImage(temp, drawX, drawY, drawW, drawH);
+    console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
   } else {
-    // Fallback to centered positioning if no transform
-    const drawX = (canvasWidth - w) / 2;
-    const drawY = (canvasHeight - h) / 2;
-    ctx.drawImage(temp, drawX, drawY, w, h);
-    console.log(`✓ MRI overlay drawn (fallback): centered at (${drawX.toFixed(1)},${drawY.toFixed(1)})`);
+    // Fallback to centered positioning if calculations failed
+    const centerX = (canvasWidth - w) / 2;
+    const centerY = (canvasHeight - h) / 2;
+    ctx.drawImage(temp, centerX, centerY, w, h);
+    console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`);
   }
   
   console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
