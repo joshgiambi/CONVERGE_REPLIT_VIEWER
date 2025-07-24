@@ -1835,8 +1835,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         [currentRegistrationMatrix[12], currentRegistrationMatrix[13], currentRegistrationMatrix[14], currentRegistrationMatrix[15]]
       ];
       
-      // The registration matrix transforms MRI to CT coordinates
-      // We need to use it to find which MRI slice corresponds to this CT slice
+      // CRITICAL FIX: The registration matrix transforms CT to MRI coordinates (per replit.md)
+      // We need to INVERT it to transform MRI to CT for slice matching
       
       // Check cache first
       const cacheKey = currentIndex;
