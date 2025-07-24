@@ -996,7 +996,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       secondaryImagesLength: secondaryImages.length
     });
     
-    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && Number(secondarySeriesId) && images.length > 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
       console.log('Registration matrix loaded, re-rendering fusion overlay');
       
       // Pre-compute MRI transformations if we have secondary images loaded
@@ -1049,7 +1049,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     const loadSecondaryImages = async () => {
       // Check if secondarySeriesId is valid (not null, not 'none', and a valid number)
-      if (!secondarySeriesId || secondarySeriesId === 'none' || isNaN(Number(secondarySeriesId))) {
+      if (!secondarySeriesId || isNaN(Number(secondarySeriesId))) {
         setSecondaryImages([]);
         setSecondaryImageCache(new Map());
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache

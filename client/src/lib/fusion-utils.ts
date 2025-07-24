@@ -347,8 +347,8 @@ export async function renderFusionOverlay(
       console.log(`✅ Using shared CT coordinate system: scale=${ctTransform.scale}, offset=(${ctTransform.offsetX}, ${ctTransform.offsetY})`);
       
       // Apply CT's scale to the MRI dimensions and offsets
-      drawW = destW * ctTransform.scale;
-      drawH = destH * ctTransform.scale;
+      drawW = drawW * ctTransform.scale;
+      drawH = drawH * ctTransform.scale;
       
       // Scale the pixel offsets as well
       const scaledDxPx = dx_px * ctTransform.scale;
@@ -362,8 +362,8 @@ export async function renderFusionOverlay(
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
-      baseX = (canvasWidth - destW) / 2 + panX;
-      baseY = (canvasHeight - destH) / 2 + panY;
+      baseX = (canvasWidth - drawW) / 2 + panX;
+      baseY = (canvasHeight - drawH) / 2 + panY;
       
       drawX = baseX + dx_px;   // Add X offset (positive = right)
       drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
