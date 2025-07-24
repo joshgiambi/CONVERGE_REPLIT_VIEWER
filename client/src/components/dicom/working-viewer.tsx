@@ -1563,15 +1563,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
 
-    // SIMPLIFIED - NO ZOOM FOR DEBUGGING  
-    const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
-    const totalScale = baseScale; // Just base scale, no zoom
+    // IMPORTANT: For proper DICOM coordinate alignment, use 1:1 pixel mapping
+    // This ensures CT and MRI use the same coordinate system for fusion
+    const totalScale = 1.0; // 1:1 pixel mapping for DICOM alignment
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
 
-    // Center the image on canvas with pan offset
-    const x = (canvasWidth - scaledWidth) / 2 + panX;
-    const y = (canvasHeight - scaledHeight) / 2 + panY;
+    // Position CT image using same DICOM coordinate system as MRI
+    // Calculate center offset based on canvas size vs image size
+    const centerOffsetX = (canvasWidth - scaledWidth) / 2;
+    const centerOffsetY = (canvasHeight - scaledHeight) / 2;
+    
+    // Apply center offset plus pan for consistent DICOM positioning
+    const x = centerOffsetX + panX;
+    const y = centerOffsetY + panY;
+
+    console.log('🎯 CT DICOM POSITIONING:', {
+      canvasSize: `${canvasWidth}x${canvasHeight}`,
+      imageSize: `${width}x${height}`,
+      scaledSize: `${scaledWidth}x${scaledHeight}`,
+      centerOffset: `(${centerOffsetX}, ${centerOffsetY})`,
+      panOffset: `(${panX}, ${panY})`,
+      finalPosition: `(${x}, ${y})`
+    });
 
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
     ctx.imageSmoothingEnabled = true;

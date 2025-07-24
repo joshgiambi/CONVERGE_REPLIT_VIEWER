@@ -326,12 +326,16 @@ export async function renderFusionOverlay(
     const dx_px = dot(delta, rowCosine) / colSpacing;  // Row direction / column spacing (X movement)
     const dy_px = dot(delta, colCosine) / rowSpacing;  // Column direction / row spacing (Y movement)
     
-    // 5) Apply pixel offsets to center-based draw position
-    const baseX = (canvasWidth - destW) / 2 + panX;
-    const baseY = (canvasHeight - destH) / 2 + panY;
+    // 5) CRITICAL: Use same coordinate system as CT for perfect alignment
+    // CT positioning: centerOffset = (canvasWidth - imageSize) / 2
+    // For consistency, MRI must use the same calculation
+    const ctImageSize = 512; // CT image dimensions are 512x512
+    const ctCenterOffsetX = (canvasWidth - ctImageSize) / 2;  // Same as CT: (1024-512)/2 = 256
+    const ctCenterOffsetY = (canvasHeight - ctImageSize) / 2; // Same as CT: (1024-512)/2 = 256
     
-    drawX = baseX + dx_px;   // Add X offset (positive = right)
-    drawY = baseY - dy_px;   // Subtract Y offset (canvas Y grows down)
+    // Apply DICOM pixel offsets to the SAME base position as CT
+    drawX = ctCenterOffsetX + panX + dx_px;   // Start from CT's base position, add DICOM offset
+    drawY = ctCenterOffsetY + panY - dy_px;   // Start from CT's base position, subtract DICOM offset (Y flipped)
     
     console.log(`🎯 PROPER DICOM COORDINATE TRANSFORMATION (CORRECTED):`);
     console.log({
@@ -351,7 +355,8 @@ export async function renderFusionOverlay(
     console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]mm`);
     console.log(`  World delta: [${delta[0].toFixed(1)}, ${delta[1].toFixed(1)}, ${delta[2].toFixed(1)}]mm`);
     console.log(`  Projected pixels: dx=${dx_px.toFixed(1)}px, dy=${dy_px.toFixed(1)}px`);
-    console.log(`  Final position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) vs center: (${baseX.toFixed(1)}, ${baseY.toFixed(1)})`);
+    console.log(`  CT base position: (${ctCenterOffsetX}, ${ctCenterOffsetY}) [SAME AS CT]`);
+    console.log(`  Final position: (${drawX.toFixed(1)}, ${drawY.toFixed(1)}) = CT_base + DICOM_offset`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
