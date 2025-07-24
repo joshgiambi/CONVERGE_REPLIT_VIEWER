@@ -153,16 +153,13 @@ export function PenToolUnified({
     if (!isActive || !canvasRef.current) return;
     if (e.button !== 0) return; // Only left click
     
-    console.log('🖱️ Pen tool mouse down', { isActive, button: e.button });
-    
-    // Use the event target's bounding rect to handle both main and overlay canvas
-    const targetElement = e.target as HTMLElement;
-    const rect = targetElement.getBoundingClientRect();
+    // Use the main canvas for coordinate calculations
+    const rect = canvasRef.current.getBoundingClientRect();
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
-    console.log('🖱️ Click detected at:', { canvasX, canvasY, worldPoint });
+    console.log('🖱️ Pen point placed at:', { canvasX, canvasY, worldPoint });
     
     // Check for morphable region
     const morphRegion = findMorphableRegion([canvasX, canvasY]);
@@ -359,19 +356,18 @@ export function PenToolUnified({
     
     console.log('🎯 Setting up pen tool event listeners', { isActive });
     
-    // Use overlay canvas for events when available
-    const eventCanvas = overlayCanvasRef.current || canvasRef.current;
-    console.log('📍 Attaching events to:', overlayCanvasRef.current ? 'overlay canvas' : 'main canvas');
+    // Use the main canvas for events (following brush tool pattern)
+    const canvas = canvasRef.current;
     
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       handleRightClick(e);
     };
     
-    eventCanvas.addEventListener('mousedown', handleMouseDown);
-    eventCanvas.addEventListener('mousemove', handleMouseMove);
-    eventCanvas.addEventListener('mouseup', handleMouseUp);
-    eventCanvas.addEventListener('contextmenu', handleContextMenu);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('contextmenu', handleContextMenu);
     
     // Global mouse up to handle mouse leaving canvas
     const handleGlobalMouseUp = (e: MouseEvent) => {
@@ -380,20 +376,13 @@ export function PenToolUnified({
     window.addEventListener('mouseup', handleGlobalMouseUp);
     
     return () => {
-      eventCanvas.removeEventListener('mousedown', handleMouseDown);
-      eventCanvas.removeEventListener('mousemove', handleMouseMove);
-      eventCanvas.removeEventListener('mouseup', handleMouseUp);
-      eventCanvas.removeEventListener('contextmenu', handleContextMenu);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isActive, canvasRef, overlayCanvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
-  
-  // Ensure overlay canvas is available by running this effect first
-  useEffect(() => {
-    if (!overlayCanvasRef.current) {
-      overlayCanvasRef.current = document.createElement('canvas');
-    }
-  }, []);
+  }, [isActive, canvasRef, handleMouseDown, handleMouseMove, handleMouseUp, handleRightClick]);
   
   // Reset when deactivated
   useEffect(() => {
@@ -423,38 +412,47 @@ export function PenToolUnified({
     };
   }, [isActive, canvasRef]);
   
-  // Setup overlay canvas
+  // Setup overlay canvas (following brush tool pattern)
   useEffect(() => {
-    if (!canvasRef.current || !overlayCanvasRef.current) return;
-    
-    const canvas = canvasRef.current;
-    const overlay = overlayCanvasRef.current;
-    
-    console.log('🎨 Setting up overlay canvas', { 
-      isActive, 
-      canvasSize: { width: canvas.width, height: canvas.height },
-      canvasOffset: { left: canvas.offsetLeft, top: canvas.offsetTop }
-    });
-    
-    // Match overlay canvas size to main canvas
-    overlay.width = canvas.width;
-    overlay.height = canvas.height;
-    overlay.style.position = 'absolute';
-    overlay.style.left = canvas.offsetLeft + 'px';
-    overlay.style.top = canvas.offsetTop + 'px';
-    overlay.style.pointerEvents = isActive ? 'auto' : 'none'; // Allow events when active
-    overlay.style.zIndex = '1000';
-    
-    if (canvas.parentElement && !canvas.parentElement.contains(overlay)) {
-      canvas.parentElement.appendChild(overlay);
+    if (!canvasRef.current || !isActive) {
+      // Clean up overlay canvas when not active
+      if (overlayCanvasRef.current && overlayCanvasRef.current.parentElement) {
+        overlayCanvasRef.current.parentElement.removeChild(overlayCanvasRef.current);
+        overlayCanvasRef.current = null;
+      }
+      return;
     }
     
-    return () => {
-      if (overlay.parentElement) {
-        overlay.parentElement.removeChild(overlay);
-      }
-    };
-  }, [canvasRef]);
+    const mainCanvas = canvasRef.current;
+    
+    // Create overlay canvas if it doesn't exist
+    if (!overlayCanvasRef.current) {
+      console.log('🎨 Creating overlay canvas for pen tool');
+      const overlayCanvas = document.createElement('canvas');
+      overlayCanvas.style.position = 'absolute';
+      overlayCanvas.style.top = '0';
+      overlayCanvas.style.left = '0';
+      overlayCanvas.style.pointerEvents = 'none'; // Allow events to pass through
+      overlayCanvas.style.zIndex = '10';
+      overlayCanvas.width = mainCanvas.width;
+      overlayCanvas.height = mainCanvas.height;
+      
+      // Match canvas styling
+      const computedStyle = window.getComputedStyle(mainCanvas);
+      overlayCanvas.style.width = computedStyle.width;
+      overlayCanvas.style.height = computedStyle.height;
+      
+      mainCanvas.parentElement?.appendChild(overlayCanvas);
+      overlayCanvasRef.current = overlayCanvas;
+    }
+    
+    // Update overlay canvas size if main canvas size changes
+    if (overlayCanvasRef.current.width !== mainCanvas.width ||
+        overlayCanvasRef.current.height !== mainCanvas.height) {
+      overlayCanvasRef.current.width = mainCanvas.width;
+      overlayCanvasRef.current.height = mainCanvas.height;
+    }
+  }, [canvasRef, isActive]);
   
   // Render overlay
   useEffect(() => {
