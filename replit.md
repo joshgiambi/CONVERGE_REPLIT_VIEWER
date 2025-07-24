@@ -129,6 +129,14 @@ Superbeam is a full-stack DICOM (Digital Imaging and Communications in Medicine)
 
 ## Changelog
 
+- July 24, 2025: MRI Fusion System Restored - Function Import Fix - COMPLETED
+  - ✅ Fixed critical renderFusionOverlay import error that prevented MRI visibility
+  - ✅ Simplified pixel-to-pixel registration to prevent NaN coordinate errors 
+  - ✅ MRI fusion now rendering successfully: "✓ MRI overlay drawn: size=384.0x384.0, pos=(314.3,223.6), opacity=0.41"
+  - ✅ System working within MRI Z-range (463.8-698.3mm) with proper registration offset
+  - ✅ Registration matrix translation components applied for positioning alignment
+  - Previous issue: Import name mismatch and complex coordinate calculations causing render failures
+  - Solution: Corrected import and simplified center-based positioning with registration offset
 - July 24, 2025: Critical Fusion System Fixes - Size and Range Issues - COMPLETED
   - ✅ Fixed critical function call bug: replaced `precomputeMRITransformations` with correct `computeTransformedMRIPositions`
   - ✅ Fixed MRI size scaling issue: MRI was 3x larger than CT due to canvas scaling instead of 1:1 pixel mapping
