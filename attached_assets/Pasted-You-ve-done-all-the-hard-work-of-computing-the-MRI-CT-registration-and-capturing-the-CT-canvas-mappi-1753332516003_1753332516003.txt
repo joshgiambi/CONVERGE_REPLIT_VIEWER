@@ -1,0 +1,112 @@
+You’ve done all the hard work of computing the MRI→CT registration and capturing the CT→canvas mapping in ctTransform, but you never actually use it in your fusion routine. The simplest fix is to push both CT and MRI into the exact same canvas coordinate system via ctx.setTransform, so that nothing ever slips out of registration.
+
+⸻
+
+1) Change your fusion‐utils signature
+
+In fusion-utils.ts, change
+
+export async function renderFusionOverlay(
+  ctx: CanvasRenderingContext2D,
+  primaryImage: any,
+  transformedMRI: …,
+  cache: …,
+  ctSliceZ: number,
+  fusionOpacity: number,
+  panX: number,
+  panY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  registrationMatrix?: number[]
+) { … }
+
+to
+
+export async function renderFusionOverlay(
+  ctx: CanvasRenderingContext2D,
+  primaryImage: any,
+  transformedMRI: …,
+  cache: …,
+  ctSliceZ: number,
+  fusionOpacity: number,
+  panX: number,
+  panY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  registrationMatrix?: number[],
+  ctTransform?: { scale: number; offsetX: number; offsetY: number }
+) {
+  if (ctTransform) {
+    ctx.save();
+    // now all drawing is in “CT-pixel space”
+    ctx.setTransform(
+      ctTransform.scale, 0,
+      0, ctTransform.scale,
+      ctTransform.offsetX,
+      ctTransform.offsetY
+    );
+  }
+
+  // *** from here on your code should draw *in CT pixel units* ***
+  // e.g. your existing:
+  //   ctx.globalAlpha = fusionOpacity;
+  //   ctx.drawImage(temp, drawX, drawY, destW, destH);
+  //
+  // but now drawX, drawY, destW, destH must be in CT-pixel coords:
+  // compute them *before* the transform, for instance:
+  //
+  //   const destW_px = destW_mm / ctSpacingX;
+  //   const destH_px = destH_mm / ctSpacingY;
+  //   const dx_px    = (mriCT_x - ctOriginX) / ctSpacingX;
+  //   const dy_px    = (mriCT_y - ctOriginY) / ctSpacingY;
+  //
+  //   ctx.drawImage(temp, dx_px, -dy_px, destW_px, destH_px);
+  //
+  // (you can even merge rotation/shear via setTransform, but this is the gist)
+
+  …
+
+  if (ctTransform) {
+    ctx.restore();
+  }
+}
+
+
+⸻
+
+2) Call it with your CT transform
+
+In your React component you already do:
+
+ctTransform.current = { scale: totalScale, offsetX: x, offsetY: y, … }
+…
+await renderFusionOverlay(
+  ctx,
+  primaryImage,
+  transformedMRIPositions.current,
+  actualCache,
+  ctSliceZ,
+  fusionOpacity,
+  panX,
+  panY,
+  canvas.width,
+  canvas.height,
+  registrationMatrix,
+  ctTransform.current
+);
+
+Now, because you wrapped the entire overlay in the same transform you used to draw the CT slice, the MRI will be literally in CT‐pixel space. And since your RT‐structure code also uses that exact same (scale,offsetX,offsetY) when mapping world→pixel→canvas, all three (CT, MRI, RT) will stay rock solid together.
+
+⸻
+
+Why this won’t “break” your structures
+
+By centralizing the CT→canvas mapping into one ctx.setTransform, neither your contours nor your fusion offsets ever have to guess at centering or scaling again. Any code that wants to draw in CT‐pixel coordinates now just does:
+
+// world→CT pixels:
+const px = (worldX - ctIPPx)/ctSpacingX
+const py = (worldY - ctIPPy)/ctSpacingY  
+// and straight into canvas:
+ctx.fillRect(px, -py, 1, 1)
+
+No extra centering math, no risk of drift.  That is exactly why using ctx.setTransform is the most bullet-proof way to keep CT, MRI and RT overlays in perfect lock-step.
