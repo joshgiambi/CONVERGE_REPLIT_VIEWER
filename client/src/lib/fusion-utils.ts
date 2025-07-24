@@ -231,57 +231,34 @@ export async function renderFusionOverlay(
   }
   tctx.putImageData(imgData, 0, 0);
 
-  // PROPER MM-TO-PIXEL SCALING using CT metadata
+  // SIMPLIFIED 1:1 PIXEL MAPPING for accurate registration
   const w = mriData.width;
   const h = mriData.height;
   
-  // Get CT pixel spacing for proper mm-to-pixel conversion
-  let ctPixelSpacing = [0.9765625, 0.9765625]; // Default fallback
+  console.log(`MRI dimensions: ${w}x${h}, Canvas: ${canvasWidth}x${canvasHeight}`);
   
-  if (primaryImage.pixelSpacing) {
-    if (typeof primaryImage.pixelSpacing === 'string') {
-      ctPixelSpacing = primaryImage.pixelSpacing.split('\\').map(Number);
-    } else if (Array.isArray(primaryImage.pixelSpacing)) {
-      ctPixelSpacing = primaryImage.pixelSpacing.map(Number);
-    }
-  }
-  
-  const ctPixelSpacingX = ctPixelSpacing[1] || ctPixelSpacing[0]; // Column spacing (X)
-  const ctPixelSpacingY = ctPixelSpacing[0]; // Row spacing (Y)
-  
-  // Calculate proper scaling from CT dimensions
-  const ctImageWidth = 512; // Standard CT matrix size
-  const ctImageHeight = 512;
-  const scaleX = canvasWidth / (ctImageWidth * ctPixelSpacingX);
-  const scaleY = canvasHeight / (ctImageHeight * ctPixelSpacingY);
-  const baseScale = Math.min(scaleX, scaleY);
-  
-  // Center the CT image on canvas
-  const offsetX = (canvasWidth - ctImageWidth * baseScale) / 2;
-  const offsetY = (canvasHeight - ctImageHeight * baseScale) / 2;
-  
-  console.log(`CT pixel spacing: ${ctPixelSpacingX.toFixed(3)}mm x ${ctPixelSpacingY.toFixed(3)}mm, base scale: ${baseScale.toFixed(3)}`);
-  
-  let drawX = offsetX + panX;
-  let drawY = offsetY + panY;
-  let drawW = w * baseScale;
-  let drawH = h * baseScale;
+  // Use 1:1 pixel mapping - no scaling
+  let drawX = (canvasWidth - w) / 2 + panX; // Center MRI on canvas
+  let drawY = (canvasHeight - h) / 2 + panY;
+  let drawW = w; // 1:1 pixel size
+  let drawH = h;
   
   // Apply registration matrix transformation if available
   if (registrationMatrix && registrationMatrix.length === 16) {
-    // Extract translation in mm
+    // Extract translation components (in mm)
     const tx_mm = registrationMatrix[3];
     const ty_mm = registrationMatrix[7];
     const tz_mm = registrationMatrix[11];
     
-    // Convert mm translation to pixels
-    const tx_px = (tx_mm / ctPixelSpacingX) * baseScale;
-    const ty_px = (ty_mm / ctPixelSpacingY) * baseScale;
+    // Use standard DICOM pixel spacing for mm-to-pixel conversion
+    const pixelSpacing = 0.9765625; // mm per pixel for this dataset
+    const tx_px = tx_mm / pixelSpacing;
+    const ty_px = ty_mm / pixelSpacing;
     
     drawX += tx_px;
     drawY += ty_px;
     
-    console.log(`🎯 Registration translation: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)}, ${tz_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
+    console.log(`🎯 Registration offset: (${tx_mm.toFixed(1)}, ${ty_mm.toFixed(1)})mm → (${tx_px.toFixed(1)}, ${ty_px.toFixed(1)})px`);
     
     // Check if matrix has rotation/shear (non-identity 2x2 submatrix)
     const a = registrationMatrix[0], b = registrationMatrix[1];
@@ -295,7 +272,8 @@ export async function renderFusionOverlay(
       
       ctx.save();
       ctx.globalAlpha = fusionOpacity;
-      ctx.setTransform(a * baseScale, c * baseScale, b * baseScale, d * baseScale, e, f);
+      // Use 1:1 scale for rotation transformation
+      ctx.setTransform(a, c, b, d, e, f);
       ctx.drawImage(temp, 0, 0);
       ctx.restore();
       
