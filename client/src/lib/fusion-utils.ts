@@ -286,17 +286,9 @@ export async function renderFusionOverlay(
   const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // column spacing (X)
   const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; // row spacing (Y)
   
-  // Since the canvas already has ctTransform applied, we need to account for that
-  if (ctTransform) {
-    // The canvas is already scaled by ctTransform.scale, so we need to draw the MRI
-    // at its size in CT pixels WITHOUT the canvas scale applied
-    drawW = (w * scaleX) / ctTransform.scale;
-    drawH = (h * scaleY) / ctTransform.scale;
-  } else {
-    // No canvas transform, use normal scaling
-    drawW = w * scaleX;
-    drawH = h * scaleY;
-  }
+  // Calculate MRI size in CT pixel coordinates
+  drawW = w * scaleX;
+  drawH = h * scaleY;
   
   console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, Dest size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
@@ -359,13 +351,10 @@ export async function renderFusionOverlay(
       // Don't scale drawW/drawH here - they're already in CT pixel space
       // The canvas transform will handle the zoom scaling
       
-      // Calculate the base position where CT image starts
-      baseX = ctTransform.offsetX;
-      baseY = ctTransform.offsetY;
-      
-      // Since canvas is already scaled, we need to divide the pixel offsets by the scale
-      drawX = baseX + (dx_px / ctTransform.scale);   // Add scaled X offset
-      drawY = baseY + (dy_px / ctTransform.scale);   // Add scaled Y offset
+      // The canvas transform is already applied, CT is at (0,0) in transformed space
+      // Just use the pixel offsets directly
+      drawX = dx_px;   // X offset from CT origin
+      drawY = dy_px;   // Y offset from CT origin
     } else {
       // Fallback to independent centering if ctTransform not available
       console.log(`⚠️ Fallback to independent centering - ctTransform not available`);
