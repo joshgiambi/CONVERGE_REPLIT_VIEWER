@@ -210,7 +210,13 @@ export async function renderFusionOverlay(
     const v = Math.max(0, Math.min(255, Math.round(normalized * 255)));
     const idx4 = i * 4;
     data[idx4] = data[idx4+1] = data[idx4+2] = v;
-    data[idx4+3] = 255;
+    
+    // Make black/very dark pixels transparent to avoid blocking CT
+    if (v < 20) { // Threshold for black pixels
+      data[idx4+3] = 0; // Fully transparent
+    } else {
+      data[idx4+3] = 255; // Fully opaque
+    }
   }
   tctx.putImageData(imgData, 0, 0);
 
