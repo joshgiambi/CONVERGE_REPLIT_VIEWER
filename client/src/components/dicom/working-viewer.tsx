@@ -985,11 +985,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
-    console.log('Registration matrix useEffect:', {
+    console.log('🔥 Registration matrix useEffect:', {
       hasMatrix: !!registrationMatrix,
       matrixLength: registrationMatrix?.length,
       secondarySeriesId,
-      imagesLength: images.length
+      secondarySeriesType: typeof secondarySeriesId,
+      imagesLength: images.length,
+      secondaryImagesLength: secondaryImages.length
     });
     
     if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && secondarySeriesId !== 'none' && Number(secondarySeriesId) && images.length > 0) {
@@ -1599,14 +1601,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    console.log('🎯 renderFusionOverlayNew called:', {
+      secondaryImagesLength: secondaryImages.length,
+      secondarySeriesId,
+      secondarySeriesType: typeof secondarySeriesId,
+      fusionOpacity,
+      hasRegistrationMatrix: !!registrationMatrix,
+      hasTransformedPositions: !!transformedMRIPositions.current?.length
+    });
+    
     if (!secondaryImages.length || !secondarySeriesId || typeof secondarySeriesId !== 'number') {
-      console.log("Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
+      console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
       return;
     }
     
     // If opacity is 0, skip rendering entirely
     if (fusionOpacity === 0) {
-      console.log("Fusion opacity is 0, skipping overlay render");
+      console.log("❌ Fusion opacity is 0, skipping overlay render");
       return;
     }
     
@@ -1646,6 +1657,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
+    console.log('🚀 About to call renderFusionOverlay with:', {
+      ctSliceZ,
+      fusionOpacity,
+      canvasSize: `${canvas.width}x${canvas.height}`,
+      actualCacheSize: actualCache.size,
+      transformedMRILength: transformedMRIPositions.current?.length
+    });
+    
     // Call the new fusion utility function with registration matrix
     await renderFusionOverlay(
       ctx,
@@ -1661,7 +1680,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       registrationMatrix
     );
     
-    console.log(`✓ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
+    console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
 
   const renderRTStructures = (

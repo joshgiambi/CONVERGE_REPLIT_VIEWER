@@ -236,8 +236,17 @@ export async function renderFusionOverlay(
   const h = mriData.height;
   
   // Get CT pixel spacing for proper mm-to-pixel conversion
-  const ctPixelSpacing = primaryImage.pixelSpacing ? primaryImage.pixelSpacing.split('\\').map(Number) : [0.9765625, 0.9765625];
-  const ctPixelSpacingX = ctPixelSpacing[1]; // Column spacing (X)
+  let ctPixelSpacing = [0.9765625, 0.9765625]; // Default fallback
+  
+  if (primaryImage.pixelSpacing) {
+    if (typeof primaryImage.pixelSpacing === 'string') {
+      ctPixelSpacing = primaryImage.pixelSpacing.split('\\').map(Number);
+    } else if (Array.isArray(primaryImage.pixelSpacing)) {
+      ctPixelSpacing = primaryImage.pixelSpacing.map(Number);
+    }
+  }
+  
+  const ctPixelSpacingX = ctPixelSpacing[1] || ctPixelSpacing[0]; // Column spacing (X)
   const ctPixelSpacingY = ctPixelSpacing[0]; // Row spacing (Y)
   
   // Calculate proper scaling from CT dimensions
