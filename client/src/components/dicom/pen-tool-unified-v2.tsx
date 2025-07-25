@@ -67,8 +67,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       prevZRef.current = currentZ;
       
       // Clear hover state when slice changes to prevent ghost contours
-      setHoveredContour(null);
-      setCurrentMousePos([0, 0]);
+      setHoveredVertex(null);
+      setCurrentMousePos(null);
       
       // Force re-render when slice changes
       if (overlayCanvasRef.current) {

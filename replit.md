@@ -202,6 +202,18 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Ghost Contour Fix - Pen Tool Proximity Detection - COMPLETED ✅
+  - ✅ Fixed critical ghost contour issue where pen tool showed contours from adjacent slices
+  - ✅ Root cause: Proximity detection was finding contours from nearby slices due to floating point Z-position comparisons
+  - ✅ Implemented strict Z-position validation using integer comparison in micrometers (multiply by 1000)
+  - ✅ Added slice change detection with automatic state cleanup when scrolling to new slice
+  - ✅ Double validation in findNearestVertex to ensure only current slice contours are considered
+  - ✅ Clear hover state (setHoveredVertex) and mouse position when slice changes
+  - Technical details:
+    - Convert Z positions to micrometers for exact integer comparison (no floating point errors)
+    - Track previous Z position to detect slice changes
+    - Extra validation loop in proximity detection to skip any contours not on current slice
+    - Automatic state cleanup prevents cached ghost contours from appearing
 - July 25, 2025: Medical Safety Improvements - Pixel Spacing and Boolean Operations - COMPLETED ✅
   - ✅ CRITICAL SAFETY FIX: Removed all hardcoded pixel spacing fallbacks that could cause dangerous measurement errors
   - ✅ Created medical-pixel-spacing.ts with proper DICOM extraction and modality-specific validation
