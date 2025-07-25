@@ -409,6 +409,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
             ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
           );
           
+          console.log('✅ ClipperLib loaded successfully');
+          
           const ClipperClass = clipperLib.Clipper;
           const clipper = new ClipperClass();
           const solution = new clipperLib.Paths();
@@ -498,7 +500,14 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           });
           
         } catch (error) {
-          console.error('Subtraction operation failed:', error);
+          console.error('❌ SUBTRACTION OPERATION FAILED:', error);
+          console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            existingContours: existingContours?.length || 0,
+            newPolygon: newPolygon?.length || 0,
+            errorType: error.constructor.name
+          });
           // For subtract, we can't do a proper subtraction without ClipperLib
           console.warn('Cannot perform subtraction, skipping contour');
         }
