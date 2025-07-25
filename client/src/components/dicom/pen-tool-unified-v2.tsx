@@ -396,17 +396,32 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
         // Send appropriate action based on operation type
         if (operation === 'union') {
-          // Union operation - merge contours
-          onContourUpdate({
-            action: 'merge_contours',
-            structureId: selectedStructure,
-            contours: resultContours, // Send all resulting contours
-            slicePosition: currentZ,
-            imageMetadata
-          });
+          // For union, send each resulting contour as a brush stroke
+          // This will use the same merging logic as the brush tool
+          if (resultContours.length > 0) {
+            // Send the first/main contour as a brush stroke
+            onContourUpdate({
+              action: 'brush_stroke',
+              structureId: selectedStructure,
+              points: resultContours[0], // Send the merged contour points
+              slicePosition: currentZ,
+              brushSize: 1, // Minimal brush size for pen
+              imageMetadata
+            });
+            
+            // If there are additional contours (separate blobs), add them separately
+            for (let i = 1; i < resultContours.length; i++) {
+              onContourUpdate({
+                action: 'add_pen_stroke',
+                structureId: selectedStructure,
+                points: resultContours[i],
+                slicePosition: currentZ,
+                imageMetadata
+              });
+            }
+          }
         } else if (operation === 'subtract') {
-          // For subtraction, the result shows what's left of the original
-          // If there's nothing left, delete the slice
+          // For subtraction, replace all contours with the result
           if (resultContours.length === 0) {
             console.log('Subtraction resulted in empty contour, deleting slice');
             onContourUpdate({
@@ -415,9 +430,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
               slicePosition: currentZ
             });
           } else {
-            // Update with what's left after subtraction
+            // Use merge_contours to replace all contours with subtraction result
             onContourUpdate({
-              action: 'merge_contours', // Use merge to replace all contours
+              action: 'merge_contours',
               structureId: selectedStructure,
               contours: resultContours,
               slicePosition: currentZ,
