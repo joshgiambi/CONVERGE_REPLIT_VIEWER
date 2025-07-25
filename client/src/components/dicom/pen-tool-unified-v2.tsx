@@ -310,15 +310,25 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
       } catch (error) {
         console.error('Boolean operation failed:', error);
-        // Fallback: just add/subtract as before
+        console.error('Error details:', {
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          errorStack: error instanceof Error ? error.stack : 'No stack trace',
+          existingContours: existingContours.length,
+          startMode,
+          hasClipperLib: typeof ClipperLib !== 'undefined',
+          clipperFunctions: typeof ClipperLib !== 'undefined' ? Object.keys(ClipperLib) : []
+        });
+        
+        // Fallback: For now, don't perform boolean operations
+        // Just add the new contour alongside existing ones
         const worldPoints: number[] = [];
         finalPoints.forEach(([x, y]) => {
           worldPoints.push(x, y, currentZ);
         });
         
-        const action = startMode === 'ADD' ? 'add_pen_stroke' : 'subtract_contour';
+        // Use a simple add action that won't delete existing contours
         onContourUpdate({
-          action: action,
+          action: 'add_contour',
           structureId: selectedStructure,
           points: worldPoints,
           slicePosition: currentZ,

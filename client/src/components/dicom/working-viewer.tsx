@@ -650,6 +650,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
+    } else if (payload.action === "add_contour") {
+      // Simple add contour without boolean operations - used as fallback
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+      
+      // Simply add the new contour alongside existing ones
+      structure.contours.push({
+        slicePosition: payload.slicePosition,
+        points: payload.points,
+        numberOfPoints: payload.points.length / 3,
+      });
+      
+      console.log(`Added new contour at slice ${payload.slicePosition} alongside existing contours`);
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'add_contour');
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
