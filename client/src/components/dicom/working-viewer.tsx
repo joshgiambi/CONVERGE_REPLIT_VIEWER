@@ -726,6 +726,70 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
+    } else if (payload.action === "merge_contours") {
+      // Handle boolean merge operation (union) - properly merges multiple contours into one
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Replace all contours at this slice with the merged result
+      const tolerance = 1.5;
+      
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+      );
+
+      // Add the merged contours from the boolean operation
+      if (payload.contours && payload.contours.length > 0) {
+        payload.contours.forEach((contourPoints: number[]) => {
+          if (contourPoints.length >= 9) {
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contourPoints,
+              numberOfPoints: contourPoints.length / 3,
+            });
+          }
+        });
+        console.log(`Merged contours at slice ${payload.slicePosition}: ${payload.contours.length} contours added`);
+      }
+
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'merge_contours');
+    } else if (payload.action === "subtract_contours") {
+      // Handle boolean subtract operation (difference)
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Replace all contours at this slice with the subtraction result
+      const tolerance = 1.5;
+      
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+      );
+
+      // Add the resulting contours from the boolean operation
+      if (payload.contours && payload.contours.length > 0) {
+        payload.contours.forEach((contourPoints: number[]) => {
+          if (contourPoints.length >= 9) {
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contourPoints,
+              numberOfPoints: contourPoints.length / 3,
+            });
+          }
+        });
+        console.log(`Subtraction result at slice ${payload.slicePosition}: ${payload.contours.length} contours added`);
+      } else {
+        console.log(`Subtraction result at slice ${payload.slicePosition}: all contours removed`);
+      }
+
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'subtract_contours');
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);

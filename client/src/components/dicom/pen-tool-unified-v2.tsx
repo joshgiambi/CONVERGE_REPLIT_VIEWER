@@ -266,25 +266,35 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           solutionPaths: solution.length
         });
         
-        // Replace all contours at this slice with boolean operation result
-        if (resultContours.length > 0) {
-          console.log('Calling onContourUpdate with replace_contour');
-          // Use replace_contour action for the merged result
+        // Send appropriate action based on operation type
+        if (startMode === 'ADD') {
+          // Union operation - merge contours
           onContourUpdate({
-            action: 'replace_contour',
+            action: 'merge_contours',
             structureId: selectedStructure,
-            points: resultContours[0], // Use the first (usually only) contour result
+            contours: resultContours, // Send all resulting contours
             slicePosition: currentZ,
             imageMetadata
           });
         } else {
-          // If boolean operation resulted in empty contour, delete the slice
-          console.log('Boolean operation resulted in empty contour, deleting slice');
-          onContourUpdate({
-            action: 'delete_slice',
-            structureId: selectedStructure,
-            slicePosition: currentZ
-          });
+          // Difference operation - subtract contours
+          if (resultContours.length > 0) {
+            onContourUpdate({
+              action: 'subtract_contours',
+              structureId: selectedStructure,
+              contours: resultContours, // Send all resulting contours
+              slicePosition: currentZ,
+              imageMetadata
+            });
+          } else {
+            // If subtraction resulted in empty contour, delete the slice
+            console.log('Subtraction resulted in empty contour, deleting slice');
+            onContourUpdate({
+              action: 'delete_slice',
+              structureId: selectedStructure,
+              slicePosition: currentZ
+            });
+          }
         }
         
       } catch (error) {
