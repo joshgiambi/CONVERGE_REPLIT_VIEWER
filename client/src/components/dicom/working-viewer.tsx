@@ -719,42 +719,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'subtract_contour');
     } else if (payload.action === "replace_contour") {
-      // Handle contour replacement (morphing)
+      // Handle contour replacement - REPLACES ALL contours at this slice (for boolean operations and morphing)
       const structure = updatedStructures.structures.find(
         (s: any) => s.roiNumber === payload.structureId,
       );
       if (!structure) return;
 
-      // Find and replace the contour on current slice
+      // Remove ALL existing contours at this slice
       const tolerance = 1.5;
-      const contourIndex = structure.contours.findIndex(
-        (c: any) =>
-          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance,
       );
 
-      if (contourIndex >= 0) {
-        // Replace existing contour with new points
-        structure.contours[contourIndex] = {
-          slicePosition: payload.slicePosition,
-          points: payload.points,
-          numberOfPoints: payload.points.length / 3,
-        };
-        console.log(
-          `Replaced contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`,
-        );
-      } else {
-        // Create new contour if none exists
-        structure.contours.push({
-          slicePosition: payload.slicePosition,
-          points: payload.points,
-          numberOfPoints: payload.points.length / 3,
-        });
-        console.log(
-          `Created new contour at slice ${payload.slicePosition} with ${payload.points.length / 3} points`,
-        );
-      }
+      // Add the new contour (which is the complete boolean operation result)
+      structure.contours.push({
+        slicePosition: payload.slicePosition,
+        points: payload.points,
+        numberOfPoints: payload.points.length / 3,
+      });
+      
+      console.log(
+        `Replaced ALL contours at slice ${payload.slicePosition} with boolean result (${payload.points.length / 3} points)`,
+      );
 
       setLocalRTStructures(updatedStructures);
+      // Save contour updates to server
+      saveContourUpdates(updatedStructures, 'replace_contour');
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
