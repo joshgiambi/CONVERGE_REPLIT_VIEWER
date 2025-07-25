@@ -411,8 +411,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           
           console.log('✅ ClipperLib loaded successfully');
           
-          const ClipperClass = clipperLib.Clipper;
-          const clipper = new ClipperClass();
+          // Create clipper instance directly from the loaded library
+          const clipper = new clipperLib.Clipper();
           const solution = new clipperLib.Paths();
           
           // Convert existing contours to ClipperLib format

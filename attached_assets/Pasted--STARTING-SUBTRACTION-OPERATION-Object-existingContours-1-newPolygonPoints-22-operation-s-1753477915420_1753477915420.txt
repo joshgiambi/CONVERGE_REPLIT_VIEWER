@@ -1,0 +1,54 @@
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 22, operation: "subtract"}
+Subtraction operation failed: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 26, operation: "subtract"}
+Subtraction operation failed: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 22, operation: "subtract"}
+Subtraction operation failed: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 26, operation: "subtract"}
+Subtraction operation failed: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 16, operation: "subtract"}
+❌ SUBTRACTION OPERATION FAILED: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+🔴 STARTING SUBTRACTION OPERATION: 
+Object {existingContours: 1, newPolygonPoints: 21, operation: "subtract"}
+❌ SUBTRACTION OPERATION FAILED: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
