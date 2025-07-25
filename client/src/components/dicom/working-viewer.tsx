@@ -20,6 +20,7 @@ import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
+import { performPolygonUnion } from "@/lib/polygon-union";
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -669,7 +670,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       if (payload.action === "add_pen_stroke") {
         if (sliceContour) {
-          // Merge pen stroke with existing contour
+          // Just append the new pen stroke without connecting
+          // This creates a separate blob on the same slice
           const mergedPoints = [...sliceContour.points, ...payload.points];
           sliceContour.points = mergedPoints;
           sliceContour.numberOfPoints = mergedPoints.length / 3;
@@ -689,6 +691,112 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
+    } else if (payload.action === "pen_boolean_operation") {
+      // Handle pen tool boolean operations (union/subtract)
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Find contour on current slice
+      const tolerance = 1.5;
+      const contourIndex = structure.contours.findIndex(
+        (c: any) =>
+          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
+      );
+
+      if (payload.operation === 'union' && contourIndex >= 0) {
+        // For union, use polygon union to merge overlapping areas properly
+        const existingContour = structure.contours[contourIndex];
+        const existingPolygons = [];
+        
+        // Convert existing contour points to polygons
+        for (let i = 0; i < existingContour.points.length; i += 3) {
+          if (i === 0 || (i > 0 && existingContour.points[i-3] === undefined)) {
+            // Start of a new polygon
+            existingPolygons.push([]);
+          }
+          existingPolygons[existingPolygons.length - 1].push([
+            existingContour.points[i],
+            existingContour.points[i+1]
+          ]);
+        }
+        
+        // Convert new pen stroke to polygon
+        const newPolygon = [];
+        for (let i = 0; i < payload.points.length; i += 3) {
+          newPolygon.push([payload.points[i], payload.points[i+1]]);
+        }
+        
+        // Perform polygon union
+        const allPolygons = [...existingPolygons, newPolygon];
+        const unionResult = performPolygonUnion(allPolygons);
+        
+        // Convert union result back to points array
+        const unionPoints = [];
+        unionResult.forEach(polygon => {
+          polygon.forEach(([x, y]) => {
+            unionPoints.push(x, y, payload.slicePosition);
+          });
+        });
+        
+        // Update contour with union result
+        structure.contours[contourIndex] = {
+          slicePosition: payload.slicePosition,
+          points: unionPoints,
+          numberOfPoints: unionPoints.length / 3,
+        };
+        
+        console.log('Pen union operation completed');
+      } else if (payload.operation === 'separate' || (payload.operation === 'union' && contourIndex === -1)) {
+        // For separate blobs or first contour, just add without merging
+        if (contourIndex >= 0) {
+          // Append as separate blob
+          const existingPoints = structure.contours[contourIndex].points;
+          const combinedPoints = [...existingPoints, ...payload.points];
+          structure.contours[contourIndex].points = combinedPoints;
+          structure.contours[contourIndex].numberOfPoints = combinedPoints.length / 3;
+        } else {
+          // Create new contour
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: payload.points,
+            numberOfPoints: payload.points.length / 3,
+          });
+        }
+      } else if (payload.operation === 'subtract' && payload.resultContours) {
+        // For subtraction, replace with the result contours from ClipperLib
+        if (payload.resultContours.length === 0) {
+          // Remove the contour if subtraction results in empty
+          if (contourIndex >= 0) {
+            structure.contours.splice(contourIndex, 1);
+          }
+        } else {
+          // Replace with subtraction result
+          const allPoints = [];
+          payload.resultContours.forEach(contour => {
+            allPoints.push(...contour);
+          });
+          
+          if (contourIndex >= 0) {
+            structure.contours[contourIndex] = {
+              slicePosition: payload.slicePosition,
+              points: allPoints,
+              numberOfPoints: allPoints.length / 3,
+            };
+          } else {
+            // This shouldn't happen for subtraction, but handle it
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: allPoints,
+              numberOfPoints: allPoints.length / 3,
+            });
+          }
+        }
+      }
+
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'pen_boolean_operation');
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(

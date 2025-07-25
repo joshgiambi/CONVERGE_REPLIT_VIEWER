@@ -268,3 +268,42 @@ function perpendicularDistance(
   
   return Math.hypot(point.x - projX, point.y - projY);
 }
+
+/**
+ * Perform polygon union on an array of polygons
+ * Each polygon is represented as an array of [x, y] coordinate pairs
+ * Returns an array of polygons (usually just one unless there are separate blobs)
+ */
+export function performPolygonUnion(polygons: number[][][]): number[][][] {
+  if (polygons.length === 0) return [];
+  if (polygons.length === 1) return polygons;
+  
+  // Convert polygon format from [[x,y]] to [x,y,z,x,y,z,...]
+  const z = 0; // We'll extract Z from the first point if available
+  const convertedPolygons: number[][] = [];
+  
+  for (const polygon of polygons) {
+    const converted: number[] = [];
+    for (const [x, y] of polygon) {
+      converted.push(x, y, z);
+    }
+    convertedPolygons.push(converted);
+  }
+  
+  // Perform union
+  const unionResult = polygonUnion(convertedPolygons);
+  
+  // Convert back to [[x,y]] format
+  const resultPolygons: number[][][] = [];
+  let currentPolygon: number[][] = [];
+  
+  for (let i = 0; i < unionResult.length; i += 3) {
+    currentPolygon.push([unionResult[i], unionResult[i + 1]]);
+  }
+  
+  if (currentPolygon.length > 0) {
+    resultPolygons.push(currentPolygon);
+  }
+  
+  return resultPolygons;
+}

@@ -278,21 +278,21 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         operation
       });
       
-      // For union operations, use brush_stroke action to leverage existing merge logic
-      if (operation === 'union' && existingContours.length > 0) {
-        // Send raw pen stroke to use brush tool's merging logic
-        const worldPoints: number[] = [];
-        finalPoints.forEach(([x, y]) => {
-          worldPoints.push(x, y, currentZ);
-        });
-        
-        console.log('Using brush_stroke action for union operation');
+      // Prepare world points
+      const worldPoints: number[] = [];
+      finalPoints.forEach(([x, y]) => {
+        worldPoints.push(x, y, currentZ);
+      });
+      
+      // Handle union operations
+      if (operation === 'union') {
+        console.log('Pen tool union operation');
         onContourUpdate({
-          action: 'brush_stroke',
+          action: 'pen_boolean_operation',
           structureId: selectedStructure,
           points: worldPoints,
           slicePosition: currentZ,
-          brushSize: 1, // Minimal brush size for pen
+          operation: 'union',
           imageMetadata
         });
         
@@ -304,18 +304,14 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Handle separate case (no boolean operation needed)
-      if (operation === 'separate' || (operation === 'union' && existingContours.length === 0)) {
-        // Just add the new contour as a separate blob
-        const worldPoints: number[] = [];
-        finalPoints.forEach(([x, y]) => {
-          worldPoints.push(x, y, currentZ);
-        });
-        
+      if (operation === 'separate') {
+        console.log('Pen tool separate blob operation');
         onContourUpdate({
-          action: 'add_pen_stroke',
+          action: 'pen_boolean_operation',
           structureId: selectedStructure,
           points: worldPoints,
           slicePosition: currentZ,
+          operation: 'separate',
           imageMetadata
         });
         
@@ -403,24 +399,17 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           solution.delete();
           clipper.delete();
           
-          // For subtraction, replace all contours with the result
-          if (resultContours.length === 0) {
-            console.log('Subtraction resulted in empty contour, deleting slice');
-            onContourUpdate({
-              action: 'delete_slice',
-              structureId: selectedStructure,
-              slicePosition: currentZ
-            });
-          } else {
-            // Use merge_contours to replace all contours with subtraction result
-            onContourUpdate({
-              action: 'merge_contours',
-              structureId: selectedStructure,
-              contours: resultContours,
-              slicePosition: currentZ,
-              imageMetadata
-            });
-          }
+          // Send subtraction result to pen_boolean_operation handler
+          console.log('Pen tool subtraction operation');
+          onContourUpdate({
+            action: 'pen_boolean_operation',
+            structureId: selectedStructure,
+            points: worldPoints,
+            slicePosition: currentZ,
+            operation: 'subtract',
+            resultContours: resultContours,
+            imageMetadata
+          });
           
         } catch (error) {
           console.error('Subtraction operation failed:', error);
