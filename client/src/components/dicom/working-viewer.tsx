@@ -541,8 +541,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Handle refresh action for undo/redo
     if (payload.action === "refresh") {
       console.log("Refreshing RT structures after undo/redo");
-      // Just update from parent without clearing
-      setLocalRTStructures(rtStructures);
+      // Update with the RT structures from the payload
+      if (payload.rtStructures) {
+        setLocalRTStructures(payload.rtStructures);
+        // Force re-render of the canvas
+        if (images.length > 0) {
+          displayCurrentImage();
+        }
+      }
       return;
     }
 

@@ -203,9 +203,12 @@ export function ContourEditToolbar({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Undo successful" });
-      // Pass the actual RT structures data instead of just refresh action
-      if (onContourUpdate && data) {
-        onContourUpdate(data);
+      // Send a refresh action instead of the raw data
+      if (onContourUpdate) {
+        onContourUpdate({
+          action: 'refresh',
+          rtStructures: data
+        });
       }
     },
     onError: () => {
@@ -227,9 +230,12 @@ export function ContourEditToolbar({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Redo successful" });
-      // Pass the actual RT structures data instead of just refresh action
-      if (onContourUpdate && data) {
-        onContourUpdate(data);
+      // Send a refresh action instead of the raw data
+      if (onContourUpdate) {
+        onContourUpdate({
+          action: 'refresh',
+          rtStructures: data
+        });
       }
     },
     onError: () => {

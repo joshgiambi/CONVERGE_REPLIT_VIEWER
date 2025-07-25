@@ -24,6 +24,14 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   onContourUpdate,
   color
 }) => {
+  // Debug - log when component renders
+  console.log('🔷 PenToolUnifiedV2 RENDERED:', {
+    isActive,
+    hasCanvas: !!canvasRef?.current,
+    selectedStructure,
+    imageMetadata: imageMetadata ? 'present' : 'missing'
+  });
+  
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   
@@ -169,37 +177,60 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     return distance < CLOSE_THRESHOLD;
   }, [points, worldToCanvas]);
   
+  // Check if a point is inside a polygon using ray casting algorithm
+  const isPointInPolygon = (point: [number, number], polygon: [number, number][]) => {
+    let inside = false;
+    const x = point[0], y = point[1];
+    
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i][0], yi = polygon[i][1];
+      const xj = polygon[j][0], yj = polygon[j][1];
+      
+      const intersect = ((yi > y) !== (yj > y))
+          && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    
+    return inside;
+  };
+  
   // Check if new polygon intersects with any existing contour
   const doesNewPolygonIntersect = useCallback((newPoints: [number, number][], existingContours: any[]) => {
-    // Create a simple bounding box check first
-    let newMinX = Infinity, newMaxX = -Infinity;
-    let newMinY = Infinity, newMaxY = -Infinity;
-    
-    newPoints.forEach(([x, y]) => {
-      newMinX = Math.min(newMinX, x);
-      newMaxX = Math.max(newMaxX, x);
-      newMinY = Math.min(newMinY, y);
-      newMaxY = Math.max(newMaxY, y);
-    });
-    
-    // Check each existing contour
+    // Check each existing contour for actual intersection
     for (const contour of existingContours) {
-      let contourMinX = Infinity, contourMaxX = -Infinity;
-      let contourMinY = Infinity, contourMaxY = -Infinity;
-      
+      // Convert contour points to 2D array
+      const contourPoints: [number, number][] = [];
       for (let i = 0; i < contour.points.length; i += 3) {
-        const x = contour.points[i];
-        const y = contour.points[i + 1];
-        contourMinX = Math.min(contourMinX, x);
-        contourMaxX = Math.max(contourMaxX, x);
-        contourMinY = Math.min(contourMinY, y);
-        contourMaxY = Math.max(contourMaxY, y);
+        contourPoints.push([contour.points[i], contour.points[i + 1]]);
       }
       
-      // Check if bounding boxes overlap
-      if (newMaxX >= contourMinX && newMinX <= contourMaxX &&
-          newMaxY >= contourMinY && newMinY <= contourMaxY) {
-        return true; // Potential intersection
+      // Check if any edge of the new polygon crosses any edge of the existing contour
+      for (let i = 0; i < newPoints.length; i++) {
+        const p1 = newPoints[i];
+        const p2 = newPoints[(i + 1) % newPoints.length];
+        
+        for (let j = 0; j < contourPoints.length; j++) {
+          const p3 = contourPoints[j];
+          const p4 = contourPoints[(j + 1) % contourPoints.length];
+          
+          // Check if line segments p1-p2 and p3-p4 intersect
+          const d1 = (p4[0] - p3[0]) * (p1[1] - p3[1]) - (p4[1] - p3[1]) * (p1[0] - p3[0]);
+          const d2 = (p4[0] - p3[0]) * (p2[1] - p3[1]) - (p4[1] - p3[1]) * (p2[0] - p3[0]);
+          const d3 = (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]);
+          const d4 = (p2[0] - p1[0]) * (p4[1] - p1[1]) - (p2[1] - p1[1]) * (p4[0] - p1[0]);
+          
+          // If signs differ, segments intersect
+          if (d1 * d2 < 0 && d3 * d4 < 0) {
+            return true; // Found intersection
+          }
+        }
+      }
+      
+      // Also check if any point of new polygon is inside the contour
+      // This handles cases where one polygon is completely inside another
+      const firstPoint = newPoints[0];
+      if (isPointInPolygon(firstPoint, contourPoints)) {
+        return true;
       }
     }
     
@@ -609,10 +640,14 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   
   // Setup overlay canvas
   useEffect(() => {
-    if (!canvasRef.current || !isActive) return;
+    if (!canvasRef.current || !isActive) {
+      console.log('Pen tool setup skipped:', { hasCanvas: !!canvasRef.current, isActive });
+      return;
+    }
     
     const mainCanvas = canvasRef.current;
     console.log('Setting up overlay canvas, main canvas:', mainCanvas);
+    console.log('Main canvas parent:', mainCanvas.parentElement);
     
     if (!overlayCanvasRef.current) {
       const overlayCanvas = document.createElement('canvas');
@@ -624,12 +659,20 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       overlayCanvas.style.height = mainCanvas.style.height;
       overlayCanvas.width = mainCanvas.width;
       overlayCanvas.height = mainCanvas.height;
-      overlayCanvas.style.zIndex = '10'; // Make sure it's on top
+      overlayCanvas.style.zIndex = '1000'; // Higher z-index to ensure visibility
+      overlayCanvas.style.border = '2px solid red'; // DEBUG: Add visible border
       
       console.log('Creating overlay canvas with size:', mainCanvas.width, 'x', mainCanvas.height);
+      console.log('Overlay canvas styles:', {
+        position: overlayCanvas.style.position,
+        zIndex: overlayCanvas.style.zIndex,
+        width: overlayCanvas.style.width,
+        height: overlayCanvas.style.height
+      });
+      
       mainCanvas.parentElement?.appendChild(overlayCanvas);
       overlayCanvasRef.current = overlayCanvas;
-      console.log('Overlay canvas created and appended');
+      console.log('Overlay canvas created and appended to parent:', mainCanvas.parentElement);
     }
     
     // Update size if needed
@@ -655,6 +698,17 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // Clear
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+    
+    // DEBUG: Draw test rectangle to verify overlay is visible
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.5)';
+    ctx.fillRect(10, 10, 100, 50);
+    ctx.font = '16px Arial';
+    ctx.fillStyle = 'white';
+    ctx.fillText('PEN TOOL ACTIVE', 15, 35);
+    ctx.restore();
+    
+    console.log('Render called - overlay canvas size:', overlayCanvasRef.current.width, 'x', overlayCanvasRef.current.height);
     
     // Get structure color
     const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
@@ -885,11 +939,16 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   
   // Start render loop
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive) {
+      console.log('🔷 Pen tool render loop - not active');
+      return;
+    }
     
+    console.log('🔷 Starting pen tool render loop');
     render();
     
     return () => {
+      console.log('🔷 Stopping pen tool render loop');
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
