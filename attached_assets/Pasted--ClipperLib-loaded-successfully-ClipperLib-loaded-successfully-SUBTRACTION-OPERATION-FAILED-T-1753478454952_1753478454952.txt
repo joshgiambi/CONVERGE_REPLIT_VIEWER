@@ -1,0 +1,59 @@
+✅ ClipperLib loaded successfully
+✅ ClipperLib loaded successfully
+❌ SUBTRACTION OPERATION FAILED: 
+TypeError {}
+message: "clipperLib.Clipper is not a constructor"
+stack: "TypeError: clipperLib.Clipper is not a constructor↵ at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/pen-tool-unified-v2.tsx?t=1753477932028:297:27"
+get stack: ƒ ()
+set stack: ƒ ()
+[[Prototype]]: Object
+constructor: ƒ TypeError()
+message: "clipperLib.Clipper is not a constructor"
+name: "TypeError"
+[[Prototype]]: Object
+
+Error details: 
+Object {message: "clipperLib.Clipper is not a constructor", stack: "TypeError: clipperLib.Clipper is not a constructor↵    at…", existingContours: 1, newPolygon: 11, errorType: "TypeError"}
+
+✅ ClipperLib loaded successfully
+❌ SUBTRACTION OPERATION FAILED: 
+TypeError {}
+message: "clipperLib.Clipper is not a constructor"
+stack: "TypeError: clipperLib.Clipper is not a constructor↵ at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/pen-tool-unified-v2.tsx?t=1753477932028:297:27"
+get stack: ƒ ()
+set stack: ƒ ()
+[[Prototype]]: Object
+
+Error details: 
+Object {message: "clipperLib.Clipper is not a constructor", stack: "TypeError: clipperLib.Clipper is not a constructor↵    at…", existingContours: 1, newPolygon: 13, errorType: "TypeError"}
+
+✅ ClipperLib loaded successfully
+ClipperLib structure: 
+(2) ["format", "instance"]
+0: "format"
+1: "instance"
+length: 2
+[[Prototype]]: Array(0)
+Error details: 
+Object {message: "clipperLib.Clipper is not a constructor", stack: "TypeError: clipperLib.Clipper is not a constructor↵    at…", existingContours: 1, newPolygon: 13, errorType: "TypeError"}
+errorType: "TypeError"
+existingContours: 1
+message: "clipperLib.Clipper is not a constructor"
+newPolygon: 13
+stack: "TypeError: clipperLib.Clipper is not a constructor↵ at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/pen-tool-unified-v2.tsx?t=1753478246646:298:27"
+[[Prototype]]: Object
+
+✅ ClipperLib loaded successfully
+ClipperLib structure: 
+(2) ["format", "instance"]
+0: "format"
+1: "instance"
+length: 2
+[[Prototype]]: Array(0)
+Error details: 
+Object {message: "clipperLib.Clipper is not a constructor", stack: "TypeError: clipperLib.Clipper is not a constructor↵    at…", existingContours: 1, newPolygon: 13, errorType: "TypeError"}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
