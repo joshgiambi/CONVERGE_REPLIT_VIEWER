@@ -1045,7 +1045,7 @@ export function SeriesSelector({
                     )}
 
                     {/* Structures List - Grouped and Individual */}
-                    <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 600px)' }}>
+                    <div className="space-y-1 overflow-y-auto max-h-96">
                       {rtStructures?.structures && (() => {
                         const filteredStructures = rtStructures.structures.filter((structure: any) =>
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())

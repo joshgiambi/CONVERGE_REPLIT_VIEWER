@@ -424,7 +424,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 h-full overflow-hidden">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
