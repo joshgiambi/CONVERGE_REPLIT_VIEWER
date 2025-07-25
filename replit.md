@@ -202,6 +202,16 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Critical Pen Tool Coordinate System Fix with React Closure Resolution - COMPLETED ✅
+  - ✅ Fixed React closure issue causing pen tool offset from cursor position
+  - ✅ Root cause: worldToCanvas/canvasToWorld functions captured stale ctTransform.current values in closure
+  - ✅ Solution: Wrapped coordinate transformation functions in useCallback to ensure fresh ctTransform access
+  - ✅ Added missing useCallback import to React imports
+  - ✅ Pen tool now correctly aligns with cursor at all zoom/pan levels
+  - Technical details:
+    - React closures can capture stale ref values when functions are passed as props
+    - useCallback ensures functions access current ref values on each call
+    - ctTransform.current now properly accessed with latest scale/offset values
 - July 25, 2025: Critical Pen Tool Coordinate System Fix - COMPLETED ✅
   - ✅ Fixed pen tool coordinate mismatch issue where pen strokes were offset from cursor position
   - ✅ Root cause: Pen tool was drawing in raw DICOM pixel space while CT canvas was scaled/centered by ctTransform
