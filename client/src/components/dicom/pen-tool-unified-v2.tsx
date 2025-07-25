@@ -185,11 +185,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       finalPoints.push(finalPoint);
     }
     
-    // Convert to ClipperLib format (scale by 1000 for integer precision)
     const SCALE = 1000;
-    const newPolygon = finalPoints.map(([x, y]) => ({
-      x: Math.round(x * SCALE),
-      y: Math.round(y * SCALE)
+    
+    // Build the new polygon in Clipper coordinates
+    const newPoly: ClipperLib.Path = finalPoints.map(([x, y]) => ({
+      X: Math.round(x * SCALE),
+      Y: Math.round(y * SCALE)
     }));
     
     // Get existing contours at current slice
@@ -222,89 +223,67 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
         );
         
-        const clipper = new ClipperLib.Clipper();
-        const solution: ClipperLib.Path[] = [];
-        
-        // Convert existing contours to ClipperLib format
-        const existingPaths: ClipperLib.Path[] = existingContours.map(contour => {
-          const path: ClipperLib.IntPoint[] = [];
-          for (let i = 0; i < contour.points.length; i += 3) {
+        // Convert existing contours to Clipper paths
+        const existing: ClipperLib.Path[] = existingContours.map(c => {
+          const path: ClipperLib.Path = [];
+          for (let i = 0; i < c.points.length; i += 3) {
             path.push({
-              x: Math.round(contour.points[i] * SCALE),
-              y: Math.round(contour.points[i + 1] * SCALE)
+              X: Math.round(c.points[i] * SCALE),
+              Y: Math.round(c.points[i + 1] * SCALE)
             });
           }
           return path;
         });
         
-        if (startMode === 'ADD') {
-          // Union operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Union, solution);
+        const clipper = new ClipperLib.Clipper();
+        const solution: ClipperLib.Paths = [];
+        
+        if (startMode === "ADD") {
+          // Union: both paths as Subject
+          clipper.addPaths(existing, ClipperLib.PolyType.Subject, true);
+          clipper.addPath(newPoly, ClipperLib.PolyType.Subject, true);
+          clipper.execute(
+            ClipperLib.ClipType.Union,
+            solution,
+            ClipperLib.PolyFillType.EvenOdd,
+            ClipperLib.PolyFillType.EvenOdd
+          );
         } else {
-          // Difference operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Difference, solution);
+          // Subtract: existing=Subject, new=Clip
+          clipper.addPaths(existing, ClipperLib.PolyType.Subject, true);
+          clipper.addPath(newPoly, ClipperLib.PolyType.Clip, true);
+          clipper.execute(
+            ClipperLib.ClipType.Difference,
+            solution,
+            ClipperLib.PolyFillType.EvenOdd,
+            ClipperLib.PolyFillType.EvenOdd
+          );
         }
         
-        // Convert solution back to world coordinates
-        const resultContours: number[][] = solution.map(path => {
-          const worldPoints: number[] = [];
-          path.forEach(point => {
-            worldPoints.push(point.x / SCALE, point.y / SCALE, currentZ);
-          });
-          return worldPoints;
-        });
-        
-        // Send updated contours
         console.log('Boolean operation result:', {
           operation: startMode,
-          originalContours: existingContours.length,
-          resultContours: resultContours.length,
           solutionPaths: solution.length
         });
         
-        // Replace all contours at this slice with boolean operation result
-        if (resultContours.length > 0) {
-          console.log('Calling onContourUpdate with replace_contours');
-          
-          // If we have multiple contours as result, we need to handle them properly
-          if (resultContours.length === 1) {
-            // Single contour result - use replace_contour
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: resultContours[0],
-              slicePosition: currentZ,
-              imageMetadata
-            });
-          } else {
-            // Multiple contours result - we need to replace all contours at this slice
-            // For now, merge all result contours into one (medical imaging typically expects one contour per slice)
-            const mergedPoints: number[] = [];
-            resultContours.forEach(contour => {
-              mergedPoints.push(...contour);
-            });
-            
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: mergedPoints,
-              slicePosition: currentZ,
-              imageMetadata
-            });
-            
-            console.log(`Boolean operation resulted in ${resultContours.length} separate contours, merged into one`);
-          }
-        } else {
-          // If boolean operation resulted in empty contour, delete the slice
-          console.log('Boolean operation resulted in empty contour, deleting slice');
+        if (solution.length === 0) {
+          // Nothing left → delete the slice
           onContourUpdate({
-            action: 'delete_slice',
+            action: "delete_slice",
             structureId: selectedStructure,
             slicePosition: currentZ
+          });
+        } else {
+          // Flatten all result paths back to world coords
+          const merged = solution.flatMap(path =>
+            path.flatMap(pt => [pt.X / SCALE, pt.Y / SCALE, currentZ])
+          );
+          
+          onContourUpdate({
+            action: "replace_contour",
+            structureId: selectedStructure,
+            points: merged,
+            slicePosition: currentZ,
+            imageMetadata
           });
         }
         
