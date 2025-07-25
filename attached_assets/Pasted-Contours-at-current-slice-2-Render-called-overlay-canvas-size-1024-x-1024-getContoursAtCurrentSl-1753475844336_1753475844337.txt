@@ -1,0 +1,52 @@
+Contours at current slice: 2
+Render called - overlay canvas size: 1024 x 1024
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+Render called - overlay canvas size: 1024 x 1024
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+Render called - overlay canvas size: 1024 x 1024
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+Render called - overlay canvas size: 1024 x 1024
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+Image metadata: 
+Object {imagePosition: "-249.51171875-466.01171875254", imageOrientation: "100010", pixelSpacing: "0.97656250.9765625", sliceLocation: "254", frameOfReferenceUID: "1.2.246.352.221.513587722995126503017641223226960306828", …}
+🔷 PenToolUnifiedV2 RENDERED: 
+Object {isActive: true, hasCanvas: true, selectedStructure: 36, imageMetadata: "present"}
+🔷 Stopping pen tool render loop
+🔷 Starting pen tool render loop
+Render called - overlay canvas size: 1024 x 1024
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice: 2
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 36, currentZ: 254}
+Found structure: CTVn_5400
+Contours at current slice:

@@ -76,7 +76,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
       // contour.slicePosition contains the Z value for this contour
-      return Math.abs(contour.slicePosition - currentZ) < 0.1;
+      // Use tighter tolerance to avoid ghost contours from adjacent slices
+      const tolerance = 0.01; // 0.01mm tolerance
+      return Math.abs(contour.slicePosition - currentZ) < tolerance;
     });
     
     console.log('Contours at current slice:', contoursAtSlice.length);
@@ -699,14 +701,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     // Clear
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
     
-    // DEBUG: Draw test rectangle to verify overlay is visible
-    ctx.save();
-    ctx.fillStyle = 'rgba(255, 0, 255, 0.5)';
-    ctx.fillRect(10, 10, 100, 50);
-    ctx.font = '16px Arial';
-    ctx.fillStyle = 'white';
-    ctx.fillText('PEN TOOL ACTIVE', 15, 35);
-    ctx.restore();
+    // Remove debug rectangle - overlay is confirmed working
     
     console.log('Render called - overlay canvas size:', overlayCanvasRef.current.width, 'x', overlayCanvasRef.current.height);
     
