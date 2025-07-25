@@ -268,15 +268,36 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
         // Replace all contours at this slice with boolean operation result
         if (resultContours.length > 0) {
-          console.log('Calling onContourUpdate with replace_contour');
-          // Use replace_contour action for the merged result
-          onContourUpdate({
-            action: 'replace_contour',
-            structureId: selectedStructure,
-            points: resultContours[0], // Use the first (usually only) contour result
-            slicePosition: currentZ,
-            imageMetadata
-          });
+          console.log('Calling onContourUpdate with replace_contours');
+          
+          // If we have multiple contours as result, we need to handle them properly
+          if (resultContours.length === 1) {
+            // Single contour result - use replace_contour
+            onContourUpdate({
+              action: 'replace_contour',
+              structureId: selectedStructure,
+              points: resultContours[0],
+              slicePosition: currentZ,
+              imageMetadata
+            });
+          } else {
+            // Multiple contours result - we need to replace all contours at this slice
+            // For now, merge all result contours into one (medical imaging typically expects one contour per slice)
+            const mergedPoints: number[] = [];
+            resultContours.forEach(contour => {
+              mergedPoints.push(...contour);
+            });
+            
+            onContourUpdate({
+              action: 'replace_contour',
+              structureId: selectedStructure,
+              points: mergedPoints,
+              slicePosition: currentZ,
+              imageMetadata
+            });
+            
+            console.log(`Boolean operation resulted in ${resultContours.length} separate contours, merged into one`);
+          }
         } else {
           // If boolean operation resulted in empty contour, delete the slice
           console.log('Boolean operation resulted in empty contour, deleting slice');

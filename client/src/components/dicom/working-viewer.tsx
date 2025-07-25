@@ -668,19 +668,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
 
       if (payload.action === "add_pen_stroke") {
-        if (sliceContour) {
-          // Merge pen stroke with existing contour
-          const mergedPoints = [...sliceContour.points, ...payload.points];
-          sliceContour.points = mergedPoints;
-          sliceContour.numberOfPoints = mergedPoints.length / 3;
-        } else {
-          // Create new contour from pen stroke
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: payload.points,
-            numberOfPoints: payload.points.length / 3,
-          });
-        }
+        // For pen tool, the points are already the result of boolean operations
+        // Remove all existing contours at this slice and replace with the new one
+        structure.contours = structure.contours.filter(
+          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+        );
+        
+        // Add the new contour (which is the result of boolean operations)
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3,
+        });
+        
+        console.log(`Pen tool: replaced contours at slice ${payload.slicePosition} with boolean result`);
       } else if (payload.action === "cut_pen_stroke") {
         // TODO: Implement contour cutting logic
         console.log("Cut pen stroke not yet implemented");
@@ -689,6 +690,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
+    } else if (payload.action === "subtract_contour") {
+      // Handle contour subtraction
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // For subtraction, the pen tool should have already performed the boolean operation
+      // Remove all existing contours at this slice and replace with the result
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+      );
+      
+      // Only add new contour if subtraction didn't result in empty contour
+      if (payload.points && payload.points.length > 0) {
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3,
+        });
+        console.log(`Pen tool subtraction: replaced contours at slice ${payload.slicePosition}`);
+      } else {
+        console.log(`Pen tool subtraction: removed all contours at slice ${payload.slicePosition}`);
+      }
+
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'subtract_contour');
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
