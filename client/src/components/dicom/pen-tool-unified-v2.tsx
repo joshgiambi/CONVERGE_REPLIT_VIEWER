@@ -67,8 +67,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!structure?.contours) return [];
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
-      const contourZ = contour.points[2];
-      return Math.abs(contourZ - currentZ) < 0.1;
+      // contour.slicePosition contains the Z value for this contour
+      return Math.abs(contour.slicePosition - currentZ) < 0.1;
     });
     
     console.log('Contours at current slice:', contoursAtSlice.length);

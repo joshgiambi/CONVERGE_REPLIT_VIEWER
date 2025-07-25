@@ -1764,7 +1764,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied
-  const worldToCanvas = (worldX: number, worldY: number): [number, number] => {
+  // Using useCallback to ensure functions always use latest ctTransform value
+  const worldToCanvas = useCallback((worldX: number, worldY: number): [number, number] => {
     if (!imageMetadata) return [0, 0];
     
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
@@ -1775,21 +1776,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const pixelY = (worldY - imagePositionY) / rowSpacing;
     
     // Apply CT transform to match the rendered canvas
-    // ctTransform contains: { scale, offsetX, offsetY }
+    // Always get fresh ctTransform value to avoid stale closure
     const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
     const canvasX = (pixelX * transform.scale) + transform.offsetX;
     const canvasY = (pixelY * transform.scale) + transform.offsetY;
     
     return [canvasX, canvasY];
-  };
+  }, [imageMetadata]); // Re-create when imageMetadata changes
   
-  const canvasToWorld = (canvasX: number, canvasY: number): [number, number] => {
+  const canvasToWorld = useCallback((canvasX: number, canvasY: number): [number, number] => {
     if (!imageMetadata) return [0, 0];
     
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
     const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
     
     // Apply inverse CT transform to get raw pixel coordinates
+    // Always get fresh ctTransform value to avoid stale closure
     const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
     const pixelX = (canvasX - transform.offsetX) / transform.scale;
     const pixelY = (canvasY - transform.offsetY) / transform.scale;
@@ -1799,7 +1801,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const worldY = imagePositionY + (pixelY * rowSpacing);
     
     return [worldX, worldY];
-  };
+  }, [imageMetadata]); // Re-create when imageMetadata changes
 
   const renderRTStructures = (
     ctx: CanvasRenderingContext2D,
