@@ -410,8 +410,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           );
           
           console.log('✅ ClipperLib loaded successfully');
+          console.log('ClipperLib structure:', Object.keys(clipperLib));
           
-          // Create clipper instance directly from the loaded library
+          // Create clipper instance - the API exports directly
           const clipper = new clipperLib.Clipper();
           const solution = new clipperLib.Paths();
           
