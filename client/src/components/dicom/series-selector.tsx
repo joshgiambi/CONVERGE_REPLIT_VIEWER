@@ -795,7 +795,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-4 flex flex-col" style={{ maxHeight: 'calc(100vh - 350px)' }}>
                 {rtStructures?.structures ? (
-                  <div className="space-y-3 flex-1 flex flex-col overflow-hidden">
+                  <div className="space-y-3 flex-1 flex flex-col">
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
