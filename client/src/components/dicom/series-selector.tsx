@@ -793,9 +793,9 @@ export function SeriesSelector({
                   Structures
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4 flex flex-col" style={{ maxHeight: 'calc(100vh - 350px)' }}>
+              <AccordionContent className="px-4 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-3 flex-1 flex flex-col">
+                  <div className="space-y-3 flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)' }}>
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1045,7 +1045,7 @@ export function SeriesSelector({
                     )}
 
                     {/* Structures List - Grouped and Individual */}
-                    <div className="space-y-1 overflow-y-auto flex-1">
+                    <div className="space-y-1 overflow-y-auto" style={{ height: 'calc(100vh - 600px)', minHeight: '200px' }}>
                       {rtStructures?.structures && (() => {
                         const filteredStructures = rtStructures.structures.filter((structure: any) =>
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
