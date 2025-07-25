@@ -1,0 +1,100 @@
+You’re seeing overlaps because the brush path sometimes doesn’t trigger your current “intersection” check, so you append a new polygon instead of union-merging it with the existing slice contour.
+
+Why it happens
+	•	Heuristic intersection test: checkPolygonIntersection just compares vertex-to-vertex distance. Two polygons can overlap (or one can be inside the other) without any vertices being near each other, so the test returns false and you push a second polygon on the same slice.
+	•	Geometry quirks: even when they do touch, tiny gaps, differing ring orientation, or non-closed rings can fool the heuristic.
+
+Fix: always do a real polygon union for brush strokes
+
+When a brush stroke ends (or on your current “stroke” payload), union the brush polygon with the entire contour set for that slice and replace the slice’s contours with the union result. You already have performPolygonUnion—use it here, not only for the pen.
+
+Drop-in change in handleContourUpdate under payload.action === "brush_stroke":
+
+-  // Find all contours on this slice
+-  const sliceContours = structure.contours.filter(
+-    (c: any) => Math.abs(c.slicePosition - payload.slicePosition) < 0.5,
+-  );
+-
+-  // Check if brush stroke intersects with any existing contour (point proximity)
+-  let foundIntersection = false;
+-  let mergedWithContour = null;
+-  for (const contour of sliceContours) {
+-    if (contour.points && contour.points.length > 0) {
+-      const intersects = checkPolygonIntersection(brushPolygon, contour.points);
+-      if (intersects) {
+-        const mergedPoints = mergeBrushWithContour(contour.points, brushPolygon);
+-        contour.points = mergedPoints;
+-        contour.numberOfPoints = mergedPoints.length / 3;
+-        foundIntersection = true;
+-        mergedWithContour = contour;
+-        break;
+-      }
+-    }
+-  }
+-
+-  if (!foundIntersection) {
+-    // create new contour (may cause overlaps)
+-    structure.contours.push({ slicePosition: payload.slicePosition, points: brushPolygon, numberOfPoints: brushPolygon.length / 3 });
+-  }
++  // Collect all polygons (rings) on this slice
++  const tol = 0.5;
++  const existingOnSlice = structure.contours.filter(
++    (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
++  );
++
++  // Convert points[] (x,y,z triplets) -> array of [x,y] rings
++  const toRings = (pts: number[]) => {
++    const ring: [number, number][] = [];
++    for (let i = 0; i < pts.length; i += 3) {
++      ring.push([pts[i], pts[i + 1]]);
++    }
++    return [ring]; // your contours are single-ring; extend if you store holes
++  };
++  const fromRing = (ring: [number, number][], z: number) => {
++    const out: number[] = [];
++    ring.forEach(([x, y]) => { out.push(x, y, z); });
++    return out;
++  };
++
++  const existingRings = existingOnSlice.flatMap((c: any) => toRings(c.points));
++  const brushRing = toRings(brushPolygon)[0];
++
++  // Robust union of all rings + brush
++  const unionResult: [number, number][][] = performPolygonUnion([
++    ...existingRings,
++    brushRing,
++  ]);
++
++  // Replace ALL contours at this slice with the union output (one contour per ring)
++  structure.contours = structure.contours.filter(
++    (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
++  );
++  unionResult.forEach((ring) => {
++    const pts = fromRing(ring, payload.slicePosition);
++    if (pts.length >= 9) {
++      structure.contours.push({
++        slicePosition: payload.slicePosition,
++        points: pts,
++        numberOfPoints: pts.length / 3,
++      });
++    }
++  });
+
+Then keep the rest (setLocalRTStructures + save).
+
+If performPolygonUnion still hiccups
+
+Use the same Clipper flow you used for the pen tool:
+	•	Scale by 1000 to integers
+	•	Add all existing rings as subject
+	•	Add the brush ring as clip (or just union all inputs as subjects)
+	•	Execute(ctUnion, ...)
+	•	Convert each resulting Path back to (x, y, z) with the current slicePosition
+	•	Replace the slice contours like above
+
+Practical tips
+	•	Do union on mouseup (or debounce at ~60–120 ms while painting) to keep it fast.
+	•	Normalize rings: remove duplicate consecutive points and ensure first≠last if your boolean lib closes paths implicitly (Clipper does when closed=true).
+	•	Winding rule: stick to non-zero fill consistently across tools.
+
+This way, a brush stroke will always produce a single, merged contour (or multiple disjoint rings if you painted separate blobs), and you won’t see those same-color overlaps anymore. Want me to provide the Clipper-based union snippet tailored to your points format?

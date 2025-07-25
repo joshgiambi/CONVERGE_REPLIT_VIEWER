@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as ClipperLib from 'js-angusj-clipper';
+import { isPointInContour } from '../../lib/clipper-boolean-operations';
 
 interface PenToolUnifiedV2Props {
   isActive: boolean;
@@ -309,19 +310,20 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       currentZ
     });
     
-    // TEMPORARY: Alert to verify function is called
-    alert(`Pen tool completing shape with ${points.length} points`);
+
     
     if (points.length < 3) {
       console.log('❌ Not enough points to complete shape');
-      alert('Not enough points - need at least 3');
       return;
     }
     
-    const finalPoints = [...points];
-    if (addFinalPoint && finalPoint) {
-      finalPoints.push(finalPoint);
-    }
+    console.log('📍 Continuing after alert...');
+    
+    try {
+      const finalPoints = [...points];
+      if (addFinalPoint && finalPoint) {
+        finalPoints.push(finalPoint);
+      }
     
     // Convert to ClipperLib format (scale by 1000 for integer precision)
     const SCALE = 1000;
@@ -359,7 +361,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       // Check if first click was inside any contour
       const startInside = existingContours.some((contour: any) => {
         if (contour.points && contour.points.length >= 9) {
-          return isPointInsideContour(firstClickPoint[0], firstClickPoint[1], contour.points);
+          return isPointInContour(firstClickPoint, contour.points);
         }
         return false;
       });
@@ -401,7 +403,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     setPoints([]);
     setIsDrawingContinuous(false);
     setStartMode(null);
-  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate, getContoursAtCurrentSlice, doesNewPolygonIntersect]);
+    } catch (error) {
+      console.error('❌ Error in completeShape:', error);
+      alert(`Error completing shape: ${error.message || error}`);
+    }
+  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate, getContoursAtCurrentSlice, doesNewPolygonIntersect, isPointInsideContour]);
   
   // Handle mouse down
   const handleMouseDown = useCallback((e: MouseEvent) => {
