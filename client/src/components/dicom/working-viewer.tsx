@@ -464,6 +464,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = (payload: any) => {
+    // Special handling for undo/redo results which return full RT structures
+    if (payload && payload.structures && !payload.action) {
+      console.log('Applying undo/redo result with', payload.structures.length, 'structures');
+      setLocalRTStructures(payload);
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(payload);
+      }
+      return;
+    }
+    
     // Check if two polygons intersect by checking if any points are close
     const checkPolygonIntersection = (polygon1: number[], polygon2: number[]) => {
       const threshold = 2.0; // Distance threshold in world coordinates (mm) - reduced for more accurate contours

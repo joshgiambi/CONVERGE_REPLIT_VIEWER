@@ -245,7 +245,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         points: worldPoints.length,
         imageMetadata
       });
-      onContourUpdate({
+      onContourUpdate('add_pen_stroke', {
         action: 'add_pen_stroke',
         structureId: selectedStructure,
         points: worldPoints,
@@ -287,7 +287,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       // Handle union operations
       if (operation === 'union') {
         console.log('Pen tool union operation');
-        onContourUpdate({
+        onContourUpdate('pen_boolean_operation', {
           action: 'pen_boolean_operation',
           structureId: selectedStructure,
           points: worldPoints,
@@ -306,7 +306,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       // Handle separate case (no boolean operation needed)
       if (operation === 'separate') {
         console.log('Pen tool separate blob operation');
-        onContourUpdate({
+        onContourUpdate('pen_boolean_operation', {
           action: 'pen_boolean_operation',
           structureId: selectedStructure,
           points: worldPoints,
@@ -405,7 +405,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           
           // Send subtraction result to pen_boolean_operation handler
           console.log('Pen tool subtraction operation');
-          onContourUpdate({
+          onContourUpdate('pen_boolean_operation', {
             action: 'pen_boolean_operation',
             structureId: selectedStructure,
             points: worldPoints,
@@ -535,7 +535,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Update contour
-      onContourUpdate({
+      onContourUpdate('replace_contour', {
         action: 'replace_contour',
         structureId: selectedStructure,
         points: newContour,
