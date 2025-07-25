@@ -501,6 +501,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 structureVisibility={structureVisibility}
                 brushToolState={brushToolState}
                 selectedForEdit={selectedForEdit}
+                selectedStructures={selectedStructures}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
                 onSlicePositionChange={setCurrentSlicePosition}
