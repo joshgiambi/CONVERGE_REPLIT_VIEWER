@@ -67,8 +67,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!structure?.contours) return [];
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
-      const contourZ = contour.points[2];
-      return Math.abs(contourZ - currentZ) < 0.1;
+      // Use the contour's slicePosition property, not the points array
+      return Math.abs(contour.slicePosition - currentZ) < 1.5;
     });
     
     console.log('Contours at current slice:', contoursAtSlice.length);
@@ -209,7 +209,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         imageMetadata
       });
       onContourUpdate({
-        action: 'add_pen_stroke',
+        action: 'replace_contour',
         structureId: selectedStructure,
         points: worldPoints,
         slicePosition: currentZ,
@@ -316,9 +316,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           worldPoints.push(x, y, currentZ);
         });
         
-        const action = startMode === 'ADD' ? 'add_pen_stroke' : 'subtract_contour';
+        // Fallback to replace_contour for all operations
         onContourUpdate({
-          action: action,
+          action: 'replace_contour',
           structureId: selectedStructure,
           points: worldPoints,
           slicePosition: currentZ,
