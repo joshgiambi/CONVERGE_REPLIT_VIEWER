@@ -1,0 +1,182 @@
+You’re doing a lot of work on the main thread, doing it twice, and triggering extra renders. That’s why it doesn’t feel faster even though you “preload.” Below is a focused plan that improves perceived and actual load time without changing visible behavior.
+
+⸻
+
+What’s slowing you down
+	1.	Double fetch + double parse per image
+loadImages() fetches every SOP to parse headers, then preloadAllImages() fetches them all again to parse pixels. That’s 2× network and 2× dicom-parser CPU.
+	2.	Heavy caches in React state
+imageCache and secondaryImageCache are useState(Map), but you also mutate them directly (imageCache.set(...)). That both prevents React updates when needed and causes huge re-renders when the whole Map is replaced.
+	3.	CPU-bound pixel transforms on the main thread
+Converting 16-bit → 8-bit RGBA in render16BitImage runs for every draw on the UI thread.
+	4.	Too many renders scheduled
+Multiple useEffect paths call displayCurrentImage() (images, currentIndex, window/level, registration…). It redraws more often than necessary.
+	5.	Temp canvas + scaling per frame
+Creating a temporary canvas, putting ImageData, then scaling every draw adds overhead.
+	6.	Unlimited parallel preloading
+Promise.allSettled with hundreds of images competes for network/CPU cache and slows the “next slice” that the user actually needs.
+
+⸻
+
+Fixes (small, safe changes first)
+
+A. Keep caches out of React state
+
+Use refs; update React only when something user-visible changes.
+
+// replace useState(Map...) with refs
+const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
+const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
+
+// read:
+const img = imageCacheRef.current.get(cacheKey);
+// write:
+imageCacheRef.current.set(cacheKey, imageData);
+
+Remove direct mutations of state Maps (they won’t trigger renders anyway).
+
+B. Fetch once per image and parse once
+
+Collapse metadata+pixel parsing into the first fetch, then sort using the parsed metadata. Delete preloadAllImages.
+
+// 1) Get server list (cheap)
+const list = await (await fetch(`/api/series/${seriesId}/images`)).json();
+
+// 2) Fetch+parse with limited concurrency
+const CONCURRENCY = 6;
+const ac = new AbortController();
+
+function withConcurrency(items, worker, n) {
+  const q = items.slice();
+  return Promise.all(Array.from({length:n}, async () => {
+    while (q.length) {
+      const item = q.shift();
+      await worker(item);
+    }
+  }));
+}
+
+const parsed = [];
+await withConcurrency(list, async (img) => {
+  const ab = await fetch(`/api/images/${img.sopInstanceUID}`, { signal: ac.signal }).then(r => r.arrayBuffer());
+  const { meta, pixels } = parseDicomOnce(ab); // returns {meta:{sliceLoc, zPos, instance}, pixels:{data,width,height}}
+  imageCacheRef.current.set(img.sopInstanceUID, pixels);
+  parsed.push({ ...img, ...meta });
+}, CONCURRENCY);
+
+// 3) Sort once using parsed meta and setImages
+parsed.sort((a,b) =>
+  a.sliceLoc ?? a.zPos ?? a.instanceNumber - (b.sliceLoc ?? b.zPos ?? b.instanceNumber)
+);
+setImages(parsed);
+
+And change your code to not call preloadAllImages(sortedImages)—it’s done already.
+
+parseDicomOnce can be your existing parseDicomImage extended to also return the metadata you already read in loadImages.
+
+C. Limit preloading priority (perceived speed)
+
+Instead of “everything at once,” preload current slice ±N, then the rest.
+
+function priorityOrder(arr, startIdx, radius=8) {
+  const order: any[] = [];
+  for (let d=0; d<=radius; d++){
+    if (startIdx-d >=0) order.push(arr[startIdx-d]);
+    if (d>0 && startIdx+d < arr.length) order.push(arr[startIdx+d]);
+  }
+  order.push(...arr.filter((_,i)=>Math.abs(i-startIdx)>radius));
+  return order;
+}
+
+Use priorityOrder when you build the list for step B.
+
+D. Move window/level mapping off the UI thread (Worker)
+
+Create a small worker that takes {hu: Float32Array, width, height, ww, wl} and returns a Uint8ClampedArray (RGBA). Cache the worker output per image+window/level pair if you like, or just compute on demand.
+
+// worker snippet (dicom-worker.ts)
+self.onmessage = (e) => {
+  const { hu, ww, wc, width, height } = e.data;
+  const out = new Uint8ClampedArray(width*height*4);
+  const min = wc - ww/2, max = wc + ww/2;
+  for (let i=0;i<hu.length;i++){
+    const v = hu[i] <= min ? 0 : (hu[i] >= max ? 255 : ((hu[i]-min)/ww*255));
+    const p = i*4;
+    out[p]=out[p+1]=out[p+2]=v|0; out[p+3]=255;
+  }
+  // transfer out.buffer
+  (postMessage as any)({ rgba: out, width, height }, [out.buffer]);
+};
+
+Main thread:
+
+const bitmapCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
+
+async function getBitmap(cacheKey: string, imgData, ww, wc) {
+  const key = `${cacheKey}|${ww}|${wc}`;
+  const cached = bitmapCacheRef.current.get(key);
+  if (cached) return cached;
+
+  const rgba = await workerRender(imgData.data, imgData.width, imgData.height, ww, wc); // posts to worker
+  const imageData = new ImageData(rgba, imgData.width, imgData.height);
+  const bmp = await createImageBitmap(imageData);  // GPU-friendly
+  bitmapCacheRef.current.set(key, bmp);
+  return bmp;
+}
+
+Then displayCurrentImage becomes mostly:
+
+const bmp = await getBitmap(cacheKey, imageCacheRef.current.get(cacheKey)!, currentWindowLevel.width, currentWindowLevel.center);
+ctx.drawImage(bmp, x, y, scaledWidth, scaledHeight);
+
+No temp canvas, minimal main-thread work.
+
+E. Draw scheduling (one place only)
+
+Replace scattered displayCurrentImage() calls with a single requestAnimationFrame scheduler.
+
+const needsRenderRef = useRef(false);
+const scheduleRender = () => {
+  if (needsRenderRef.current) return;
+  needsRenderRef.current = true;
+  requestAnimationFrame(async () => {
+    needsRenderRef.current = false;
+    await displayCurrentImage(); // reads currentIndex, window/level, etc.
+  });
+};
+
+// Call scheduleRender() from effects and handlers instead of displayCurrentImage()
+useEffect(() => { if (images.length) scheduleRender(); }, [images, currentIndex]);
+useEffect(() => { scheduleRender(); }, [currentWindowLevel.width, currentWindowLevel.center]);
+
+F. Don’t reset canvas size every frame
+
+Set {width:1024,height:1024} once (or on DPR change). In render16BitImage remove canvas.width = 1024; canvas.height = 1024;.
+
+G. Abort in-flight fetches on series change
+
+Avoid wasted work.
+
+const seriesAbortRef = useRef<AbortController | null>(null);
+useEffect(() => {
+  seriesAbortRef.current?.abort();
+  const ac = new AbortController();
+  seriesAbortRef.current = ac;
+  // pass ac.signal to all fetches
+  return () => ac.abort();
+}, [seriesId]);
+
+H. Trim logs & deep copies
+	•	Remove or gate frequent console.log in tight loops.
+	•	In handleContourUpdate, avoid JSON.stringify on whole structures. Use a per-ROI version or shallow change detection.
+
+⸻
+
+Minimal patch to get an immediate win
+	1.	Ref caches + single fetch/parse (A+B)
+	2.	RAF scheduler (E)
+	3.	Concurrency limit & priority order (C)
+
+These three alone usually cut “first usable slice” time dramatically.
+
+If you want, I can draft the worker file and the refactor of loadImages() into a single code block you can drop in.
