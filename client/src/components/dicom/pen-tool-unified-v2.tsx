@@ -185,147 +185,34 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       finalPoints.push(finalPoint);
     }
     
-    // Convert to ClipperLib format (scale by 1000 for integer precision)
-    const SCALE = 1000;
-    const newPolygon = finalPoints.map(([x, y]) => ({
-      x: Math.round(x * SCALE),
-      y: Math.round(y * SCALE)
-    }));
+    // Get current image Z position
+    const currentZ = imageMetadata?.sliceLocation || imageMetadata?.imagePosition?.[2] || 0;
     
-    // Get existing contours at current slice
-    const existingContours = getContoursAtCurrentSlice();
-    console.log('Found existing contours:', existingContours.length);
+    // Build final world coordinates array
+    const worldPoints: number[] = [];
+    finalPoints.forEach(([x, y]) => {
+      worldPoints.push(x, y, currentZ);
+    });
     
-    if (existingContours.length === 0) {
-      // No existing contours, just add the new one
-      const worldPoints: number[] = [];
-      finalPoints.forEach(([x, y]) => {
-        worldPoints.push(x, y, currentZ);
-      });
-      
-      console.log('Adding new contour:', {
-        structureId: selectedStructure,
-        points: worldPoints.length,
-        imageMetadata
-      });
-      onContourUpdate({
-        action: 'replace_contour',
-        structureId: selectedStructure,
-        points: worldPoints,
-        slicePosition: currentZ,
-        imageMetadata
-      });
-    } else {
-      // Perform boolean operations with existing contours
-      try {
-        await ClipperLib.loadNativeClipperLibInstanceAsync(
-          ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
-        );
-        
-        const clipper = new ClipperLib.Clipper();
-        const solution: ClipperLib.Path[] = [];
-        
-        // Convert existing contours to ClipperLib format
-        const existingPaths: ClipperLib.Path[] = existingContours.map(contour => {
-          const path: ClipperLib.IntPoint[] = [];
-          for (let i = 0; i < contour.points.length; i += 3) {
-            path.push({
-              x: Math.round(contour.points[i] * SCALE),
-              y: Math.round(contour.points[i + 1] * SCALE)
-            });
-          }
-          return path;
-        });
-        
-        if (startMode === 'ADD') {
-          // Union operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Union, solution);
-        } else {
-          // Difference operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Difference, solution);
-        }
-        
-        // Convert solution back to world coordinates
-        const resultContours: number[][] = solution.map(path => {
-          const worldPoints: number[] = [];
-          path.forEach(point => {
-            worldPoints.push(point.x / SCALE, point.y / SCALE, currentZ);
-          });
-          return worldPoints;
-        });
-        
-        // Send updated contours
-        console.log('Boolean operation result:', {
-          operation: startMode,
-          originalContours: existingContours.length,
-          resultContours: resultContours.length,
-          solutionPaths: solution.length
-        });
-        
-        // Replace all contours at this slice with boolean operation result
-        if (resultContours.length > 0) {
-          console.log('Calling onContourUpdate with replace_contours');
-          
-          // If we have multiple contours as result, we need to handle them properly
-          if (resultContours.length === 1) {
-            // Single contour result - use replace_contour
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: resultContours[0],
-              slicePosition: currentZ,
-              imageMetadata
-            });
-          } else {
-            // Multiple contours result - we need to replace all contours at this slice
-            // For now, merge all result contours into one (medical imaging typically expects one contour per slice)
-            const mergedPoints: number[] = [];
-            resultContours.forEach(contour => {
-              mergedPoints.push(...contour);
-            });
-            
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: mergedPoints,
-              slicePosition: currentZ,
-              imageMetadata
-            });
-            
-            console.log(`Boolean operation resulted in ${resultContours.length} separate contours, merged into one`);
-          }
-        } else {
-          // If boolean operation resulted in empty contour, delete the slice
-          console.log('Boolean operation resulted in empty contour, deleting slice');
-          onContourUpdate({
-            action: 'delete_slice',
-            structureId: selectedStructure,
-            slicePosition: currentZ
-          });
-        }
-        
-      } catch (error) {
-        console.error('Boolean operation failed:', error);
-        // Fallback: just add/subtract as before
-        const worldPoints: number[] = [];
-        finalPoints.forEach(([x, y]) => {
-          worldPoints.push(x, y, currentZ);
-        });
-        
-        // Fallback to replace_contour for all operations
-        onContourUpdate({
-          action: 'replace_contour',
-          structureId: selectedStructure,
-          points: worldPoints,
-          slicePosition: currentZ,
-          imageMetadata
-        });
-      }
+    // Convert worldPoints array [x,y,z,x,y,z...] to brush tool format [[x,y,z],[x,y,z]...]
+    const brushFormatPoints: [number, number, number][] = [];
+    for (let i = 0; i < worldPoints.length; i += 3) {
+      brushFormatPoints.push([worldPoints[i], worldPoints[i + 1], worldPoints[i + 2]]);
     }
+    
+    // Use brush_stroke action to get automatic boolean operations like brush tool
+    onContourUpdate({
+      action: 'brush_stroke',
+      structureId: selectedStructure,
+      points: brushFormatPoints,
+      slicePosition: currentZ,
+      pointCount: brushFormatPoints.length,
+      brushSize: 10, // Default pen size
+      predictionEnabled: false,
+      imageMetadata
+    });
+    
+    console.log(`Pen tool completed: sent ${brushFormatPoints.length} points as brush_stroke to working-viewer`);
     
     // Reset state
     setPoints([]);
