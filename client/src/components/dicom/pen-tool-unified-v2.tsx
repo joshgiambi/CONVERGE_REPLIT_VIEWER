@@ -67,8 +67,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!structure?.contours) return [];
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
-      // Use the contour's slicePosition property, not the points array
-      return Math.abs(contour.slicePosition - currentZ) < 1.5;
+      const contourZ = contour.points[2];
+      return Math.abs(contourZ - currentZ) < 0.1;
     });
     
     console.log('Contours at current slice:', contoursAtSlice.length);
@@ -209,7 +209,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         imageMetadata
       });
       onContourUpdate({
-        action: 'replace_contour',
+        action: 'add_pen_stroke',
         structureId: selectedStructure,
         points: worldPoints,
         slicePosition: currentZ,
@@ -268,36 +268,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
         // Replace all contours at this slice with boolean operation result
         if (resultContours.length > 0) {
-          console.log('Calling onContourUpdate with replace_contours');
-          
-          // If we have multiple contours as result, we need to handle them properly
-          if (resultContours.length === 1) {
-            // Single contour result - use replace_contour
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: resultContours[0],
-              slicePosition: currentZ,
-              imageMetadata
-            });
-          } else {
-            // Multiple contours result - we need to replace all contours at this slice
-            // For now, merge all result contours into one (medical imaging typically expects one contour per slice)
-            const mergedPoints: number[] = [];
-            resultContours.forEach(contour => {
-              mergedPoints.push(...contour);
-            });
-            
-            onContourUpdate({
-              action: 'replace_contour',
-              structureId: selectedStructure,
-              points: mergedPoints,
-              slicePosition: currentZ,
-              imageMetadata
-            });
-            
-            console.log(`Boolean operation resulted in ${resultContours.length} separate contours, merged into one`);
-          }
+          console.log('Calling onContourUpdate with replace_contour');
+          // Use replace_contour action for the merged result
+          onContourUpdate({
+            action: 'replace_contour',
+            structureId: selectedStructure,
+            points: resultContours[0], // Use the first (usually only) contour result
+            slicePosition: currentZ,
+            imageMetadata
+          });
         } else {
           // If boolean operation resulted in empty contour, delete the slice
           console.log('Boolean operation resulted in empty contour, deleting slice');
@@ -316,9 +295,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           worldPoints.push(x, y, currentZ);
         });
         
-        // Fallback to replace_contour for all operations
+        const action = startMode === 'ADD' ? 'add_pen_stroke' : 'subtract_contour';
         onContourUpdate({
-          action: 'replace_contour',
+          action: action,
           structureId: selectedStructure,
           points: worldPoints,
           slicePosition: currentZ,

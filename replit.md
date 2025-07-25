@@ -202,19 +202,6 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
-- July 25, 2025: Pen Tool Boolean Operations Fix - COMPLETED ✅
-  - ✅ Fixed pen tool boolean operations (union/subtract) not working correctly
-  - ✅ Root cause: WorkingViewer was concatenating points instead of replacing contours with boolean results
-  - ✅ Updated `add_pen_stroke` handler to replace all contours at slice with boolean operation result
-  - ✅ Added `subtract_contour` handler for proper subtraction operations
-  - ✅ Enhanced pen tool to handle multiple contours from boolean operations
-  - Implementation details:
-    - Pen tool performs boolean ops with ClipperJS, sends result to WorkingViewer
-    - WorkingViewer now removes existing contours and replaces with boolean result
-    - Drawing from inside contour = union (merge)
-    - Drawing from outside contour = subtraction (difference)
-  - Previous issue: Completed shapes looked like two overlapping contours
-  - Solution: Proper handling of boolean operation results in WorkingViewer
 - July 25, 2025: Critical Pen Tool Coordinate System Fix - COMPLETED ✅
   - ✅ Fixed pen tool coordinate mismatch issue where pen strokes were offset from cursor position
   - ✅ Root cause: Pen tool was drawing in raw DICOM pixel space while CT canvas was scaled/centered by ctTransform
