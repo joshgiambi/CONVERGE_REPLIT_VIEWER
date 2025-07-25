@@ -300,14 +300,23 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
 
   // Complete the shape and apply boolean operation
   const completeShape = useCallback(async (addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
-    if (points.length < 3) return;
-    
-    console.log('completeShape called:', {
-      selectedStructure,
+    console.log('🎯 COMPLETE SHAPE CALLED:', {
       pointsCount: points.length,
+      minRequired: 3,
+      willProceed: points.length >= 3,
+      selectedStructure,
       startMode,
       currentZ
     });
+    
+    // TEMPORARY: Alert to verify function is called
+    alert(`Pen tool completing shape with ${points.length} points`);
+    
+    if (points.length < 3) {
+      console.log('❌ Not enough points to complete shape');
+      alert('Not enough points - need at least 3');
+      return;
+    }
     
     const finalPoints = [...points];
     if (addFinalPoint && finalPoint) {
@@ -420,7 +429,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // If drawing, check for closing
     if (points.length > 0) {
-      if (isNearFirstPoint(canvasX, canvasY) && points.length >= 3) {
+      const nearFirst = isNearFirstPoint(canvasX, canvasY);
+      console.log('🎯 Click near first point check:', {
+        nearFirst,
+        pointsCount: points.length,
+        canRequire3: points.length >= 3
+      });
+      
+      if (nearFirst && points.length >= 3) {
+        console.log('✅ Completing shape by clicking near first point');
         completeShape();
         return;
       }
@@ -447,7 +464,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       console.log(`🎯 PEN TOOL START MODE: ${mode} (inside contour: ${insideAnyContour})`, {
         clickPoint: worldPoint,
         numContours: contours.length,
-        contourPoints: contours.map(c => c.points?.length || 0)
+        contourPoints: contours.map((c: any) => c.points?.length || 0)
       });
     }
     
@@ -504,8 +521,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Update contour
-      onContourUpdate({
-        action: 'replace_contour',
+      onContourUpdate('replace_contour', {
         structureId: selectedStructure,
         points: newContour,
         slicePosition: currentZ,
@@ -558,20 +574,26 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const handleRightClick = useCallback((e: MouseEvent) => {
     e.preventDefault();
     
-    if (points.length < 2) return;
+    console.log('🔴 Right-click detected, points:', points.length);
+    
+    if (points.length < 2) {
+      console.log('❌ Not enough points for right-click completion');
+      return;
+    }
     
     const rect = canvasRef.current!.getBoundingClientRect();
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
-    console.log('Right click - completing shape with point:', worldPoint);
+    console.log('✅ Right click - completing shape with final point:', worldPoint);
     
     // Add final point and complete shape
     setPoints(prev => [...prev, worldPoint]);
     
     // Complete immediately after adding point
     setTimeout(() => {
+      console.log('⏱️ Calling completeShape after timeout');
       completeShape(true);
     }, 10);
   }, [points, canvasRef, canvasToWorld, completeShape]);
