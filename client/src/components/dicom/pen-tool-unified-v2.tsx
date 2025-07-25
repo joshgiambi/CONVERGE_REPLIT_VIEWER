@@ -412,8 +412,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           console.log('✅ ClipperLib loaded successfully');
           console.log('🔧 ClipperLib instance structure:', Object.keys(clipperLib.instance));
           
-          // Create clipper instance using the instance property
-          const clipper = new clipperLib.instance.Clipper();
+          // Create clipper instance using the instance property - Clipper constructor needs IoManager parameter
+          const ioManager = new clipperLib.instance.IoManager();
+          const clipper = new clipperLib.instance.Clipper(ioManager);
           const solution = new clipperLib.instance.Paths();
           console.log('✅ Clipper and Paths created successfully');
           

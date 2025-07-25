@@ -1,0 +1,31 @@
+❌ SUBTRACTION OPERATION FAILED: 
+BindingError {name: "BindingError", message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters…", stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1)…"}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+Error details: 
+Object {message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters…", stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1)…", existingContours: 1, newPolygon: 24, errorType: "BindingError"}
+errorType: "BindingError"
+existingContours: 1
+message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters instead!"
+newPolygon: 24
+stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters instead!↵ at BindingError.<anonymous> (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2040:25)↵ at new BindingError (eval at createNamedFunction (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2034:18), <anonymous>:4:34)↵ at Clipper.<anonymous> (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2699:23)↵ at new Clipper (eval at createNamedFunction (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2034:18), <anonymous>:4:34)↵ at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/pen-tool-unified-v2.tsx:298:27"
+[[Prototype]]: Object
+
+❌ SUBTRACTION OPERATION FAILED: 
+BindingError {name: "BindingError", message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters…", stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1)…"}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+Error details: 
+Object {message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters…", stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1)…", existingContours: 1, newPolygon: 33, errorType: "BindingError"}
+errorType: "BindingError"
+existingContours: 1
+message: "Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters instead!"
+newPolygon: 33
+stack: "BindingError: Tried to invoke ctor of Clipper with invalid number of parameters (0) - expected (1) parameters instead!↵ at BindingError.<anonymous> (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2040:25)↵ at new BindingError (eval at createNamedFunction (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2034:18), <anonymous>:4:34)↵ at Clipper.<anonymous> (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2699:23)↵ at new Clipper (eval at createNamedFunction (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/js-angusj-clipper.js?v=181fdb03:2034:18), <anonymous>:4:34)↵ at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/pen-tool-unified-v2.tsx:298:27"
+[[Prototype]]: Object
