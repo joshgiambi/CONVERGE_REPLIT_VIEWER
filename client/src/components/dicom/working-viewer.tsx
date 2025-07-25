@@ -467,7 +467,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Special handling for undo/redo results which return full RT structures
     if (payload && payload.structures && !payload.action) {
       console.log('Applying undo/redo result with', payload.structures.length, 'structures');
-      setLocalRTStructures(payload);
+      
+      // Optimize update to only change modified structures
+      setLocalRTStructures((prevStructures: any) => {
+        if (!prevStructures) return payload;
+        
+        // Create a new object with the same reference for unchanged properties
+        const updatedStructures = {
+          ...prevStructures,
+          structures: prevStructures.structures.map((oldStruct: any) => {
+            // Find the corresponding structure in the new data
+            const newStruct = payload.structures.find((s: any) => s.roiNumber === oldStruct.roiNumber);
+            
+            // If structure wasn't changed, keep the same reference
+            if (newStruct && JSON.stringify(oldStruct) === JSON.stringify(newStruct)) {
+              return oldStruct;
+            }
+            
+            // If structure was changed or removed, use the new one
+            return newStruct || oldStruct;
+          })
+        };
+        
+        // Add any new structures that weren't in the old data
+        payload.structures.forEach((newStruct: any) => {
+          if (!updatedStructures.structures.find((s: any) => s.roiNumber === newStruct.roiNumber)) {
+            updatedStructures.structures.push(newStruct);
+          }
+        });
+        
+        return updatedStructures;
+      });
+      
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(payload);
