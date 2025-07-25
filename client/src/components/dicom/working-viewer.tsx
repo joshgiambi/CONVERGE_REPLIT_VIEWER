@@ -697,6 +697,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       if (!structure) return;
 
+      const tolerance = 1.5;
       // For subtraction, the pen tool should have already performed the boolean operation
       // Remove all existing contours at this slice and replace with the result
       structure.contours = structure.contours.filter(
