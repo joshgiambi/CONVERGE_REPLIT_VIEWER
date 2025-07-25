@@ -745,34 +745,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       // Save contour updates to server
       saveContourUpdates(updatedStructures, 'replace_contour');
-    } else if (payload.action === "replace_contours_multi") {
-      // Handle multiple contours replacement - keeps separate contours separate
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (!structure) return;
-
-      // Remove ALL existing contours at this slice
-      const tolerance = 1.5;
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance,
-      );
-
-      // Add all the new contours (which are the complete boolean operation results)
-      payload.contours.forEach((contourPoints: number[]) => {
-        structure.contours.push({
-          slicePosition: payload.slicePosition,
-          points: contourPoints,
-          numberOfPoints: contourPoints.length / 3,
-        });
-      });
-      
-      console.log(
-        `Replaced ALL contours at slice ${payload.slicePosition} with ${payload.contours.length} separate contours`,
-      );
-
-      setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'replace_contours_multi');
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
