@@ -336,13 +336,17 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           // Convert existing contours to ClipperLib format
           existingContours.forEach((contour: any) => {
             const path = new clipperLib.Path();
+            
             for (let i = 0; i < contour.points.length; i += 3) {
               path.push({
                 X: Math.round(contour.points[i] * SCALE),
                 Y: Math.round(contour.points[i + 1] * SCALE)
               });
             }
-            clipper.AddPath(path, clipperLib.PolyType.ptSubject, true);
+            
+            if (path.size() > 2) {
+              clipper.AddPath(path, clipperLib.PolyType.ptSubject, true);
+            }
           });
           
           // Add new polygon for subtraction

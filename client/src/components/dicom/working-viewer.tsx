@@ -748,50 +748,48 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         };
         
         console.log('Pen union operation completed');
-      } else if (payload.operation === 'separate' || (payload.operation === 'union' && contourIndex === -1)) {
-        // For separate blobs or first contour, just add without merging
-        if (contourIndex >= 0) {
-          // Append as separate blob
-          const existingPoints = structure.contours[contourIndex].points;
-          const combinedPoints = [...existingPoints, ...payload.points];
-          structure.contours[contourIndex].points = combinedPoints;
-          structure.contours[contourIndex].numberOfPoints = combinedPoints.length / 3;
-        } else {
-          // Create new contour
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: payload.points,
-            numberOfPoints: payload.points.length / 3,
-          });
-        }
+      } else if (payload.operation === 'separate') {
+        // For separate blobs, always create a new contour object
+        // This keeps them visually separate without complex NaN handling
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3,
+        });
+        console.log('Added separate blob as new contour');
+      } else if (payload.operation === 'union' && contourIndex === -1) {
+        // First contour on slice
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: payload.points,
+          numberOfPoints: payload.points.length / 3,
+        });
       } else if (payload.operation === 'subtract' && payload.resultContours) {
-        // For subtraction, replace with the result contours from ClipperLib
-        if (payload.resultContours.length === 0) {
-          // Remove the contour if subtraction results in empty
-          if (contourIndex >= 0) {
+        // For subtraction, replace existing contours with result from ClipperLib
+        if (contourIndex >= 0) {
+          if (payload.resultContours.length === 0) {
+            // Remove the contour if subtraction results in empty
             structure.contours.splice(contourIndex, 1);
+            console.log('Subtraction resulted in empty contour, removed slice');
+          } else {
+            // Remove all existing contours at this slice first
+            structure.contours = structure.contours.filter(
+              (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 1.5
+            );
+            
+            // Add each result contour as a separate contour object
+            payload.resultContours.forEach((contourPoints: number[]) => {
+              structure.contours.push({
+                slicePosition: payload.slicePosition,
+                points: contourPoints,
+                numberOfPoints: contourPoints.length / 3,
+              });
+            });
+            
+            console.log(`Pen subtraction operation completed, created ${payload.resultContours.length} separate contours`);
           }
         } else {
-          // Replace with subtraction result
-          const allPoints = [];
-          payload.resultContours.forEach(contour => {
-            allPoints.push(...contour);
-          });
-          
-          if (contourIndex >= 0) {
-            structure.contours[contourIndex] = {
-              slicePosition: payload.slicePosition,
-              points: allPoints,
-              numberOfPoints: allPoints.length / 3,
-            };
-          } else {
-            // This shouldn't happen for subtraction, but handle it
-            structure.contours.push({
-              slicePosition: payload.slicePosition,
-              points: allPoints,
-              numberOfPoints: allPoints.length / 3,
-            });
-          }
+          console.warn('Subtraction operation called but no existing contour found');
         }
       }
 
