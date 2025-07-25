@@ -1,0 +1,98 @@
+🎯 Current CT slice 258mm should show structures at RT positions near this value
+✓ Drawing BODY contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing BODY contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing BODY contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing Thyroid contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing Thyroid contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing SpinalCord contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing LN_Neck_L_AI contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing Larynx contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing Constrictors_AI contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing Clavicle_R_AI contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing BrachialPlexus_R contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing BrachialPlexus_L contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing zzPostNeck contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing SpinalCord_07 contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing SpinalCord_05 contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing CTVn_5400 contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing CouchTop contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing zzAvoidance contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing zzAvoidance contour at RT 258.0mm (CT slice: 258.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875258", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1
+getContoursAtCurrentSlice called: 
+Object {hasRTStructures: true, structuresCount: 64, selectedStructure: 20, currentZ: 258}
+Found structure: LN_Neck_L_AI
+Contours at current slice: 1

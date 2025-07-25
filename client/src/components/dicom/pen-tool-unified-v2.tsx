@@ -208,9 +208,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         points: worldPoints.length,
         imageMetadata
       });
-      onContourUpdate('add_contour', {
+      onContourUpdate({
+        action: 'add_contour',
         structureId: selectedStructure,
         points: worldPoints,
+        slicePosition: currentZ,
         imageMetadata
       });
     } else {
@@ -257,11 +259,33 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         });
         
         // Send updated contours
-        onContourUpdate('replace_all_contours', {
-          structureId: selectedStructure,
-          contours: resultContours,
-          imageMetadata
+        console.log('Boolean operation result:', {
+          operation: startMode,
+          originalContours: existingContours.length,
+          resultContours: resultContours.length,
+          solutionPaths: solution.length
         });
+        
+        // Replace all contours at this slice with boolean operation result
+        if (resultContours.length > 0) {
+          console.log('Calling onContourUpdate with replace_contour');
+          // Use replace_contour action for the merged result
+          onContourUpdate({
+            action: 'replace_contour',
+            structureId: selectedStructure,
+            points: resultContours[0], // Use the first (usually only) contour result
+            slicePosition: currentZ,
+            imageMetadata
+          });
+        } else {
+          // If boolean operation resulted in empty contour, delete the slice
+          console.log('Boolean operation resulted in empty contour, deleting slice');
+          onContourUpdate({
+            action: 'delete_slice',
+            structureId: selectedStructure,
+            slicePosition: currentZ
+          });
+        }
         
       } catch (error) {
         console.error('Boolean operation failed:', error);
@@ -272,9 +296,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         });
         
         const action = startMode === 'ADD' ? 'add_contour' : 'subtract_contour';
-        onContourUpdate(action, {
+        onContourUpdate({
+          action: action,
           structureId: selectedStructure,
           points: worldPoints,
+          slicePosition: currentZ,
           imageMetadata
         });
       }
@@ -392,10 +418,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Update contour
-      onContourUpdate('replace_contour', {
+      onContourUpdate({
+        action: 'replace_contour',
         structureId: selectedStructure,
-        contourIndex: contours[draggedVertex.contourIdx].index,
         points: newContour,
+        slicePosition: currentZ,
         imageMetadata
       });
       
