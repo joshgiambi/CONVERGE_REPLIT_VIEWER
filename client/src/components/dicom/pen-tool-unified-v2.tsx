@@ -218,45 +218,85 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     } else {
       // Perform boolean operations with existing contours
       try {
-        await ClipperLib.loadNativeClipperLibInstanceAsync(
+        const clipperLib = await ClipperLib.loadNativeClipperLibInstanceAsync(
           ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
         );
         
-        const clipper = new ClipperLib.Clipper();
-        const solution: ClipperLib.Path[] = [];
+        const clipper = new clipperLib.Clipper();
+        const solution = new clipperLib.Paths();
         
         // Convert existing contours to ClipperLib format
-        const existingPaths: ClipperLib.Path[] = existingContours.map(contour => {
-          const path: ClipperLib.IntPoint[] = [];
+        existingContours.forEach(contour => {
+          const path = new clipperLib.Path();
           for (let i = 0; i < contour.points.length; i += 3) {
             path.push({
-              x: Math.round(contour.points[i] * SCALE),
-              y: Math.round(contour.points[i + 1] * SCALE)
+              X: Math.round(contour.points[i] * SCALE),
+              Y: Math.round(contour.points[i + 1] * SCALE)
             });
           }
-          return path;
+          clipper.AddPath(path, clipperLib.PolyType.ptSubject, true);
+        });
+        
+        // Add new polygon
+        const newPath = new clipperLib.Path();
+        newPolygon.forEach(point => {
+          newPath.push({
+            X: point.x,
+            Y: point.y
+          });
         });
         
         if (startMode === 'ADD') {
           // Union operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Union, solution);
+          clipper.AddPath(newPath, clipperLib.PolyType.ptClip, true);
+          const success = clipper.Execute(
+            clipperLib.ClipType.ctUnion,
+            solution,
+            clipperLib.PolyFillType.pftNonZero,
+            clipperLib.PolyFillType.pftNonZero
+          );
+          
+          if (!success) {
+            console.warn('ClipperLib union operation failed');
+          }
         } else {
           // Difference operation
-          clipper.addPaths(existingPaths, ClipperLib.PolyType.Subject);
-          clipper.addPath(newPolygon, ClipperLib.PolyType.Clip);
-          clipper.execute(ClipperLib.ClipType.Difference, solution);
+          clipper.AddPath(newPath, clipperLib.PolyType.ptClip, true);
+          const success = clipper.Execute(
+            clipperLib.ClipType.ctDifference,
+            solution,
+            clipperLib.PolyFillType.pftNonZero,
+            clipperLib.PolyFillType.pftNonZero
+          );
+          
+          if (!success) {
+            console.warn('ClipperLib difference operation failed');
+          }
         }
         
         // Convert solution back to world coordinates
-        const resultContours: number[][] = solution.map(path => {
+        const resultContours: number[][] = [];
+        for (let i = 0; i < solution.size(); i++) {
+          const path = solution.get(i);
           const worldPoints: number[] = [];
-          path.forEach(point => {
-            worldPoints.push(point.x / SCALE, point.y / SCALE, currentZ);
-          });
-          return worldPoints;
-        });
+          
+          for (let j = 0; j < path.size(); j++) {
+            const point = path.get(j);
+            worldPoints.push(
+              point.X / SCALE,
+              point.Y / SCALE,
+              currentZ
+            );
+          }
+          
+          if (worldPoints.length >= 9) { // At least 3 points
+            resultContours.push(worldPoints);
+          }
+        }
+        
+        // Clean up ClipperLib objects
+        solution.delete();
+        clipper.delete();
         
         // Send updated contours
         console.log('Boolean operation result:', {
