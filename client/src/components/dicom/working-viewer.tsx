@@ -1699,17 +1699,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
 
-  // Coordinate transformation functions for pen tool
+  // Coordinate transformation functions for pen tool with CT transform applied
   const worldToCanvas = (worldX: number, worldY: number): [number, number] => {
     if (!imageMetadata) return [0, 0];
     
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
     const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
     
+    // Convert world coordinates to raw pixel coordinates
     const pixelX = (worldX - imagePositionX) / colSpacing;
     const pixelY = (worldY - imagePositionY) / rowSpacing;
     
-    return [pixelX, pixelY];
+    // Apply CT transform to match the rendered canvas
+    // ctTransform contains: { scale, offsetX, offsetY }
+    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    const canvasX = (pixelX * transform.scale) + transform.offsetX;
+    const canvasY = (pixelY * transform.scale) + transform.offsetY;
+    
+    return [canvasX, canvasY];
   };
   
   const canvasToWorld = (canvasX: number, canvasY: number): [number, number] => {
@@ -1718,8 +1725,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
     const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
     
-    const worldX = imagePositionX + (canvasX * colSpacing);
-    const worldY = imagePositionY + (canvasY * rowSpacing);
+    // Apply inverse CT transform to get raw pixel coordinates
+    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    const pixelX = (canvasX - transform.offsetX) / transform.scale;
+    const pixelY = (canvasY - transform.offsetY) / transform.scale;
+    
+    // Convert pixel coordinates to world coordinates
+    const worldX = imagePositionX + (pixelX * colSpacing);
+    const worldY = imagePositionY + (pixelY * rowSpacing);
     
     return [worldX, worldY];
   };

@@ -1,0 +1,52 @@
+It turns out nothing mystical is wrong with js-angusj-clipper or React – it’s just that your pen tool is drawing in “raw DICOM pixel” space, while your CT canvas has already been scaled + centered by render16BitImage (via that ctTransform you log).  You end up with:
+	1.	Two canvases
+	•	The main CT canvas is drawn at 1024×1024 with a scale & offset (so your 512×512 DICOM image gets blown up and centered).
+	•	Your PenTool overlay is using worldToCanvas → pixelX,pixelY alone, never applying the same scale & offsets (ctTransform.scale, ctTransform.offsetX, ctTransform.offsetY), so it draws a smaller “raw” contour sitting up-and-left of the big one.
+	2.	Plus, you’re emitting a custom action (add_contour) in onContourUpdate, but WorkingViewer.handleContourUpdate only knows about "add_pen_stroke", "replace_contour", etc., so it never actually grafts your new polygon onto rtStructures.
+
+⸻
+
+How to fix
+
+1) Use the same CT transform in your pen tool
+
+Change your worldToCanvas (or wrap it) so that, instead of:
+
+const pixelX = (worldX - imagePosX) / colSpacing;
+const pixelY = (worldY - imagePosY) / rowSpacing;
+return [pixelX, pixelY];
+
+you do:
+
+// in WorkingViewer you exposed this ref:
+const ct = ctTransform.current!;  // { scale, offsetX, offsetY }
+  
+const worldToCanvas = (worldX: number, worldY: number): [number,number] => {
+  // first convert into image-pixel space:
+  const pixelX = (worldX - imagePosX) / colSpacing;
+  const pixelY = (worldY - imagePosY) / rowSpacing;
+  // then apply the same scale+offset used by render16BitImage:
+  return [
+    ct.offsetX + pixelX * ct.scale,
+    ct.offsetY + pixelY * ct.scale
+  ];
+};
+
+That guarantees your overlay lives in the exact same coordinate system as the CT.
+
+2) Emit the correct update action
+
+When you finish drawing, call:
+
+onContourUpdate({
+  action: 'add_pen_stroke',
+  structureId: selectedStructure,
+  points: worldPoints,
+  slicePosition: currentZ
+});
+
+instead of a bespoke "add_contour".  That way WorkingViewer.handleContourUpdate will actually merge your new pen stroke into rtStructures and redraw it (so you only ever see one contour, in the right place).
+
+⸻
+
+Once both of those are in sync, you’ll get a single, correctly-sized contour riding on top of your CT, and editing will update the real RT structure underneath.

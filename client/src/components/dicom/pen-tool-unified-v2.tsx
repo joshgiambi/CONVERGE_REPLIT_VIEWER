@@ -209,7 +209,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         imageMetadata
       });
       onContourUpdate({
-        action: 'add_contour',
+        action: 'add_pen_stroke',
         structureId: selectedStructure,
         points: worldPoints,
         slicePosition: currentZ,
@@ -295,7 +295,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           worldPoints.push(x, y, currentZ);
         });
         
-        const action = startMode === 'ADD' ? 'add_contour' : 'subtract_contour';
+        const action = startMode === 'ADD' ? 'add_pen_stroke' : 'subtract_contour';
         onContourUpdate({
           action: action,
           structureId: selectedStructure,

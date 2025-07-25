@@ -202,6 +202,18 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Critical Pen Tool Coordinate System Fix - COMPLETED ✅
+  - ✅ Fixed pen tool coordinate mismatch issue where pen strokes were offset from cursor position
+  - ✅ Root cause: Pen tool was drawing in raw DICOM pixel space while CT canvas was scaled/centered by ctTransform
+  - ✅ Updated worldToCanvas function to apply CT transform (scale + offsetX/offsetY) to align with rendered canvas
+  - ✅ Updated canvasToWorld function to apply inverse CT transform for proper coordinate conversion
+  - ✅ Changed pen tool actions from 'add_contour' to 'add_pen_stroke' to match WorkingViewer's handleContourUpdate expectations
+  - ✅ Pen tool now correctly aligns with cursor position at all zoom levels and pan positions
+  - Implementation details:
+    - worldToCanvas: Convert world → pixels → apply ctTransform.scale and offsets
+    - canvasToWorld: Apply inverse transform → convert pixels → world coordinates
+  - Previous issue: Pen tool drew at wrong position when CT was zoomed or panned
+  - Solution: Apply same coordinate transformations that render16BitImage uses for CT display
 - July 24, 2025: Unified Pen Tool Implementation and Settings Cleanup - COMPLETED ✅
   - ✅ Created new PenToolUnified component implementing user's exact specifications
   - ✅ Replaced EclipsePenToolFixed with PenToolUnified in working-viewer.tsx for both pen and planar-contour tools
