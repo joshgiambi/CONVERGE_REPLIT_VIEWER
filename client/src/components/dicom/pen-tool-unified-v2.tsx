@@ -544,30 +544,13 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const structureColor = structure?.color || [255, 255, 0];
     const colorStr = `rgb(${structureColor[0]}, ${structureColor[1]}, ${structureColor[2]})`;
     
-    // Draw existing contours with vertex indicators when hovering
+    // Only draw vertex indicators when hovering, not the entire contour
     const contours = getContoursAtCurrentSlice();
     contours.forEach((contour: any, contourIdx: number) => {
-      // Draw faint contour outline
-      ctx.strokeStyle = colorStr;
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.3;
-      ctx.beginPath();
-      
-      const points = contour.points;
-      for (let i = 0; i < points.length; i += 3) {
-        const [cx, cy] = worldToCanvas(points[i], points[i + 1]);
-        if (i === 0) {
-          ctx.moveTo(cx, cy);
-        } else {
-          ctx.lineTo(cx, cy);
-        }
-      }
-      ctx.closePath();
-      ctx.stroke();
-      
       // Draw vertex dots only if hovering very close to boundary
       if (hoveredVertex && hoveredVertex.contourIdx === contourIdx && !isDrawingContinuous && !isDraggingVertex && currentMousePos) {
         // Check if we're actually near this contour's boundary
+        const points = contour.points;
         let nearBoundary = false;
         for (let i = 0; i < points.length; i += 3) {
           const j = (i + 3) % points.length;
