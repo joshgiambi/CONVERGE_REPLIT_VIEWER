@@ -13,6 +13,67 @@ import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 
+// Helper function to check if two polygons overlap
+function polygonOverlaps(poly1: number[][], poly2: number[][]): boolean {
+  // Check if any point of poly1 is inside poly2
+  for (const point of poly1) {
+    if (isPointInPolygon(point, poly2)) {
+      return true;
+    }
+  }
+  
+  // Check if any point of poly2 is inside poly1
+  for (const point of poly2) {
+    if (isPointInPolygon(point, poly1)) {
+      return true;
+    }
+  }
+  
+  // Check if any edges intersect
+  for (let i = 0; i < poly1.length; i++) {
+    const p1 = poly1[i];
+    const p2 = poly1[(i + 1) % poly1.length];
+    
+    for (let j = 0; j < poly2.length; j++) {
+      const p3 = poly2[j];
+      const p4 = poly2[(j + 1) % poly2.length];
+      
+      if (lineSegmentsIntersect(p1, p2, p3, p4)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+// Helper function for point-in-polygon test
+function isPointInPolygon(point: number[], polygon: number[][]): boolean {
+  let inside = false;
+  const x = point[0], y = point[1];
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  
+  return inside;
+}
+
+// Helper function to check if two line segments intersect
+function lineSegmentsIntersect(p1: number[], p2: number[], p3: number[], p4: number[]): boolean {
+  const d1 = (p4[0] - p3[0]) * (p1[1] - p3[1]) - (p4[1] - p3[1]) * (p1[0] - p3[0]);
+  const d2 = (p4[0] - p3[0]) * (p2[1] - p3[1]) - (p4[1] - p3[1]) * (p2[0] - p3[0]);
+  const d3 = (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]);
+  const d4 = (p2[0] - p1[0]) * (p4[1] - p1[1]) - (p2[1] - p1[1]) * (p4[0] - p1[0]);
+  
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
 // Configure multer to use session-specific upload directories
 const upload = multer({ 
   storage: multer.diskStorage({
@@ -2346,10 +2407,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const seriesId = parseInt(req.params.seriesId);
-      const { structures, action } = req.body;
+      const { structures, action, operation, points, slicePosition, structureId } = req.body;
       
       if (!structures || !Array.isArray(structures)) {
         return res.status(400).json({ message: "Structures array is required" });
+      }
+
+      // Handle server-side boolean operations for pen tool
+      if (action === 'pen_boolean_operation' && operation === 'subtract' && points && structureId && slicePosition !== undefined) {
+        console.log('🔧 Server performing subtraction operation:', { structureId, slicePosition, operation });
+        
+        // Find the target structure
+        const targetStructure = structures.find(s => s.roiNumber === structureId);
+        if (targetStructure && targetStructure.contours) {
+          // Find contours at the current slice position
+          const existingContours = targetStructure.contours.filter(c => 
+            Math.abs(c.slicePosition - slicePosition) < 0.1
+          );
+          
+          if (existingContours.length > 0) {
+            console.log(`Found ${existingContours.length} existing contours to subtract from`);
+            
+            // Convert new points to 2D polygon
+            const newPolygon = [];
+            for (let i = 0; i < points.length; i += 3) {
+              newPolygon.push([points[i], points[i + 1]]);
+            }
+            
+            // Simple subtraction: remove any existing contours that the new polygon overlaps with
+            const remainingContours = targetStructure.contours.filter(contour => {
+              // Skip contours not at current slice
+              if (Math.abs(contour.slicePosition - slicePosition) >= 0.1) {
+                return true; // Keep contours from other slices
+              }
+              
+              // Convert contour to 2D polygon
+              const contourPolygon = [];
+              for (let i = 0; i < contour.points.length; i += 3) {
+                contourPolygon.push([contour.points[i], contour.points[i + 1]]);
+              }
+              
+              // Check if new polygon overlaps with this contour
+              const overlaps = polygonOverlaps(newPolygon, contourPolygon);
+              if (overlaps) {
+                console.log('🗑️ Removing overlapping contour');
+                return false; // Remove this contour
+              }
+              
+              return true; // Keep this contour
+            });
+            
+            // Update the structure with remaining contours
+            targetStructure.contours = remainingContours;
+            console.log(`✅ Subtraction complete: ${existingContours.length - remainingContours.filter(c => Math.abs(c.slicePosition - slicePosition) < 0.1).length} contours removed`);
+          }
+        }
       }
 
       // Initialize modifications storage if not exists

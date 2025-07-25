@@ -398,101 +398,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       
       // Only do ClipperLib operations for subtraction
       if (operation === 'subtract' && existingContours.length > 0) {
-        console.log('🔴 STARTING SUBTRACTION OPERATION:', {
-          existingContours: existingContours.length,
-          newPolygonPoints: newPolygon.length,
-          operation
+        // Simple server-side subtraction - let the server handle boolean operations
+        onContourUpdate({
+          action: 'pen_boolean_operation',
+          structureId: selectedStructure,
+          points: newPolygon.flatMap(p => [p.x, p.y, currentZ]),
+          slicePosition: currentZ,
+          operation: 'subtract',
+          imageMetadata
         });
-        
-        try {
-          const clipperLib = await ClipperLib.loadNativeClipperLibInstanceAsync(
-            ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
-          );
-          
-          const ioManager = new clipperLib.instance.IoManager();
-          const clipper = new clipperLib.instance.Clipper(ioManager);
-          const solution = new clipperLib.instance.Paths();
-          
-          // Convert existing contours to ClipperLib format
-          existingContours.forEach((contour: any) => {
-            const path = new clipperLib.instance.Path();
-            for (let i = 0; i < contour.points.length; i += 3) {
-              path.push({
-                X: Math.round(contour.points[i] * SCALE),
-                Y: Math.round(contour.points[i + 1] * SCALE)
-              });
-            }
-            if (path.size() > 2) {
-              clipper.AddPath(path, clipperLib.instance.PolyType.ptSubject, true);
-            }
-          });
-          
-          // Add new polygon for subtraction
-          const newPath = new clipperLib.instance.Path();
-          newPolygon.forEach((point) => {
-            newPath.push({
-              X: point.x,
-              Y: point.y
-            });
-          });
-          
-          clipper.AddPath(newPath, clipperLib.instance.PolyType.ptClip, true);
-          
-          const success = clipper.Execute(
-            clipperLib.instance.ClipType.ctDifference,
-            solution,
-            clipperLib.instance.PolyFillType.pftNonZero,
-            clipperLib.instance.PolyFillType.pftNonZero
-          );
-          
-          // Convert solution back to world coordinates
-          const resultContours: number[][] = [];
-          for (let i = 0; i < solution.size(); i++) {
-            const path = solution.get(i);
-            const worldPoints: number[] = [];
-            
-            for (let j = 0; j < path.size(); j++) {
-              const point = path.get(j);
-              worldPoints.push(
-                point.X / SCALE,
-                point.Y / SCALE,
-                currentZ
-              );
-            }
-            
-            if (worldPoints.length >= 9) { // At least 3 points
-              resultContours.push(worldPoints);
-            }
-          }
-          
-          console.log('✅ Subtraction completed:', resultContours.length, 'result contours');
-          
-          // Clean up ClipperLib objects
-          solution.delete();
-          clipper.delete();
-          
-          // Send subtraction result to pen_boolean_operation handler
-          onContourUpdate({
-            action: 'pen_boolean_operation',
-            structureId: selectedStructure,
-            slicePosition: currentZ,
-            operation: 'subtract',
-            resultContours: resultContours,
-            imageMetadata
-          });
-          
-        } catch (error) {
-          console.error('❌ SUBTRACTION OPERATION FAILED:', error);
-          console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            existingContours: existingContours?.length || 0,
-            newPolygon: newPolygon?.length || 0,
-            errorType: error.constructor.name
-          });
-          // For subtract, we can't do a proper subtraction without ClipperLib
-          console.warn('Cannot perform subtraction, skipping contour');
-        }
       }
     }
     
