@@ -1176,19 +1176,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadSecondaryImages();
   }, [secondarySeriesId]);
 
+  // Effect to trigger image display when all conditions are met
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      // Add a small delay to ensure state is stable after contour operations
-      const timeoutId = setTimeout(() => {
+      // Wait for next tick to ensure canvas is mounted
+      const timer = setTimeout(() => {
         displayCurrentImage();
-        // Load metadata for current image
+        // Load metadata for current image only once
         const currentImage = images[currentIndex];
-        if (currentImage?.id) {
+        if (currentImage?.id && currentImage.id !== imageMetadata?.imageId) {
           loadImageMetadata(currentImage.id);
         }
-      }, 10);
+      }, 100);
       
-      return () => clearTimeout(timeoutId);
+      return () => clearTimeout(timer);
     }
   }, [images, currentIndex, currentWindowLevel, isPreloading]);
 
@@ -1348,9 +1349,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const preloadAllImages = async (imageList: any[]) => {
-    console.log("Starting to preload all images...");
     if (!imageList || imageList.length === 0) {
-      console.warn("No images to preload");
       setIsPreloading(false);
       return;
     }
@@ -1372,7 +1371,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         if (imageData) {
           newCache.set(image.sopInstanceUID, imageData);
-          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
         }
       } catch (error) {
         console.warn(`Failed to preload image ${index + 1}:`, error);
@@ -1383,9 +1381,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     await Promise.allSettled(loadPromises);
     setImageCache(newCache);
     setIsPreloading(false);
-    console.log(
-      `Preloading complete: ${newCache.size}/${imageList.length} images cached`,
-    );
   };
 
   const loadImageMetadata = async (imageId: number) => {
@@ -1393,10 +1388,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
-        console.log("Image metadata:", metadata);
         setImageMetadata(metadata);
-
-        // Frame of Reference UIDs are verified during data import
       }
     } catch (error) {
       console.error("Failed to load image metadata:", error);
