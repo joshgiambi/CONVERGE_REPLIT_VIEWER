@@ -13,6 +13,8 @@ export type ClipperAPI = {
   PolyType: any;
   ClipType: any;
   PolyFillType: any;
+  JoinType: any;
+  EndType: any;
   CleanPolygon: (path: any, dist: number) => any;
   CleanPolygons: (paths: any, dist: number) => any;
   SimplifyPolygon: (path: any, fillType: any) => any;
@@ -52,6 +54,8 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
       PolyType: lib.instance.PolyType,
       ClipType: lib.instance.ClipType,
       PolyFillType: lib.instance.PolyFillType,
+      JoinType: lib.instance.JoinType,
+      EndType: lib.instance.EndType,
       CleanPolygon: lib.instance.CleanPolygon,
       CleanPolygons: lib.instance.CleanPolygons,
       SimplifyPolygon: lib.instance.SimplifyPolygon,

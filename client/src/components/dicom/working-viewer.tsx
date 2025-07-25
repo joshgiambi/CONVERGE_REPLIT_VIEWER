@@ -15,6 +15,7 @@ import {
   addBrushToContour,
   eraseBrushFromContour,
   mergeBrushWithContour,
+  brushStrokeToPolishedPolygon,
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
@@ -565,12 +566,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
 
-      // Convert brush stroke to polygon
-      const brushPolygon = addBrushToContour(
-        [], // Empty array to get just the brush polygon
-        payload.points,
-        payload.brushSize,
-      );
+      // Convert brush stroke to polished polygon for smooth edges
+      let brushPolygon: number[];
+      
+      // Use polished brush stroke for medical-grade smooth edges
+      try {
+        brushPolygon = await brushStrokeToPolishedPolygon(
+          payload.points,
+          payload.brushSize
+        );
+        console.log("Using polished brush stroke with smooth edges");
+      } catch (error) {
+        console.warn("Failed to polish brush stroke, using unpolished version:", error);
+        // Fallback to unpolished version if polishing fails
+        brushPolygon = addBrushToContour(
+          [], // Empty array to get just the brush polygon
+          payload.points,
+          payload.brushSize,
+        );
+      }
 
       // Collect all polygons on this slice
       const tol = 0.5;

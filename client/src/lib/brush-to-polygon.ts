@@ -1,5 +1,6 @@
 // Utility functions to convert brush strokes to polygons for radiotherapy contouring
 import { polygonUnion } from './polygon-union';
+import { polishContour } from './contour-polish';
 
 interface Point3D {
   x: number;
@@ -53,6 +54,28 @@ export function brushStrokeToPolygon(
   
   // Union all circles together to create seamless boundary
   return polygonUnion(circles);
+}
+
+/**
+ * Convert brush stroke points to a polished polygon with smooth edges
+ * This adds medical-grade edge smoothing to remove jaggies
+ */
+export async function brushStrokeToPolishedPolygon(
+  brushPoints: number[][],
+  brushSize: number
+): Promise<number[]> {
+  if (brushPoints.length === 0) {
+    return [];
+  }
+  
+  // First create the basic polygon
+  const basicPolygon = brushStrokeToPolygon(brushPoints, brushSize);
+  
+  // Polish the contour to remove jagged edges
+  // Use a smaller epsilon (0.2mm) for brush strokes to preserve detail
+  const polishedPolygon = await polishContour(basicPolygon, 0.2);
+  
+  return polishedPolygon;
 }
 
 /**
