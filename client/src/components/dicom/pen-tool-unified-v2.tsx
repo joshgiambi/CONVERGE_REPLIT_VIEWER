@@ -52,15 +52,27 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   
   // Find existing contours at current slice
   const getContoursAtCurrentSlice = useCallback(() => {
+    console.log('getContoursAtCurrentSlice called:', {
+      hasRTStructures: !!rtStructures?.structures,
+      structuresCount: rtStructures?.structures?.length || 0,
+      selectedStructure,
+      currentZ
+    });
+    
     if (!rtStructures?.structures || !selectedStructure) return [];
     
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    console.log('Found structure:', structure ? structure.structureName : 'None');
+    
     if (!structure?.contours) return [];
     
-    return structure.contours.filter((contour: any) => {
+    const contoursAtSlice = structure.contours.filter((contour: any) => {
       const contourZ = contour.points[2];
       return Math.abs(contourZ - currentZ) < 0.1;
     });
+    
+    console.log('Contours at current slice:', contoursAtSlice.length);
+    return contoursAtSlice;
   }, [rtStructures, selectedStructure, currentZ]);
   
   // Check if point is inside any contour
@@ -161,6 +173,13 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const completeShape = useCallback(async (addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
     if (points.length < 3) return;
     
+    console.log('completeShape called:', {
+      selectedStructure,
+      pointsCount: points.length,
+      startMode,
+      currentZ
+    });
+    
     const finalPoints = [...points];
     if (addFinalPoint && finalPoint) {
       finalPoints.push(finalPoint);
@@ -175,6 +194,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // Get existing contours at current slice
     const existingContours = getContoursAtCurrentSlice();
+    console.log('Found existing contours:', existingContours.length);
     
     if (existingContours.length === 0) {
       // No existing contours, just add the new one
@@ -183,6 +203,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         worldPoints.push(x, y, currentZ);
       });
       
+      console.log('Adding new contour:', {
+        structureId: selectedStructure,
+        points: worldPoints.length,
+        imageMetadata
+      });
       onContourUpdate('add_contour', {
         structureId: selectedStructure,
         points: worldPoints,
