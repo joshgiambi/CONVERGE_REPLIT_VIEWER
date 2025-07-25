@@ -17,7 +17,7 @@ import {
   mergeBrushWithContour,
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
-import { combineContours, subtractContours } from "@/lib/contour-boolean-operations";
+import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
@@ -189,7 +189,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   // Handle boolean operations (combine/subtract) between structures
-  const handleBooleanOperation = (payload: any) => {
+  const handleBooleanOperation = async (payload: any) => {
     if (!rtStructures) {
       console.error("RT structures not available for boolean operation");
       return;
@@ -239,10 +239,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       if (operation === 'combine') {
         // Combine the two contours
-        resultPoints = combineContours(sourceContour.points, targetContour.points);
+        resultPoints = await combineContours(sourceContour.points, targetContour.points);
       } else if (operation === 'subtract') {
         // Subtract target from source
-        resultPoints = subtractContours(sourceContour.points, targetContour.points);
+        resultPoints = await subtractContours(sourceContour.points, targetContour.points);
       } else {
         console.error(`Unknown boolean operation: ${operation}`);
         return;
@@ -463,7 +463,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [lastPanY, setLastPanY] = useState(0);
 
   // Handle contour updates from brush tool and other contour editing operations
-  const handleContourUpdate = (payload: any) => {
+  const handleContourUpdate = async (payload: any) => {
     // Special handling for undo/redo results which return full RT structures
     if (payload && payload.structures && !payload.action) {
       console.log('Applying undo/redo result with', payload.structures.length, 'structures');
@@ -951,7 +951,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       handleMarginOperation(payload);
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
-      handleBooleanOperation(payload);
+      await handleBooleanOperation(payload);
     } else if (payload.action === "delete_slice") {
       // Handle delete slice action - only delete the contour for the selected structure
       const structure = updatedStructures.structures.find(

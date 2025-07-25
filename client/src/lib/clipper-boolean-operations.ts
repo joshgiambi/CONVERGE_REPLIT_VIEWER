@@ -3,15 +3,17 @@
  * Provides union, subtract, intersection, XOR, and complex operations
  */
 
-import * as clipperLib from 'js-angusj-clipper';
+import { getClipper, createClipperInstance, createPath, createPaths } from './clipper-adapter';
 
-const SCALE = 1000000; // Scale factor for ClipperLib (converts to integers)
+const SCALE = 10000; // Scale factor for ClipperLib (1e4 is safer than 1e6)
+const CLEAN_TOLERANCE = 0.1; // mm tolerance for polygon cleaning
+const MIN_AREA = 1e-3; // Minimum area in mm² to keep a polygon
 
 /**
  * Convert 3D contour points to ClipperLib path format
  */
-function contourToClipperPath(points: number[]): clipperLib.Path {
-  const path = new clipperLib.Path();
+async function contourToClipperPath(points: number[]): Promise<any> {
+  const path = await createPath();
   
   for (let i = 0; i < points.length; i += 3) {
     path.push({
@@ -26,7 +28,7 @@ function contourToClipperPath(points: number[]): clipperLib.Path {
 /**
  * Convert ClipperLib paths back to contour format
  */
-function clipperPathsToContours(paths: clipperLib.Paths, z: number): number[][] {
+function clipperPathsToContours(paths: any, z: number): number[][] {
   const contours: number[][] = [];
   
   for (let i = 0; i < paths.size(); i++) {
@@ -54,26 +56,29 @@ function clipperPathsToContours(paths: clipperLib.Paths, z: number): number[][] 
  * Union (Combine) - Merges two contours into one, including all area covered by either
  * This is what Eclipse TPS calls "OR" operation
  */
-export function combineContours(contourA: number[], contourB: number[]): number[][] {
+export async function combineContours(contourA: number[], contourB: number[]): Promise<number[][]> {
   if (contourA.length < 9 || contourB.length < 9) {
     console.warn('Contours must have at least 3 points');
     return contourA.length >= 9 ? [contourA] : contourB.length >= 9 ? [contourB] : [];
   }
 
   const z = contourA[2]; // Assume same Z plane
-  const ClipperClass = clipperLib.Clipper;
-  const clipper = new ClipperClass();
-  const solution = new clipperLib.Paths();
+  const api = await getClipper();
+  const clipper = await createClipperInstance();
+  const solution = await createPaths();
   
   try {
     // Add both contours
-    clipper.AddPath(contourToClipperPath(contourA), clipperLib.PolyType.ptSubject, true);
-    clipper.AddPath(contourToClipperPath(contourB), clipperLib.PolyType.ptClip, true);
+    const pathA = await contourToClipperPath(contourA);
+    const pathB = await contourToClipperPath(contourB);
+    
+    clipper.AddPath(pathA, api.PolyType.ptSubject, true);
+    clipper.AddPath(pathB, api.PolyType.ptClip, true);
     
     // Perform union
-    clipper.Execute(clipperLib.ClipType.ctUnion, solution, 
-      clipperLib.PolyFillType.pftNonZero, 
-      clipperLib.PolyFillType.pftNonZero
+    clipper.Execute(api.ClipType.ctUnion, solution, 
+      api.PolyFillType.pftNonZero, 
+      api.PolyFillType.pftNonZero
     );
     
     return clipperPathsToContours(solution, z);
@@ -88,7 +93,7 @@ export function combineContours(contourA: number[], contourB: number[]): number[
  * Subtract - Removes area of contourB from contourA
  * This is what Eclipse TPS calls "SUB" operation
  */
-export function subtractContours(contourA: number[], contourB: number[]): number[][] {
+export async function subtractContours(contourA: number[], contourB: number[]): Promise<number[][]> {
   if (contourA.length < 9) {
     console.warn('Base contour must have at least 3 points');
     return [];
@@ -100,18 +105,21 @@ export function subtractContours(contourA: number[], contourB: number[]): number
   }
 
   const z = contourA[2];
-  const ClipperClass = clipperLib.Clipper;
-  const clipper = new ClipperClass();
-  const solution = new clipperLib.Paths();
+  const api = await getClipper();
+  const clipper = await createClipperInstance();
+  const solution = await createPaths();
   
   try {
-    clipper.AddPath(contourToClipperPath(contourA), clipperLib.PolyType.ptSubject, true);
-    clipper.AddPath(contourToClipperPath(contourB), clipperLib.PolyType.ptClip, true);
+    const pathA = await contourToClipperPath(contourA);
+    const pathB = await contourToClipperPath(contourB);
+    
+    clipper.AddPath(pathA, api.PolyType.ptSubject, true);
+    clipper.AddPath(pathB, api.PolyType.ptClip, true);
     
     // Perform difference
-    clipper.Execute(clipperLib.ClipType.ctDifference, solution,
-      clipperLib.PolyFillType.pftNonZero,
-      clipperLib.PolyFillType.pftNonZero
+    clipper.Execute(api.ClipType.ctDifference, solution,
+      api.PolyFillType.pftNonZero,
+      api.PolyFillType.pftNonZero
     );
     
     return clipperPathsToContours(solution, z);
@@ -126,25 +134,28 @@ export function subtractContours(contourA: number[], contourB: number[]): number
  * Intersection - Returns only the overlapping area of two contours
  * This is what Eclipse TPS calls "AND" operation
  */
-export function intersectContours(contourA: number[], contourB: number[]): number[][] {
+export async function intersectContours(contourA: number[], contourB: number[]): Promise<number[][]> {
   if (contourA.length < 9 || contourB.length < 9) {
     console.warn('Contours must have at least 3 points');
     return [];
   }
 
   const z = contourA[2];
-  const ClipperClass = clipperLib.Clipper;
-  const clipper = new ClipperClass();
-  const solution = new clipperLib.Paths();
+  const api = await getClipper();
+  const clipper = await createClipperInstance();
+  const solution = await createPaths();
   
   try {
-    clipper.AddPath(contourToClipperPath(contourA), clipperLib.PolyType.ptSubject, true);
-    clipper.AddPath(contourToClipperPath(contourB), clipperLib.PolyType.ptClip, true);
+    const pathA = await contourToClipperPath(contourA);
+    const pathB = await contourToClipperPath(contourB);
+    
+    clipper.AddPath(pathA, api.PolyType.ptSubject, true);
+    clipper.AddPath(pathB, api.PolyType.ptClip, true);
     
     // Perform intersection
-    clipper.Execute(clipperLib.ClipType.ctIntersection, solution,
-      clipperLib.PolyFillType.pftNonZero,
-      clipperLib.PolyFillType.pftNonZero
+    clipper.Execute(api.ClipType.ctIntersection, solution,
+      api.PolyFillType.pftNonZero,
+      api.PolyFillType.pftNonZero
     );
     
     return clipperPathsToContours(solution, z);
@@ -159,25 +170,28 @@ export function intersectContours(contourA: number[], contourB: number[]): numbe
  * XOR (Exclusive OR) - Returns areas covered by either contour but not both
  * Removes the overlapping region
  */
-export function xorContours(contourA: number[], contourB: number[]): number[][] {
+export async function xorContours(contourA: number[], contourB: number[]): Promise<number[][]> {
   if (contourA.length < 9 || contourB.length < 9) {
     console.warn('Contours must have at least 3 points');
     return contourA.length >= 9 ? [contourA] : [];
   }
 
   const z = contourA[2];
-  const ClipperClass = clipperLib.Clipper;
-  const clipper = new ClipperClass();
-  const solution = new clipperLib.Paths();
+  const api = await getClipper();
+  const clipper = await createClipperInstance();
+  const solution = await createPaths();
   
   try {
-    clipper.AddPath(contourToClipperPath(contourA), clipperLib.PolyType.ptSubject, true);
-    clipper.AddPath(contourToClipperPath(contourB), clipperLib.PolyType.ptClip, true);
+    const pathA = await contourToClipperPath(contourA);
+    const pathB = await contourToClipperPath(contourB);
+    
+    clipper.AddPath(pathA, api.PolyType.ptSubject, true);
+    clipper.AddPath(pathB, api.PolyType.ptClip, true);
     
     // Perform XOR
-    clipper.Execute(clipperLib.ClipType.ctXor, solution,
-      clipperLib.PolyFillType.pftNonZero,
-      clipperLib.PolyFillType.pftNonZero
+    clipper.Execute(api.ClipType.ctXor, solution,
+      api.PolyFillType.pftNonZero,
+      api.PolyFillType.pftNonZero
     );
     
     return clipperPathsToContours(solution, z);
@@ -192,13 +206,13 @@ export function xorContours(contourA: number[], contourB: number[]): number[][] 
  * Complex boolean operation: (A ∪ B) - C
  * Combines A and B, then subtracts C from the result
  */
-export function combineAndSubtract(
+export async function combineAndSubtract(
   contourA: number[], 
   contourB: number[], 
   contourC: number[]
-): number[][] {
+): Promise<number[][]> {
   // First combine A and B
-  const combined = combineContours(contourA, contourB);
+  const combined = await combineContours(contourA, contourB);
   
   if (combined.length === 0) {
     return [];
@@ -208,7 +222,7 @@ export function combineAndSubtract(
   const results: number[][] = [];
   
   for (const combinedContour of combined) {
-    const subtracted = subtractContours(combinedContour, contourC);
+    const subtracted = await subtractContours(combinedContour, contourC);
     results.push(...subtracted);
   }
   
@@ -219,13 +233,13 @@ export function combineAndSubtract(
  * Complex boolean operation: (A ∩ B) ∪ C
  * Intersects A and B, then combines with C
  */
-export function intersectAndCombine(
+export async function intersectAndCombine(
   contourA: number[], 
   contourB: number[], 
   contourC: number[]
-): number[][] {
+): Promise<number[][]> {
   // First intersect A and B
-  const intersection = intersectContours(contourA, contourB);
+  const intersection = await intersectContours(contourA, contourB);
   
   if (intersection.length === 0) {
     // If no intersection, just return C
@@ -233,24 +247,26 @@ export function intersectAndCombine(
   }
   
   // Combine all intersection results with C
-  const ClipperClass = clipperLib.Clipper;
-  const clipper = new ClipperClass();
-  const solution = new clipperLib.Paths();
+  const api = await getClipper();
+  const clipper = await createClipperInstance();
+  const solution = await createPaths();
   const z = contourA[2];
   
   try {
     // Add all intersection results
     for (const intersectContour of intersection) {
-      clipper.AddPath(contourToClipperPath(intersectContour), clipperLib.PolyType.ptSubject, true);
+      const path = await contourToClipperPath(intersectContour);
+      clipper.AddPath(path, api.PolyType.ptSubject, true);
     }
     
     // Add C
-    clipper.AddPath(contourToClipperPath(contourC), clipperLib.PolyType.ptClip, true);
+    const pathC = await contourToClipperPath(contourC);
+    clipper.AddPath(pathC, api.PolyType.ptClip, true);
     
     // Perform union
-    clipper.Execute(clipperLib.ClipType.ctUnion, solution,
-      clipperLib.PolyFillType.pftNonZero,
-      clipperLib.PolyFillType.pftNonZero
+    clipper.Execute(api.ClipType.ctUnion, solution,
+      api.PolyFillType.pftNonZero,
+      api.PolyFillType.pftNonZero
     );
     
     return clipperPathsToContours(solution, z);
@@ -264,18 +280,19 @@ export function intersectAndCombine(
 /**
  * Check if a point is inside a contour using ClipperLib
  */
-export function isPointInContour(point: [number, number], contour: number[]): boolean {
+export async function isPointInContour(point: [number, number], contour: number[]): Promise<boolean> {
   if (contour.length < 9) {
     return false;
   }
   
-  const path = contourToClipperPath(contour);
+  const api = await getClipper();
+  const path = await contourToClipperPath(contour);
   const testPoint = {
     X: Math.round(point[0] * SCALE),
     Y: Math.round(point[1] * SCALE)
   };
   
-  const PointInPolygonClass = clipperLib.PointInPolygon;
+  const PointInPolygonClass = api.PointInPolygon;
   const result = PointInPolygonClass(testPoint, path);
   
   // 0 = outside, 1 = inside, -1 = on boundary
@@ -285,15 +302,16 @@ export function isPointInContour(point: [number, number], contour: number[]): bo
 /**
  * Simplify a contour by removing redundant points
  */
-export function simplifyContour(contour: number[], tolerance: number = 0.5): number[] {
+export async function simplifyContour(contour: number[], tolerance: number = 0.5): Promise<number[]> {
   if (contour.length < 9) {
     return contour;
   }
   
   const z = contour[2];
-  const path = contourToClipperPath(contour);
+  const api = await getClipper();
+  const path = await contourToClipperPath(contour);
   
-  const CleanPolygonClass = clipperLib.CleanPolygon;
+  const CleanPolygonClass = api.CleanPolygon;
   const cleanedPath = CleanPolygonClass(path, tolerance * SCALE);
   
   const result: number[] = [];

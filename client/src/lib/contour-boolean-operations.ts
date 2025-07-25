@@ -1,6 +1,7 @@
 /**
- * Boolean operations for medical imaging contours
- * Provides combine (union) and subtract operations for RT structure contours
+ * Simple/naive boolean operations for medical imaging contours
+ * DEPRECATED: Use clipper-boolean-operations.ts for robust operations
+ * Kept only for fallback/testing purposes
  */
 
 interface Point2D {
@@ -14,7 +15,7 @@ interface Point2D {
  * @param contour2 - Second contour as flat array [x, y, z, ...]
  * @returns Combined contour as flat array
  */
-export function combineContours(contour1: number[], contour2: number[]): number[] {
+export function naiveCombineContours(contour1: number[], contour2: number[]): number[] {
   if (!contour1 || contour1.length < 9) return contour2;
   if (!contour2 || contour2.length < 9) return contour1;
   
@@ -38,7 +39,7 @@ export function combineContours(contour1: number[], contour2: number[]): number[
  * @param contour2 - Contour to subtract as flat array [x, y, z, ...]
  * @returns Result contour as flat array
  */
-export function subtractContours(contour1: number[], contour2: number[]): number[] {
+export function naiveSubtractContours(contour1: number[], contour2: number[]): number[] {
   if (!contour1 || contour1.length < 9) return [];
   if (!contour2 || contour2.length < 9) return contour1;
   

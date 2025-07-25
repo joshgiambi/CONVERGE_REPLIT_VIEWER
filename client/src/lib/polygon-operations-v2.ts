@@ -99,7 +99,7 @@ export class PolygonOperationsV2 {
   }
 
   // Union operation for additive brush strokes
-  static union(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
+  static async union(polygons1: MultiPolygon, polygons2: MultiPolygon): Promise<MultiPolygon> {
     if (polygons1.length === 0) return polygons2;
     if (polygons2.length === 0) return polygons1;
     
@@ -120,7 +120,7 @@ export class PolygonOperationsV2 {
         
         // Try to merge with existing contours
         for (const existingContour of resultContours) {
-          const unionResult = combineContours(existingContour, contour2);
+          const unionResult = await combineContours(existingContour, contour2);
           if (unionResult.length === 1) {
             // Successfully merged into single contour
             newResultContours.push(unionResult[0]);
@@ -151,7 +151,7 @@ export class PolygonOperationsV2 {
   }
 
   // Difference operation for subtractive brush strokes  
-  static difference(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
+  static async difference(polygons1: MultiPolygon, polygons2: MultiPolygon): Promise<MultiPolygon> {
     if (polygons1.length === 0) return [];
     if (polygons2.length === 0) return polygons1;
     
@@ -171,7 +171,7 @@ export class PolygonOperationsV2 {
         const newResultContours: number[][] = [];
         
         for (const existingContour of resultContours) {
-          const differenceResult = subtractContours(existingContour, subtractContour);
+          const differenceResult = await subtractContours(existingContour, subtractContour);
           
           // Add all resulting contours (could be 0, 1, or multiple)
           newResultContours.push(...differenceResult);
@@ -191,7 +191,7 @@ export class PolygonOperationsV2 {
   }
 
   // Intersection operation
-  static intersection(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
+  static async intersection(polygons1: MultiPolygon, polygons2: MultiPolygon): Promise<MultiPolygon> {
     if (polygons1.length === 0 || polygons2.length === 0) return [];
     
     try {
@@ -206,7 +206,7 @@ export class PolygonOperationsV2 {
       // Find intersection between each pair of contours
       for (const contour1 of contours1) {
         for (const contour2 of contours2) {
-          const intersectionResult = intersectContours(contour1, contour2);
+          const intersectionResult = await intersectContours(contour1, contour2);
           resultContours.push(...intersectionResult);
         }
       }
