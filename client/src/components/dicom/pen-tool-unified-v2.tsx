@@ -173,6 +173,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const completeShape = useCallback(async (addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
     if (points.length < 3) return;
     
+    // Get current image Z position first
+    const currentZ = imageMetadata?.sliceLocation || imageMetadata?.imagePosition?.[2] || 0;
+    
     console.log('completeShape called:', {
       selectedStructure,
       pointsCount: points.length,
@@ -184,9 +187,6 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (addFinalPoint && finalPoint) {
       finalPoints.push(finalPoint);
     }
-    
-    // Get current image Z position
-    const currentZ = imageMetadata?.sliceLocation || imageMetadata?.imagePosition?.[2] || 0;
     
     // Build final world coordinates array
     const worldPoints: number[] = [];
@@ -201,15 +201,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     }
     
     // Use brush_stroke action to get automatic boolean operations like brush tool
-    onContourUpdate({
-      action: 'brush_stroke',
+    onContourUpdate('brush_stroke', {
       structureId: selectedStructure,
       points: brushFormatPoints,
       slicePosition: currentZ,
       pointCount: brushFormatPoints.length,
       brushSize: 10, // Default pen size
       predictionEnabled: false,
-      imageMetadata
+      imageMetadata,
+      mode: startMode // Pass the mode (ADD or SUBTRACT) determined at start
     });
     
     console.log(`Pen tool completed: sent ${brushFormatPoints.length} points as brush_stroke to working-viewer`);
@@ -326,8 +326,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Update contour
-      onContourUpdate({
-        action: 'replace_contour',
+      onContourUpdate('replace_contour', {
         structureId: selectedStructure,
         points: newContour,
         slicePosition: currentZ,
