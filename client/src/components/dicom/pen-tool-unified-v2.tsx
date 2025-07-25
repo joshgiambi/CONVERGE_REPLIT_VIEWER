@@ -75,10 +75,13 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!structure?.contours) return [];
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
-      // contour.slicePosition contains the Z value for this contour
-      // Use tighter tolerance to avoid ghost contours from adjacent slices
-      const tolerance = 0.01; // 0.01mm tolerance
-      return Math.abs(contour.slicePosition - currentZ) < tolerance;
+      // Use integer comparison to completely avoid floating point issues
+      // Convert to micrometers (multiply by 1000) for integer comparison
+      const contourZMicrons = Math.round(contour.slicePosition * 1000);
+      const currentZMicrons = Math.round(currentZ * 1000);
+      
+      // Only match if exactly the same when rounded to micrometers
+      return contourZMicrons === currentZMicrons;
     });
     
     console.log('Contours at current slice:', contoursAtSlice.length);
@@ -703,7 +706,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // Remove debug rectangle - overlay is confirmed working
     
-    console.log('Render called - overlay canvas size:', overlayCanvasRef.current.width, 'x', overlayCanvasRef.current.height);
+    // Remove verbose render logging
     
     // Get structure color
     const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure);
