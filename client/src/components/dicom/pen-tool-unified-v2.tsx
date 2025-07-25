@@ -262,7 +262,10 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
         console.log('Boolean operation result:', {
           operation: startMode,
-          solutionPaths: solution.length
+          existingPaths: existing.length,
+          newPolyPoints: newPoly.length,
+          solutionPaths: solution.length,
+          solutionDetails: solution.map(path => ({ points: path.length }))
         });
         
         if (solution.length === 0) {
@@ -365,7 +368,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
       
       // Set mode based on whether we're starting inside or outside
-      const mode = insideAnyContour ? 'ADD' : 'SUBTRACT';
+      // If starting OUTSIDE existing contour → ADD (expand the contour)
+      // If starting INSIDE existing contour → SUBTRACT (cut from the contour)
+      const mode = insideAnyContour ? 'SUBTRACT' : 'ADD';
       setStartMode(mode);
       console.log(`Starting pen tool in ${mode} mode (inside contour: ${insideAnyContour})`);
     }
