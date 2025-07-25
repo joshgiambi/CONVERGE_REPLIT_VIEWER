@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
-import { ContourEditToolbarV2 } from './contour-edit-toolbar-v2';
+import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -501,7 +501,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 structureVisibility={structureVisibility}
                 brushToolState={brushToolState}
                 selectedForEdit={selectedForEdit}
-                selectedStructures={selectedStructures}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
                 onSlicePositionChange={setCurrentSlicePosition}
@@ -579,7 +578,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       {/* Contour Edit Toolbar */}
       {selectedForEdit && rtStructures && rtStructures.structures && (
-        <ContourEditToolbarV2
+        <ContourEditToolbar
           selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
           isVisible={isContourEditMode}
           onClose={() => {
@@ -601,6 +600,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           currentSlicePosition={currentSlicePosition}
           onContourUpdate={handleContourUpdate}
+          availableStructures={rtStructures.structures}
+          onTargetStructureSelect={(structureId) => {
+            // Handle target structure selection for boolean operations
+            console.log('Target structure selected:', structureId);
+          }}
           seriesId={selectedSeries?.id}
         />
       )}

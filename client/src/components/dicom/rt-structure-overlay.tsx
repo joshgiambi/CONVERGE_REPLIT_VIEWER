@@ -35,7 +35,6 @@ interface RTStructureOverlayProps {
   onPredictionConfirm?: (structureId: number, slicePosition: number) => void;
   animationTime?: number;
   rtStructures?: any; // Pass in RT structures for better control
-  selectedStructures?: Set<number>; // Track which structures are selected
 }
 
 export function RTStructureOverlay({
@@ -51,70 +50,13 @@ export function RTStructureOverlay({
   contourOpacity = 30,
   onPredictionConfirm,
   animationTime,
-  rtStructures: externalRTStructures,
-  selectedStructures = new Set()
+  rtStructures: externalRTStructures
 }: RTStructureOverlayProps) {
   const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [animationProgress, setAnimationProgress] = useState<Map<number, number>>(new Map());
   
   // Use external RT structures if provided, otherwise load our own
   const rtStructures = externalRTStructures || localRTStructures;
-  
-  // Track animation progress for newly selected structures
-  useEffect(() => {
-    const newProgress = new Map(animationProgress);
-    let hasChanges = false;
-    
-    // Add new selections with initial progress
-    selectedStructures.forEach(structureId => {
-      if (!animationProgress.has(structureId)) {
-        newProgress.set(structureId, 0);
-        hasChanges = true;
-      }
-    });
-    
-    // Remove deselected structures
-    animationProgress.forEach((_, structureId) => {
-      if (!selectedStructures.has(structureId)) {
-        newProgress.delete(structureId);
-        hasChanges = true;
-      }
-    });
-    
-    if (hasChanges) {
-      setAnimationProgress(newProgress);
-    }
-  }, [selectedStructures, animationProgress]);
-  
-  // Animate selected structures
-  useEffect(() => {
-    if (animationProgress.size === 0) return;
-    
-    const animateFrame = () => {
-      setAnimationProgress(prev => {
-        const newProgress = new Map(prev);
-        let hasIncomplete = false;
-        
-        prev.forEach((progress, structureId) => {
-          if (progress < 1) {
-            // Ease-out animation curve
-            const newValue = Math.min(1, progress + 0.03);
-            newProgress.set(structureId, newValue);
-            hasIncomplete = true;
-          }
-        });
-        
-        if (hasIncomplete) {
-          requestAnimationFrame(animateFrame);
-        }
-        
-        return newProgress;
-      });
-    };
-    
-    requestAnimationFrame(animateFrame);
-  }, [animationProgress.size]);
 
   // Load RT structures for the study (only if external structures not provided)
   useEffect(() => {
@@ -213,9 +155,9 @@ export function RTStructureOverlay({
     if (!ctx) return;
 
     // Clear any existing overlays (we'll redraw them) - pass animation time for dashed borders
-    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime, selectedStructures, animationProgress);
+    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime);
 
-  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime, selectedStructures, animationProgress]);
+  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime]);
 
   return null; // This component only draws on the existing canvas
 }
@@ -232,9 +174,7 @@ function renderRTStructures(
   panY: number,
   contourWidth: number = 2,
   contourOpacity: number = 80,
-  animationTime?: number, // For animated dashed borders
-  selectedStructures?: Set<number>,
-  animationProgress?: Map<number, number>
+  animationTime?: number // For animated dashed borders
 ) {
   // Save current context state
   ctx.save();
@@ -275,17 +215,13 @@ function renderRTStructures(
     ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${contourOpacity / 100})`;
     
-    // Check if this structure is selected for animation
-    const isSelected = selectedStructures?.has(structure.roiNumber) || false;
-    const animProgress = animationProgress?.get(structure.roiNumber) || 1;
-    
     structure.contours.forEach(contour => {
       // Check if this contour is on the current slice
       const sliceZ = contour.slicePosition;
       
       // Check if this contour is on the current slice
       if (Math.abs(sliceZ - currentSlicePosition) <= tolerance) {
-        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime, isSelected, animProgress, structure.color);
+        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime);
       }
     });
   });
@@ -328,10 +264,7 @@ function drawContour(
   imageHeight: number,
   contourWidth: number = 2,
   contourOpacity: number = 80,
-  animationTime?: number,
-  isSelected?: boolean,
-  animationProgress?: number,
-  structureColor?: [number, number, number]
+  animationTime?: number
 ) {
   if (contour.points.length < 6) return;
 
@@ -341,30 +274,9 @@ function drawContour(
   const dicomImageWidth = 512; // Standard DICOM matrix size
   const dicomImageHeight = 512;
 
-  // Save the current context state
-  ctx.save();
-  
   // Apply global contour width and opacity settings
   ctx.lineWidth = contourWidth;
   ctx.globalAlpha = contourOpacity / 100;
-
-  // Animation effects for selected structures
-  if (isSelected && animationProgress !== undefined && animationProgress < 1 && structureColor) {
-    // Add glow effect for selected structures
-    const [r, g, b] = structureColor;
-    
-    // Create multiple layers for glow effect
-    ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
-    ctx.shadowBlur = 15 + (5 * Math.sin(Date.now() * 0.003)); // Pulsing glow
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    
-    // Increase line width slightly during animation
-    ctx.lineWidth = contourWidth + 1;
-    
-    // Enhance opacity during animation
-    ctx.globalAlpha = Math.min(1, (contourOpacity / 100) + 0.2);
-  }
 
   // Set up animated dashed line for predicted contours
   if (contour.isPredicted && animationTime !== undefined) {
@@ -385,12 +297,7 @@ function drawContour(
 
   ctx.beginPath();
 
-  // Calculate how many points to draw based on animation progress
-  const totalPoints = Math.floor(contour.points.length / 3);
-  const pointsToDraw = isSelected && animationProgress !== undefined ? 
-    Math.ceil(totalPoints * animationProgress) : totalPoints;
-
-  for (let i = 0; i < pointsToDraw * 3; i += 3) {
+  for (let i = 0; i < contour.points.length; i += 3) {
     const worldX = contour.points[i];
     const worldY = contour.points[i + 1];
 
@@ -412,33 +319,19 @@ function drawContour(
     }
   }
 
-  // Only close path if animation is complete or not selected
-  if (!isSelected || animationProgress === 1 || animationProgress === undefined) {
-    ctx.closePath();
-    
-    // Fill with reduced opacity for predictions
-    if (contour.isPredicted) {
-      const originalAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
-      ctx.fill();
-      ctx.globalAlpha = originalAlpha;
-    } else {
-      ctx.fill();
-    }
+  ctx.closePath();
+  
+  // Fill with reduced opacity for predictions
+  if (contour.isPredicted) {
+    const originalAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
+    ctx.fill();
+    ctx.globalAlpha = originalAlpha;
+  } else {
+    ctx.fill();
   }
   
   ctx.stroke();
-  
-  // Add extra glow pass for selected structures
-  if (isSelected && animationProgress !== undefined && structureColor) {
-    // Second pass with stronger glow
-    ctx.shadowBlur = 25 + (10 * Math.sin(Date.now() * 0.003));
-    ctx.globalAlpha = 0.3 * animationProgress;
-    ctx.stroke();
-  }
-  
-  // Restore context state
-  ctx.restore();
   
   // Reset line dash and alpha for subsequent drawing operations
   ctx.setLineDash([]);
