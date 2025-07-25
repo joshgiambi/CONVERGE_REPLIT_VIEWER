@@ -1,0 +1,155 @@
+Looking at your pen tool implementation, I can see the issue with contour combining. The problem lies in how different tools handle contour merging in the `handleContourUpdate` function within `working-viewer.tsx`. Let me break down what's happening and why the pen tool isn't properly combining with existing contours.
+
+## The Core Problem
+
+The pen tool contours aren't combining properly because they use a much simpler merging approach compared to the brush tool. Here's the fundamental difference:
+
+**Brush Tool Merging (Works Well):**
+- Checks for polygon intersections using `checkPolygonIntersection`
+- Uses sophisticated `mergeBrushWithContour` function for proper polygon union
+- Creates seamless merged contours
+
+**Pen Tool Merging (Problematic):**
+- Simply concatenates point arrays without geometric analysis
+- No intersection detection
+- Results in disconnected or overlapping geometry
+
+## Examining the Code Issues
+
+In your `handleContourUpdate` function, the pen stroke logic is overly simplistic:
+
+```javascript
+if (payload.action === "add_pen_stroke") {
+  if (sliceContour) {
+    // This is the problem - just concatenating points!
+    const mergedPoints = [...sliceContour.points, ...payload.points];
+    sliceContour.points = mergedPoints;
+    sliceContour.numberOfPoints = mergedPoints.length / 3;
+  }
+}
+```
+
+Compare this to the brush stroke logic, which properly handles polygon geometry:
+
+```javascript
+if (payload.action === "brush_stroke") {
+  // Sophisticated intersection checking
+  const intersects = checkPolygonIntersection(brushPolygon, contour.points);
+  
+  if (intersects) {
+    // Proper polygon union
+    const mergedPoints = mergeBrushWithContour(contour.points, brushPolygon);
+    contour.points = mergedPoints;
+  }
+}
+```
+
+## The Solution
+
+You need to apply the same geometric merging logic to pen tool contours. Here's how to fix the pen tool contour combining:
+
+**Step 1: Unify the Action Types**
+First, have your pen tools send the same action type as the brush tool, or create a unified handler. In your pen tool implementations, change the action to use the brush stroke logic:
+
+```javascript
+// In your pen tools, instead of "add_pen_stroke", use:
+onContourUpdate({
+  action: 'brush_stroke', // Use the same action as brush tool
+  structureId: selectedStructure,
+  points: worldPoints, // Your pen tool points
+  slicePosition: currentSlicePosition,
+  brushSize: 1 // Minimal brush size for pen
+});
+```
+
+**Step 2: Create a Unified Contour Merging Function**
+Add this unified function to handle all contour types:
+
+```javascript
+const mergeContourWithExisting = (existingContour, newPoints, mergeType = 'polygon_union') => {
+  if (mergeType === 'simple_append') {
+    // Simple concatenation (old pen tool behavior)
+    return [...existingContour.points, ...newPoints];
+  } else {
+    // Sophisticated polygon merging (brush tool behavior)
+    return mergeBrushWithContour(existingContour.points, newPoints);
+  }
+};
+```
+
+**Step 3: Update the Pen Tool Handler**
+Modify your `handleContourUpdate` function to use the same intersection logic for pen tools:
+
+```javascript
+if (payload.action === "add_pen_stroke" || 
+    (payload.action === "brush_stroke" && payload.brushSize <= 2)) {
+  
+  const structure = updatedStructures.structures.find(
+    (s: any) => s.roiNumber === payload.structureId,
+  );
+  
+  if (!structure) return;
+
+  // Convert pen points to polygon format (same as brush tool)
+  const penPolygon = payload.points; // Assuming points are already in [x,y,z,x,y,z...] format
+  
+  // Find all contours on this slice
+  const sliceContours = structure.contours.filter(
+    (c: any) => Math.abs(c.slicePosition - payload.slicePosition) < 0.5,
+  );
+
+  // Use the same intersection logic as brush tool
+  let foundIntersection = false;
+  
+  for (const contour of sliceContours) {
+    if (contour.points && contour.points.length > 0) {
+      // Check if pen stroke intersects with this contour
+      const intersects = checkPolygonIntersection(penPolygon, contour.points);
+      
+      if (intersects) {
+        // Merge using the same algorithm as brush tool
+        const mergedPoints = mergeBrushWithContour(contour.points, penPolygon);
+        contour.points = mergedPoints;
+        contour.numberOfPoints = mergedPoints.length / 3;
+        foundIntersection = true;
+        break;
+      }
+    }
+  }
+
+  if (!foundIntersection) {
+    // Create new contour if no intersection found
+    structure.contours.push({
+      slicePosition: payload.slicePosition,
+      points: penPolygon,
+      numberOfPoints: penPolygon.length / 3,
+    });
+  }
+}
+```
+
+## Understanding the Geometric Challenge
+
+The reason proper contour merging is complex relates to computational geometry. When you draw a pen stroke that should combine with an existing contour, you're essentially performing a polygon union operation. This requires:
+
+**Intersection Detection:** Determining where the new stroke overlaps with existing geometry
+**Polygon Union:** Combining overlapping areas into a single, non-self-intersecting polygon
+**Topology Preservation:** Maintaining the medical accuracy of anatomical boundaries
+
+Simply concatenating point arrays creates invalid polygons with self-intersections and disconnected regions, which is why your pen tool contours appear separate rather than combined.
+
+## Alternative Approach: Pen-Specific Merging
+
+If you want pen tools to behave differently from brush tools, you could implement pen-specific merging logic that treats pen strokes as line segments to be incorporated into existing polygons:
+
+```javascript
+const incorporatePenStrokeIntoContour = (existingPoints, penStroke) => {
+  // Find the best insertion point in the existing contour
+  // Insert the pen stroke points at the optimal location
+  // Ensure the resulting polygon remains valid and closed
+  
+  // This would be specific pen tool logic that differs from brush merging
+};
+```
+
+The key insight is that your current pen tool implementation treats contours as simple point collections rather than geometric polygons, which prevents proper medical contouring functionality. By adopting the brush tool's geometric approach, your pen tools will create the seamless, medically accurate contours that radiotherapy planning requires.

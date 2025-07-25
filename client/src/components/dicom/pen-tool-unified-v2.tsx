@@ -169,6 +169,43 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     return distance < CLOSE_THRESHOLD;
   }, [points, worldToCanvas]);
   
+  // Check if new polygon intersects with any existing contour
+  const doesNewPolygonIntersect = useCallback((newPoints: [number, number][], existingContours: any[]) => {
+    // Create a simple bounding box check first
+    let newMinX = Infinity, newMaxX = -Infinity;
+    let newMinY = Infinity, newMaxY = -Infinity;
+    
+    newPoints.forEach(([x, y]) => {
+      newMinX = Math.min(newMinX, x);
+      newMaxX = Math.max(newMaxX, x);
+      newMinY = Math.min(newMinY, y);
+      newMaxY = Math.max(newMaxY, y);
+    });
+    
+    // Check each existing contour
+    for (const contour of existingContours) {
+      let contourMinX = Infinity, contourMaxX = -Infinity;
+      let contourMinY = Infinity, contourMaxY = -Infinity;
+      
+      for (let i = 0; i < contour.points.length; i += 3) {
+        const x = contour.points[i];
+        const y = contour.points[i + 1];
+        contourMinX = Math.min(contourMinX, x);
+        contourMaxX = Math.max(contourMaxX, x);
+        contourMinY = Math.min(contourMinY, y);
+        contourMaxY = Math.max(contourMaxY, y);
+      }
+      
+      // Check if bounding boxes overlap
+      if (newMaxX >= contourMinX && newMinX <= contourMaxX &&
+          newMaxY >= contourMinY && newMinY <= contourMaxY) {
+        return true; // Potential intersection
+      }
+    }
+    
+    return false;
+  }, []);
+
   // Complete the shape and apply boolean operation
   const completeShape = useCallback(async (addFinalPoint: boolean = false, finalPoint?: [number, number]) => {
     if (points.length < 3) return;
@@ -216,17 +253,66 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         imageMetadata
       });
     } else {
+      // Check if we need to do boolean operations
+      const newPolygonIntersects = doesNewPolygonIntersect(finalPoints, existingContours);
+      
+      // Determine the operation based on starting point and intersection
+      let operation: 'union' | 'subtract' | 'separate';
+      if (startMode === 'ADD') {
+        // Started inside structure - always union
+        operation = 'union';
+      } else {
+        // Started outside structure
+        if (newPolygonIntersects) {
+          // Goes into structure - subtract
+          operation = 'subtract';
+        } else {
+          // Doesn't touch structure - keep separate
+          operation = 'separate';
+        }
+      }
+      
+      console.log('Boolean operation determined:', {
+        startMode,
+        intersects: newPolygonIntersects,
+        operation
+      });
+      
+      // Handle separate case (no boolean operation needed)
+      if (operation === 'separate') {
+        // Just add the new contour as a separate blob
+        const worldPoints: number[] = [];
+        finalPoints.forEach(([x, y]) => {
+          worldPoints.push(x, y, currentZ);
+        });
+        
+        onContourUpdate({
+          action: 'add_pen_stroke',
+          structureId: selectedStructure,
+          points: worldPoints,
+          slicePosition: currentZ,
+          imageMetadata
+        });
+        
+        // Reset state and return
+        setPoints([]);
+        setIsDrawingContinuous(false);
+        setStartMode(null);
+        return;
+      }
+      
       // Perform boolean operations with existing contours
       try {
         const clipperLib = await ClipperLib.loadNativeClipperLibInstanceAsync(
           ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
         );
         
-        const clipper = new clipperLib.Clipper();
+        const ClipperClass = clipperLib.Clipper;
+        const clipper = new ClipperClass();
         const solution = new clipperLib.Paths();
         
         // Convert existing contours to ClipperLib format
-        existingContours.forEach(contour => {
+        existingContours.forEach((contour: any) => {
           const path = new clipperLib.Path();
           for (let i = 0; i < contour.points.length; i += 3) {
             path.push({
@@ -246,8 +332,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           });
         });
         
-        if (startMode === 'ADD') {
-          // Union operation
+        if (operation === 'union') {
+          // Union operation - combine without holes/overlaps
           clipper.AddPath(newPath, clipperLib.PolyType.ptClip, true);
           const success = clipper.Execute(
             clipperLib.ClipType.ctUnion,
@@ -259,8 +345,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           if (!success) {
             console.warn('ClipperLib union operation failed');
           }
-        } else {
-          // Difference operation
+        } else if (operation === 'subtract') {
+          // Difference operation - subtract new from existing
           clipper.AddPath(newPath, clipperLib.PolyType.ptClip, true);
           const success = clipper.Execute(
             clipperLib.ClipType.ctDifference,
@@ -276,7 +362,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         
         // Convert solution back to world coordinates
         const resultContours: number[][] = [];
-        for (let i = 0; i < solution.size(); i++) {
+        const solutionSize = solution.size();
+        
+        for (let i = 0; i < solutionSize; i++) {
           const path = solution.get(i);
           const worldPoints: number[] = [];
           
@@ -294,20 +382,20 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           }
         }
         
+        // Log before cleanup
+        console.log('Boolean operation result:', {
+          operation,
+          originalContours: existingContours.length,
+          resultContours: resultContours.length,
+          solutionPaths: solutionSize
+        });
+        
         // Clean up ClipperLib objects
         solution.delete();
         clipper.delete();
         
-        // Send updated contours
-        console.log('Boolean operation result:', {
-          operation: startMode,
-          originalContours: existingContours.length,
-          resultContours: resultContours.length,
-          solutionPaths: solution.length
-        });
-        
         // Send appropriate action based on operation type
-        if (startMode === 'ADD') {
+        if (operation === 'union') {
           // Union operation - merge contours
           onContourUpdate({
             action: 'merge_contours',
@@ -316,43 +404,50 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
             slicePosition: currentZ,
             imageMetadata
           });
-        } else {
-          // Difference operation - subtract contours
-          if (resultContours.length > 0) {
-            onContourUpdate({
-              action: 'subtract_contours',
-              structureId: selectedStructure,
-              contours: resultContours, // Send all resulting contours
-              slicePosition: currentZ,
-              imageMetadata
-            });
-          } else {
-            // If subtraction resulted in empty contour, delete the slice
+        } else if (operation === 'subtract') {
+          // For subtraction, the result shows what's left of the original
+          // If there's nothing left, delete the slice
+          if (resultContours.length === 0) {
             console.log('Subtraction resulted in empty contour, deleting slice');
             onContourUpdate({
               action: 'delete_slice',
               structureId: selectedStructure,
               slicePosition: currentZ
             });
+          } else {
+            // Update with what's left after subtraction
+            onContourUpdate({
+              action: 'merge_contours', // Use merge to replace all contours
+              structureId: selectedStructure,
+              contours: resultContours,
+              slicePosition: currentZ,
+              imageMetadata
+            });
           }
         }
         
       } catch (error) {
         console.error('Boolean operation failed:', error);
-        // Fallback: just add/subtract as before
+        // Fallback: just add the contour without boolean operations
         const worldPoints: number[] = [];
         finalPoints.forEach(([x, y]) => {
           worldPoints.push(x, y, currentZ);
         });
         
-        const action = startMode === 'ADD' ? 'add_pen_stroke' : 'subtract_contour';
-        onContourUpdate({
-          action: action,
-          structureId: selectedStructure,
-          points: worldPoints,
-          slicePosition: currentZ,
-          imageMetadata
-        });
+        if (operation === 'union' || operation === 'separate') {
+          // For union or separate, just add the new contour
+          onContourUpdate({
+            action: 'add_pen_stroke',
+            structureId: selectedStructure,
+            points: worldPoints,
+            slicePosition: currentZ,
+            imageMetadata
+          });
+        } else {
+          // For subtract, we can't do a proper subtraction without ClipperLib
+          // So we'll just skip adding the contour
+          console.warn('Cannot perform subtraction without ClipperLib, skipping contour');
+        }
       }
     }
     
@@ -360,7 +455,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     setPoints([]);
     setIsDrawingContinuous(false);
     setStartMode(null);
-  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate, getContoursAtCurrentSlice]);
+  }, [points, currentZ, startMode, selectedStructure, imageMetadata, onContourUpdate, getContoursAtCurrentSlice, doesNewPolygonIntersect]);
   
   // Handle mouse down
   const handleMouseDown = useCallback((e: MouseEvent) => {
