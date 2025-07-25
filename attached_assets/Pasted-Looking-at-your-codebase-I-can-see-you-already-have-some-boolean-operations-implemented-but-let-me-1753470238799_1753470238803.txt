@@ -1,0 +1,646 @@
+Looking at your codebase, I can see you already have some boolean operations implemented, but let me provide you with a comprehensive set of contour operations and explain how to properly implement 3D expansion/shrinkage in medical imaging contexts.
+
+## Current Implementation Analysis
+
+From your code, I see you have:
+- Basic `combineContours` and `subtractContours` functions referenced in `working-viewer.tsx`
+- A `growContour` function for radial expansion/shrinkage
+- An `applyDirectionalGrow` function for directional growth
+
+Let me provide complete implementations for all the boolean operations you need:
+
+## Complete Boolean Operations Implementation
+
+Create a new file `client/src/lib/contour-boolean-operations.ts`:
+
+```typescript
+import * as martinez from 'martinez-polygon-clipping';
+
+/**
+ * Convert 3D contour points to 2D polygon for boolean operations
+ * Assumes all points are on the same Z plane
+ */
+function contourTo2DPolygon(points: number[]): number[][] {
+  const polygon: number[][] = [];
+  for (let i = 0; i < points.length; i += 3) {
+    polygon.push([points[i], points[i + 1]]);
+  }
+  return polygon;
+}
+
+/**
+ * Convert 2D polygon back to 3D contour points
+ */
+function polygon2DToContour(polygon: number[][], z: number): number[] {
+  const contour: number[] = [];
+  for (const point of polygon) {
+    contour.push(point[0], point[1], z);
+  }
+  return contour;
+}
+
+/**
+ * Union (Combine) - Merges two contours into one, including all area covered by either
+ * This is what Eclipse TPS calls "OR" operation
+ */
+export function combineContours(contourA: number[], contourB: number[]): number[] {
+  if (contourA.length < 9 || contourB.length < 9) {
+    console.warn('Contours must have at least 3 points');
+    return contourA.length >= 9 ? contourA : contourB;
+  }
+
+  const z = contourA[2]; // Assume same Z plane
+  const polyA = [contourTo2DPolygon(contourA)];
+  const polyB = [contourTo2DPolygon(contourB)];
+
+  try {
+    const union = martinez.union(polyA, polyB);
+    if (union && union.length > 0 && union[0].length > 0) {
+      // Take the largest resulting polygon (main contour)
+      const largestPoly = union.reduce((prev, curr) => 
+        curr.length > prev.length ? curr : prev
+      );
+      return polygon2DToContour(largestPoly, z);
+    }
+  } catch (error) {
+    console.error('Union operation failed:', error);
+  }
+
+  return contourA;
+}
+
+/**
+ * Subtract - Removes area of contourB from contourA
+ * This is what Eclipse TPS calls "SUB" operation
+ */
+export function subtractContours(contourA: number[], contourB: number[]): number[] {
+  if (contourA.length < 9 || contourB.length < 9) {
+    console.warn('Contours must have at least 3 points');
+    return contourA;
+  }
+
+  const z = contourA[2];
+  const polyA = [contourTo2DPolygon(contourA)];
+  const polyB = [contourTo2DPolygon(contourB)];
+
+  try {
+    const difference = martinez.diff(polyA, polyB);
+    if (difference && difference.length > 0 && difference[0].length > 0) {
+      // Combine all resulting polygons (handles holes)
+      const allPoints: number[] = [];
+      for (const poly of difference) {
+        const contourPoints = polygon2DToContour(poly, z);
+        allPoints.push(...contourPoints);
+      }
+      return allPoints;
+    }
+  } catch (error) {
+    console.error('Subtract operation failed:', error);
+  }
+
+  return contourA;
+}
+
+/**
+ * Intersection - Returns only the overlapping area of two contours
+ * This is what Eclipse TPS calls "AND" operation
+ */
+export function intersectContours(contourA: number[], contourB: number[]): number[] {
+  if (contourA.length < 9 || contourB.length < 9) {
+    console.warn('Contours must have at least 3 points');
+    return [];
+  }
+
+  const z = contourA[2];
+  const polyA = [contourTo2DPolygon(contourA)];
+  const polyB = [contourTo2DPolygon(contourB)];
+
+  try {
+    const intersection = martinez.intersection(polyA, polyB);
+    if (intersection && intersection.length > 0 && intersection[0].length > 0) {
+      return polygon2DToContour(intersection[0], z);
+    }
+  } catch (error) {
+    console.error('Intersection operation failed:', error);
+  }
+
+  return [];
+}
+
+/**
+ * XOR (Exclusive OR) - Returns areas covered by either contour but not both
+ * Removes the overlapping region
+ */
+export function xorContours(contourA: number[], contourB: number[]): number[] {
+  if (contourA.length < 9 || contourB.length < 9) {
+    console.warn('Contours must have at least 3 points');
+    return contourA;
+  }
+
+  const z = contourA[2];
+  const polyA = [contourTo2DPolygon(contourA)];
+  const polyB = [contourTo2DPolygon(contourB)];
+
+  try {
+    const xor = martinez.xor(polyA, polyB);
+    if (xor && xor.length > 0) {
+      // Combine all resulting polygons
+      const allPoints: number[] = [];
+      for (const poly of xor) {
+        if (poly.length >= 3) {
+          const contourPoints = polygon2DToContour(poly, z);
+          allPoints.push(...contourPoints);
+        }
+      }
+      return allPoints;
+    }
+  } catch (error) {
+    console.error('XOR operation failed:', error);
+  }
+
+  return contourA;
+}
+
+/**
+ * Complex boolean operation: (A ∪ B) - C
+ * Combines A and B, then subtracts C from the result
+ */
+export function combineAndSubtract(
+  contourA: number[], 
+  contourB: number[], 
+  contourC: number[]
+): number[] {
+  // First combine A and B
+  const combined = combineContours(contourA, contourB);
+  
+  // Then subtract C from the result
+  return subtractContours(combined, contourC);
+}
+
+/**
+ * Complex boolean operation: (A ∩ B) ∪ C
+ * Intersects A and B, then combines with C
+ */
+export function intersectAndCombine(
+  contourA: number[], 
+  contourB: number[], 
+  contourC: number[]
+): number[] {
+  // First intersect A and B
+  const intersection = intersectContours(contourA, contourB);
+  
+  // Then combine with C
+  return combineContours(intersection, contourC);
+}
+```
+
+## 3D Contour Expansion/Shrinkage Implementation
+
+Now let's implement proper 3D expansion with centimeter-based measurements:
+
+```typescript
+// client/src/lib/contour-3d-operations.ts
+
+import { smoothContour } from './contour-smooth';
+
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface ContourSlice {
+  points: number[];
+  slicePosition: number;
+}
+
+/**
+ * Expand or shrink a contour in 2D by a specific distance in millimeters
+ * Positive distance = expansion (grow), negative = shrinkage
+ * Uses proper normal vector calculation for medical-grade accuracy
+ */
+export function expandContour2D(
+  points: number[], 
+  distanceMM: number,
+  pixelSpacing: [number, number] = [1.171875, 1.171875] // Default from HN-ATLAS
+): number[] {
+  if (points.length < 9) return points;
+
+  const vertices: Point3D[] = [];
+  const z = points[2]; // Store Z coordinate
+
+  // Convert to vertices
+  for (let i = 0; i < points.length; i += 3) {
+    vertices.push({ x: points[i], y: points[i + 1], z: points[i + 2] });
+  }
+
+  // Calculate centroid for shrinkage safety check
+  const centroid = calculateCentroid(vertices);
+
+  // Calculate normal vectors at each vertex
+  const normals: Point3D[] = [];
+  const n = vertices.length;
+
+  for (let i = 0; i < n; i++) {
+    const prev = vertices[(i - 1 + n) % n];
+    const curr = vertices[i];
+    const next = vertices[(i + 1) % n];
+
+    // Calculate edge vectors
+    const edge1 = { 
+      x: curr.x - prev.x, 
+      y: curr.y - prev.y, 
+      z: 0 
+    };
+    const edge2 = { 
+      x: next.x - curr.x, 
+      y: next.y - curr.y, 
+      z: 0 
+    };
+
+    // Average normal (perpendicular to edges)
+    const normal1 = { x: -edge1.y, y: edge1.x, z: 0 };
+    const normal2 = { x: -edge2.y, y: edge2.x, z: 0 };
+
+    // Normalize and average
+    const len1 = Math.sqrt(normal1.x * normal1.x + normal1.y * normal1.y);
+    const len2 = Math.sqrt(normal2.x * normal2.x + normal2.y * normal2.y);
+
+    if (len1 > 0) {
+      normal1.x /= len1;
+      normal1.y /= len1;
+    }
+    if (len2 > 0) {
+      normal2.x /= len2;
+      normal2.y /= len2;
+    }
+
+    // Average normal
+    let avgNormal = {
+      x: (normal1.x + normal2.x) / 2,
+      y: (normal1.y + normal2.y) / 2,
+      z: 0
+    };
+
+    // Ensure normal points outward
+    const toCentroid = {
+      x: centroid.x - curr.x,
+      y: centroid.y - curr.y,
+      z: 0
+    };
+    const dot = avgNormal.x * toCentroid.x + avgNormal.y * toCentroid.y;
+    if (dot > 0) {
+      avgNormal.x = -avgNormal.x;
+      avgNormal.y = -avgNormal.y;
+    }
+
+    // Normalize final normal
+    const finalLen = Math.sqrt(avgNormal.x * avgNormal.x + avgNormal.y * avgNormal.y);
+    if (finalLen > 0) {
+      avgNormal.x /= finalLen;
+      avgNormal.y /= finalLen;
+    }
+
+    normals.push(avgNormal);
+  }
+
+  // Apply expansion/shrinkage
+  const expandedPoints: number[] = [];
+  for (let i = 0; i < vertices.length; i++) {
+    const vertex = vertices[i];
+    const normal = normals[i];
+
+    // Move vertex along normal by the specified distance
+    const newX = vertex.x + normal.x * distanceMM;
+    const newY = vertex.y + normal.y * distanceMM;
+
+    expandedPoints.push(newX, newY, z);
+  }
+
+  // For shrinkage, check if contour collapsed
+  if (distanceMM < 0 && isContourCollapsed(expandedPoints)) {
+    console.warn('Contour collapsed during shrinkage, returning empty');
+    return [];
+  }
+
+  return expandedPoints;
+}
+
+/**
+ * Perform 3D expansion/shrinkage across multiple slices
+ * This handles inter-slice smoothing and continuity
+ */
+export function expandContour3D(
+  structure: any, // RT structure with contours array
+  distanceCM: number, // Distance in centimeters
+  sliceThickness: number = 3.0 // mm between slices
+): any {
+  const distanceMM = distanceCM * 10; // Convert CM to MM
+  const expandedStructure = JSON.parse(JSON.stringify(structure));
+
+  // Process each contour slice
+  for (const contour of expandedStructure.contours) {
+    if (!contour.points || contour.points.length < 9) continue;
+
+    // Expand the 2D contour
+    const expanded = expandContour2D(contour.points, distanceMM);
+    
+    if (expanded.length >= 9) {
+      // Apply smoothing for medical-grade quality
+      const smoothed = smoothContour({ 
+        points: expanded, 
+        slicePosition: contour.slicePosition 
+      }, 0.15);
+      
+      contour.points = smoothed.points;
+      contour.numberOfPoints = smoothed.points.length / 3;
+    } else {
+      // Contour collapsed, remove it
+      contour.points = [];
+      contour.numberOfPoints = 0;
+    }
+  }
+
+  // Inter-slice smoothing for 3D continuity
+  smoothInterSliceTransitions(expandedStructure.contours, sliceThickness);
+
+  return expandedStructure;
+}
+
+/**
+ * Smooth transitions between slices for better 3D continuity
+ */
+function smoothInterSliceTransitions(
+  contours: ContourSlice[], 
+  sliceThickness: number
+): void {
+  // Sort by slice position
+  contours.sort((a, b) => a.slicePosition - b.slicePosition);
+
+  // Apply smoothing between adjacent slices
+  for (let i = 1; i < contours.length - 1; i++) {
+    const prev = contours[i - 1];
+    const curr = contours[i];
+    const next = contours[i + 1];
+
+    if (!curr.points || curr.points.length < 9) continue;
+
+    // Weight based on slice distance
+    const distToPrev = Math.abs(curr.slicePosition - prev.slicePosition);
+    const distToNext = Math.abs(next.slicePosition - curr.slicePosition);
+
+    if (distToPrev <= sliceThickness * 1.5 && distToNext <= sliceThickness * 1.5) {
+      // Apply weighted smoothing
+      const smoothedPoints = applyInterSliceSmoothing(
+        prev.points, 
+        curr.points, 
+        next.points,
+        0.7 // Current slice weight
+      );
+      
+      curr.points = smoothedPoints;
+      curr.numberOfPoints = smoothedPoints.length / 3;
+    }
+  }
+}
+
+/**
+ * Helper functions
+ */
+function calculateCentroid(vertices: Point3D[]): Point3D {
+  const sum = vertices.reduce(
+    (acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y, z: acc.z + v.z }),
+    { x: 0, y: 0, z: 0 }
+  );
+  return {
+    x: sum.x / vertices.length,
+    y: sum.y / vertices.length,
+    z: sum.z / vertices.length
+  };
+}
+
+function isContourCollapsed(points: number[]): boolean {
+  if (points.length < 9) return true;
+  
+  // Check if area is too small
+  const area = calculateContourArea(points);
+  return area < 1.0; // mm²
+}
+
+function calculateContourArea(points: number[]): number {
+  let area = 0;
+  const n = points.length / 3;
+  
+  for (let i = 0; i < n; i++) {
+    const x1 = points[i * 3];
+    const y1 = points[i * 3 + 1];
+    const x2 = points[((i + 1) % n) * 3];
+    const y2 = points[((i + 1) % n) * 3 + 1];
+    
+    area += (x1 * y2 - x2 * y1);
+  }
+  
+  return Math.abs(area) / 2;
+}
+```
+
+## Integration with Your Existing Code
+
+Looking at your `working-viewer.tsx`, you already have the infrastructure in place. Here's how to properly integrate these operations:
+
+### 1. Update the Boolean Operation Handler
+
+In `working-viewer.tsx`, update your `handleBooleanOperation` function:
+
+```typescript
+// Replace the existing boolean operation section with:
+try {
+  let resultPoints: number[];
+
+  switch (operation) {
+    case 'combine':
+    case 'union':
+      resultPoints = combineContours(sourceContour.points, targetContour.points);
+      break;
+      
+    case 'subtract':
+      resultPoints = subtractContours(sourceContour.points, targetContour.points);
+      break;
+      
+    case 'intersect':
+      resultPoints = intersectContours(sourceContour.points, targetContour.points);
+      break;
+      
+    case 'xor':
+      resultPoints = xorContours(sourceContour.points, targetContour.points);
+      break;
+      
+    default:
+      console.error(`Unknown boolean operation: ${operation}`);
+      return;
+  }
+
+  if (resultPoints.length >= 9) {
+    // Update the source contour with the result
+    sourceContour.points = resultPoints;
+    sourceContour.numberOfPoints = resultPoints.length / 3;
+    
+    // Apply smoothing for medical-grade quality
+    const smoothed = smoothContour(sourceContour, 0.15);
+    sourceContour.points = smoothed.points;
+    sourceContour.numberOfPoints = smoothed.points.length / 3;
+
+    // Update and save
+    setLocalRTStructures(updatedRTStructures);
+    saveContourUpdates(updatedRTStructures, `boolean_${operation}`);
+    
+    if (onContourUpdate) {
+      onContourUpdate(updatedRTStructures);
+    }
+  }
+} catch (error) {
+  console.error(`Error performing ${operation} operation:`, error);
+}
+```
+
+### 2. Update the Grow/Shrink Handler
+
+Replace your existing `handleGrowContour` with proper 3D expansion:
+
+```typescript
+const handleGrowContour = (payload: any) => {
+  if (!localRTStructures) {
+    console.error("RT structures not available for growing");
+    return;
+  }
+
+  const { structureId, slicePosition, distance, direction = 'all' } = payload;
+  const isGrowing = distance > 0;
+  
+  // Create a deep copy
+  const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+  const structure = updatedRTStructures.structures?.find(
+    (s: any) => s.roiNumber === structureId
+  );
+  
+  if (!structure) {
+    console.error(`Structure ${structureId} not found`);
+    return;
+  }
+
+  try {
+    if (payload.apply3D) {
+      // Apply 3D expansion to entire structure
+      const distanceCM = Math.abs(distance) / 10; // Convert MM to CM
+      const expandedStructure = expandContour3D(
+        structure, 
+        isGrowing ? distanceCM : -distanceCM,
+        3.0 // slice thickness in mm
+      );
+      
+      // Replace all contours
+      structure.contours = expandedStructure.contours;
+    } else {
+      // Single slice expansion (existing code)
+      const contour = structure.contours?.find(
+        (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5
+      );
+      
+      if (!contour || !contour.points || contour.points.length < 9) {
+        console.warn(`No contour found on slice ${slicePosition}`);
+        return;
+      }
+      
+      const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
+      const expandedPoints = expandContour2D(
+        contour.points, 
+        distance, 
+        pixelSpacing as [number, number]
+      );
+      
+      if (expandedPoints.length >= 9) {
+        const smoothed = smoothContour({
+          points: expandedPoints,
+          slicePosition: slicePosition
+        }, 0.15);
+        
+        contour.points = smoothed.points;
+        contour.numberOfPoints = smoothed.points.length / 3;
+      } else {
+        // Contour collapsed, remove it
+        const index = structure.contours.indexOf(contour);
+        if (index > -1) {
+          structure.contours.splice(index, 1);
+        }
+      }
+    }
+
+    // Update and save
+    setLocalRTStructures(updatedRTStructures);
+    saveContourUpdates(updatedRTStructures, 'grow_contour_3d');
+    
+    if (onContourUpdate) {
+      onContourUpdate(updatedRTStructures);
+    }
+
+    console.log(`Successfully ${isGrowing ? 'expanded' : 'shrunk'} structure by ${Math.abs(distance)}mm`);
+  } catch (error) {
+    console.error(`Error in contour expansion:`, error);
+  }
+};
+```
+
+### 3. Add Complex Operations to the Toolbar
+
+In your `ContourEditToolbar` component, add buttons for complex operations:
+
+```typescript
+// Add a new state for complex operation mode
+const [complexOperation, setComplexOperation] = useState<'combineSubtract' | null>(null);
+const [selectedStructuresForOperation, setSelectedStructuresForOperation] = useState<number[]>([]);
+
+// Add handler for complex operations
+const handleComplexBooleanOperation = () => {
+  if (selectedStructuresForOperation.length < 3) {
+    toast({ 
+      title: "Select 3 structures for (A ∪ B) - C operation", 
+      variant: "destructive" 
+    });
+    return;
+  }
+
+  const [structureA, structureB, structureC] = selectedStructuresForOperation;
+  
+  const payload = {
+    action: 'complex_boolean',
+    operation: complexOperation,
+    structureA,
+    structureB, 
+    structureC,
+    slicePosition: currentSlicePosition
+  };
+  
+  onContourUpdate(payload);
+  setSelectedStructuresForOperation([]);
+  setComplexOperation(null);
+};
+```
+
+## Key Points for Your Dev Team
+
+1. **Coordinate System Consistency**: Your DICOM coordinates are in millimeters. The expansion/shrinkage functions work in MM but accept input in CM for clinical convenience.
+
+2. **Pixel Spacing**: Always use the actual pixel spacing from DICOM metadata when converting between pixel and world coordinates. Your default appears to be `[1.171875, 1.171875]` from the HN-ATLAS dataset.
+
+3. **Smoothing**: Medical-grade contours require smoothing after boolean operations. Your existing `smoothContour` function with a factor of 0.15 seems appropriate.
+
+4. **3D Continuity**: When expanding/shrinking in 3D, inter-slice smoothing is crucial to avoid "staircase" effects. The provided `smoothInterSliceTransitions` function handles this.
+
+5. **Validation**: Always validate contour points after operations:
+   - Minimum 3 points (9 values in your array format)
+   - Non-zero area for closed contours
+   - Proper winding order (counter-clockwise for outer boundaries)
+
+6. **Error Handling**: Boolean operations can fail with complex geometries. Always wrap in try-catch and provide fallback behavior.
+
+The implementation I've provided integrates seamlessly with your existing event-driven architecture and maintains compatibility with your RT structure format. The operations handle your flat array point format `[x, y, z, x, y, z, ...]` correctly and preserve the Z coordinate throughout operations.

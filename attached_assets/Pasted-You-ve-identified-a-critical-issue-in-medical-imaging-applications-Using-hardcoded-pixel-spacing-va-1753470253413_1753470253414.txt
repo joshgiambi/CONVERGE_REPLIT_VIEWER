@@ -1,0 +1,203 @@
+You've identified a critical issue in medical imaging applications! Using hardcoded pixel spacing values like `[1.171875, 1.171875]` as fallbacks is indeed problematic and potentially dangerous in clinical contexts. Let me explain why this matters and how to handle it properly.
+
+## Why Pixel Spacing Matters So Much
+
+In medical imaging, **pixel spacing** represents the real-world distance between pixel centers in millimeters. This is crucial because:
+
+- **Measurement accuracy**: Without correct pixel spacing, any distance measurements will be wrong
+- **Contour alignment**: RT structure contours must align precisely with anatomy
+- **Treatment planning**: In radiation therapy, even small coordinate errors can be dangerous
+- **Multi-modal fusion**: Registering CT with MR or PET requires precise spatial correspondence
+
+## The Problem with Hardcoded Values
+
+Your current code uses `[1.171875, 1.171875]` as a fallback, which appears to come from a specific HN-ATLAS dataset. This creates several issues:
+
+```typescript
+// ❌ DANGEROUS: Hardcoded fallback from one specific dataset
+const pixelSpacing = imgMetadata.pixelSpacing
+  ?.split("\\")
+  .map(Number) || [1.171875, 1.171875];
+```
+
+**Why this is problematic:**
+- Different body regions use different resolutions (brain: ~0.5mm, abdomen: ~1-2mm)
+- Different protocols have different spacing (high-res vs. standard)
+- Different manufacturers may use different defaults
+- Pediatric vs. adult imaging uses different parameters
+
+## Proper Pixel Spacing Extraction
+
+Here's how to handle pixel spacing correctly in your DICOM processing:
+
+```typescript
+// ✅ BETTER: Robust pixel spacing extraction with validation
+const extractPixelSpacing = (dataSet: any, imageMetadata: any): [number, number] => {
+  let spacing: [number, number] | null = null;
+  
+  // Method 1: Try from DICOM dataset directly (most reliable)
+  if (dataSet) {
+    const spacingString = dataSet.string('x00280030'); // Pixel Spacing tag
+    if (spacingString) {
+      const values = spacingString.split('\\').map(Number);
+      if (values.length === 2 && values.every(v => v > 0 && v < 100)) {
+        spacing = [values[0], values[1]]; // [row spacing, column spacing]
+      }
+    }
+  }
+  
+  // Method 2: Try from metadata
+  if (!spacing && imageMetadata?.pixelSpacing) {
+    const values = imageMetadata.pixelSpacing.split('\\').map(Number);
+    if (values.length === 2 && values.every(v => v > 0 && v < 100)) {
+      spacing = [values[0], values[1]];
+    }
+  }
+  
+  // Method 3: Try alternative DICOM tags
+  if (!spacing && dataSet) {
+    // Imager Pixel Spacing (for some modalities)
+    const imagerSpacing = dataSet.string('x00181164');
+    if (imagerSpacing) {
+      const values = imagerSpacing.split('\\').map(Number);
+      if (values.length === 2 && values.every(v => v > 0 && v < 100)) {
+        spacing = [values[0], values[1]];
+      }
+    }
+  }
+  
+  // ❌ NO FALLBACK: Fail explicitly rather than use wrong values
+  if (!spacing) {
+    throw new Error(
+      'Could not extract pixel spacing from DICOM. ' +
+      'This image cannot be safely processed for medical use.'
+    );
+  }
+  
+  return spacing;
+};
+```
+
+## Validation and Sanity Checks
+
+Always validate pixel spacing values to catch corrupted or unusual data:
+
+```typescript
+const validatePixelSpacing = (spacing: [number, number], modality: string): boolean => {
+  const [rowSpacing, colSpacing] = spacing;
+  
+  // Basic sanity checks
+  if (rowSpacing <= 0 || colSpacing <= 0) return false;
+  if (rowSpacing > 50 || colSpacing > 50) return false; // Unusually large
+  if (rowSpacing < 0.01 || colSpacing < 0.01) return false; // Unusually small
+  
+  // Modality-specific validation
+  switch (modality) {
+    case 'CT':
+      // CT typically 0.3-2.0mm
+      return rowSpacing >= 0.3 && rowSpacing <= 3.0 && 
+             colSpacing >= 0.3 && colSpacing <= 3.0;
+    case 'MR':
+      // MR can vary widely 0.1-5.0mm
+      return rowSpacing >= 0.1 && rowSpacing <= 5.0 && 
+             colSpacing >= 0.1 && colSpacing <= 5.0;
+    case 'PT':
+      // PET typically 2-5mm
+      return rowSpacing >= 1.0 && rowSpacing <= 8.0 && 
+             colSpacing >= 1.0 && colSpacing <= 8.0;
+    default:
+      return true; // Allow other modalities
+  }
+};
+```
+
+## Updated Coordinate Transformation
+
+Here's how to improve your coordinate transformation functions:
+
+```typescript
+// ✅ IMPROVED: Proper coordinate transformation with explicit spacing
+const worldToCanvas = (
+  worldX: number, 
+  worldY: number,
+  imagePosition: [number, number, number],
+  pixelSpacing: [number, number], // [row spacing, column spacing]
+  canvasWidth: number,
+  canvasHeight: number,
+  imageWidth: number = 512,
+  imageHeight: number = 512
+): [number, number] => {
+  
+  // Validate inputs
+  if (!pixelSpacing || pixelSpacing.length !== 2) {
+    throw new Error('Invalid pixel spacing for coordinate transformation');
+  }
+  
+  // Convert world coordinates to pixel coordinates
+  // Note: DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
+  const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
+  const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
+  
+  // Convert to canvas coordinates with proper scaling
+  const scale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+  const scaledImageWidth = imageWidth * scale;
+  const scaledImageHeight = imageHeight * scale;
+  
+  const offsetX = (canvasWidth - scaledImageWidth) / 2;
+  const offsetY = (canvasHeight - scaledImageHeight) / 2;
+  
+  const canvasX = offsetX + (pixelX * scale);
+  const canvasY = offsetY + (pixelY * scale);
+  
+  return [canvasX, canvasY];
+};
+```
+
+## Error Handling Strategy
+
+For medical applications, it's better to fail explicitly than to use potentially wrong values:
+
+```typescript
+// ✅ MEDICAL-SAFE: Explicit error handling
+const loadImageForMedicalUse = async (sopInstanceUID: string) => {
+  try {
+    const response = await fetch(`/api/images/${sopInstanceUID}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const dataSet = window.dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+    
+    // Extract and validate pixel spacing
+    const pixelSpacing = extractPixelSpacing(dataSet, null);
+    const modality = dataSet.string('x00080060') || 'CT';
+    
+    if (!validatePixelSpacing(pixelSpacing, modality)) {
+      throw new Error(
+        `Invalid pixel spacing [${pixelSpacing.join(', ')}] for ${modality} image. ` +
+        'Image cannot be safely used for medical measurements.'
+      );
+    }
+    
+    return {
+      pixelSpacing,
+      modality,
+      // ... other image data
+    };
+    
+  } catch (error) {
+    // Log the error and show user-friendly message
+    console.error('Failed to load medical image safely:', error);
+    throw new Error('This image cannot be loaded safely for medical use');
+  }
+};
+```
+
+## Key Takeaways
+
+1. **Never use hardcoded pixel spacing** as fallbacks in medical applications
+2. **Extract spacing from DICOM tags** using multiple fallback methods
+3. **Validate spacing values** against modality-specific ranges
+4. **Fail explicitly** rather than proceeding with potentially wrong values
+5. **Document your coordinate system** clearly (DICOM uses [row, column] ordering)
+
+The safety of patients depends on getting these coordinate transformations exactly right. It's better to reject an image that can't be processed safely than to display it with incorrect spatial relationships.
+
+Would you like me to help you audit your current coordinate transformation code and suggest specific improvements for each component?

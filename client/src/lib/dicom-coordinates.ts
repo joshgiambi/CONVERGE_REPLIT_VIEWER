@@ -45,13 +45,23 @@ export function worldToCanvas(
   canvasWidth: number,
   canvasHeight: number
 ): [number, number] {
+  // Validate pixel spacing for medical safety
+  if (!pixelSpacing || pixelSpacing.length !== 2) {
+    throw new Error('Invalid pixel spacing for coordinate transformation');
+  }
+  
+  const [rowSpacing, colSpacing] = pixelSpacing;
+  if (rowSpacing <= 0 || colSpacing <= 0) {
+    throw new Error('Pixel spacing must be positive values');
+  }
+  
   const imageWidth = 512;
   const imageHeight = 512;
   
   // Direct conversion - no flip needed based on user feedback
   // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-  const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // Direct X mapping
-  const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // Direct Y mapping
+  const pixelX = (worldX - imagePosition[0]) / colSpacing; // column spacing for X
+  const pixelY = (worldY - imagePosition[1]) / rowSpacing; // row spacing for Y
   
   // Scale to canvas
   const canvasX = (pixelX / imageWidth) * canvasWidth;

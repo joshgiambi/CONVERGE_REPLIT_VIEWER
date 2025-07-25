@@ -274,10 +274,15 @@ export async function renderFusionOverlay(
     actualSecondaryImage = distances[0]?.image;
   }
 
-  // Get MRI pixel spacing from the actual MRI metadata
-  let mriSpacingArr = [1, 1]; // Default fallback
+  // Get MRI pixel spacing from the actual MRI metadata - NO FALLBACK for medical safety
+  let mriSpacingArr: number[] | null = null;
   if (actualSecondaryImage && actualSecondaryImage.pixelSpacing) {
     mriSpacingArr = normalizeSpacing(actualSecondaryImage.pixelSpacing);
+  }
+  
+  if (!mriSpacingArr || mriSpacingArr.length !== 2 || mriSpacingArr.some(v => v <= 0)) {
+    console.error('Invalid or missing MRI pixel spacing - cannot safely render fusion overlay');
+    return; // Do not render fusion without valid pixel spacing
   }
   
   console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);

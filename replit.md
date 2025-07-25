@@ -202,6 +202,20 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Medical Safety Improvements - Pixel Spacing and Boolean Operations - COMPLETED ✅
+  - ✅ CRITICAL SAFETY FIX: Removed all hardcoded pixel spacing fallbacks that could cause dangerous measurement errors
+  - ✅ Created medical-pixel-spacing.ts with proper DICOM extraction and modality-specific validation
+  - ✅ Updated fusion-utils.ts to fail safely if MRI pixel spacing is invalid (removed [1, 1] fallback)
+  - ✅ Updated dicom-coordinates.ts to validate pixel spacing before coordinate transformations
+  - ✅ Implemented comprehensive boolean operations library (clipper-boolean-operations.ts):
+    - Union (combine), Subtract, Intersection, XOR operations
+    - Complex operations like (A ∪ B) - C and (A ∩ B) ∪ C
+    - Point-in-contour testing and contour simplification
+  - ✅ All coordinate transformations now require valid pixel spacing - no dangerous assumptions
+  - Technical details:
+    - Pixel spacing extraction tries multiple DICOM tags (0028,0030 and 0018,1164)
+    - Modality-specific validation (CT: 0.3-3mm, MR: 0.1-5mm, PET: 1-8mm)
+    - Medical-safe coordinate transformation with explicit error handling
 - July 25, 2025: Critical Pen Tool Coordinate System Fix with React Closure Resolution - COMPLETED ✅
   - ✅ Fixed React closure issue causing pen tool offset from cursor position
   - ✅ Root cause: worldToCanvas/canvasToWorld functions captured stale ctTransform.current values in closure
