@@ -814,28 +814,40 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         });
       } else if (payload.operation === 'subtract' && payload.resultContours) {
         // For subtraction, replace existing contours with result from ClipperLib
+        console.log('🔴 SUBTRACTION HANDLER:', {
+          contourIndex,
+          existingContoursAtSlice: structure.contours.filter((c: any) => 
+            Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
+          ).length,
+          resultContoursCount: payload.resultContours.length,
+          slicePosition: payload.slicePosition
+        });
+        
         if (contourIndex >= 0) {
           if (payload.resultContours.length === 0) {
             // Remove the contour if subtraction results in empty
             structure.contours.splice(contourIndex, 1);
-            console.log('Subtraction resulted in empty contour, removed slice');
+            console.log('🗑️ Subtraction resulted in empty contour, removed slice');
           } else {
             // Remove only the specific contour that was operated on, not all contours
+            const removedContour = structure.contours[contourIndex];
+            console.log('📐 Removing contour at index:', contourIndex, 'with points:', removedContour.points.length);
             structure.contours.splice(contourIndex, 1);
             
             // Add each result contour as a separate contour object
-            payload.resultContours.forEach((contourPoints: number[]) => {
+            payload.resultContours.forEach((contourPoints: number[], idx: number) => {
               structure.contours.push({
                 slicePosition: payload.slicePosition,
                 points: contourPoints,
                 numberOfPoints: contourPoints.length / 3,
               });
+              console.log(`✅ Added result contour ${idx + 1} with ${contourPoints.length / 3} points`);
             });
             
-            console.log(`Pen subtraction operation completed, replaced 1 contour with ${payload.resultContours.length} result contours`);
+            console.log(`🎯 Pen subtraction completed, replaced 1 contour with ${payload.resultContours.length} result contours`);
           }
         } else {
-          console.warn('Subtraction operation called but no existing contour found');
+          console.warn('⚠️ Subtraction operation called but no existing contour found');
         }
       }
 

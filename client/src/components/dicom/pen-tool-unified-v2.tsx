@@ -344,10 +344,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         }
       }
       
-      console.log('Boolean operation determined:', {
+      console.log('🔧 BOOLEAN OPERATION DETERMINED:', {
         startMode,
         intersects: newPolygonIntersects,
-        operation
+        operation,
+        existingContours: existingContours.length,
+        newPolygonPoints: finalPoints.length
       });
       
       // Prepare world points
@@ -396,6 +398,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       
       // Only do ClipperLib operations for subtraction
       if (operation === 'subtract' && existingContours.length > 0) {
+        console.log('🔴 STARTING SUBTRACTION OPERATION:', {
+          existingContours: existingContours.length,
+          newPolygonPoints: newPolygon.length,
+          operation
+        });
+        
         try {
           const clipperLib = await ClipperLib.loadNativeClipperLibInstanceAsync(
             ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
@@ -465,10 +473,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           }
           
           // Log before cleanup
-          console.log('Subtraction operation result:', {
+          console.log('🔴 SUBTRACTION OPERATION RESULT:', {
             originalContours: existingContours.length,
             resultContours: resultContours.length,
-            solutionPaths: solutionSize
+            solutionPaths: solutionSize,
+            newPolygonPoints: newPolygon.length,
+            clippingSuccess: success
           });
           
           // Clean up ClipperLib objects
@@ -551,7 +561,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       // Set mode based on whether we're starting inside or outside
       const mode = insideAnyContour ? 'ADD' : 'SUBTRACT';
       setStartMode(mode);
-      console.log(`Starting pen tool in ${mode} mode (inside contour: ${insideAnyContour})`);
+      console.log(`🎯 PEN TOOL START MODE: ${mode} (inside contour: ${insideAnyContour})`, {
+        clickPoint: worldPoint,
+        numContours: contours.length,
+        contourPoints: contours.map(c => c.points?.length || 0)
+      });
     }
     
     // Add point

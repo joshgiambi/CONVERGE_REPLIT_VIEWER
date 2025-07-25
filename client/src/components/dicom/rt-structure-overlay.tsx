@@ -192,18 +192,22 @@ function renderRTStructures(
   // The RT structure positions should directly match the CT image positions
   // No transformation needed - just use the actual Z positions from the contours
   
-  const tolerance = 0.1; // mm tolerance for slice matching - very tight to prevent adjacent slice bleed
+  // Use exact integer comparison to completely prevent ghost contours
+  const toleranceMicrons = 100; // 0.1mm in micrometers for integer comparison
   
   // Check if rtStructures has the expected structure
   if (!rtStructures?.structures) {
     return; // Early return if no structures to render
   }
   
-  // Count how many contours match the current slice
+  // Count how many contours match the current slice using exact integer comparison
   let contoursOnSlice = 0;
+  const currentSliceMicrons = Math.round(currentSlicePosition * 1000);
+  
   rtStructures.structures.forEach(structure => {
     structure.contours.forEach(contour => {
-      if (Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance) {
+      const contourSliceMicrons = Math.round(contour.slicePosition * 1000);
+      if (Math.abs(contourSliceMicrons - currentSliceMicrons) <= toleranceMicrons) {
         contoursOnSlice++;
       }
     });
@@ -216,11 +220,12 @@ function renderRTStructures(
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${contourOpacity / 100})`;
     
     structure.contours.forEach(contour => {
-      // Check if this contour is on the current slice
+      // Check if this contour is on the current slice using exact integer comparison
       const sliceZ = contour.slicePosition;
+      const contourSliceMicrons = Math.round(sliceZ * 1000);
       
-      // Check if this contour is on the current slice
-      if (Math.abs(sliceZ - currentSlicePosition) <= tolerance) {
+      // Only draw if on exactly the same slice (with tiny tolerance for rounding)
+      if (Math.abs(contourSliceMicrons - currentSliceMicrons) <= toleranceMicrons) {
         drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime);
       }
     });
