@@ -126,17 +126,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       });
     }
   };
-  const [imageCache, setImageCache] = useState<
-    Map<string, { data: Float32Array; width: number; height: number }>
-  >(new Map());
+  // Use refs for caches to avoid expensive React re-renders
+  const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
+  const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
-  const [secondaryImageCache, setSecondaryImageCache] = useState<
-    Map<string, { data: Float32Array; width: number; height: number }>
-  >(new Map());
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
@@ -157,6 +154,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+  
+  // Render scheduling to prevent redundant renders
+  const needsRenderRef = useRef(false);
+  const scheduleRender = useCallback(() => {
+    if (needsRenderRef.current) return;
+    needsRenderRef.current = true;
+    requestAnimationFrame(async () => {
+      needsRenderRef.current = false;
+      await displayCurrentImage();
+    });
+  }, []);
+  
+  // Abort controller for series changes
+  const seriesAbortRef = useRef<AbortController | null>(null);
 
 
 
@@ -547,7 +558,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         setLocalRTStructures(payload.rtStructures);
         // Force re-render of the canvas
         if (images.length > 0) {
-          displayCurrentImage();
+          scheduleRender();
         }
       }
       return;
@@ -1155,7 +1166,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (autoZoomLevel && autoZoomLevel !== zoom) {
       setZoom(autoZoomLevel);
       if (images.length > 0) {
-        displayCurrentImage();
+        scheduleRender();
       }
     }
   }, [autoZoomLevel, zoom, images.length]);
@@ -1173,7 +1184,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLastPanX(-x * scaleFactor);
       setLastPanY(-y * scaleFactor);
       if (images.length > 0) {
-        displayCurrentImage();
+        scheduleRender();
       }
     }
   }, [autoLocalizeTarget, images.length]);
@@ -1248,7 +1259,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         mriSliceMappingCache.current.clear();
       }
       
-      displayCurrentImage();
+      scheduleRender();
     }
   }, [registrationMatrix, secondarySeriesId, images.length]);
   
@@ -1282,7 +1293,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Check if secondarySeriesId is valid (not null, not 'none', and a valid number)
       if (!secondarySeriesId || isNaN(Number(secondarySeriesId))) {
         setSecondaryImages([]);
-        setSecondaryImageCache(new Map());
+        secondaryImageCacheRef.current = new Map();
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
         setSecondaryModality('MR'); // Reset to default
         return;
@@ -1336,33 +1347,42 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
         });
         
-        // Preload secondary images
+        // Preload secondary images with concurrency limits
         const newCache = new Map();
-        await Promise.all(sortedImages.map(async (image: any, index: number) => {
-          try {
-            const imageResponse = await fetch(`/api/images/${image.sopInstanceUID}`);
-            if (!imageResponse.ok) {
-              console.error(`Failed to fetch secondary image ${index}:`, imageResponse.status);
-              return;
-            }
-            
-            const arrayBuffer = await imageResponse.arrayBuffer();
-            const imageData = await parseDicomImage(arrayBuffer);
-            
-            if (imageData) {
-              newCache.set(image.sopInstanceUID, imageData);
-              if (index < 3) {
-                console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
-              }
-            } else {
-              console.error(`Failed to parse secondary image ${index}`);
-            }
-          } catch (error) {
-            console.warn(`Failed to preload secondary image ${index}:`, error);
-          }
-        }));
+        const CONCURRENT_LIMIT = 4;
         
-        setSecondaryImageCache(newCache);
+        // Process secondary images in chunks
+        for (let i = 0; i < sortedImages.length; i += CONCURRENT_LIMIT) {
+          const chunk = sortedImages.slice(i, i + CONCURRENT_LIMIT);
+          
+          await Promise.all(chunk.map(async (image: any, chunkIndex: number) => {
+            const index = i + chunkIndex;
+            try {
+              // Create a dedicated fetch for secondary images
+              const response = await fetch(`/api/images/${image.sopInstanceUID}`);
+              if (!response.ok) {
+                console.error(`Failed to fetch secondary image ${index}:`, response.status);
+                return;
+              }
+              
+              const arrayBuffer = await response.arrayBuffer();
+              const imageData = await parseDicomImage(arrayBuffer);
+              
+              if (imageData) {
+                newCache.set(image.sopInstanceUID, imageData);
+                if (index < 3) {
+                  console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
+                }
+              } else {
+                console.error(`Failed to parse secondary image ${index}`);
+              }
+            } catch (error) {
+              console.warn(`Failed to preload secondary image ${index}:`, error);
+            }
+          }));
+        }
+        
+        secondaryImageCacheRef.current = newCache;
         console.log(`Preloaded ${newCache.size} secondary images`);
         console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
         
@@ -1396,7 +1416,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Trigger re-render to show fusion overlay with delay to ensure state is updated
         if (newCache.size > 0) {
           setTimeout(() => {
-            displayCurrentImage();
+            scheduleRender();
           }, 100);
         }
       } catch (err) {
@@ -1411,7 +1431,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (images.length > 0 && !isPreloading) {
       // Add a small delay to ensure state is stable after contour operations
       const timeoutId = setTimeout(() => {
-        displayCurrentImage();
+        scheduleRender();
         // Load metadata for current image
         const currentImage = images[currentIndex];
         if (currentImage?.id) {
@@ -1428,7 +1448,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch(`/api/series/${seriesId}/images`);
+      // Cancel any existing series load
+      if (seriesAbortRef.current) {
+        seriesAbortRef.current.abort();
+      }
+      
+      // Create new abort controller for this series
+      seriesAbortRef.current = new AbortController();
+      const signal = seriesAbortRef.current.signal;
+
+      const response = await fetch(`/api/series/${seriesId}/images`, { signal });
       if (!response.ok) {
         throw new Error(`Failed to load images: ${response.statusText}`);
       }
@@ -1439,7 +1468,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const imagesWithMetadata = await Promise.all(
         seriesImages.map(async (img: any) => {
           try {
-            const response = await fetch(`/api/images/${img.sopInstanceUID}`);
+            const response = await fetch(`/api/images/${img.sopInstanceUID}`, { signal });
             const arrayBuffer = await response.arrayBuffer();
 
             if (!window.dicomParser) {
@@ -1520,6 +1549,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Preload all images immediately
       preloadAllImages(sortedImages);
     } catch (error: any) {
+      // Don't show error for aborted requests (happens when switching series)
+      if (error.name === 'AbortError') {
+        console.log('Series load aborted (user switched series)');
+        return;
+      }
       setError(error.message);
     } finally {
       setIsLoading(false);
@@ -1578,44 +1612,76 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Single fetch/parse function to avoid double fetching
+  const fetchAndParseImage = async (sopInstanceUID: string, signal?: AbortSignal) => {
+    // Check if already in cache
+    if (imageCacheRef.current.has(sopInstanceUID)) {
+      return imageCacheRef.current.get(sopInstanceUID);
+    }
+    
+    const response = await fetch(`/api/images/${sopInstanceUID}`, { signal });
+    if (!response.ok) {
+      throw new Error(`Failed to load image: ${response.status}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const imageData = await parseDicomImage(arrayBuffer);
+    
+    if (imageData) {
+      imageCacheRef.current.set(sopInstanceUID, imageData);
+    }
+    
+    return imageData;
+  };
+
   const preloadAllImages = async (imageList: any[]) => {
-    console.log("Starting to preload all images...");
+    console.log("Starting to preload all images with concurrency limits...");
     if (!imageList || imageList.length === 0) {
       console.warn("No images to preload");
       setIsPreloading(false);
       return;
     }
     setIsPreloading(true);
-    const newCache = new Map();
-
-    // Load all images in parallel
-    const loadPromises = imageList.map(async (image, index) => {
+    
+    // Concurrency limit - load max 4 images at a time
+    const CONCURRENT_LIMIT = 4;
+    let loadedCount = 0;
+    
+    // Process images in chunks
+    for (let i = 0; i < imageList.length; i += CONCURRENT_LIMIT) {
+      const chunk = imageList.slice(i, i + CONCURRENT_LIMIT);
+      
+      // Load chunk in parallel
+      const chunkPromises = chunk.map(async (image, chunkIndex) => {
+        const index = i + chunkIndex;
+        try {
+          // Use abort controller for this series
+          await fetchAndParseImage(image.sopInstanceUID, seriesAbortRef.current?.signal);
+          loadedCount++;
+          console.log(`Preloaded image ${index + 1}/${imageList.length} (${loadedCount} loaded)`);
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            console.log('Preloading aborted (user switched series)');
+            throw error; // Re-throw to stop preloading
+          }
+          console.warn(`Failed to preload image ${index + 1}:`, error);
+        }
+      });
+      
+      // Wait for this chunk to complete before loading next chunk
       try {
-        const imageResponse = await fetch(
-          `/api/images/${image.sopInstanceUID}`,
-        );
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to load image ${index + 1}`);
+        await Promise.all(chunkPromises);
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log('Preloading cancelled - series changed');
+          break;
         }
-
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        const imageData = await parseDicomImage(arrayBuffer);
-
-        if (imageData) {
-          newCache.set(image.sopInstanceUID, imageData);
-          console.log(`Preloaded image ${index + 1}/${imageList.length}`);
-        }
-      } catch (error) {
-        console.warn(`Failed to preload image ${index + 1}:`, error);
       }
-    });
-
-    // Wait for all images to load
-    await Promise.allSettled(loadPromises);
-    setImageCache(newCache);
+    }
+    
     setIsPreloading(false);
     console.log(
-      `Preloading complete: ${newCache.size}/${imageList.length} images cached`,
+      `Preloading complete: ${imageCacheRef.current.size}/${imageList.length} images cached`,
     );
   };
 
@@ -1656,7 +1722,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      let imageData = imageCache.get(cacheKey);
+      let imageData = imageCacheRef.current.get(cacheKey);
 
       if (!imageData || !imageData.data) {
         // Try to reload the image if it's not in cache
@@ -1666,19 +1732,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         );
         
         try {
-          const imageResponse = await fetch(
-            `/api/images/${currentImage.sopInstanceUID}`,
-          );
-          if (!imageResponse.ok) {
-            throw new Error(`Failed to reload image: ${imageResponse.status}`);
-          }
-
-          const arrayBuffer = await imageResponse.arrayBuffer();
-          const reloadedImageData = await parseDicomImage(arrayBuffer);
-
+          // Use single fetch/parse function to avoid double fetching
+          const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
+          
           if (reloadedImageData) {
-            // Update cache with reloaded image
-            imageCache.set(cacheKey, reloadedImageData);
             imageData = reloadedImageData;
             console.log("Successfully reloaded image:", cacheKey);
           } else {
@@ -1898,7 +1955,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     }
     
-    const actualCache = (window as any).secondaryImageCacheRef || secondaryImageCache;
+    const actualCache = secondaryImageCacheRef.current;
     const canvas = canvasRef.current;
     if (!canvas) return;
     
