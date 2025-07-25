@@ -273,15 +273,20 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
             slicePosition: currentZ
           });
         } else {
-          // Flatten all result paths back to world coords
-          const merged = solution.flatMap(path =>
-            path.flatMap(pt => [pt.X / SCALE, pt.Y / SCALE, currentZ])
-          );
+          // Convert each result path back to world coords, keeping them separate
+          const resultContours = solution.map(path => {
+            const worldPoints: number[] = [];
+            path.forEach(pt => {
+              worldPoints.push(pt.X / SCALE, pt.Y / SCALE, currentZ);
+            });
+            return worldPoints;
+          });
           
+          // Send all separate contours
           onContourUpdate({
-            action: "replace_contour",
+            action: "replace_contours_multi",
             structureId: selectedStructure,
-            points: merged,
+            contours: resultContours,
             slicePosition: currentZ,
             imageMetadata
           });
