@@ -1,0 +1,119 @@
+1. Scan loading performance
+The viewer loads DICOM images via an API endpoint (/api/images/:sopInstanceUID) and renders them using Cornerstone. The configuration uses on‑demand web workers and downloads the Cornerstone libraries dynamically:
+
+const config = {
+  maxWebWorkers: navigator.hardwareConcurrency || 1,
+  startWebWorkersOnDemand: true,
+  webWorkerPath: 'https://unpkg.com/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoaderWebWorker.js',
+  ...
+};
+cornerstoneWADOImageLoader.webWorkerManager.initialize(config);
+
+You can speed up scan loading by caching these libraries locally (instead of using CDN URLs) and pre‑fetching the DICOM data. The server also caches parsed RT structure files using rtStructureCache:
+
+const rtStructureCache = new Map<string, any>();
+
+Ensuring this cache persists (or is backed by a database) will reduce repeated parsing of RTSTRUCT files when a user revisits a series.
+
+2. Handling DICOM coordinates and RT structures
+Coordinate transformations are centralized in CoordinateTransformerV2, which converts patient coordinates, pixel coordinates and display coordinates:
+
+export class CoordinateTransformerV2 {
+  ...
+  static patientToPixel(patientPoint: Point3D, imageMetadata: DICOMImageMetadata): Point { ... }
+  static pixelToPatient(pixelPoint: Point, imageMetadata: DICOMImageMetadata): Point3D { ... }
+  ...
+}
+
+For RT structure sets, the server parses DICOM RTSTRUCT files, extracting referenced series and ROI data:
+
+const contourSequence = dataSet.elements.x30060039;
+...
+rtStructureSet.referencedSeriesUID = this.getString(refSeries.dataSet, 'x0020000e');
+
+These utilities already support patient‑to‑pixel transformations, slice position calculations and RTSTRUCT parsing. Ensuring that every loaded image supplies valid imagePositionPatient, imageOrientationPatient and pixelSpacing will improve accuracy of coordinate conversions.
+
+3. Boolean operations and expansion
+Contour operations such as union/difference and contour growth are implemented in PolygonOperationsV2 and contour-grow.ts. Currently, union/difference only concatenate polygons or return the original polygons:
+
+static union(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
+  // TODO: Replace with ClipperLib when properly integrated
+  const combined = [...polygons1, ...polygons2];
+  return this.cleanPolygons(combined);
+}
+
+static difference(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
+  // TODO: Replace with ClipperLib when properly integrated
+  return this.cleanPolygons(polygons1);
+}
+
+For accurate Boolean operations you could integrate a library like Clipper or implement polygon‑clipping algorithms here. The contour growth feature already performs radial expansion using offset polygons:
+
+export function growContour(contour: ContourPoints, growDistance: number): ContourPoints {
+  const points2D: Point2D[] = ...
+  const grownPoints = offsetPolygon(points2D, growDistance);
+  ...
+}
+
+Reviewing these functions (and adding unit tests) will help refine expansion behaviour.
+
+4. Undo/Redo for RT structure operations
+Server‑side routes maintain an in‑memory history of RT structure modifications. Each update stores a history entry and exposes /api/rt-structures/:seriesId/undo and /redo endpoints:
+
+const historyEntry = {
+  timestamp: Date.now(),
+  action: detectedAction,
+  structureId: affectedStructureId,
+  previousState: Array.from(previousState.entries()),
+  newState: Array.from(modifications.modifiedStructures.entries())
+};
+modifications.history = modifications.history.slice(0, modifications.historyIndex + 1);
+modifications.history.push(historyEntry);
+modifications.historyIndex++;
+
+Undo applies historyEntry.previousState and decrements the index, while redo reapplies historyEntry.newState. If you need persistence across sessions, you can extend this mechanism using the RT structure history tables defined in shared/schema.ts so that the history survives server restarts.
+
+5. Overall suggestions
+Scan loading speed
+Host the Cornerstone and dicom-parser libraries locally or bundle them to avoid CDN delays.
+Prefetch DICOM series and cache them on the client or server.
+Coordinate and RTSTRUCT handling
+Ensure every DICOM file includes accurate spatial metadata (position, orientation, spacing).
+Continue to use CoordinateTransformerV2 and validate metadata with validateImageMetadata() for reliability.
+Boolean and expansion tools
+Replace the placeholder Boolean functions in PolygonOperationsV2 with a robust polygon clipping library.
+Review contour growing algorithms (contour-grow.ts and contour-directional-grow.ts) and ensure they correctly use image orientation for directional growth.
+Undo/Redo
+Use the existing history mechanism but consider persisting rtStructureHistory to the database for long‑term storage.
+Client components already call the /undo and /redo endpoints and update the viewer accordingly.
+By tightening these areas—local caching, complete metadata, improved polygon math and persistent history—you can achieve faster loading, better coordinate accuracy, correct Boolean/expansion behaviour and robust undo/redo support.
+
+Previously zoom stopped working, the scans would zoom but contours wouldn't, how do I fix this
+Copy
+The viewer no longer applies the user’s zoom factor to contour drawing. In working‑viewer.tsx a constant zoom value is used and all scaling logic ignores zoom:
+
+155  // Zoom and pan state - DISABLED FOR DEBUGGING
+156  const zoom = 1; // Fixed zoom for debugging
+...
+1741  // SIMPLIFIED - NO ZOOM FOR DEBUGGING
+1742  const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
+1743  const totalScale = baseScale; // Just base scale, no zoom
+...
+2091  // SIMPLIFIED - NO ZOOM FOR DEBUGGING
+2092  const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+2096  const totalScale = baseScale; // NO ZOOM
+
+Meanwhile rt-structure-overlay.tsx expects a zoom value and scales contours accordingly:
+
+182  ctx.translate(canvas.width / 2, canvas.height / 2);
+184  ctx.scale(zoom, zoom);
+185  ctx.translate(-canvas.width / 2 + panX, -canvas.height / 2 + panY);
+188  ctx.lineWidth = contourWidth / zoom;
+
+Because the viewer fixes zoom to 1, the CT image still scales (due to baseScale), but contours never adjust. Restore dynamic zoom handling by:
+
+Reintroducing state: const [zoom, setZoom] = useState(1);
+Multiplying baseScale by the zoom factor when computing totalScale for both CT rendering and contour drawing.
+Re‑enabling the wheel/toolbar handlers that modify setZoom.
+Ensure rt-structure-overlay.tsx receives the updated zoom value from the viewer.
+Once zoom state is restored in working‑viewer.tsx, both scans and contours scale together when the user zooms.
