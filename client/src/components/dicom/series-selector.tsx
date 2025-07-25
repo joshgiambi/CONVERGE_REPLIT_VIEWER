@@ -475,8 +475,8 @@ export function SeriesSelector({
       {/* Main Series and Structures Panel */}
       <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
         <CardContent className="p-0 h-full flex flex-col">
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <Accordion type="multiple" defaultValue={["series", "structures"]} className="h-full flex flex-col">
+          <div className="flex-1 overflow-hidden">
+            <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
             <AccordionItem value="series" className="border-dicom-indigo/30">
@@ -786,7 +786,7 @@ export function SeriesSelector({
             </AccordionItem>
 
             {/* Structures Section */}
-            <AccordionItem value="structures" className="border-dicom-indigo/30 flex-1 flex flex-col overflow-hidden">
+            <AccordionItem value="structures" className="border-dicom-indigo/30">
               <AccordionTrigger className="px-6 py-3 hover:no-underline hover:bg-green-500/10">
                 <div className="flex items-center text-green-400 font-medium text-sm">
                   <Palette className="w-4 h-4 mr-2 text-green-400" />
@@ -795,7 +795,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-3 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+                  <div className="space-y-3">
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />

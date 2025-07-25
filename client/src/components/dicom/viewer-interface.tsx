@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
-import { ContourEditToolbar } from './contour-edit-toolbar';
+import { ContourEditToolbarV2 } from './contour-edit-toolbar-v2';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -424,7 +424,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
-        <div className="lg:col-span-1 h-full overflow-hidden">
+        <div className="lg:col-span-1">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
@@ -501,6 +501,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 structureVisibility={structureVisibility}
                 brushToolState={brushToolState}
                 selectedForEdit={selectedForEdit}
+                selectedStructures={selectedStructures}
                 onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
                 onContourUpdate={handleContourUpdate}
                 onSlicePositionChange={setCurrentSlicePosition}
@@ -578,7 +579,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       {/* Contour Edit Toolbar */}
       {selectedForEdit && rtStructures && rtStructures.structures && (
-        <ContourEditToolbar
+        <ContourEditToolbarV2
           selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
           isVisible={isContourEditMode}
           onClose={() => {
@@ -600,11 +601,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           currentSlicePosition={currentSlicePosition}
           onContourUpdate={handleContourUpdate}
-          availableStructures={rtStructures.structures}
-          onTargetStructureSelect={(structureId) => {
-            // Handle target structure selection for boolean operations
-            console.log('Target structure selected:', structureId);
-          }}
           seriesId={selectedSeries?.id}
         />
       )}

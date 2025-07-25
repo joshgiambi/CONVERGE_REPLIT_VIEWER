@@ -41,6 +41,7 @@ interface WorkingViewerProps {
     predictionEnabled?: boolean;
   };
   selectedForEdit?: number | null;
+  selectedStructures?: Set<number>;
   onBrushSizeChange?: (size: number) => void;
   onContourUpdate?: (updatedStructures: any) => void;
   contourSettings?: { width: number; opacity: number };
@@ -67,6 +68,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     structureVisibility: externalStructureVisibility,
     brushToolState,
     selectedForEdit,
+    selectedStructures,
     onBrushSizeChange,
     onContourUpdate,
     contourSettings,
@@ -95,6 +97,57 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
+  
+  // Animation state for selected structures
+  const [animationProgress, setAnimationProgress] = useState<Map<number, number>>(new Map());
+
+  // Handle animation progress when structures are selected/deselected
+  useEffect(() => {
+    if (!selectedStructures) return;
+    
+    // Start animation for newly selected structures
+    selectedStructures.forEach(structureId => {
+      if (!animationProgress.has(structureId)) {
+        setAnimationProgress(prev => {
+          const next = new Map(prev);
+          next.set(structureId, 0); // Start at 0
+          return next;
+        });
+        
+        // Animate from 0 to 1 over 500ms
+        const startTime = Date.now();
+        const animationDuration = 500;
+        
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / animationDuration, 1);
+          
+          setAnimationProgress(prev => {
+            const next = new Map(prev);
+            next.set(structureId, progress);
+            return next;
+          });
+          
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          }
+        };
+        
+        requestAnimationFrame(animate);
+      }
+    });
+    
+    // Remove deselected structures from animation tracking
+    animationProgress.forEach((_, structureId) => {
+      if (!selectedStructures.has(structureId)) {
+        setAnimationProgress(prev => {
+          const next = new Map(prev);
+          next.delete(structureId);
+          return next;
+        });
+      }
+    });
+  }, [selectedStructures]);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1835,6 +1888,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Always show selected structure for editing, even if visibility is off
       if (!isVisible && !isSelectedForEdit) return;
 
+      // Check if this structure is selected for animation
+      const isSelected = selectedStructures?.has(structure.roiNumber) || false;
+      const animProgress = animationProgress.get(structure.roiNumber) || 1;
+
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
       const [r, g, b] = color;
@@ -1850,7 +1907,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log(
             `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
           );
-          drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
+          drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime, isSelected, animProgress, color);
         }
       });
     });
@@ -1867,8 +1924,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     canvasHeight: number,
     currentImage: any,
     animationTime?: number,
+    isSelected?: boolean,
+    animProgress?: number,
+    structureColor?: number[],
   ) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
+
+    // Apply animation effects for selected structures
+    if (isSelected && animProgress !== undefined && animProgress < 1) {
+      ctx.save();
+      
+      // Apply draw-in animation effect
+      const scaleEffect = 0.8 + (0.2 * animProgress); // Scale from 80% to 100%
+      const centerX = canvasWidth / 2;
+      const centerY = canvasHeight / 2;
+      
+      ctx.translate(centerX, centerY);
+      ctx.scale(scaleEffect, scaleEffect);
+      ctx.translate(-centerX, -centerY);
+      
+      // Add glow effect for selected structures
+      if (structureColor) {
+        const [r, g, b] = structureColor;
+        ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${0.8 * animProgress})`;
+        ctx.shadowBlur = 20 * animProgress;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
+    }
 
     ctx.beginPath();
 
@@ -1876,6 +1959,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const imgMetadata = currentImage?.imageMetadata;
     if (!imgMetadata) {
       console.warn("No image metadata available for contour drawing");
+      if (isSelected && animProgress !== undefined && animProgress < 1) {
+        ctx.restore(); // Restore if we saved for animation
+      }
       return;
     }
     
