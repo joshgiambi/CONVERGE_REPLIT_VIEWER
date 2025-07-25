@@ -300,13 +300,18 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       let insideAnyContour = false;
       
       for (const contour of contours) {
-        if (isPointInsideContour(worldPoint[0], worldPoint[1], contour.points)) {
-          insideAnyContour = true;
-          break;
+        if (contour.points && contour.points.length >= 9) { // Need at least 3 points for a valid contour
+          if (isPointInsideContour(worldPoint[0], worldPoint[1], contour.points)) {
+            insideAnyContour = true;
+            break;
+          }
         }
       }
       
-      setStartMode(insideAnyContour ? 'ADD' : 'SUBTRACT');
+      // Set mode based on whether we're starting inside or outside
+      const mode = insideAnyContour ? 'ADD' : 'SUBTRACT';
+      setStartMode(mode);
+      console.log(`Starting pen tool in ${mode} mode (inside contour: ${insideAnyContour})`);
     }
     
     // Add point
@@ -650,6 +655,38 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       }
     }
     
+    // Draw initial cursor when not drawing yet
+    if (currentMousePos && points.length === 0 && !isDraggingVertex) {
+      // Check if we're inside any contour to show mode
+      const worldPoint = canvasToWorld(currentMousePos[0], currentMousePos[1]);
+      const contours = getContoursAtCurrentSlice();
+      let insideAnyContour = false;
+      
+      for (const contour of contours) {
+        if (contour.points && contour.points.length >= 9) {
+          if (isPointInsideContour(worldPoint[0], worldPoint[1], contour.points)) {
+            insideAnyContour = true;
+            break;
+          }
+        }
+      }
+      
+      // Draw mode indicator dot
+      const modeColor = insideAnyContour ? '#00ff00' : '#ff0000'; // Green for ADD, Red for SUBTRACT
+      ctx.save();
+      ctx.fillStyle = modeColor;
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.arc(currentMousePos[0], currentMousePos[1], 5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Add white border for visibility
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+    
     // Set cursor style
     if (hoveredVertex && !isDrawingContinuous) {
       canvasRef.current!.style.cursor = 'grab';
@@ -664,7 +701,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     animationFrameRef.current = requestAnimationFrame(render);
   }, [points, currentMousePos, hoveredVertex, isDrawingContinuous, isDraggingVertex,
       rtStructures, selectedStructure, worldToCanvas, getContoursAtCurrentSlice,
-      isNearFirstPoint, canvasRef]);
+      isNearFirstPoint, canvasRef, canvasToWorld, isPointInsideContour, startMode]);
   
   // Start render loop
   useEffect(() => {
