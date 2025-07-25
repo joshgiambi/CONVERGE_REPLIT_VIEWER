@@ -202,6 +202,20 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Boolean Operations and Cornerstone Performance Optimization - COMPLETED ✅
+  - ✅ Replaced all placeholder union/difference/intersection functions in PolygonOperationsV2 with proper ClipperLib implementations
+  - ✅ Added multiPolygonToContours() and contoursToMultiPolygon() helper functions for seamless format conversion
+  - ✅ Union operation now properly merges overlapping contours into single polygons
+  - ✅ Difference operation correctly subtracts shapes with support for holes and multiple results
+  - ✅ Intersection operation finds common areas between polygons
+  - ✅ All boolean operations maintain medical-grade precision with SCALING_FACTOR
+  - ✅ Installed Cornerstone libraries locally (cornerstone-core, cornerstone-math, cornerstone-tools, cornerstone-web-image-loader, cornerstone-wado-image-loader)
+  - ✅ Updated cornerstone-config.ts to load libraries from local node_modules instead of unpkg.com CDN
+  - ✅ Updated web worker path to use local bundle for improved performance
+  - Technical details:
+    - ClipperLib operations work with flat contour arrays, converted to/from MultiPolygon format
+    - Local hosting eliminates CDN latency and improves initial scan loading speed
+    - Web workers now load from /@fs/ paths for faster DICOM decoding
 - July 25, 2025: Pen Tool Delete Function Fix - Boolean Subtraction - COMPLETED ✅
   - ✅ Fixed critical pen tool delete/subtraction bug where ALL contours at current slice were removed
   - ✅ Root cause: pen_boolean_operation handler was using filter() to remove all contours at slice instead of splice()

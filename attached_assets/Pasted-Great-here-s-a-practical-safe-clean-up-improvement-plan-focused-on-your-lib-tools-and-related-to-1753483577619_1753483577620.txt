@@ -1,0 +1,250 @@
+Great—here’s a practical, safe clean-up & improvement plan focused on your lib/ tools and related toolbar flows, without breaking existing behavior.
+
+⸻
+
+1) What each lib/ tool is doing now (and how it’s used)
+
+(based on your WorkingViewer and recent pen/brush code)
+	•	lib/contour-grow.ts
+	•	growContour(points, distanceMm) – radial offset of the polygon (grow/shrink).
+	•	smoothContour(contour, factor) – post smoothing.
+	•	Used by: margin operation, brush refine, “grow” actions.
+	•	lib/contour-directional-grow.ts
+	•	applyDirectionalGrow(points, distanceMm, direction, imageOrientation) – offsets points only in specified anatomical half-space.
+	•	Used by: directional grow tool actions.
+	•	lib/contour-boolean-operations.ts
+	•	Should provide robust boolean ops (union/subtract/intersect/xor) via js-angusj-clipper.
+	•	Used by: the viewer’s boolean operations and your pen-tool pen_boolean_operation.
+	•	Issue: the file you pasted contains two different implementations of combineContours / subtractContours (a Clipper version and a “convex-hull / point filtering” fallback) with identical export names. That’s fragile and can silently swap behavior depending on build order/import position.
+	•	lib/brush-to-polygon.ts
+	•	addBrushToContour, mergeBrushWithContour, eraseBrushFromContour – builds a polygon from brush stamps and merges/erases against existing contours.
+	•	Used by: brush tool.
+	•	Note: in WorkingViewer you import eraseBrushFromContour but don’t call it there; it may still be used inside SimpleBrushTool.
+	•	lib/polygon-union.ts
+	•	performPolygonUnion(polygons) – unions multiple rings (used when pen “union” merges blobs).
+	•	Used by: pen union handler in handleContourUpdate.
+	•	lib/contour-prediction.ts
+	•	predictNextSliceContour – simplistic slice-to-slice propagation.
+	•	Used by: brush workflow for auto-propagate to adjacent slices.
+	•	lib/fusion-utils.ts
+	•	computeTransformedMRIPositions, renderFusionOverlay – registration + overlay pipeline.
+	•	Used by: fusion overlay in the viewer.
+
+Components that look unused (in the viewer):
+	•	RTStructureOverlay is imported but not rendered (you draw directly in displayCurrentImage).
+	•	EclipsePlanarContourTool is imported but your JSX uses PenToolUnifiedV2 for both “pen” and “planar-contour”.
+	•	eraseBrushFromContour is imported in WorkingViewer but not called there (could still be referenced in SimpleBrushTool).
+
+⸻
+
+2) High-impact, low-risk fixes (boolean + margin flows)
+
+A) Make boolean ops consistent (one Clipper path only)
+
+Right now you have a robust Clipper implementation and a simple “convex hull / point filter” implementation with the same export names. That can cause:
+	•	No-ops (looks like “nothing happens” after closing the pen loop).
+	•	Overlaps instead of boolean merges (brush).
+
+Safe fix:
+	•	Split into two modules and one public facade:
+	•	lib/clipper-adapter.ts – one way to get a Clipper instance:
+	•	For js-angusj-clipper, prefer loadNativeClipperLibInstanceAsync and use instance.Path/Paths/Clipper. Wrap this behind getClipper() so other code doesn’t care which API surface is used.
+	•	lib/contour-boolean-clipper.ts – only the Clipper-based union/subtract/intersect/xor, with:
+	•	SCALE = 1e4 (or 1e3) – large enough for integer precision but not excessively big.
+	•	CleanPolygon (or CleanPolygons) after every op.
+	•	PolyFillType.pftNonZero for medical contours (holes are supported).
+	•	lib/contour-boolean.ts – facade that re-exports the Clipper versions. If you really need a fallback, export them under different names (e.g., unionFallbackHull) so they can’t shadow the real ones.
+	•	Update imports everywhere to come from lib/contour-boolean (the facade).
+
+While there:
+	•	Add a small helper to convert between flat [x,y,z] arrays and Clipper’s {X,Y} with z carried separately.
+	•	Call EnsureOrientation/ReversePath for holes if needed; or just rely on pftNonZero and clean.
+
+B) Always clean/simplify polygons around boolean ops
+	•	Before and after boolean operations, apply:
+	•	CleanPolygon (tolerance ≈ 0.05–0.2 mm in world units × SCALE)
+	•	Optional SimplifyPolygon (if available) after unions to remove spike artifacts from brush strokes.
+	•	After subtract, keep multiple resulting contours per slice (you’re already doing that). Ensure renderer fills with even-odd rule (see below).
+
+C) Fix brush overlaps that “don’t boolean”
+
+That happens when the brush polygon isn’t being unioned robustly or rings self-intersect.
+
+Adjust the flow:
+	1.	Convert brush path → closed polygon (ensure last==first or explicitly close).
+	2.	CleanPolygon on the brush polygon.
+	3.	If there’s an existing contour on that slice, always do a Clipper union (subject=existing, clip=brush) rather than the “distance < threshold” heuristic. The distance check can remain as a performance early-exit, but don’t rely on it for correctness.
+	4.	After union, CleanPolygons and store.
+
+This change keeps your UI behavior but removes those “overlapping outputs”.
+
+D) Margin (uniform & asymmetric) that respects mm and holes
+
+Your margin code currently calls growContour + smoothContour. For medical “margins” (Eclipse-style), you’ll get better shape fidelity by using ClipperOffset:
+	•	Add offsetContours(points[], marginMm) backed by ClipperOffset (with miter limit and round joins).
+	•	Use world mm → scale → integer offset → back to world.
+	•	After offset, CleanPolygons then optional smoothing (light).
+	•	For asymmetric margins, compute directional offsets by splitting a contour into half-spaces (or apply applyDirectionalGrow first, then offsetContours with a small uniform value to re-regularize edges).
+
+This will make margins robust (no gaps/self-intersections) and preserve holes.
+
+⸻
+
+3) One source of truth for “slice equality” & drawing holes
+
+A) Slice matching
+
+You currently mix:
+	•	exact z-equality (μm rounding)
+	•	±0.5 mm tolerance
+	•	“sliceThickness/2” tolerance
+
+Safe consolidation:
+Create lib/slices.ts:
+
+export function sameSlice(z1: number, z2: number, sliceThickness?: number) {
+  const tol = Math.max(0.5, (sliceThickness ?? 1) * 0.5); // mm
+  return Math.abs(z1 - z2) <= tol;
+}
+
+Use this everywhere (viewer render, pen tool, brush tool, handlers).
+
+B) Holes rendering on Canvas
+
+If subtraction creates donut shapes (outer ring + inner hole), you need even-odd fill:
+
+ctx.fill("evenodd");
+
+If you must support older canvases, draw outer ring CCW and holes CW (reverse winding) then normal fill().
+
+⸻
+
+4) Small, surgical cleanups (won’t break behavior)
+	•	Remove unused imports:
+	•	In WorkingViewer, drop RTStructureOverlay, EclipsePlanarContourTool, and eraseBrushFromContour if they are not used anywhere else. (See “verification” below.)
+	•	Pen tool RAF loop: make sure there’s only one active rAF. When isActive flips or slice changes, cancelAnimationFrame before starting a new loop.
+	•	Contour payload types: replace any with a discriminated union (e.g., { action: 'pen_boolean_operation', ... } | { action: 'grow_contour', ... }) so accidental payload mismatches don’t silently no-op.
+	•	World↔canvas transforms: you already factor ctTransform.current. Add a guard to early-return if imageMetadata or ctTransform.current isn’t ready (prevents a few “won’t draw” moments).
+	•	Constants: centralize SCALE, SLICE_TOLERANCE_MM, CLEAN_TOL_MM in one lib/geometry-constants.ts so all tools match.
+
+⸻
+
+5) Candidates for deletion (after verifying usage)
+
+How to verify safely (no breaking changes):
+	1.	Run a project-wide search with ripgrep or VS Code “Find in Files”.
+	2.	If a symbol/file is truly unused, remove the import & code and re-build.
+	3.	Keep a branch to revert quickly.
+
+Likely candidates:
+	•	RTStructureOverlay component – not used in WorkingViewer (you render RT contours directly).
+	•	EclipsePlanarContourTool – imported but not mounted anywhere; you route “planar-contour” to PenToolUnifiedV2.
+	•	eraseBrushFromContour – unused in WorkingViewer; keep only if used inside SimpleBrushTool (grep first).
+	•	Legacy boolean helpers – the second half of your pasted contour-boolean-operations.ts (convex-hull/point-filter version) – delete or move behind a different export name so it cannot shadow the Clipper implementation.
+
+⸻
+
+6) Verification checklist (copy/paste to PR)
+	•	Replace all imports of combineContours/subtractContours to the Clipper facade.
+	•	brush_stroke path now unions via Clipper (no more overlap ghosts).
+	•	ctx.fill("evenodd") (or reversed holes) for donut contours.
+	•	One sameSlice() helper used everywhere.
+	•	Margin uses ClipperOffset with mm units.
+	•	Remove unused imports (RTStructureOverlay, EclipsePlanarContourTool, eraseBrushFromContour) if grep shows no references.
+	•	Pen tool rAF properly canceled on deactivate/slice change.
+	•	Add CleanPolygon/Polygons around boolean/offset ops.
+	•	Introduce lib/clipper-adapter.ts so both pen and boolean libs use the same Clipper instance pattern.
+
+⸻
+
+7) Quick code patterns to drop in
+
+Clipper adapter (single source):
+
+// lib/clipper-adapter.ts
+import * as Clipper from 'js-angusj-clipper';
+
+export type ClipperAPI = {
+  instance: any; // WASM instance types
+  Path: any;
+  Paths: any;
+  Clipper: any;
+  PolyType: any;
+  ClipType: any;
+  PolyFillType: any;
+  CleanPolygon: (path: any, dist: number) => any;
+  CleanPolygons: (paths: any, dist: number) => any;
+  ClipperOffset?: any;
+};
+
+let cached: ClipperAPI | null = null;
+
+export async function getClipper(): Promise<ClipperAPI> {
+  if (cached) return cached;
+  const lib = await Clipper.loadNativeClipperLibInstanceAsync(
+    Clipper.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
+  );
+  cached = {
+    instance: lib.instance,
+    Path: lib.instance.Path,
+    Paths: lib.instance.Paths,
+    Clipper: lib.instance.Clipper,
+    PolyType: lib.instance.PolyType,
+    ClipType: lib.instance.ClipType,
+    PolyFillType: lib.instance.PolyFillType,
+    CleanPolygon: lib.instance.CleanPolygon,
+    CleanPolygons: lib.instance.CleanPolygons,
+    ClipperOffset: lib.instance.ClipperOffset,
+  };
+  return cached;
+}
+
+Even-odd fill for holes:
+
+ctx.beginPath();
+// … draw outer + inner rings in any winding …
+ctx.fill("evenodd");
+ctx.stroke();
+
+Unified slice matching:
+
+export function sameSlice(z1: number, z2: number, sliceThickness?: number) {
+  const tol = Math.max(0.5, (sliceThickness ?? 1) * 0.5);
+  return Math.abs(z1 - z2) <= tol;
+}
+
+
+⸻
+
+8) How to find & remove unused code (commands)
+	•	Find unused files/symbols quickly
+
+# files that are never imported
+npx ts-prune
+
+# or ripgrep for references
+rg --glob '!node_modules' 'RTStructureOverlay'
+rg --glob '!node_modules' 'EclipsePlanarContourTool'
+rg --glob '!node_modules' 'eraseBrushFromContour'
+
+
+	•	Lint for unused imports/vars
+
+npx eslint --ext .ts,.tsx src client --max-warnings=0
+
+
+	•	Type-check to catch accidental API drift
+
+npx tsc --noEmit
+
+
+
+⸻
+
+9) Why this won’t break existing behavior
+	•	We’re not changing user-visible flows; we’re making existing boolean/margin paths robust and consistent across brush/pen/tools.
+	•	All thresholds are conservative (mm-based), and we add cleaning/simplification rather than removing logic.
+	•	Removals are gated behind “grep shows no references”.
+	•	We centralize Clipper usage to stop “sometimes nothing happens” from mismatched APIs.
+
+If you want, I can turn this into a small PR plan with file diffs for the boolean facade + adapter and the brush union change. Want me to draft the exact patch set?

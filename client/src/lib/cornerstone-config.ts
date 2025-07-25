@@ -73,7 +73,7 @@ export class CornerstoneConfig {
       const config = {
         maxWebWorkers: navigator.hardwareConcurrency || 1,
         startWebWorkersOnDemand: true,
-        webWorkerPath: 'https://unpkg.com/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoaderWebWorker.js',
+        webWorkerPath: '/@fs/home/runner/workspace/node_modules/cornerstone-wado-image-loader/dist/index.worker.bundle.min.worker.js',
         webWorkerTaskPaths: [],
         taskConfiguration: {
           decodeTask: {
@@ -114,12 +114,12 @@ export class CornerstoneConfig {
 
   private async loadScripts(): Promise<void> {
     const scripts = [
-      'https://unpkg.com/cornerstone-core@2.6.1/dist/cornerstone.min.js',
-      'https://unpkg.com/cornerstone-math@0.1.9/dist/cornerstoneMath.min.js',
-      'https://unpkg.com/cornerstone-tools@6.0.10/dist/cornerstoneTools.min.js',
-      'https://unpkg.com/cornerstone-web-image-loader@2.1.1/dist/cornerstoneWebImageLoader.min.js',
-      'https://unpkg.com/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoader.bundle.min.js',
-      'https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js',
+      '/@fs/home/runner/workspace/node_modules/cornerstone-core/dist/cornerstone.min.js',
+      '/@fs/home/runner/workspace/node_modules/cornerstone-math/dist/cornerstoneMath.min.js',
+      '/@fs/home/runner/workspace/node_modules/cornerstone-tools/dist/cornerstoneTools.min.js',
+      '/@fs/home/runner/workspace/node_modules/cornerstone-web-image-loader/dist/cornerstoneWebImageLoader.min.js',
+      '/@fs/home/runner/workspace/node_modules/cornerstone-wado-image-loader/dist/cornerstoneWADOImageLoader.bundle.min.js',
+      '/@fs/home/runner/workspace/node_modules/dicom-parser/dist/dicomParser.min.js',
     ];
 
     for (const src of scripts) {

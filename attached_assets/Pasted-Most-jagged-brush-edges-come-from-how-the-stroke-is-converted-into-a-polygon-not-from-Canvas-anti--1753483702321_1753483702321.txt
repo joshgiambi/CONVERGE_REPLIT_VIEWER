@@ -1,0 +1,150 @@
+Most “jagged” brush edges come from how the stroke is converted into a polygon—not from Canvas anti-aliasing. In your pipeline the brush lays down many small circles/segments, then unions them into a contour. That naturally creates scallops and tiny zig-zags along the perimeter. Here are the usual culprits in viewers like yours and how to fix them without changing user-visible behavior.
+
+⸻
+
+Why it looks jagged
+	1.	Stamp spacing too large
+If consecutive brush stamps are spaced ~radius apart, the union creates a beaded edge. Same if the continuous path samples are > a few pixels apart.
+	2.	Union of many little shapes
+Repeated boolean unions preserve every micro-detail; you end up with a high-frequency boundary.
+	3.	Integer scaling into Clipper
+Using a very large SCALE (e.g., 1e6) amplifies rounding noise when converting mm→ints→mm.
+	4.	No post-union clean/simplify
+If you don’t run CleanPolygon/Polygons (and optionally a gentle simplify) after each op, small spikes and near-collinear vertices remain.
+	5.	Line joins/caps (visual only)
+Canvas will draw exactly the polygon you give it. Sharp corners look jagged unless you use round joins/caps.
+	6.	Device pixel ratio
+If the canvas backing store isn’t scaled to window.devicePixelRatio, even smooth vectors can look stair-stepped.
+	7.	Float→int quantization in transforms
+Rounding world↔canvas or world↔clipper coordinates introduces tiny sawteeth.
+
+⸻
+
+Safe fixes (keep behavior, make edges look clinical-smooth)
+
+A) Make the brush stroke denser before union
+	•	Stamp spacing: step ≤ radius * 0.4 (or clamp to ≤ half of in-plane pixel spacing).
+	•	Polyline sampling: append a stroke point only after moving ≥ 0.5–1.0 pixel in world units.
+
+This reduces scalloping at the source.
+
+B) Use a moderate Clipper scale and always clean
+	•	Choose SCALE = 1e3 … 1e4 (mm→int). You don’t need 1e6.
+	•	After every union/subtract:
+	•	CleanPolygons(paths, tol = 0.05 * SCALE)  // ≈0.05 mm
+	•	(Optional) light simplify if available.
+
+This removes slivers and collinear noise.
+
+C) Do a micro “polish” offset after union
+
+A robust, medical-grade trick that doesn’t change the intent:
+	1.	Union result → offset out by ε (round joins).
+	2.	Then offset in by the same ε.
+
+Think of it as morphological close+open with a tiny radius that wipes micro-zigzags but preserves anatomy.
+	•	Choose ε = 0.3–0.6 mm (start at 0.4 mm).
+	•	Use ClipperOffset with round joins and a reasonable miter limit (e.g., 2).
+	•	Clean again afterwards.
+
+D) Smooth the perimeter (optional, gentle)
+
+If you still see bead texture (especially from big brushes):
+	•	Apply Chaikin 1–2 passes or a light RDP simplify with small tolerance (e.g., 0.2–0.4 mm).
+	•	Don’t over-smooth; preserve corners and topology.
+	•	If you shrink area noticeably, follow with a tiny outward offset (e.g., +0.1 mm).
+
+E) Draw settings
+	•	Before stroke():
+
+ctx.lineJoin = 'round';
+ctx.lineCap  = 'round';
+
+
+	•	If you have donut contours:
+
+ctx.fill('evenodd');
+
+
+
+F) Hi-DPI canvas
+
+Back the canvas with device pixels:
+
+const dpr = window.devicePixelRatio || 1;
+canvas.width  = cssW * dpr;
+canvas.height = cssH * dpr;
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+You’re already scaling images; apply the same principle for crisp vector edges.
+
+G) Avoid unnecessary rounding in transforms
+	•	Keep world↔canvas math in floats; only round where the Clipper int API requires it.
+	•	Don’t Math.round() canvas coordinates before ctx.lineTo().
+
+⸻
+
+Minimal changes in your code path
+	1.	Brush stroke assembly
+	•	Ensure stamp spacing ≤ radius * 0.4.
+	•	Ensure continuous draw adds points only after Δ ≥ 0.5–1.0 pixel (world-space).
+	2.	Brush→contour union
+Replace the “point-distance intersects” heuristic with an unconditional Clipper union once per stroke:
+	•	Convert the whole stroke polygon to one Path.
+	•	union(existing, stroke) → clean → polish offset (±ε) → clean.
+	3.	SCALE + clean
+	•	Set SCALE = 1e3 (or 1e4 if your coordinates are very small).
+	•	CleanPolygons(paths, 0.05 * SCALE) before converting back.
+	4.	Drawing
+	•	ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+	•	ctx.fill('evenodd') for holes.
+	•	Ensure Hi-DPI backing store is enabled.
+
+⸻
+
+Quick pseudo-flow (union + polish)
+
+// world mm -> clipper ints
+const SCALE = 1000; // 1e3
+const εmm = 0.4;
+
+const subj = toPath(existingContour, SCALE);
+const clip = toPath(strokePolygon, SCALE);
+
+const c = await getClipper();           // from a small adapter
+const sol = new c.Paths();
+
+clipper.AddPath(subj, c.PolyType.ptSubject, true);
+clipper.AddPath(clip, c.PolyType.ptClip, true);
+clipper.Execute(c.ClipType.ctUnion, sol, c.PolyFillType.pftNonZero, c.PolyFillType.pftNonZero);
+
+// Clean small artifacts
+const cleaned = c.CleanPolygons(sol, 0.05 * SCALE);
+
+// Polish offset: out then back in with round joins
+const off1 = new c.Paths();
+const co1  = new c.ClipperOffset(2.0, 0.25 * SCALE);
+co1.AddPaths(cleaned, c.JoinType.jtRound, c.EndType.etClosedPolygon);
+co1.Execute(off1, +εmm * SCALE);
+
+const off2 = new c.Paths();
+const co2  = new c.ClipperOffset(2.0, 0.25 * SCALE);
+co2.AddPaths(off1, c.JoinType.jtRound, c.EndType.etClosedPolygon);
+co2.Execute(off2, -εmm * SCALE);
+
+const final = c.CleanPolygons(off2, 0.05 * SCALE);
+
+// back to [x,y,z] world mm
+const resultContours = toWorldContours(final, z, SCALE);
+
+
+⸻
+
+Triage order (fastest improvements first)
+	1.	Enable CleanPolygons + moderate SCALE → dramatic edge improvement.
+	2.	Polish offset (±0.4 mm) → removes bead texture.
+	3.	Round joins/caps + Hi-DPI canvas → looks better immediately.
+	4.	Denser stamps / point sampling → fewer scallops.
+	5.	Light smoothing (optional) → final touch if you still see chatter.
+
+If you want, I can write a tiny polishContour(contourPoints: number[]): number[] helper you can call right after any brush union so you don’t have to thread these steps through every call site.

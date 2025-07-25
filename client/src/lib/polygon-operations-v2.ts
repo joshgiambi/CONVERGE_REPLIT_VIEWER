@@ -7,6 +7,11 @@ import {
   Polygon, 
   PolygonRing 
 } from '@shared/schema';
+import { 
+  combineContours, 
+  subtractContours, 
+  intersectContours 
+} from './clipper-boolean-operations';
 
 export class PolygonOperationsV2 {
   private static readonly SCALING_FACTOR = 1000;
@@ -49,26 +54,170 @@ export class PolygonOperationsV2 {
     );
   }
 
+  // Convert MultiPolygon to contour format (for ClipperLib compatibility)
+  private static multiPolygonToContours(multiPolygon: MultiPolygon): number[][] {
+    const contours: number[][] = [];
+    
+    for (const polygon of multiPolygon) {
+      for (const ring of polygon) {
+        if (ring.length < 3) continue;
+        
+        const contour: number[] = [];
+        const z = 0; // Z value doesn't matter for 2D operations
+        
+        for (const point of ring) {
+          contour.push(point.x, point.y, z);
+        }
+        
+        contours.push(contour);
+      }
+    }
+    
+    return contours;
+  }
+
+  // Convert contours back to MultiPolygon format
+  private static contoursToMultiPolygon(contours: number[][]): MultiPolygon {
+    const multiPolygon: MultiPolygon = [];
+    
+    for (const contour of contours) {
+      if (contour.length < 9) continue; // Need at least 3 points
+      
+      const ring: PolygonRing = [];
+      for (let i = 0; i < contour.length; i += 3) {
+        ring.push({
+          x: contour[i],
+          y: contour[i + 1]
+        });
+      }
+      
+      // Each contour becomes its own polygon
+      multiPolygon.push([ring]);
+    }
+    
+    return multiPolygon;
+  }
+
   // Union operation for additive brush strokes
   static union(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
-    // For now, use basic concatenation with cleaning
-    // TODO: Replace with ClipperLib when properly integrated
-    const combined = [...polygons1, ...polygons2];
-    return this.cleanPolygons(combined);
+    if (polygons1.length === 0) return polygons2;
+    if (polygons2.length === 0) return polygons1;
+    
+    try {
+      // Convert to contour format
+      const contours1 = this.multiPolygonToContours(polygons1);
+      const contours2 = this.multiPolygonToContours(polygons2);
+      
+      if (contours1.length === 0) return polygons2;
+      if (contours2.length === 0) return polygons1;
+      
+      // Perform union operations on all contour pairs
+      let resultContours: number[][] = [...contours1];
+      
+      for (const contour2 of contours2) {
+        let merged = false;
+        const newResultContours: number[][] = [];
+        
+        // Try to merge with existing contours
+        for (const existingContour of resultContours) {
+          const unionResult = combineContours(existingContour, contour2);
+          if (unionResult.length === 1) {
+            // Successfully merged into single contour
+            newResultContours.push(unionResult[0]);
+            merged = true;
+            // Continue checking other contours as they might not overlap
+          } else {
+            // Keep existing contour if no merge happened
+            newResultContours.push(existingContour);
+          }
+        }
+        
+        // If didn't merge with any existing contour, add it separately
+        if (!merged) {
+          newResultContours.push(contour2);
+        }
+        
+        resultContours = newResultContours;
+      }
+      
+      // Convert back to MultiPolygon
+      return this.cleanPolygons(this.contoursToMultiPolygon(resultContours));
+      
+    } catch (error) {
+      console.error('Union operation failed:', error);
+      // Fallback to simple concatenation
+      return this.cleanPolygons([...polygons1, ...polygons2]);
+    }
   }
 
   // Difference operation for subtractive brush strokes  
   static difference(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
-    // For now, return original polygons minus overlapping areas
-    // TODO: Replace with ClipperLib when properly integrated
-    return this.cleanPolygons(polygons1);
+    if (polygons1.length === 0) return [];
+    if (polygons2.length === 0) return polygons1;
+    
+    try {
+      // Convert to contour format
+      const contours1 = this.multiPolygonToContours(polygons1);
+      const contours2 = this.multiPolygonToContours(polygons2);
+      
+      if (contours1.length === 0) return [];
+      if (contours2.length === 0) return polygons1;
+      
+      // Start with all contours from polygons1
+      let resultContours: number[][] = [...contours1];
+      
+      // Subtract each contour from polygons2
+      for (const subtractContour of contours2) {
+        const newResultContours: number[][] = [];
+        
+        for (const existingContour of resultContours) {
+          const differenceResult = subtractContours(existingContour, subtractContour);
+          
+          // Add all resulting contours (could be 0, 1, or multiple)
+          newResultContours.push(...differenceResult);
+        }
+        
+        resultContours = newResultContours;
+      }
+      
+      // Convert back to MultiPolygon
+      return this.cleanPolygons(this.contoursToMultiPolygon(resultContours));
+      
+    } catch (error) {
+      console.error('Difference operation failed:', error);
+      // Fallback to returning original
+      return this.cleanPolygons(polygons1);
+    }
   }
 
   // Intersection operation
   static intersection(polygons1: MultiPolygon, polygons2: MultiPolygon): MultiPolygon {
-    // Basic intersection - return empty for now
-    // TODO: Replace with ClipperLib when properly integrated
-    return [];
+    if (polygons1.length === 0 || polygons2.length === 0) return [];
+    
+    try {
+      // Convert to contour format
+      const contours1 = this.multiPolygonToContours(polygons1);
+      const contours2 = this.multiPolygonToContours(polygons2);
+      
+      if (contours1.length === 0 || contours2.length === 0) return [];
+      
+      const resultContours: number[][] = [];
+      
+      // Find intersection between each pair of contours
+      for (const contour1 of contours1) {
+        for (const contour2 of contours2) {
+          const intersectionResult = intersectContours(contour1, contour2);
+          resultContours.push(...intersectionResult);
+        }
+      }
+      
+      // Convert back to MultiPolygon
+      return this.cleanPolygons(this.contoursToMultiPolygon(resultContours));
+      
+    } catch (error) {
+      console.error('Intersection operation failed:', error);
+      return [];
+    }
   }
 
   // Offset operation for brush stroke path creation

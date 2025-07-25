@@ -1,0 +1,221 @@
+Thanks for the repo link. I looked through the viewer/pen/boolean/margin code you’ve shared (and the repo layout) and put together safe, incremental fixes and cleanups that won’t change current behavior, plus a path to stronger geometry ops and fewer “overlap-but-not-boolean” glitches.  ￼
+
+Below is organized so you can apply it in small PRs without breaking workflows.
+
+⸻
+
+0) “No-breakage” guardrails
+	•	Feature flags: gate any new geometry path behind GEOM_STRICT=true (env or module const). Default it off.
+	•	Unit tests before changes: snapshot area/point counts for a few real contours (union/subtract/brush) on two slices and assert post-refactor parity (± small tolerance).
+	•	Keep payload shapes identical (payload.action, structureId, slicePosition, points, etc.) so handleContourUpdate doesn’t change.
+
+⸻
+
+1) Fix hard correctness problems
+
+1.1 Duplicate/Conflicting boolean implementations (Clipper vs “simple”)
+
+In the file you pasted there are two sets of boolean helpers with the same exported names (combineContours, subtractContours, …): a Clipper-based set and a “convex hull / point-in-poly” set. That creates ambiguity and accidental imports.
+Fix: split them:
+	•	lib/geometry/boolean/clipper.ts – authoritative implementation (kept as-is, but see 2.1).
+	•	lib/geometry/boolean/naive.ts – keep only for fallback/testing with different names (e.g., naiveCombine, naiveSubtract).
+Search/replace imports so app code only imports from clipper.ts.
+
+1.2 js-angusj-clipper usage consistency
+
+In PenToolUnifiedV2 you correctly load the WASM instance and construct via new clipperLib.instance.Clipper(new IoManager()). In your helpers you also use the global classes (new clipperLib.Clipper(), new clipperLib.Paths()), which don’t exist in the WASM build and can silently fail.
+Fix: centralize a singleton loader and always use the instance.* classes.
+
+// lib/geometry/clipper/instance.ts
+import * as ClipperLib from 'js-angusj-clipper';
+
+let _clip: Awaited<ReturnType<typeof load>> | null = null;
+
+export async function load() {
+  if (_clip) return _clip;
+  const lib = await ClipperLib.loadNativeClipperLibInstanceAsync(
+    ClipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback
+  );
+  const i = lib.instance;
+  _clip = {
+    i,
+    newClipper: () => new i.Clipper(new i.IoManager()),
+    newPath: () => new i.Path(),
+    newPaths: () => new i.Paths(),
+  };
+  return _clip;
+}
+
+Then in all boolean helpers:
+
+const { i, newClipper, newPath, newPaths } = await load();
+const clipper = newClipper();
+const subject = newPath(); const clip = newPath(); const solution = newPaths();
+
+This removes the “works here / breaks there” inconsistency and the occasional “nothing happens on close” symptom.
+
+1.3 Payload dispatch mismatch
+
+Some callers use onContourUpdate('add_pen_stroke', {...}) while the handler expects payload.action === "add_pen_stroke".
+Fix: always call onContourUpdate({ action: 'add_pen_stroke', ... }). (You already adjusted some places; audit all tools.)
+
+⸻
+
+2) Make geometry robust (still “no-break”)
+
+2.1 Scaling, cleaning, winding
+	•	Scale: SCALE = 1e6 is OK in 64-bit, but it magnifies noisy inputs. Use 1e4 or 1e3 with a call to CleanPolygon(snapTol) and/or SimplifyPolygon before operations. This reduces self-intersections from handwriting and brush ribbons.
+	•	Fill rule: keep pftNonZero but normalize path orientation (outer CCW, holes CW) so later consumers are predictable:
+
+clipper.ReverseSolution(true); // or normalize after reading solution
+
+
+	•	Clean before/after:
+	•	Before: clean the incoming stroke path.
+	•	After: clean solution and drop micro-rings (area < epsilon).
+
+2.2 Multipolygon slice model
+
+Today, some code concatenates points and treats a slice like one long ring. That causes ghost connections and “overlaps but not unioned”.
+	•	Represent each slice as Contour[] (multi-polygon) always.
+	•	For union/subtract, union all slice polys with the new polygon, then replace only the affected slice’s set with the result paths.
+
+Minimal change: add a thin adaptor so handleContourUpdate('pen_boolean_operation') converts between flat arrays and array-of-rings internally without changing the payload schema.
+
+2.3 Brush → union (fix “overlapping outputs”)
+
+The brush path check uses a nearest-point distance heuristic; sometimes it misses intersection → you end up with overlapping contours.
+Fix: generate a stroke ribbon polygon from the sampled brush path and union it with the slice multipolygon via Clipper every time. You already have mergeBrushWithContour—swap its internals to delegate to the Clipper union path (behind a flag).
+
+⸻
+
+3) Pen tool behavior parity & slice tolerance
+
+3.1 Eclipse parity rules (you already implemented them)
+	•	First click inside → union regardless of excursions.
+	•	First click outside → if the path crosses the structure → subtract, otherwise separate blob.
+
+Keep your doesNewPolygonIntersect for quick check but add a final Clipper intersection (cheap at 1e3 scale) to avoid edge-case misses when the hand-drawn poly grazes the boundary.
+
+3.2 Slice matching (no ghosts)
+
+Unify slice match as:
+
+const tol = (imageMetadata?.sliceThickness ?? 1) * 0.5; // mm
+const sameSlice = (a,b) => Math.abs(a-b) <= tol;
+
+Use one helper across viewer & tools. Guard undefined metadata (?.) so we don’t throw (you hit that once).
+
+⸻
+
+4) Performance & UX polish (low risk)
+	•	Worker offload for Clipper: wrap boolean ops in a Web Worker to keep pointer tracking butter-smooth on large contours. API shape stays the same; only the call site await changes.
+	•	Debounce saves: saveContourUpdates every 250–500 ms (last-write-wins) rather than on every small edit. Also deduplicate identical JSON bodies to avoid noisy PUTs.
+	•	RAF loops: ensure one render loop per active tool; cancel on deactivate/slice change. You already cancel, but add a boolean guard to avoid double loops under React Strict Mode.
+	•	Overlay lifecycle: create overlay once; on slice change clear and reposition if canvas resizes. Don’t add a border in prod.
+	•	Logging: gate console.log under DEBUG=true to avoid slow devtools strings on every frame.
+
+⸻
+
+5) Safer contour editing
+	•	Min ring length & area: before committing a stroke: close ring, drop if < 3 unique points or shoelace area < 1e-3 mm². Prevents “nothing happens” because the poly cleans down to nothing later.
+	•	Vertex drag: throttle to ~30 Hz, and on mouseup run CleanPolygon + small smoothing to avoid zig-zag jitter.
+
+⸻
+
+6) Type safety & data shape
+	•	Define a single RTStructures TypeScript model:
+
+type WorldPoint = [number, number, number]; // mm
+interface Contour { slicePosition: number; points: number[]; numberOfPoints: number; isPredicted?: boolean }
+interface Structure { roiNumber: number; structureName: string; color: [number,number,number]; contours: Contour[] }
+interface RTStructures { structures: Structure[] }
+
+
+	•	Use those types in tool props and the viewer to eliminate “optional everything” and guard early.
+
+⸻
+
+7) Example: unified boolean helper (drop-in)
+
+// lib/geometry/boolean/clipper.ts
+import { load } from '../clipper/instance';
+
+const SCALE = 1e4; // safer, less noise
+const EPS_AREA = 1e-3;
+
+export async function diff(subjects: number[][], clip: number[], z: number) {
+  const { i, newClipper, newPath, newPaths } = await load();
+  const clipper = newClipper();
+  const sol = newPaths();
+
+  const toPath = (flat: number[]) => {
+    const p = newPath();
+    for (let k=0; k<flat.length; k+=3) p.push({X: Math.round(flat[k]*SCALE), Y: Math.round(flat[k+1]*SCALE)});
+    return p;
+  };
+
+  subjects.forEach(s => clipper.AddPath(toPath(s), i.PolyType.ptSubject, true));
+  clipper.AddPath(toPath(clip), i.PolyType.ptClip, true);
+
+  clipper.Execute(i.ClipType.ctDifference, sol, i.PolyFillType.pftNonZero, i.PolyFillType.pftNonZero);
+
+  const out: number[][] = [];
+  for (let pi=0; pi<sol.size(); pi++) {
+    const path = sol.get(pi);
+    const ring: number[] = [];
+    for (let j=0; j<path.size(); j++) {
+      const pt = path.get(j);
+      ring.push(pt.X/SCALE, pt.Y/SCALE, z);
+    }
+    if (ring.length >= 9 && Math.abs(area(ring)) > EPS_AREA) out.push(ring);
+  }
+  sol.delete(); clipper.delete();
+  return out;
+}
+
+function area(flat: number[]) {
+  let a = 0;
+  for (let i=0; i<flat.length; i+=3) {
+    const ni = (i+3) % flat.length;
+    a += flat[i]*flat[ni+1] - flat[ni]*flat[i+1];
+  }
+  return 0.5*a;
+}
+
+Call this from your handleContourUpdate('pen_boolean_operation'), converting the current slice’s contour set to subjects.
+
+⸻
+
+8) Margin & directional grow (quality without breakage)
+	•	After growContour / applyDirectionalGrow, pass result through:
+	1.	Smoothing (you already do),
+	2.	CleanPolygon (remove spikes),
+	3.	SimplifyPolygon with tiny tolerance (preserve shape, fewer points).
+	•	For asymmetric margins, keep current averaging (to avoid breakage) but add a marginMode: 'uniform' | 'anisotropic' parameter; when you’re ready, switch ‘anisotropic’ to a proper outward normal offset (Clipper’s offset API or a parallel-curve approach).
+
+⸻
+
+9) “Why union/subtract sometimes shows overlaps?”
+
+Typical root causes addressed above:
+	•	Heuristic intersection missed → switch brush to union via Clipper (3.3).
+	•	Path not closed / degenerate area → add min area gate (5).
+	•	Geometry used global classes (no WASM instance) → central loader (1.2).
+	•	Multiple rings stored as one → multipolygon per slice (2.2).
+
+⸻
+
+10) Small housekeeping
+	•	One source of truth for world↔canvas transforms (you already keep ctTransform ref; expose helpers in a module so Pen/Brush/Overlay share the same math).
+	•	Undo/redo payloads: when entire rtStructures arrives, short-circuit drawing tools to clear overlays to avoid stale strokes.
+	•	Save server bandwidth: compress points to Float32Array on the wire if/when you control the API (future).
+
+⸻
+
+If you want, I can open a quick PR that:
+	1.	Adds the Clipper instance singleton + switches the helpers.
+	2.	Introduces the multipolygon wrapper in handleContourUpdate (no external API change).
+	3.	Replaces brush merge with union behind a flag.
+
+That should remove the “overlap but not union” cases and stabilize pen closes, without changing the UX.  ￼

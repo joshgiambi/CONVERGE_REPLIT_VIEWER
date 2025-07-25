@@ -152,8 +152,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // CT transform for fusion coordinate system alignment
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
 
-  // Zoom and pan state - DISABLED FOR DEBUGGING
-  const zoom = 1; // Fixed zoom for debugging
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
 
@@ -1785,9 +1785,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
 
-    // SIMPLIFIED - NO ZOOM FOR DEBUGGING  
+    // Calculate scale with zoom factor
     const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
-    const totalScale = baseScale; // Just base scale, no zoom
+    const totalScale = baseScale * zoom;
     const scaledWidth = width * totalScale;
     const scaledHeight = height * totalScale;
 
@@ -2135,12 +2135,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const imageWidth = 512;
     const imageHeight = 512;
 
-    // SIMPLIFIED - NO ZOOM FOR DEBUGGING
+    // Calculate scale with zoom factor
     const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
     // For a 512x512 image in 1024x1024 canvas, baseScale = 2
     
-    // Just use base scale, ignore zoom completely
-    const totalScale = baseScale; // NO ZOOM
+    // Apply zoom factor to base scale
+    const totalScale = baseScale * zoom;
     const scaledWidth = imageWidth * totalScale;
     const scaledHeight = imageHeight * totalScale;
     
