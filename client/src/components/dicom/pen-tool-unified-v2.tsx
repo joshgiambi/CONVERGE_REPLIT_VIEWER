@@ -42,9 +42,9 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     originalContour: number[];
   } | null>(null);
   
-  const CLOSE_THRESHOLD = 20; // Larger hit area for first vertex
-  const VERTEX_HIT_RADIUS = 10;
-  const CONTOUR_HOVER_DISTANCE = 10;
+  const CLOSE_THRESHOLD = 10; // Smaller bubble for first vertex
+  const VERTEX_HIT_RADIUS = 8;
+  const CONTOUR_HOVER_DISTANCE = 5; // Only show vertices when very close to boundary
   
   // Get current Z position
   const currentZ = imageMetadata?.imagePosition ? 
@@ -85,16 +85,61 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const contours = getContoursAtCurrentSlice();
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
+    // First check if we're near any contour boundary
     for (let contourIdx = 0; contourIdx < contours.length; contourIdx++) {
       const contour = contours[contourIdx];
       const points = contour.points;
       
+      // Check distance to contour edges
+      let nearBoundary = false;
       for (let i = 0; i < points.length; i += 3) {
-        const [cx, cy] = worldToCanvas(points[i], points[i + 1]);
-        const distance = Math.sqrt((canvasX - cx) ** 2 + (canvasY - cy) ** 2);
+        const j = (i + 3) % points.length;
+        const [x1, y1] = worldToCanvas(points[i], points[i + 1]);
+        const [x2, y2] = worldToCanvas(points[j], points[j + 1]);
         
-        if (distance < VERTEX_HIT_RADIUS) {
-          return { contourIdx, pointIdx: i };
+        // Distance from point to line segment
+        const A = canvasX - x1;
+        const B = canvasY - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+        
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        
+        if (lenSq !== 0) param = dot / lenSq;
+        
+        let xx, yy;
+        if (param < 0) {
+          xx = x1;
+          yy = y1;
+        } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+        } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+        
+        const dx = canvasX - xx;
+        const dy = canvasY - yy;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < CONTOUR_HOVER_DISTANCE) {
+          nearBoundary = true;
+          break;
+        }
+      }
+      
+      // Only check vertices if we're near the boundary
+      if (nearBoundary) {
+        for (let i = 0; i < points.length; i += 3) {
+          const [cx, cy] = worldToCanvas(points[i], points[i + 1]);
+          const distance = Math.sqrt((canvasX - cx) ** 2 + (canvasY - cy) ** 2);
+          
+          if (distance < VERTEX_HIT_RADIUS) {
+            return { contourIdx, pointIdx: i };
+          }
         }
       }
     }
@@ -242,7 +287,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // If drawing, check for closing
     if (points.length > 0) {
-      if (isNearFirstPoint(canvasX, canvasY)) {
+      if (isNearFirstPoint(canvasX, canvasY) && points.length >= 3) {
         completeShape();
         return;
       }
@@ -334,11 +379,25 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     }
     
     // Add points during continuous drawing
-    if (isDrawingContinuous) {
-      setPoints(prev => [...prev, worldPoint]);
+    if (isDrawingContinuous && points.length > 0) {
+      // Check if we're dragging into the bubble to complete
+      if (points.length >= 3 && isNearFirstPoint(canvasX, canvasY)) {
+        completeShape();
+        setIsDrawingContinuous(false);
+        return;
+      }
+      
+      const lastPoint = points[points.length - 1];
+      const distance = Math.sqrt((worldPoint[0] - lastPoint[0]) ** 2 + (worldPoint[1] - lastPoint[1]) ** 2);
+      
+      // Add point if moved enough distance
+      if (distance > 5) { // minimum distance threshold
+        setPoints(prev => [...prev, worldPoint]);
+      }
     }
   }, [canvasRef, canvasToWorld, isDraggingVertex, draggedVertex, getContoursAtCurrentSlice,
-      selectedStructure, imageMetadata, onContourUpdate, isDrawingContinuous, findNearestVertex]);
+      selectedStructure, imageMetadata, onContourUpdate, isDrawingContinuous, findNearestVertex,
+      points, isNearFirstPoint, completeShape]);
   
   // Handle mouse up
   const handleMouseUp = useCallback((e: MouseEvent) => {
@@ -439,33 +498,76 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       ctx.closePath();
       ctx.stroke();
       
-      // Draw vertex dots if hovering near this contour or if vertex is hovered
-      if (hoveredVertex && hoveredVertex.contourIdx === contourIdx && !isDrawingContinuous && !isDraggingVertex) {
-        // Draw all vertices as small circles
-        ctx.fillStyle = colorStr;
-        ctx.globalAlpha = 0.8;
-        
+      // Draw vertex dots only if hovering very close to boundary
+      if (hoveredVertex && hoveredVertex.contourIdx === contourIdx && !isDrawingContinuous && !isDraggingVertex && currentMousePos) {
+        // Check if we're actually near this contour's boundary
+        let nearBoundary = false;
         for (let i = 0; i < points.length; i += 3) {
-          const [x, y] = worldToCanvas(points[i], points[i + 1]);
+          const j = (i + 3) % points.length;
+          const [x1, y1] = worldToCanvas(points[i], points[i + 1]);
+          const [x2, y2] = worldToCanvas(points[j], points[j + 1]);
           
-          // Check if this is the hovered vertex
-          if (hoveredVertex.pointIdx === i) {
-            // Draw larger highlighted vertex
-            ctx.fillStyle = '#ffffff';
-            ctx.strokeStyle = colorStr;
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 1;
-            ctx.beginPath();
-            ctx.arc(x, y, 6, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
+          // Distance from cursor to line segment
+          const A = currentMousePos[0] - x1;
+          const B = currentMousePos[1] - y1;
+          const C = x2 - x1;
+          const D = y2 - y1;
+          
+          const dot = A * C + B * D;
+          const lenSq = C * C + D * D;
+          let param = -1;
+          
+          if (lenSq !== 0) param = dot / lenSq;
+          
+          let xx, yy;
+          if (param < 0) {
+            xx = x1;
+            yy = y1;
+          } else if (param > 1) {
+            xx = x2;
+            yy = y2;
           } else {
-            // Draw normal vertex
-            ctx.fillStyle = colorStr;
-            ctx.globalAlpha = 0.8;
-            ctx.beginPath();
-            ctx.arc(x, y, 4, 0, Math.PI * 2);
-            ctx.fill();
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+          }
+          
+          const dx = currentMousePos[0] - xx;
+          const dy = currentMousePos[1] - yy;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < CONTOUR_HOVER_DISTANCE * 2) {
+            nearBoundary = true;
+            break;
+          }
+        }
+        
+        if (nearBoundary) {
+          // Draw all vertices as small circles
+          ctx.fillStyle = colorStr;
+          ctx.globalAlpha = 0.8;
+          
+          for (let i = 0; i < points.length; i += 3) {
+            const [x, y] = worldToCanvas(points[i], points[i + 1]);
+            
+            // Check if this is the hovered vertex
+            if (hoveredVertex.pointIdx === i) {
+              // Draw larger highlighted vertex
+              ctx.fillStyle = '#ffffff';
+              ctx.strokeStyle = colorStr;
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 1;
+              ctx.beginPath();
+              ctx.arc(x, y, 6, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+            } else {
+              // Draw normal vertex
+              ctx.fillStyle = colorStr;
+              ctx.globalAlpha = 0.8;
+              ctx.beginPath();
+              ctx.arc(x, y, 4, 0, Math.PI * 2);
+              ctx.fill();
+            }
           }
         }
       }
@@ -484,6 +586,21 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         const [x, y] = worldToCanvas(points[i][0], points[i][1]);
         if (i === 0) {
           ctx.moveTo(x, y);
+          
+          // Draw mode indicator dot at first point
+          const modeColor = startMode === 'ADD' ? '#00ff00' : '#ff0000';
+          ctx.save();
+          ctx.fillStyle = modeColor;
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Add white border for visibility
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
         } else {
           ctx.lineTo(x, y);
         }
@@ -504,17 +621,17 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         if (currentMousePos) {
           const dist = Math.sqrt((currentMousePos[0] - fx) ** 2 + (currentMousePos[1] - fy) ** 2);
           if (dist < CLOSE_THRESHOLD) {
-            // Draw purple bubble
+            // Draw smaller purple bubble
             ctx.fillStyle = '#ff00ff';
-            ctx.globalAlpha = 0.4;
+            ctx.globalAlpha = 0.3;
             ctx.beginPath();
             ctx.arc(fx, fy, CLOSE_THRESHOLD, 0, Math.PI * 2);
             ctx.fill();
             
             // Draw bubble border
             ctx.strokeStyle = '#ff00ff';
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.8;
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.6;
             ctx.stroke();
           }
         }
