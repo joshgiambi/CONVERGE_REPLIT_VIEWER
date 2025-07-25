@@ -317,10 +317,10 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     // Add point
     setPoints(prev => [...prev, worldPoint]);
     
-    // Don't use continuous drawing mode for pen tool - we want click-to-add points
-    // if (e.button === 0) { // Left button
-    //   setIsDrawingContinuous(true);
-    // }
+    // Start continuous drawing if holding down
+    if (e.button === 0) { // Left button
+      setIsDrawingContinuous(true);
+    }
   }, [isActive, canvasRef, canvasToWorld, findNearestVertex, getContoursAtCurrentSlice, 
       points, isNearFirstPoint, completeShape, startMode, isPointInsideContour]);
   
@@ -443,6 +443,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!canvasRef.current || !isActive) return;
     
     const mainCanvas = canvasRef.current;
+    console.log('Setting up overlay canvas, main canvas:', mainCanvas);
     
     if (!overlayCanvasRef.current) {
       const overlayCanvas = document.createElement('canvas');
@@ -454,9 +455,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       overlayCanvas.style.height = mainCanvas.style.height;
       overlayCanvas.width = mainCanvas.width;
       overlayCanvas.height = mainCanvas.height;
+      overlayCanvas.style.zIndex = '10'; // Make sure it's on top
       
+      console.log('Creating overlay canvas with size:', mainCanvas.width, 'x', mainCanvas.height);
       mainCanvas.parentElement?.appendChild(overlayCanvas);
       overlayCanvasRef.current = overlayCanvas;
+      console.log('Overlay canvas created and appended');
     }
     
     // Update size if needed
@@ -469,10 +473,16 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   
   // Render overlay with animation frame
   const render = useCallback(() => {
-    if (!overlayCanvasRef.current) return;
+    if (!overlayCanvasRef.current) {
+      console.log('No overlay canvas');
+      return;
+    }
     
     const ctx = overlayCanvasRef.current.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.log('No context');
+      return;
+    }
     
     // Clear
     ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
