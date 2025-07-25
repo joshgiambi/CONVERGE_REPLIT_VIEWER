@@ -786,16 +786,16 @@ export function SeriesSelector({
             </AccordionItem>
 
             {/* Structures Section */}
-            <AccordionItem value="structures" className="border-dicom-indigo/30">
+            <AccordionItem value="structures" className="border-dicom-indigo/30 flex-1 flex flex-col overflow-hidden">
               <AccordionTrigger className="px-6 py-3 hover:no-underline hover:bg-green-500/10">
                 <div className="flex items-center text-green-400 font-medium text-sm">
                   <Palette className="w-4 h-4 mr-2 text-green-400" />
                   Structures
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
+              <AccordionContent className="px-4 pb-4 flex-1 flex flex-col min-h-0 overflow-hidden">
                 {rtStructures?.structures ? (
-                  <div className="space-y-3 flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+                  <div className="space-y-3 flex flex-col flex-1 min-h-0">
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1045,7 +1045,7 @@ export function SeriesSelector({
                     )}
 
                     {/* Structures List - Grouped and Individual */}
-                    <div className="space-y-1 overflow-y-auto" style={{ height: 'calc(100vh - 420px)', minHeight: '200px' }}>
+                    <div className="space-y-1 overflow-y-auto flex-1 min-h-0">
                       {rtStructures?.structures && (() => {
                         const filteredStructures = rtStructures.structures.filter((structure: any) =>
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
