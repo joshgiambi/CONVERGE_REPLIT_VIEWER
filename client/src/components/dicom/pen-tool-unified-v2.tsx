@@ -57,20 +57,29 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   // Get current Z position
   const currentZ = imageMetadata?.imagePosition ? 
     parseFloat(imageMetadata.imagePosition.split("\\")[2]) : 0;
+    
+  // Track previous Z to detect slice changes
+  const prevZRef = useRef<number>(currentZ);
+  
+  // Clear any cached data when slice changes
+  useEffect(() => {
+    if (prevZRef.current !== currentZ) {
+      prevZRef.current = currentZ;
+      // Force re-render when slice changes
+      if (overlayCanvasRef.current) {
+        const ctx = overlayCanvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+        }
+      }
+    }
+  }, [currentZ]);
   
   // Find existing contours at current slice
   const getContoursAtCurrentSlice = useCallback(() => {
-    console.log('getContoursAtCurrentSlice called:', {
-      hasRTStructures: !!rtStructures?.structures,
-      structuresCount: rtStructures?.structures?.length || 0,
-      selectedStructure,
-      currentZ
-    });
-    
     if (!rtStructures?.structures || !selectedStructure) return [];
     
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
-    console.log('Found structure:', structure ? structure.structureName : 'None');
     
     if (!structure?.contours) return [];
     
@@ -84,7 +93,6 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
       return contourZMicrons === currentZMicrons;
     });
     
-    console.log('Contours at current slice:', contoursAtSlice.length);
     return contoursAtSlice;
   }, [rtStructures, selectedStructure, currentZ]);
   
@@ -715,7 +723,15 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // Draw existing contours with vertex indicators when hovering
     const contours = getContoursAtCurrentSlice();
-    contours.forEach((contour: any, contourIdx: number) => {
+    
+    // Double-check we're only rendering contours for the exact current slice
+    const validContours = contours.filter((contour: any) => {
+      const contourZMicrons = Math.round(contour.slicePosition * 1000);
+      const currentZMicrons = Math.round(currentZ * 1000);
+      return contourZMicrons === currentZMicrons;
+    });
+    
+    validContours.forEach((contour: any, contourIdx: number) => {
       // Draw faint contour outline
       ctx.strokeStyle = colorStr;
       ctx.lineWidth = 1;
