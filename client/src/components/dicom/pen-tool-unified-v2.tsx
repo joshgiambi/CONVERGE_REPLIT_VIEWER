@@ -65,6 +65,11 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   useEffect(() => {
     if (prevZRef.current !== currentZ) {
       prevZRef.current = currentZ;
+      
+      // Clear hover state when slice changes to prevent ghost contours
+      setHoveredContour(null);
+      setCurrentMousePos([0, 0]);
+      
       // Force re-render when slice changes
       if (overlayCanvasRef.current) {
         const ctx = overlayCanvasRef.current.getContext('2d');
@@ -118,9 +123,19 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     const contours = getContoursAtCurrentSlice();
     const worldPoint = canvasToWorld(canvasX, canvasY);
     
+    // Current Z in micrometers for exact comparison
+    const currentZMicrons = Math.round(currentZ * 1000);
+    
     // First check if we're near any contour boundary
     for (let contourIdx = 0; contourIdx < contours.length; contourIdx++) {
       const contour = contours[contourIdx];
+      
+      // Double-check Z position to prevent ghost contours
+      const contourZMicrons = Math.round(contour.slicePosition * 1000);
+      if (contourZMicrons !== currentZMicrons) {
+        continue; // Skip contours not on current slice
+      }
+      
       const points = contour.points;
       
       // Check distance to contour edges
@@ -178,7 +193,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     }
     
     return null;
-  }, [getContoursAtCurrentSlice, worldToCanvas, canvasToWorld]);
+  }, [getContoursAtCurrentSlice, worldToCanvas, canvasToWorld, currentZ]);
   
   // Check if near first point for closing
   const isNearFirstPoint = useCallback((canvasX: number, canvasY: number) => {
