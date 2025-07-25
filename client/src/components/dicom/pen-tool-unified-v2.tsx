@@ -317,10 +317,10 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     // Add point
     setPoints(prev => [...prev, worldPoint]);
     
-    // Start continuous drawing if holding down
-    if (e.button === 0) { // Left button
-      setIsDrawingContinuous(true);
-    }
+    // Don't use continuous drawing mode for pen tool - we want click-to-add points
+    // if (e.button === 0) { // Left button
+    //   setIsDrawingContinuous(true);
+    // }
   }, [isActive, canvasRef, canvasToWorld, findNearestVertex, getContoursAtCurrentSlice, 
       points, isNearFirstPoint, completeShape, startMode, isPointInsideContour]);
   
@@ -580,6 +580,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     // Draw current shape
     if (points.length > 0) {
+      console.log('Drawing pen tool points:', points.length, points);
       ctx.strokeStyle = colorStr;
       ctx.fillStyle = colorStr;
       ctx.lineWidth = 2;
