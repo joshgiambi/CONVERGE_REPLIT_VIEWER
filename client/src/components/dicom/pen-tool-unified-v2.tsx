@@ -410,43 +410,66 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
           );
           
           console.log('✅ ClipperLib loaded successfully');
+          console.log('🔧 ClipperLib instance structure:', Object.keys(clipperLib.instance));
           
           // Create clipper instance using the instance property
           const clipper = new clipperLib.instance.Clipper();
           const solution = new clipperLib.instance.Paths();
+          console.log('✅ Clipper and Paths created successfully');
           
           // Convert existing contours to ClipperLib format
-          existingContours.forEach((contour: any) => {
-            const path = new clipperLib.Path();
-            
-            for (let i = 0; i < contour.points.length; i += 3) {
-              path.push({
-                X: Math.round(contour.points[i] * SCALE),
-                Y: Math.round(contour.points[i + 1] * SCALE)
-              });
-            }
-            
-            if (path.size() > 2) {
-              clipper.AddPath(path, clipperLib.PolyType.ptSubject, true);
+          console.log('🔧 Processing existing contours:', existingContours.length);
+          existingContours.forEach((contour: any, index: number) => {
+            try {
+              const path = new clipperLib.instance.Path();
+              console.log(`🔧 Created path ${index}:`, path);
+              
+              for (let i = 0; i < contour.points.length; i += 3) {
+                const point = {
+                  X: Math.round(contour.points[i] * SCALE),
+                  Y: Math.round(contour.points[i + 1] * SCALE)
+                };
+                path.push(point);
+              }
+              
+              console.log(`🔧 Path ${index} size:`, path.size());
+              if (path.size() > 2) {
+                clipper.AddPath(path, clipperLib.instance.PolyType.ptSubject, true);
+                console.log(`✅ Added existing contour ${index} to clipper`);
+              }
+            } catch (err) {
+              console.error(`❌ Error processing contour ${index}:`, err);
             }
           });
           
           // Add new polygon for subtraction
-          const newPath = new clipperLib.Path();
-          newPolygon.forEach(point => {
-            newPath.push({
-              X: point.x,
-              Y: point.y
+          let success = false;
+          try {
+            console.log('🔧 Processing new polygon:', newPolygon.length, 'points');
+            const newPath = new clipperLib.instance.Path();
+            newPolygon.forEach((point, i) => {
+              newPath.push({
+                X: point.x,
+                Y: point.y
+              });
             });
-          });
-          
-          clipper.AddPath(newPath, clipperLib.PolyType.ptClip, true);
-          const success = clipper.Execute(
-            clipperLib.ClipType.ctDifference,
-            solution,
-            clipperLib.PolyFillType.pftNonZero,
-            clipperLib.PolyFillType.pftNonZero
-          );
+            
+            console.log('🔧 New path size:', newPath.size());
+            clipper.AddPath(newPath, clipperLib.instance.PolyType.ptClip, true);
+            console.log('✅ Added new polygon to clipper');
+            
+            console.log('🔧 Executing boolean difference operation...');
+            success = clipper.Execute(
+              clipperLib.instance.ClipType.ctDifference,
+              solution,
+              clipperLib.instance.PolyFillType.pftNonZero,
+              clipperLib.instance.PolyFillType.pftNonZero
+            );
+            console.log('🔧 Execute result:', success);
+          } catch (err) {
+            console.error('❌ Error in execute operation:', err);
+            throw err;
+          }
           
           if (!success) {
             console.warn('ClipperLib difference operation failed');
