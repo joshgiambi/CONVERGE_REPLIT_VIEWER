@@ -58,29 +58,47 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const currentZ = imageMetadata?.imagePosition ? 
     parseFloat(imageMetadata.imagePosition.split("\\")[2]) : 0;
     
-  // Track previous Z to detect slice changes
+  // Track previous Z to detect slice changes  
   const prevZRef = useRef<number>(currentZ);
   
-  // Clear any cached data when slice changes
+  // Eclipse-style slice change handling - clear everything when slice changes
   useEffect(() => {
-    if (prevZRef.current !== currentZ) {
-      prevZRef.current = currentZ;
-      
-      // Clear hover state when slice changes to prevent ghost contours
-      setHoveredVertex(null);
-      setCurrentMousePos(null);
-      
-      // Force re-render when slice changes
-      if (overlayCanvasRef.current) {
-        const ctx = overlayCanvasRef.current.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
-        }
-      }
+    if (prevZRef.current === currentZ) return;   // still on same slice
+    prevZRef.current = currentZ;
+
+    // —— clear any stroke-in-progress ——
+    setPoints([]);                 // discard unfinished path
+    setStartMode(null);
+    setHoveredVertex(null);
+    setIsDraggingVertex(false);
+    setDraggedVertex(null);
+    setIsDrawingContinuous(false);
+    setCurrentMousePos(null);
+
+    // —— wipe the overlay canvas ——
+    if (overlayCanvasRef.current) {
+      const ctx = overlayCanvasRef.current.getContext('2d');
+      ctx?.clearRect(
+        0,
+        0,
+        overlayCanvasRef.current.width,
+        overlayCanvasRef.current.height
+      );
     }
   }, [currentZ]);
   
-  // Find existing contours at current slice
+  // Clear/hide overlay when tool deactivates  
+  useEffect(() => {
+    if (!isActive && overlayCanvasRef.current) {
+      const ctx = overlayCanvasRef.current.getContext('2d');
+      ctx?.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+      overlayCanvasRef.current.style.display = 'none';
+    } else if (isActive && overlayCanvasRef.current) {
+      overlayCanvasRef.current.style.display = 'block';
+    }
+  }, [isActive]);
+  
+  // Find existing contours at current slice using slice-thickness tolerance
   const getContoursAtCurrentSlice = useCallback(() => {
     if (!rtStructures?.structures || !selectedStructure) return [];
     
@@ -88,31 +106,33 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     if (!structure?.contours) return [];
     
+    // Eclipse-style slice-thickness tolerance
+    const tol = (imageMetadata.sliceThickness ?? 1) / 2;   // mm
+    const sameSlice = (z1: number, z2: number) => Math.abs(z1 - z2) < tol;
+    
     console.log('🔍 Pen Tool Z-Debug:', {
       currentZ,
+      sliceThickness: imageMetadata.sliceThickness,
+      tolerance: tol,
       totalContours: structure.contours.length,
       structureId: selectedStructure
     });
     
     const contoursAtSlice = structure.contours.filter((contour: any) => {
-      // Use integer comparison to completely avoid floating point issues
-      // Convert to micrometers (multiply by 1000) for integer comparison
-      const contourZMicrons = Math.round(contour.slicePosition * 1000);
-      const currentZMicrons = Math.round(currentZ * 1000);
+      const zDiff = Math.abs(contour.slicePosition - currentZ);
+      const matches = sameSlice(contour.slicePosition, currentZ);
       
       // Log near matches for debugging
-      const zDiff = Math.abs(contour.slicePosition - currentZ);
       if (zDiff < 3) {
-        console.log(`📍 Contour Z: ${contour.slicePosition} (${contourZMicrons}μm), Current Z: ${currentZ} (${currentZMicrons}μm), Diff: ${zDiff}mm, Match: ${contourZMicrons === currentZMicrons}`);
+        console.log(`📍 Contour Z: ${contour.slicePosition}, Current Z: ${currentZ}, Diff: ${zDiff}mm, Tolerance: ${tol}mm, Match: ${matches}`);
       }
       
-      // Only match if exactly the same when rounded to micrometers
-      return contourZMicrons === currentZMicrons;
+      return matches;
     });
     
-    console.log(`✅ Found ${contoursAtSlice.length} contours at current slice`);
+    console.log(`✅ Found ${contoursAtSlice.length} contours at current slice (tolerance: ${tol}mm)`);
     return contoursAtSlice;
-  }, [rtStructures, selectedStructure, currentZ]);
+  }, [rtStructures, selectedStructure, currentZ, imageMetadata.sliceThickness]);
   
   // Check if point is inside any contour
   const isPointInsideContour = useCallback((x: number, y: number, contour: number[]) => {
@@ -317,37 +337,37 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         points: worldPoints.length,
         imageMetadata
       });
-      onContourUpdate({
-        action: 'add_pen_stroke',
+      onContourUpdate('add_pen_stroke', {
         structureId: selectedStructure,
         points: worldPoints,
         slicePosition: currentZ,
         imageMetadata
       });
     } else {
-      // Check if we need to do boolean operations
-      const newPolygonIntersects = doesNewPolygonIntersect(finalPoints, existingContours);
+      // Eclipse-style operation detection from first click
+      const firstClickPoint = points[0];
       
-      // Determine the operation based on starting point and intersection
-      let operation: 'union' | 'subtract' | 'separate';
-      if (startMode === 'ADD') {
-        // Started inside structure - always union
-        operation = 'union';
-      } else {
-        // Started outside structure
-        if (newPolygonIntersects) {
-          // Goes into structure - subtract
-          operation = 'subtract';
-        } else {
-          // Doesn't touch structure - keep separate
-          operation = 'separate';
+      // Check if first click was inside any contour
+      const startInside = existingContours.some((contour: any) => {
+        if (contour.points && contour.points.length >= 9) {
+          return isPointInsideContour(firstClickPoint[0], firstClickPoint[1], contour.points);
         }
-      }
+        return false;
+      });
       
-      console.log('🔧 BOOLEAN OPERATION DETERMINED:', {
-        startMode,
-        intersects: newPolygonIntersects,
+      // Check if new polygon intersects with existing contours
+      const intersectsStructure = doesNewPolygonIntersect(finalPoints, existingContours);
+      
+      // Eclipse-style operation determination: exactly as user specified
+      const operation = startInside ? 'union' :           // first click inside → add
+                       intersectsStructure ? 'subtract' : // first click outside *and* stroke crosses → carve hole  
+                                           'separate';     // first click outside, never touches → new blob
+      
+      console.log('🎯 ECLIPSE-STYLE OPERATION DETERMINED:', {
+        startInside,
+        intersectsStructure,
         operation,
+        firstClickPoint,
         existingContours: existingContours.length,
         newPolygonPoints: finalPoints.length
       });
@@ -358,56 +378,14 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
         worldPoints.push(x, y, currentZ);
       });
       
-      // Handle union operations
-      if (operation === 'union') {
-        console.log('Pen tool union operation');
-        onContourUpdate({
-          action: 'pen_boolean_operation',
-          structureId: selectedStructure,
-          points: worldPoints,
-          slicePosition: currentZ,
-          operation: 'union',
-          imageMetadata
-        });
-        
-        // Reset state and return
-        setPoints([]);
-        setIsDrawingContinuous(false);
-        setStartMode(null);
-        return;
-      }
-      
-      // Handle separate case (no boolean operation needed)
-      if (operation === 'separate') {
-        console.log('Pen tool separate blob operation');
-        onContourUpdate({
-          action: 'pen_boolean_operation',
-          structureId: selectedStructure,
-          points: worldPoints,
-          slicePosition: currentZ,
-          operation: 'separate',
-          imageMetadata
-        });
-        
-        // Reset state and return
-        setPoints([]);
-        setIsDrawingContinuous(false);
-        setStartMode(null);
-        return;
-      }
-      
-      // Only do ClipperLib operations for subtraction
-      if (operation === 'subtract' && existingContours.length > 0) {
-        // Simple server-side subtraction - let the server handle boolean operations
-        onContourUpdate({
-          action: 'pen_boolean_operation',
-          structureId: selectedStructure,
-          points: newPolygon.flatMap(p => [p.x, p.y, currentZ]),
-          slicePosition: currentZ,
-          operation: 'subtract',
-          imageMetadata
-        });
-      }
+      // Execute the determined operation
+      onContourUpdate('pen_boolean_operation', {
+        structureId: selectedStructure,
+        points: worldPoints,
+        slicePosition: currentZ,
+        operation,
+        imageMetadata
+      });
     }
     
     // Reset state
