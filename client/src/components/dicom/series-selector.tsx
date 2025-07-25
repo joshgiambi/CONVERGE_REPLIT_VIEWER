@@ -475,7 +475,7 @@ export function SeriesSelector({
       {/* Main Series and Structures Panel */}
       <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
         <CardContent className="p-0 h-full flex flex-col">
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden flex flex-col">
             <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
@@ -793,9 +793,9 @@ export function SeriesSelector({
                   Structures
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
+              <AccordionContent className="px-4 pb-4 flex flex-col" style={{ maxHeight: 'calc(100vh - 350px)' }}>
                 {rtStructures?.structures ? (
-                  <div className="space-y-3">
+                  <div className="space-y-3 flex-1 flex flex-col overflow-hidden">
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1045,7 +1045,7 @@ export function SeriesSelector({
                     )}
 
                     {/* Structures List - Grouped and Individual */}
-                    <div className="space-y-1 overflow-y-auto max-h-96">
+                    <div className="space-y-1 overflow-y-auto flex-1">
                       {rtStructures?.structures && (() => {
                         const filteredStructures = rtStructures.structures.filter((structure: any) =>
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
