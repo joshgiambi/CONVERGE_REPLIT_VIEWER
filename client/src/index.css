@@ -67,8 +67,16 @@
     @apply border-border;
   }
 
+  html {
+    @apply h-full overflow-hidden;
+  }
+
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased bg-background text-foreground h-full overflow-hidden;
+  }
+
+  #root {
+    @apply h-full overflow-hidden;
   }
 }
 
