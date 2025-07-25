@@ -88,16 +88,29 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     if (!structure?.contours) return [];
     
+    console.log('🔍 Pen Tool Z-Debug:', {
+      currentZ,
+      totalContours: structure.contours.length,
+      structureId: selectedStructure
+    });
+    
     const contoursAtSlice = structure.contours.filter((contour: any) => {
       // Use integer comparison to completely avoid floating point issues
       // Convert to micrometers (multiply by 1000) for integer comparison
       const contourZMicrons = Math.round(contour.slicePosition * 1000);
       const currentZMicrons = Math.round(currentZ * 1000);
       
+      // Log near matches for debugging
+      const zDiff = Math.abs(contour.slicePosition - currentZ);
+      if (zDiff < 3) {
+        console.log(`📍 Contour Z: ${contour.slicePosition} (${contourZMicrons}μm), Current Z: ${currentZ} (${currentZMicrons}μm), Diff: ${zDiff}mm, Match: ${contourZMicrons === currentZMicrons}`);
+      }
+      
       // Only match if exactly the same when rounded to micrometers
       return contourZMicrons === currentZMicrons;
     });
     
+    console.log(`✅ Found ${contoursAtSlice.length} contours at current slice`);
     return contoursAtSlice;
   }, [rtStructures, selectedStructure, currentZ]);
   

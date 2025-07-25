@@ -820,10 +820,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             structure.contours.splice(contourIndex, 1);
             console.log('Subtraction resulted in empty contour, removed slice');
           } else {
-            // Remove all existing contours at this slice first
-            structure.contours = structure.contours.filter(
-              (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > 1.5
-            );
+            // Remove only the specific contour that was operated on, not all contours
+            structure.contours.splice(contourIndex, 1);
             
             // Add each result contour as a separate contour object
             payload.resultContours.forEach((contourPoints: number[]) => {
@@ -834,7 +832,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               });
             });
             
-            console.log(`Pen subtraction operation completed, created ${payload.resultContours.length} separate contours`);
+            console.log(`Pen subtraction operation completed, replaced 1 contour with ${payload.resultContours.length} result contours`);
           }
         } else {
           console.warn('Subtraction operation called but no existing contour found');

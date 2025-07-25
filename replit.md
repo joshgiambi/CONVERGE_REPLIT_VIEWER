@@ -202,6 +202,16 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 25, 2025: Pen Tool Delete Function Fix - Boolean Subtraction - COMPLETED ✅
+  - ✅ Fixed critical pen tool delete/subtraction bug where ALL contours at current slice were removed
+  - ✅ Root cause: pen_boolean_operation handler was using filter() to remove all contours at slice instead of splice()
+  - ✅ Changed logic to remove only the specific contour that was operated on, not all contours
+  - ✅ Pen tool subtraction now works correctly: shapes drawn from outside into structure disappear as expected
+  - ✅ Added enhanced debug logging to getContoursAtCurrentSlice for ghost contour troubleshooting
+  - Technical details:
+    - Changed from: `structure.contours.filter()` removing all at slice
+    - Changed to: `structure.contours.splice(contourIndex, 1)` removing only operated contour
+    - Result contours from ClipperLib subtraction are then added back properly
 - July 25, 2025: Ghost Contour Fix - Pen Tool Proximity Detection - COMPLETED ✅
   - ✅ Fixed critical ghost contour issue where pen tool showed contours from adjacent slices
   - ✅ Root cause: Proximity detection was finding contours from nearby slices due to floating point Z-position comparisons
