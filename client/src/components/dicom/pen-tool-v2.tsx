@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { isPointInContour, unionContours, subtractContours } from '../../lib/clipper-boolean-operations';
 
 interface PenToolV2Props {
   isActive: boolean;
@@ -16,7 +17,7 @@ interface Point {
   y: number;
 }
 
-// Pen Tool V2 - Complete rewrite with proper Eclipse-style functionality
+// Eclipse Pen Tool V2 - Clean implementation with proper boolean operations
 export default function PenToolV2({
   isActive,
   selectedStructure,
@@ -28,44 +29,59 @@ export default function PenToolV2({
   ctTransform
 }: PenToolV2Props) {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const animationFrameRef = useRef<number | null>(null);
   
-  // Tool state
-  const [isDrawing, setIsDrawing] = useState(false);
+  // Drawing state
   const [vertices, setVertices] = useState<Point[]>([]);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
-  const [isComplete, setIsComplete] = useState(false);
+  const [isDrawingContinuous, setIsDrawingContinuous] = useState(false);
+  const [operationMode, setOperationMode] = useState<'union' | 'subtract' | 'new' | null>(null);
+
+  // Get contours at current slice
+  const getContoursAtCurrentSlice = useCallback(() => {
+    if (!selectedStructure || !rtStructures?.structures) return [];
+    
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    if (!structure?.contours) return [];
+    
+    // Convert currentSlicePosition to micrometers for exact comparison
+    const currentZMicro = Math.round(currentSlicePosition * 1000);
+    
+    return structure.contours.filter((contour: any) => {
+      if (!contour.imagePosition) return false;
+      const contourZMicro = Math.round(contour.imagePosition * 1000);
+      return contourZMicro === currentZMicro;
+    });
+  }, [selectedStructure, rtStructures, currentSlicePosition]);
 
   // Initialize overlay canvas
   useEffect(() => {
     if (!canvasRef.current || !isActive) return;
 
     const mainCanvas = canvasRef.current;
-    const overlay = overlayCanvasRef.current;
+    let overlay = overlayCanvasRef.current;
     
     if (!overlay) {
-      // Create overlay canvas
-      const newOverlay = document.createElement('canvas');
-      newOverlay.style.position = 'absolute';
-      newOverlay.style.top = '0';
-      newOverlay.style.left = '0';
-      newOverlay.style.pointerEvents = 'none';
-      newOverlay.style.zIndex = '10';
-      newOverlay.width = mainCanvas.width;
-      newOverlay.height = mainCanvas.height;
+      overlay = document.createElement('canvas');
+      overlay.style.position = 'absolute';
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '10';
+      overlay.className = 'pen-tool-overlay';
       
-      mainCanvas.parentElement?.appendChild(newOverlay);
-      overlayCanvasRef.current = newOverlay;
-    } else {
-      overlay.width = mainCanvas.width;
-      overlay.height = mainCanvas.height;
+      mainCanvas.parentElement?.appendChild(overlay);
+      overlayCanvasRef.current = overlay;
     }
+    
+    overlay.width = mainCanvas.width;
+    overlay.height = mainCanvas.height;
 
     return () => {
-      if (overlayCanvasRef.current && overlayCanvasRef.current.parentElement) {
-        overlayCanvasRef.current.parentElement.removeChild(overlayCanvasRef.current);
-        overlayCanvasRef.current = null;
+      const overlayElement = document.querySelector('.pen-tool-overlay');
+      if (overlayElement && overlayElement.parentElement) {
+        overlayElement.parentElement.removeChild(overlayElement);
       }
+      overlayCanvasRef.current = null;
     };
   }, [isActive, canvasRef]);
 
@@ -113,6 +129,23 @@ export default function PenToolV2({
     return { x: canvasX, y: canvasY };
   }, [imageMetadata, ctTransform]);
 
+  // Determine operation mode based on first click context
+  const determineOperationMode = useCallback((firstWorldPoint: Point): 'union' | 'subtract' | 'new' => {
+    const contours = getContoursAtCurrentSlice();
+    if (contours.length === 0) return 'new';
+    
+    // Check if first point is inside any existing contour
+    for (const contour of contours) {
+      if (isPointInContour([firstWorldPoint.x, firstWorldPoint.y], contour.points)) {
+        console.log('🔷 First click INSIDE existing contour → UNION mode');
+        return 'union';
+      }
+    }
+    
+    console.log('🔷 First click OUTSIDE existing contours → Will check for crossing when complete');
+    return 'subtract'; // Will be refined when polygon is complete
+  }, [getContoursAtCurrentSlice]);
+
   // Check if point is near first vertex (for closing polygon)
   const isNearFirstVertex = useCallback((point: Point): boolean => {
     if (vertices.length < 3) return false;
@@ -122,7 +155,7 @@ export default function PenToolV2({
       Math.pow(point.x - firstVertex.x, 2) + Math.pow(point.y - firstVertex.y, 2)
     );
     
-    return distance < 8; // 8 pixel tolerance
+    return distance < 12; // 12 pixel tolerance for easy closing
   }, [vertices]);
 
   // Get structure color
@@ -141,41 +174,90 @@ export default function PenToolV2({
     return '#00ff00';
   }, [selectedStructure, rtStructures]);
 
+  // Check if new polygon crosses existing contours
+  const doesPolygonCrossExisting = useCallback((newVertices: Point[]): boolean => {
+    const contours = getContoursAtCurrentSlice();
+    if (contours.length === 0) return false;
+    
+    // Convert vertices to world coordinates for intersection testing
+    const worldVertices = newVertices.map(v => canvasToWorld(v.x, v.y));
+    
+    for (const contour of contours) {
+      // Convert contour points to 2D array for intersection testing
+      const contourPoints: [number, number][] = [];
+      for (let i = 0; i < contour.points.length; i += 3) {
+        contourPoints.push([contour.points[i], contour.points[i + 1]]);
+      }
+      
+      // Check if any edge of new polygon crosses any edge of existing contour
+      for (let i = 0; i < worldVertices.length; i++) {
+        const p1 = worldVertices[i];
+        const p2 = worldVertices[(i + 1) % worldVertices.length];
+        
+        for (let j = 0; j < contourPoints.length; j++) {
+          const p3 = contourPoints[j];
+          const p4 = contourPoints[(j + 1) % contourPoints.length];
+          
+          // Line intersection check
+          if (doLinesIntersect(p1, p2, p3, p4)) {
+            return true;
+          }
+        }
+      }
+    }
+    
+    return false;
+  }, [getContoursAtCurrentSlice, canvasToWorld]);
+
+  // Line intersection helper
+  const doLinesIntersect = (p1: Point, p2: Point, p3: [number, number], p4: [number, number]): boolean => {
+    const denom = (p1.x - p2.x) * (p3[1] - p4[1]) - (p1.y - p2.y) * (p3[0] - p4[0]);
+    if (Math.abs(denom) < 1e-10) return false; // Parallel lines
+    
+    const t = ((p1.x - p3[0]) * (p3[1] - p4[1]) - (p1.y - p3[1]) * (p3[0] - p4[0])) / denom;
+    const u = -((p1.x - p2.x) * (p1.y - p3[1]) - (p1.y - p2.y) * (p1.x - p3[0])) / denom;
+    
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  };
+
   // Handle mouse events
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!isActive || !selectedStructure || !canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
-    const point = {
+    const canvasPoint = {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     };
 
     if (event.button === 0) { // Left click
-      if (isComplete) {
-        // Reset if completed
-        setVertices([]);
-        setIsComplete(false);
-        setIsDrawing(true);
+      if (isNearFirstVertex(canvasPoint) && vertices.length >= 3) {
+        // Close polygon by clicking near first vertex
+        completePolygon();
+        return;
       }
       
-      if (isNearFirstVertex(point) && vertices.length >= 3) {
-        // Close polygon
-        completePolygon();
-      } else {
-        // Add vertex
-        setVertices(prev => [...prev, point]);
-        if (!isDrawing) {
-          setIsDrawing(true);
-        }
+      // Add vertex
+      setVertices(prev => [...prev, canvasPoint]);
+      
+      // Determine operation mode on first click
+      if (vertices.length === 0 && !operationMode) {
+        const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
+        const mode = determineOperationMode(worldPoint);
+        setOperationMode(mode);
+        console.log(`🔷 Operation mode set to: ${mode}`);
       }
+      
+      // Start continuous drawing if holding down
+      setIsDrawingContinuous(true);
+      
     } else if (event.button === 2) { // Right click
       event.preventDefault();
       if (vertices.length >= 3) {
         completePolygon();
       }
     }
-  }, [isActive, selectedStructure, vertices, isDrawing, isComplete, isNearFirstVertex]);
+  }, [isActive, selectedStructure, vertices, operationMode, isNearFirstVertex, canvasToWorld, determineOperationMode]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!isActive || !canvasRef.current) return;
