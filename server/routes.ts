@@ -2652,20 +2652,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
       }
       
-      // Apply modifications from current state
-      if (modifications.newStructures.length > 0) {
-        rtStructureSet.structures.push(...modifications.newStructures);
-      }
-      
-      modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
-        const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
-        if (structureIndex >= 0) {
-          rtStructureSet.structures[structureIndex] = {
-            ...rtStructureSet.structures[structureIndex],
-            ...modifiedData
-          };
+      // Apply modifications from current state only if we're not at the original state
+      if (modifications.historyIndex >= 0) {
+        if (modifications.newStructures.length > 0) {
+          rtStructureSet.structures.push(...modifications.newStructures);
         }
-      });
+        
+        modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+          const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
+          if (structureIndex >= 0) {
+            rtStructureSet.structures[structureIndex] = {
+              ...rtStructureSet.structures[structureIndex],
+              ...modifiedData
+            };
+          }
+        });
+      }
+      // If historyIndex is -1, we're at the original state, so return the unmodified RT structure set
       
       res.json(rtStructureSet);
     } catch (error) {

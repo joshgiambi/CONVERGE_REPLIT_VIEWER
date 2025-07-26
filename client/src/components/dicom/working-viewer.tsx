@@ -1571,7 +1571,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setImages(sortedImages);
       setCurrentIndex(0);
 
-      // Preload all images immediately
+      // Load the first image before removing loading screen
+      if (sortedImages.length > 0) {
+        try {
+          const firstImage = sortedImages[0];
+          const imageData = await fetchAndParseImage(firstImage.sopInstanceUID, signal);
+          if (imageData) {
+            // First image loaded, now we can remove loading screen
+            setIsLoading(false);
+            // Schedule initial render
+            setTimeout(() => {
+              displayCurrentImage();
+            }, 10);
+          }
+        } catch (err) {
+          console.error('Failed to load first image:', err);
+        }
+      }
+
+      // Preload remaining images in background
       preloadAllImages(sortedImages);
     } catch (error: any) {
       // Don't show error for aborted requests (happens when switching series)
@@ -1580,7 +1598,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       setError(error.message);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -2715,9 +2732,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   if (isLoading) {
     return (
       <Card className="h-full bg-black border-indigo-800 flex items-center justify-center">
-        <div className="text-center text-white">
-          <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-          <p>Loading CT scan...</p>
+        <div className="text-center">
+          {/* Medical-themed loading animation */}
+          <div className="relative w-24 h-24 mx-auto mb-4">
+            {/* Outer ring with gradient */}
+            <div className="absolute inset-0 rounded-full border-4 border-transparent bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 bg-clip-border animate-spin"></div>
+            
+            {/* Inner ring rotating opposite direction */}
+            <div className="absolute inset-2 rounded-full border-4 border-transparent bg-gradient-to-l from-cyan-500 via-blue-500 to-indigo-500 bg-clip-border animate-spin" style={{ animationDirection: 'reverse' }}></div>
+            
+            {/* Center pulse effect */}
+            <div className="absolute inset-4 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 animate-pulse"></div>
+            
+            {/* Medical cross icon in center */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg className="w-8 h-8 text-white z-10" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M9 3V21H15V3H9ZM3 9V15H21V9H3Z" />
+              </svg>
+            </div>
+          </div>
+          
+          <p className="text-white text-lg font-medium mb-2">Loading medical images...</p>
+          <p className="text-indigo-300 text-sm">Preparing visualization</p>
         </div>
       </Card>
     );
