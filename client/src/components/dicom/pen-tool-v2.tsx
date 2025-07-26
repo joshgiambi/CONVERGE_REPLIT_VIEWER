@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { isPointInContour, combineContours, subtractContours } from '../../lib/clipper-boolean-operations';
+import { combineContours, subtractContours } from '../../lib/clipper-boolean-operations';
 import { polygonUnion } from '../../lib/polygon-union';
 
 interface PenToolV2Props {
@@ -228,7 +228,14 @@ export default function PenToolV2({
     
     // Check if first point is inside any existing contour of selected structure
     for (const contour of contoursAtSlice) {
-      const isInside = await isPointInContour([firstWorldPoint.x, firstWorldPoint.y], contour.points);
+      // Convert contour points to 2D array
+      const contourPoints: [number, number][] = [];
+      for (let i = 0; i < contour.points.length; i += 3) {
+        contourPoints.push([contour.points[i], contour.points[i + 1]]);
+      }
+      
+      // Check if point is inside contour using simple polygon check
+      const isInside = isPointInPolygon([firstWorldPoint.x, firstWorldPoint.y], contourPoints);
       if (isInside) {
         console.log('🔷 First click INSIDE existing contour → UNION mode');
         return 'union';
