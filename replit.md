@@ -211,9 +211,11 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
   - ✅ Right-click size overlay now displays world coordinates (cm) matching toolbar settings
   - ✅ Brush tool now shows accurate coordinate system with proper mm/cm/px conversion
   - Technical details:
-    - Changed cursor radius from `currentBrushSize / zoomScale` to match stroke visual size
+    - Fixed critical double-radius bug in brush-to-polygon.ts where brushSize was treated as diameter instead of radius
+    - Changed createPerfectCircle function parameter from diameter to radius for consistent sizing
     - Fixed pixel spacing parsing: `imageMetadata.pixelSpacing.split('\\').map(Number)[0]`
     - Cursor circle now accurately represents the actual brush stroke output diameter
+    - Root cause: brush tool cursor showed radius X, but polygon creation used X as diameter, creating 2X size output
 - July 26, 2025: Brush Tool Undo Fix and ClipperLib Compatibility - COMPLETED ✅
   - ✅ Fixed brush tool undo functionality by clearing selected structure state on undo/redo operations
   - ✅ Added onSelectStructure(null) call in undo/redo success handlers to reset tool state

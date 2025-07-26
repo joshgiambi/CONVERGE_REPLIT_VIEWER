@@ -12,11 +12,10 @@ interface Point3D {
  * Create a perfect circle polygon at the given center with exact radius
  * Following Eclipse TPS and 3D Slicer specifications
  */
-function createPerfectCircle(center: number[], diameter: number): number[] {
+function createPerfectCircle(center: number[], radius: number): number[] {
   const circleSegments = 32; // More segments for smoother circles
   const points: number[] = [];
-  // Use diameter/2 as radius to make circle diameter = brushSize
-  const radius = diameter / 2;
+  // Use radius directly - brushSize is already the radius we want
   
   for (let i = 0; i < circleSegments; i++) {
     const angle = (i / circleSegments) * 2 * Math.PI;
@@ -48,7 +47,7 @@ export function brushStrokeToPolygon(
   const circles: number[][] = [];
   
   for (const point of brushPoints) {
-    const circle = createPerfectCircle(point, brushSize);
+    const circle = createPerfectCircle(point, brushSize); // brushSize is the radius
     circles.push(circle);
   }
   
