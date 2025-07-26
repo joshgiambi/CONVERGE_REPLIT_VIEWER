@@ -971,6 +971,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           points: payload.points,
           numberOfPoints: payload.points.length / 3,
         });
+      } else if (payload.operation === 'new') {
+        // Handle the simple case - just add new contour from resultContours
+        if (payload.resultContours && payload.resultContours.length > 0) {
+          // Convert resultContours to flat points array
+          const points = [];
+          payload.resultContours.forEach((contour: number[][]) => {
+            contour.forEach(([x, y]) => {
+              points.push(x, y, payload.slicePosition);
+            });
+          });
+          
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: points,
+            numberOfPoints: points.length / 3,
+          });
+          console.log('✅ Added new contour from pen tool');
+        }
       } else if (payload.operation === 'subtract') {
         // For subtraction, calculate the result using ClipperLib
         console.log('🔴 STARTING SUBTRACTION OPERATION:', {
