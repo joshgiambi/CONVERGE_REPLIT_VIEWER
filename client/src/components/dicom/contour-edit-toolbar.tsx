@@ -726,7 +726,7 @@ export function ContourEditToolbar({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <div>
-                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness (cm)</Label>
+                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
                 <Slider
                   value={brushThickness}
                   onValueChange={(value) => {
@@ -741,13 +741,20 @@ export function ContourEditToolbar({
                       });
                     }
                   }}
-                  max={20}
+                  max={50}
                   min={1}
                   step={1}
                   className="w-full"
                 />
                 <div className="text-xs text-gray-400 mt-1">
-                  {(brushThickness[0] * 0.1171875).toFixed(2)} cm ({brushThickness[0]}px)
+                  {/* Get actual pixel spacing from image metadata */}
+                  {(() => {
+                    const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
+                    const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
+                    const brushSizeMM = brushThickness[0] * avgPixelSpacing;
+                    const brushSizeCM = brushSizeMM / 10;
+                    return `${brushSizeMM.toFixed(1)} mm (${brushSizeCM.toFixed(2)} cm) - ${brushThickness[0]} px`;
+                  })()}
                 </div>
               </div>
               

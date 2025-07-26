@@ -669,12 +669,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Convert brush stroke to polished polygon for smooth edges
       let brushPolygon: number[];
       
+      // Convert brush size from pixels to world coordinates
+      // The brush size is in pixels, but we need it in world coordinates (mm)
+      const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [1.171875, 1.171875];
+      const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
+      const brushSizeInMM = payload.brushSize * avgPixelSpacing;
+      
+      console.log(`Brush size conversion: ${payload.brushSize}px → ${brushSizeInMM.toFixed(2)}mm (pixel spacing: ${avgPixelSpacing.toFixed(3)}mm/px)`);
+      
       // TEMPORARILY DISABLED: Polishing causing structure morphing/shrinking
       // Use unpolished brush stroke until polishing is fixed
       brushPolygon = addBrushToContour(
         [], // Empty array to get just the brush polygon
         payload.points,
-        payload.brushSize,
+        brushSizeInMM, // Use world coordinate size
       );
       console.log("Using unpolished brush stroke (polishing temporarily disabled)");
       
