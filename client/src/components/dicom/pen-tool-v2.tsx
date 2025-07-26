@@ -263,11 +263,39 @@ export default function PenToolV2({
     if (!isActive || !canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
-    setMousePosition({
+    const canvasPoint = {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
-    });
-  }, [isActive]);
+    };
+    
+    setMousePosition(canvasPoint);
+    
+    // Add points during continuous drawing
+    if (isDrawingContinuous && vertices.length > 0) {
+      // Check if we're near first vertex to close
+      if (vertices.length >= 3 && isNearFirstVertex(canvasPoint)) {
+        completePolygon();
+        setIsDrawingContinuous(false);
+        return;
+      }
+      
+      const lastVertex = vertices[vertices.length - 1];
+      const distance = Math.sqrt(
+        Math.pow(canvasPoint.x - lastVertex.x, 2) + Math.pow(canvasPoint.y - lastVertex.y, 2)
+      );
+      
+      // Add point if moved enough distance (continuous drawing)
+      if (distance > 8) {
+        setVertices(prev => [...prev, canvasPoint]);
+      }
+    }
+  }, [isActive, isDrawingContinuous, vertices, isNearFirstVertex]);
+
+  const handleMouseUp = useCallback((event: MouseEvent) => {
+    if (event.button === 0) { // Left button
+      setIsDrawingContinuous(false);
+    }
+  }, []);
 
   const handleContextMenu = useCallback((event: Event) => {
     if (isActive) {
@@ -275,11 +303,11 @@ export default function PenToolV2({
     }
   }, [isActive]);
 
-  // Complete polygon and send to parent
+  // Complete polygon with proper Eclipse boolean operations
   const completePolygon = useCallback(() => {
-    if (vertices.length < 3 || !selectedStructure) return;
+    if (vertices.length < 3 || !selectedStructure || !operationMode) return;
     
-    console.log(`PenToolV2: Completing polygon with ${vertices.length} vertices`);
+    console.log(`🔷 PenToolV2: Completing polygon with ${vertices.length} vertices, mode: ${operationMode}`);
     
     // Convert vertices to world coordinates
     const worldPoints: number[] = [];
@@ -288,24 +316,71 @@ export default function PenToolV2({
       worldPoints.push(world.x, world.y, world.z);
     });
     
-    console.log('PenToolV2: First 3 world points:', worldPoints.slice(0, 9));
+    const contours = getContoursAtCurrentSlice();
     
-    // Send to parent component
-    if (onContourUpdate) {
+    // Refine operation mode if it was initially set to 'subtract'
+    let finalMode = operationMode;
+    if (operationMode === 'subtract') {
+      const crosses = doesPolygonCrossExisting(vertices);
+      if (crosses) {
+        finalMode = 'subtract';
+        console.log('🔷 Polygon CROSSES existing contours → SUBTRACT mode (carve hole)');
+      } else {
+        finalMode = 'new';
+        console.log('🔷 Polygon SEPARATE from existing contours → NEW BLOB mode');
+      }
+    }
+    
+    // Apply boolean operations
+    let resultContours: number[][] = [];
+    
+    if (finalMode === 'new' || contours.length === 0) {
+      // Simple addition - new separate contour
+      resultContours = [worldPoints];
+      console.log('🔷 Adding new separate contour');
+      
+    } else if (finalMode === 'union') {
+      // Union with existing contours
+      console.log('🔷 Performing UNION operation');
+      const existingContours = contours.map(c => c.points);
+      resultContours = unionContours(existingContours, [worldPoints]);
+      
+    } else if (finalMode === 'subtract') {
+      // Subtract from existing contours
+      console.log('🔷 Performing SUBTRACT operation');
+      const existingContours = contours.map(c => c.points);
+      resultContours = subtractContours(existingContours, [worldPoints]);
+    }
+    
+    // Send boolean operation result to parent
+    if (onContourUpdate && resultContours.length > 0) {
       onContourUpdate({
-        action: "add_pen_stroke",
+        action: "pen_boolean_operation",
+        operation: finalMode,
         structureId: selectedStructure,
         slicePosition: currentSlicePosition,
-        points: worldPoints,
-        pointCount: vertices.length
+        resultContours: resultContours,
+        originalPolygon: worldPoints
       });
     }
     
     // Reset state
     setVertices([]);
-    setIsDrawing(false);
-    setIsComplete(true);
-  }, [vertices, selectedStructure, currentSlicePosition, canvasToWorld, onContourUpdate]);
+    setIsDrawingContinuous(false);
+    setOperationMode(null);
+    setMousePosition(null);
+    
+    console.log('🔷 PenToolV2: Polygon completed and boolean operation applied');
+  }, [vertices, selectedStructure, operationMode, currentSlicePosition, canvasToWorld, 
+      getContoursAtCurrentSlice, doesPolygonCrossExisting, onContourUpdate]);
+
+  // Reset state on slice change
+  useEffect(() => {
+    setVertices([]);
+    setIsDrawingContinuous(false);
+    setOperationMode(null);
+    setMousePosition(null);
+  }, [currentSlicePosition]);
 
   // Set up event listeners
   useEffect(() => {
@@ -315,16 +390,18 @@ export default function PenToolV2({
     
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('contextmenu', handleContextMenu);
     
     return () => {
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [isActive, handleMouseDown, handleMouseMove, handleContextMenu]);
+  }, [isActive, handleMouseDown, handleMouseMove, handleMouseUp, handleContextMenu]);
 
-  // Draw overlay
+  // Draw overlay with Eclipse-style visual feedback
   const drawOverlay = useCallback(() => {
     const overlay = overlayCanvasRef.current;
     if (!overlay || !isActive) return;
@@ -354,11 +431,18 @@ export default function PenToolV2({
       });
       
       // Draw preview line to mouse
-      if (isDrawing && mousePosition && vertices.length > 0) {
+      if (mousePosition && vertices.length > 0) {
+        ctx.setLineDash([5, 3]); // Dashed preview line
         ctx.lineTo(mousePosition.x, mousePosition.y);
+        
+        // Show close indicator if near first vertex
+        if (vertices.length >= 3 && isNearFirstVertex(mousePosition)) {
+          ctx.lineTo(vertices[0].x, vertices[0].y);
+        }
       }
       
       ctx.stroke();
+      ctx.setLineDash([]); // Reset to solid line
       
       // Draw vertices as circles
       vertices.forEach((vertex, index) => {
@@ -366,34 +450,32 @@ export default function PenToolV2({
         ctx.arc(vertex.x, vertex.y, 4, 0, 2 * Math.PI);
         
         if (index === 0 && vertices.length >= 3) {
-          // First vertex - highlight in purple for close indication
-          ctx.fillStyle = '#8b5cf6';
+          // Highlight first vertex for closing with pulsing effect
+          const pulseRadius = 4 + Math.sin(Date.now() / 200) * 2;
+          ctx.beginPath();
+          ctx.arc(vertex.x, vertex.y, pulseRadius, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffff00'; // Yellow highlight
           ctx.fill();
-          ctx.strokeStyle = '#ffffff';
+          ctx.strokeStyle = '#000000';
           ctx.lineWidth = 2;
           ctx.stroke();
         } else {
           ctx.fillStyle = structureColor;
           ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
         }
       });
-    }
-    
-    // Draw cursor
-    if (mousePosition && isDrawing) {
-      ctx.strokeStyle = structureColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(mousePosition.x, mousePosition.y, 3, 0, 2 * Math.PI);
-      ctx.stroke();
       
-      // Show close indicator if near first vertex
-      if (isNearFirstVertex(mousePosition)) {
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(vertices[0].x, vertices[0].y, 8, 0, 2 * Math.PI);
-        ctx.stroke();
+      // Show operation mode indicator
+      if (operationMode && vertices.length > 0) {
+        ctx.font = '12px Arial';
+        ctx.fillStyle = operationMode === 'union' ? '#00ff00' : 
+                       operationMode === 'subtract' ? '#ff0000' : '#0080ff';
+        const modeText = operationMode === 'union' ? 'UNION' : 
+                        operationMode === 'subtract' ? 'SUBTRACT' : 'NEW';
+        ctx.fillText(modeText, vertices[0].x + 10, vertices[0].y - 10);
       }
     }
   }, [isActive, vertices, mousePosition, isDrawing, getStructureColor, isNearFirstVertex]);
