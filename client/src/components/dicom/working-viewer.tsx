@@ -974,20 +974,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       } else if (payload.operation === 'new') {
         // Handle the simple case - just add new contour from resultContours
         if (payload.resultContours && payload.resultContours.length > 0) {
-          // Convert resultContours to flat points array
+          // resultContours is an array of polygons
+          // For 'new' operation, we expect a single polygon
+          const polygon = payload.resultContours[0];
           const points = [];
-          payload.resultContours.forEach((contour: number[][]) => {
-            contour.forEach(([x, y]) => {
-              points.push(x, y, payload.slicePosition);
-            });
-          });
+          
+          // Convert polygon points to flat array
+          for (let i = 0; i < polygon.length; i += 2) {
+            points.push(polygon[i], polygon[i + 1], payload.slicePosition);
+          }
           
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: points,
             numberOfPoints: points.length / 3,
           });
-          console.log('✅ Added new contour from pen tool');
         }
       } else if (payload.operation === 'subtract') {
         // For subtraction, calculate the result using ClipperLib
@@ -1047,6 +1048,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'pen_boolean_operation');
+    } else if (payload.action === "update_rt_structures") {
+      // Simple update after pen tool operations - structure already modified directly
+      setLocalRTStructures(updatedStructures);
+      // Save state to undo system
+      if (seriesId && payload.structureId) {
+        undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
+      }
+      // Save to server
+      saveContourUpdates(updatedStructures, 'pen_tool');
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(

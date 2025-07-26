@@ -43,14 +43,17 @@ export default function PenToolV2({
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
     if (!structure?.contours) return [];
     
-    // Convert currentSlicePosition to micrometers for exact comparison
-    const currentZMicro = Math.round(currentSlicePosition * 1000);
-    
-    return structure.contours.filter((contour: any) => {
-      if (!contour.imagePosition) return false;
-      const contourZMicro = Math.round(contour.imagePosition * 1000);
-      return contourZMicro === currentZMicro;
+    // Filter contours at current slice position
+    const tolerance = 1.5; // mm tolerance for slice matching
+    const contours = structure.contours.filter((contour: any) => {
+      return Math.abs(contour.slicePosition - currentSlicePosition) <= tolerance;
     });
+    
+    // Convert contours to the format expected by boolean operations
+    return contours.map((contour: any) => ({
+      points: contour.points,
+      slicePosition: contour.slicePosition
+    }));
   }, [selectedStructure, rtStructures, currentSlicePosition]);
 
   // Initialize overlay canvas
@@ -324,86 +327,108 @@ export default function PenToolV2({
     }
   }, [isActive]);
 
-  // Complete polygon with proper Eclipse boolean operations
+  // Complete polygon with direct structure updates (like brush tool)
   const completePolygon = useCallback(async () => {
-    if (vertices.length < 3 || !selectedStructure) {
+    if (vertices.length < 3 || !selectedStructure || !rtStructures?.structures) {
       console.log(`🔷 Cannot complete: vertices=${vertices.length}, selectedStructure=${selectedStructure}`);
       return;
     }
     
-    // Determine operation mode if not already set
+    // Find the structure we're editing
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedStructure);
+    if (!structure) {
+      console.log('🔷 ERROR: Structure not found');
+      return;
+    }
+    
+    // Convert vertices to world coordinates
+    const worldPoints: number[] = [];
+    const polygon2D: number[] = [];
+    
+    vertices.forEach(vertex => {
+      const world = canvasToWorld(vertex.x, vertex.y);
+      worldPoints.push(world.x, world.y, world.z);
+      polygon2D.push(world.x, world.y);
+    });
+    
+    // Determine operation mode
     let currentMode = operationMode;
     if (!currentMode) {
       const firstWorldPoint = canvasToWorld(vertices[0].x, vertices[0].y);
       currentMode = await determineOperationMode(firstWorldPoint);
-      console.log(`🔷 Operation mode determined late: ${currentMode}`);
     }
     
-    console.log(`🔷 PenToolV2: Completing polygon with ${vertices.length} vertices, mode: ${currentMode}`);
+    console.log(`🔷 PenToolV2: ${currentMode} operation with ${vertices.length} vertices`);
     
-    // Convert vertices to world coordinates
-    const worldPoints: number[] = [];
-    vertices.forEach(vertex => {
-      const world = canvasToWorld(vertex.x, vertex.y);
-      worldPoints.push(world.x, world.y, world.z);
-    });
+    // Get existing contours at current slice
+    const tolerance = 1.5;
+    const existingContourIndex = structure.contours.findIndex((c: any) => 
+      Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
+    );
     
-    const contours = getContoursAtCurrentSlice();
-    
-    // Refine operation mode if it was initially set to 'subtract'
-    let finalMode = currentMode;
-    if (currentMode === 'subtract') {
-      const crosses = doesPolygonCrossExisting(vertices);
-      if (crosses) {
-        finalMode = 'subtract';
-        console.log('🔷 Polygon CROSSES existing contours → SUBTRACT mode (carve hole)');
-      } else {
-        finalMode = 'new';
-        console.log('🔷 Polygon SEPARATE from existing contours → NEW BLOB mode');
-      }
-    }
-    
-    // Apply boolean operations
-    let resultContours: number[][] = [];
-    
-    if (finalMode === 'new' || contours.length === 0) {
-      // Simple addition - new separate contour
-      resultContours = [worldPoints];
-      console.log('🔷 Adding new separate contour');
-      
-    } else if (finalMode === 'union') {
-      // Union with existing contours
-      console.log('🔷 Performing UNION operation');
-      if (contours.length > 0) {
-        // Combine new polygon with first existing contour
-        const existingContour = contours[0].points;
-        resultContours = await combineContours(existingContour, worldPoints);
-      } else {
-        resultContours = [worldPoints];
-      }
-      
-    } else if (finalMode === 'subtract') {
-      // Subtract from existing contours
-      console.log('🔷 Performing SUBTRACT operation');
-      if (contours.length > 0) {
-        const existingContour = contours[0].points;
-        resultContours = await subtractContours(existingContour, worldPoints);
-      }
-    }
-    
-    // Send boolean operation result to parent
-    if (onContourUpdate) {
-      console.log(`🔷 Sending pen_boolean_operation: ${finalMode}, resultContours:`, resultContours.length);
-      onContourUpdate({
-        action: "pen_boolean_operation",
-        operation: finalMode,
-        structureId: selectedStructure,
+    // Apply operations directly to the structure
+    if (currentMode === 'new' || existingContourIndex === -1) {
+      // Just add new contour
+      structure.contours.push({
         slicePosition: currentSlicePosition,
-        resultContours: resultContours,
-        originalPolygon: worldPoints
+        points: worldPoints,
+        numberOfPoints: worldPoints.length / 3
       });
-    } else {
-      console.log('🔷 ERROR: onContourUpdate is not available!');
+      console.log('🔷 Added new contour');
+      
+    } else if (currentMode === 'union' && existingContourIndex >= 0) {
+      // Combine with existing
+      const existingContour = structure.contours[existingContourIndex];
+      const combinedContours = await combineContours(existingContour.points, worldPoints);
+      
+      // Remove old contour
+      structure.contours.splice(existingContourIndex, 1);
+      
+      // Add combined result
+      if (combinedContours.length > 0) {
+        const combined = combinedContours[0]; // Take first result
+        const points: number[] = [];
+        for (let i = 0; i < combined.length; i += 2) {
+          points.push(combined[i], combined[i + 1], currentSlicePosition);
+        }
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: points,
+          numberOfPoints: points.length / 3
+        });
+      }
+      console.log('🔷 Applied union operation');
+      
+    } else if (currentMode === 'subtract' && existingContourIndex >= 0) {
+      // Subtract from existing
+      const existingContour = structure.contours[existingContourIndex];
+      const subtractedContours = await subtractContours(existingContour.points, worldPoints);
+      
+      // Remove old contour
+      structure.contours.splice(existingContourIndex, 1);
+      
+      // Add subtraction results
+      if (subtractedContours.length > 0) {
+        const subtracted = subtractedContours[0]; // Take first result
+        const points: number[] = [];
+        for (let i = 0; i < subtracted.length; i += 2) {
+          points.push(subtracted[i], subtracted[i + 1], currentSlicePosition);
+        }
+        structure.contours.push({
+          slicePosition: currentSlicePosition,
+          points: points,
+          numberOfPoints: points.length / 3
+        });
+      }
+      console.log('🔷 Applied subtract operation');
+    }
+    
+    // Send simple update to trigger save
+    if (onContourUpdate) {
+      onContourUpdate({
+        action: "update_rt_structures",
+        structureId: selectedStructure
+      });
     }
     
     // Reset state
@@ -412,9 +437,9 @@ export default function PenToolV2({
     setOperationMode(null);
     setMousePosition(null);
     
-    console.log('🔷 PenToolV2: Polygon completed and boolean operation applied');
+    console.log('🔷 PenToolV2: Direct update completed');
   }, [vertices, selectedStructure, operationMode, currentSlicePosition, canvasToWorld, 
-      getContoursAtCurrentSlice, doesPolygonCrossExisting, onContourUpdate, determineOperationMode]);
+      rtStructures, onContourUpdate, determineOperationMode]);
 
   // Reset state on slice change
   useEffect(() => {
