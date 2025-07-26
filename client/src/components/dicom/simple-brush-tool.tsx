@@ -179,13 +179,18 @@ export function SimpleBrushTool({
       ctx.fill();
     }
 
-    // Draw current brush stroke
+    // Draw current brush stroke - match actual output size
     if (brushPointsRef.current.length > 0) {
       ctx.strokeStyle = structureColor;
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      // Scale brush size with zoom level from ctTransform
+      
+      // Use same coordinate system as cursor and output
+      const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
+      const brushSizeInMM = currentBrushSize * pixelSpacing;
       const zoomScale = ctTransform?.current?.scale || 1;
-      ctx.lineWidth = currentBrushSize * 2 / zoomScale; // Scale brush size inversely with zoom
+      const strokeWidthInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale * 2; // Diameter
+      
+      ctx.lineWidth = strokeWidthInScreenPixels;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.globalAlpha = 0.7;

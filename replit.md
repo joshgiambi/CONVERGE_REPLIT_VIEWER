@@ -202,20 +202,19 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
-- July 26, 2025: Brush Tool Coordinate System and Cursor Size Fix - COMPLETED ✅
-  - ✅ Fixed imageMetadata prop flow from WorkingViewer → viewer-interface → ContourEditToolbar
-  - ✅ Added imageMetadata state management and onImageMetadataChange callback
-  - ✅ Fixed brush cursor diameter to match actual stroke output size
-  - ✅ Corrected cursor radius calculation: stroke has lineWidth = brushSize * 2, so cursor shows brushSize radius
-  - ✅ Fixed right-click size adjustment to properly parse DICOM pixel spacing from string format
-  - ✅ Right-click size overlay now displays world coordinates (cm) matching toolbar settings
-  - ✅ Brush tool now shows accurate coordinate system with proper mm/cm/px conversion
+- July 26, 2025: Complete Brush Tool Coordinate System Fix - COMPLETED ✅
+  - ✅ Fixed brush cursor diameter to accurately match actual polygon output size using world coordinates
+  - ✅ Fixed cursor maintaining constant visual size when zooming (no more shrinking at high zoom)
+  - ✅ Fixed brush stroke preview line to match cursor and output size (was previously tiny)
+  - ✅ Expanded brush size range from 50px to 512px maximum (covers 0.5-5cm medical range)
+  - ✅ Updated both main toolbar slider and right-click adjustment overlay for expanded range
+  - ✅ All brush tool visual elements now use consistent world coordinate scaling
   - Technical details:
-    - Fixed critical double-radius bug in brush-to-polygon.ts where brushSize was treated as diameter instead of radius
-    - Changed createPerfectCircle function parameter from diameter to radius for consistent sizing
-    - Fixed pixel spacing parsing: `imageMetadata.pixelSpacing.split('\\').map(Number)[0]`
-    - Cursor circle now accurately represents the actual brush stroke output diameter
-    - Root cause: brush tool cursor showed radius X, but polygon creation used X as diameter, creating 2X size output
+    - Cursor uses world coordinates: `brushSizeInMM = brushSize * pixelSpacing` then converts back to screen pixels with zoom
+    - Stroke preview uses same system: `strokeWidthInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale * 2`
+    - Brush output maintains perfect world coordinate consistency regardless of zoom level
+    - Range expanded: min=5px, max=512px to cover medical 0.5-5cm range at typical pixel spacings
+    - Root cause: Three different coordinate systems (cursor, preview, output) were using different scaling methods
 - July 26, 2025: Brush Tool Undo Fix and ClipperLib Compatibility - COMPLETED ✅
   - ✅ Fixed brush tool undo functionality by clearing selected structure state on undo/redo operations
   - ✅ Added onSelectStructure(null) call in undo/redo success handlers to reset tool state
