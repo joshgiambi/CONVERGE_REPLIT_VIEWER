@@ -678,6 +678,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const brushSizeInMM = payload.brushSize * avgPixelSpacing;
       
       console.log(`Brush size conversion: ${payload.brushSize}px → ${brushSizeInMM.toFixed(2)}mm (pixel spacing: ${avgPixelSpacing.toFixed(3)}mm/px)`);
+      console.log(`Sample brush point coordinates:`, payload.points.slice(0, 3));
       
       // TEMPORARILY DISABLED: Polishing causing structure morphing/shrinking
       // Use unpolished brush stroke until polishing is fixed
