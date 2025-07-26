@@ -13,7 +13,8 @@ const MIN_AREA = 1e-3; // Minimum area in mm² to keep a polygon
  * Convert 3D contour points to ClipperLib path format
  */
 async function contourToClipperPath(points: number[]): Promise<any> {
-  const path = await createPath();
+  const api = await getClipper();
+  const path = new api.Path();
   
   for (let i = 0; i < points.length; i += 3) {
     path.push({
