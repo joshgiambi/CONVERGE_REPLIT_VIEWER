@@ -32,8 +32,8 @@ function createPerfectCircle(center: number[], radius: number): number[] {
 /**
  * Convert brush stroke points to a merged polygon
  * This implements the Eclipse TPS and 3D Slicer brush tool behavior:
- * - Each brush position creates a perfect circle
- * - Overlapping circles merge seamlessly with no interior boundaries
+ * - Creates a continuous stroke outline instead of merging circles
+ * - Avoids jaggedness from complex polygon merging algorithms
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
@@ -43,16 +43,89 @@ export function brushStrokeToPolygon(
     return [];
   }
   
-  // Create circles for each brush point
-  const circles: number[][] = [];
-  
-  for (const point of brushPoints) {
-    const circle = createPerfectCircle(point, brushSize); // brushSize is the radius
-    circles.push(circle);
+  // For a single point, just return a circle
+  if (brushPoints.length === 1) {
+    return createPerfectCircle(brushPoints[0], brushSize);
   }
   
-  // Union all circles together to create seamless boundary
-  return polygonUnion(circles);
+  // Create a continuous stroke outline
+  const leftPoints: number[] = [];
+  const rightPoints: number[] = [];
+  const z = brushPoints[0][2]; // Assume all points have same Z
+  
+  // Process each segment between consecutive points
+  for (let i = 0; i < brushPoints.length - 1; i++) {
+    const p1 = brushPoints[i];
+    const p2 = brushPoints[i + 1];
+    
+    // Calculate direction vector
+    const dx = p2[0] - p1[0];
+    const dy = p2[1] - p1[1];
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length < 0.001) continue; // Skip if points are too close
+    
+    // Normalize direction
+    const dirX = dx / length;
+    const dirY = dy / length;
+    
+    // Calculate perpendicular vector (rotated 90 degrees)
+    const perpX = -dirY;
+    const perpY = dirX;
+    
+    // Create offset points on both sides
+    const leftX = p1[0] + perpX * brushSize;
+    const leftY = p1[1] + perpY * brushSize;
+    const rightX = p1[0] - perpX * brushSize;
+    const rightY = p1[1] - perpY * brushSize;
+    
+    // Add to appropriate side arrays
+    if (i === 0) {
+      // For first point, also add end cap
+      const capSegments = 16;
+      for (let j = 0; j <= capSegments; j++) {
+        const angle = Math.PI + (j / capSegments) * Math.PI;
+        leftPoints.push(
+          p1[0] + brushSize * Math.cos(angle),
+          p1[1] + brushSize * Math.sin(angle),
+          z
+        );
+      }
+    } else {
+      leftPoints.push(leftX, leftY, z);
+    }
+    
+    rightPoints.unshift(rightX, rightY, z); // Add to beginning for correct winding
+  }
+  
+  // Handle last point
+  const lastPoint = brushPoints[brushPoints.length - 1];
+  const secondLastPoint = brushPoints[brushPoints.length - 2];
+  
+  const dx = lastPoint[0] - secondLastPoint[0];
+  const dy = lastPoint[1] - secondLastPoint[1];
+  const length = Math.sqrt(dx * dx + dy * dy);
+  
+  if (length > 0.001) {
+    const dirX = dx / length;
+    const dirY = dy / length;
+    const perpX = -dirY;
+    const perpY = dirX;
+    
+    // Add end cap
+    const capSegments = 16;
+    for (let j = 0; j <= capSegments; j++) {
+      const angle = (j / capSegments) * Math.PI;
+      leftPoints.push(
+        lastPoint[0] + brushSize * Math.cos(angle) * Math.cos(Math.atan2(dirY, dirX)) - brushSize * Math.sin(angle) * Math.sin(Math.atan2(dirY, dirX)),
+        lastPoint[1] + brushSize * Math.cos(angle) * Math.sin(Math.atan2(dirY, dirX)) + brushSize * Math.sin(angle) * Math.cos(Math.atan2(dirY, dirX)),
+        z
+      );
+    }
+  }
+  
+  // Combine left and right sides into a single polygon
+  return [...leftPoints, ...rightPoints];
 }
 
 /**

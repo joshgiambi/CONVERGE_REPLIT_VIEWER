@@ -723,31 +723,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
 
       if (intersectsWithExisting) {
-        // Union brush with intersecting contours only
-        const polygonsToUnion: number[][] = [];
+        // Instead of merging, keep all contours separate
+        // The RT structure rendering will handle the visual merging
         
-        // Add intersecting contours
-        for (const contour of intersectingContours) {
-          polygonsToUnion.push(contour.points);
-        }
+        // Add the new brush stroke as its own contour
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: brushPolygon,
+          numberOfPoints: brushPolygon.length / 3,
+        });
         
-        // Add the new brush polygon
-        polygonsToUnion.push(brushPolygon);
-
-        // Perform union of intersecting polygons
-        const unionResult = polygonUnion(polygonsToUnion);
-        
-        // Add the unified contour
-        if (unionResult.length >= 9) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: unionResult,
-            numberOfPoints: unionResult.length / 3,
-          });
-        }
-        
-        // Re-add non-intersecting contours as separate blobs
-        for (const contour of nonIntersectingContours) {
+        // Re-add all existing contours (both intersecting and non-intersecting)
+        for (const contour of existingOnSlice) {
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: contour.points,
