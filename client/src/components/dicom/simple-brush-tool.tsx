@@ -261,22 +261,35 @@ export function SimpleBrushTool({
         e.preventDefault();
         e.stopPropagation();
         
-        // Calculate new size based on horizontal mouse movement
+        // Calculate new size based on horizontal mouse movement - use full range 5-512px
         const deltaX = e.clientX - sizeAdjustStart.x;
-        const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 1.171875;
-        const sizeChangePixels = deltaX * 0.5; // Sensitivity factor
-        const newSizePixels = Math.max(1, Math.min(100, sizeAdjustStart.size + sizeChangePixels));  // Clamp between 1 and 100
+        const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
+        const sizeChangePixels = deltaX * 0.8; // Improved sensitivity
+        const newSizePixels = Math.max(5, Math.min(512, sizeAdjustStart.size + sizeChangePixels));  // Full range 5-512px
         
         setAdjustedBrushSize(Math.round(newSizePixels));
         
-        // Update slider overlay but keep position fixed at start position
-        try {
-          // Keep the same offset as initial creation
-          const brushDiameter = sizeAdjustStart.size * 2;
-          const offsetY = Math.max(40, brushDiameter / 2);
-          updateSliderOverlay(sizeAdjustStart.x, sizeAdjustStart.y - offsetY, newSizePixels, pixelSpacing);
-        } catch (error) {
-          console.error('Error updating slider overlay:', error);
+        // Update slider overlay with live feedback
+        if (sliderOverlayRef.current) {
+          const sizeText = sliderOverlayRef.current.querySelector("#brush-size-text") as HTMLElement;
+          const sliderFill = sliderOverlayRef.current.querySelector("#brush-slider-fill") as HTMLElement;
+          
+          if (sizeText) {
+            const sizeCm = (newSizePixels * pixelSpacing) / 10;
+            sizeText.innerHTML = `
+              <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+              <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
+              <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(newSizePixels)} px)</div>
+            `;
+          }
+          
+          if (sliderFill) {
+            // Map size to slider width (0-100%) using full range 5-512px
+            const minSize = 5;
+            const maxSize = 512;
+            const percentage = ((newSizePixels - minSize) / (maxSize - minSize)) * 100;
+            sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+          }
         }
         return;
       }
@@ -337,9 +350,10 @@ export function SimpleBrushTool({
       }
       
       if (isAdjustingSize) {
-        // Apply the new brush size
+        // Apply the new brush size and sync with main toolbar
         if (onBrushSizeChange && adjustedBrushSize !== brushSize) {
           onBrushSizeChange(adjustedBrushSize);
+          console.log(`Right-click slider: Updated brush size from ${brushSize}px to ${adjustedBrushSize}px`);
         }
         setIsAdjustingSize(false);
         setSizeAdjustStart(null);

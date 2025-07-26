@@ -7,6 +7,7 @@ import { SimpleBrushTool } from "./simple-brush-tool";
 import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
+import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
 import { BrushOperation } from "@shared/schema";
@@ -22,6 +23,7 @@ import { naiveCombineContours as combineContours, naiveSubtractContours as subtr
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
+import { undoRedoManager } from "@/lib/undo-system";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -847,6 +849,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           setLocalRTStructures(updatedStructures);
         }
       }
+      // Save state to new undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
+      }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
     } else if (
       payload.action === "add_pen_stroke" ||
@@ -886,6 +892,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
+      // Save state to new undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, payload.action, payload.structureId, updatedStructures);
+      }
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
     } else if (payload.action === "pen_boolean_operation") {
@@ -3053,21 +3063,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               />
             )}
 
-          {/* Eclipse Pen Tool overlay */}
+          {/* Pen Tool V2 - Complete rewrite with Eclipse functionality */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
             selectedForEdit && (
-              <PenToolUnifiedV2
-                canvasRef={canvasRef}
+              <PenToolV2
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                imageMetadata={imageMetadata}
                 onContourUpdate={(payload: any) => {
                   handleContourUpdate(payload);
                 }}
-                imageMetadata={imageMetadata}
-                worldToCanvas={worldToCanvas}
-                canvasToWorld={canvasToWorld}
+                canvasRef={canvasRef}
+                ctTransform={ctTransform}
               />
             )}
 

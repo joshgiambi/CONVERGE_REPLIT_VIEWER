@@ -33,6 +33,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { undoRedoManager } from '@/lib/undo-system';
 import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
 import { useToast } from '@/hooks/use-toast';
 
@@ -191,67 +192,42 @@ export function ContourEditToolbar({
     }
   });
 
-  // Undo mutation
-  const undoMutation = useMutation({
-    mutationFn: async () => {
-      if (!seriesId) throw new Error('No series ID');
-      const response = await fetch(`/api/rt-structures/${seriesId}/undo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (!response.ok) throw new Error('Failed to undo');
-      return response.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
-      toast({ title: "Undo successful" });
-      // Clear selected structure to reset tool state
-      if (onSelectStructure) {
-        onSelectStructure(null);
-      }
-      // Send a refresh action instead of the raw data
+  // New undo/redo handlers using the revamped system
+  const handleUndo = () => {
+    if (!seriesId) return;
+    
+    const previousState = undoRedoManager.undo();
+    if (previousState) {
+      console.log(`Undoing to: ${previousState.action} on structure ${previousState.structureId}`);
       if (onContourUpdate) {
-        onContourUpdate({
-          action: 'refresh',
-          rtStructures: data
-        });
+        onContourUpdate(previousState.rtStructures);
       }
-    },
-    onError: () => {
+      toast({ title: `Undone: ${previousState.action}` });
+    } else {
       toast({ title: "Nothing to undo", variant: "destructive" });
     }
-  });
+  };
 
-  // Redo mutation
-  const redoMutation = useMutation({
-    mutationFn: async () => {
-      if (!seriesId) throw new Error('No series ID');
-      const response = await fetch(`/api/rt-structures/${seriesId}/redo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (!response.ok) throw new Error('Failed to redo');
-      return response.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
-      toast({ title: "Redo successful" });
-      // Clear selected structure to reset tool state
-      if (onSelectStructure) {
-        onSelectStructure(null);
-      }
-      // Send a refresh action instead of the raw data
+  const handleRedo = () => {
+    if (!seriesId) return;
+    
+    const nextState = undoRedoManager.redo();
+    if (nextState) {
+      console.log(`Redoing to: ${nextState.action} on structure ${nextState.structureId}`);
       if (onContourUpdate) {
-        onContourUpdate({
-          action: 'refresh',
-          rtStructures: data
-        });
+        onContourUpdate(nextState.rtStructures);
       }
-    },
-    onError: () => {
+      toast({ title: `Redone: ${nextState.action}` });
+    } else {
       toast({ title: "Nothing to redo", variant: "destructive" });
     }
-  });
+  };
+
+  // Check undo/redo availability
+  const canUndo = undoRedoManager.canUndo();
+  const canRedo = undoRedoManager.canRedo();
+
+
 
   // Delete operations functions
   const handleDeleteCurrentSlice = () => {
@@ -940,8 +916,8 @@ export function ContourEditToolbar({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => undoMutation.mutate()}
-              disabled={undoMutation.isPending}
+              onClick={handleUndo}
+              disabled={!canUndo}
               className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
               title="Undo (Ctrl+Z)"
             >
@@ -950,8 +926,8 @@ export function ContourEditToolbar({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => redoMutation.mutate()}
-              disabled={redoMutation.isPending}
+              onClick={handleRedo}
+              disabled={!canRedo}
               className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
               title="Redo (Ctrl+Y)"
             >
