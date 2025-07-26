@@ -598,22 +598,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Convert brush stroke to polished polygon for smooth edges
       let brushPolygon: number[];
       
-      // Use polished brush stroke for medical-grade smooth edges
-      try {
-        brushPolygon = await brushStrokeToPolishedPolygon(
-          payload.points,
-          payload.brushSize
-        );
-        console.log("Using polished brush stroke with smooth edges");
-      } catch (error) {
-        console.warn("Failed to polish brush stroke, using unpolished version:", error);
-        // Fallback to unpolished version if polishing fails
-        brushPolygon = addBrushToContour(
-          [], // Empty array to get just the brush polygon
-          payload.points,
-          payload.brushSize,
-        );
-      }
+      // TEMPORARILY DISABLED: Polishing causing structure morphing/shrinking
+      // Use unpolished brush stroke until polishing is fixed
+      brushPolygon = addBrushToContour(
+        [], // Empty array to get just the brush polygon
+        payload.points,
+        payload.brushSize,
+      );
+      console.log("Using unpolished brush stroke (polishing temporarily disabled)");
+      
+      // TODO: Fix polishing ClipperLib compatibility issue
+      // The polishing function is failing with "Error polishing contour" 
+      // and causing structures to morph/shrink when multiple strokes are added
 
       // Collect all polygons on this slice
       const tol = 0.5;

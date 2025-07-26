@@ -160,7 +160,9 @@ export function SimpleBrushTool({
       // The stroke has lineWidth = brushSize * 2, which creates a visual radius of brushSize
       // So cursor should show the same visual size
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      ctx.arc(cursorPosition.x, cursorPosition.y, currentBrushSize, 0, 2 * Math.PI);
+      // Scale cursor size with zoom level
+      const zoomScale = ctTransform?.current?.scale || 1;
+      ctx.arc(cursorPosition.x, cursorPosition.y, currentBrushSize / zoomScale, 0, 2 * Math.PI);
       ctx.strokeStyle = structureColor;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -176,7 +178,9 @@ export function SimpleBrushTool({
     if (brushPointsRef.current.length > 0) {
       ctx.strokeStyle = structureColor;
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      ctx.lineWidth = currentBrushSize * 2; // This makes the visible stroke diameter = brushSize * 2
+      // Scale brush size with zoom level from ctTransform
+      const zoomScale = ctTransform?.current?.scale || 1;
+      ctx.lineWidth = currentBrushSize * 2 / zoomScale; // Scale brush size inversely with zoom
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.globalAlpha = 0.7;
