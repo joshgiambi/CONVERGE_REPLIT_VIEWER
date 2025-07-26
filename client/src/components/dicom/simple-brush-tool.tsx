@@ -18,6 +18,7 @@ interface SimpleBrushToolProps {
   onBrushModeChange?: (mode: any) => void;
   predictionEnabled?: boolean;
   onBrushSizeChange?: (size: number) => void;
+  ctTransform: React.RefObject<{ scale: number; offsetX: number; offsetY: number }>;
 }
 
 export function SimpleBrushTool({
@@ -34,6 +35,7 @@ export function SimpleBrushTool({
   imageMetadata,
   predictionEnabled = false,
   onBrushSizeChange,
+  ctTransform,
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
   const [isDrawing, setIsDrawing] = useState(false);

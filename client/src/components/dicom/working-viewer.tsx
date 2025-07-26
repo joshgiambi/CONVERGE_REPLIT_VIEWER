@@ -2916,6 +2916,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 smoothingEnabled={true}
                 enableSmartMode={true}
                 predictionEnabled={brushToolState?.predictionEnabled || false}
+                ctTransform={ctTransform}
                 onBrushModeChange={(mode: BrushOperation) => {
                   console.log("Brush mode changed:", mode);
                 }}

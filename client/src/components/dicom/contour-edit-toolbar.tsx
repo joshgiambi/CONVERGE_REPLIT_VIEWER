@@ -139,7 +139,7 @@ export function ContourEditToolbar({
     }
     
     // Auto-expand settings for the active tool  
-    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original' || newTool === 'planar-contour')) {
+    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original')) {
       setShowSettings(newTool);
     } else if (!newTool) {
       setShowSettings(null);
@@ -452,7 +452,7 @@ export function ContourEditToolbar({
 
   const mainTools = [
     { id: 'brush', icon: Brush, label: 'Brush' },
-    { id: 'planar-contour', icon: Pen, label: 'Pen' },
+    { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
     { id: 'margin', icon: Maximize2, label: 'Margin' },
