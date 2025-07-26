@@ -10,6 +10,28 @@ const CLEAN_TOLERANCE = 0.1; // mm tolerance for polygon cleaning
 const MIN_AREA = 1e-3; // Minimum area in mm² to keep a polygon
 
 /**
+ * Fallback point-in-polygon test using ray casting algorithm
+ */
+function pointInPolygonFallback(point: {X: number, Y: number}, polygon: any[]): number {
+  let inside = false;
+  const x = point.X;
+  const y = point.Y;
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].X;
+    const yi = polygon[i].Y;
+    const xj = polygon[j].X;
+    const yj = polygon[j].Y;
+    
+    const intersect = ((yi > y) !== (yj > y))
+        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  
+  return inside ? 1 : 0;
+}
+
+/**
  * Convert 3D contour points to ClipperLib path format
  */
 async function contourToClipperPath(points: number[]): Promise<any> {
@@ -318,8 +340,24 @@ export async function isPointInContour(point: [number, number], contour: number[
     Y: Math.round(point[1] * SCALE)
   };
   
-  const PointInPolygonClass = api.PointInPolygon;
-  const result = PointInPolygonClass(testPoint, path);
+  // PointInPolygon might be a function or static method depending on ClipperLib version
+  let result;
+  try {
+    // Try as a direct function (JavaScript version)
+    if (typeof api.PointInPolygon === 'function') {
+      result = api.PointInPolygon(testPoint, path);
+    } else if (api.Clipper && typeof api.Clipper.PointInPolygon === 'function') {
+      // Try as a static method on Clipper class
+      result = api.Clipper.PointInPolygon(testPoint, path);
+    } else {
+      // Fallback: implement basic point-in-polygon test
+      console.warn('PointInPolygon not found in ClipperLib, using fallback');
+      result = pointInPolygonFallback(testPoint, path);
+    }
+  } catch (error) {
+    console.error('PointInPolygon error, using fallback:', error);
+    result = pointInPolygonFallback(testPoint, path);
+  }
   
   // 0 = outside, 1 = inside, -1 = on boundary
   return result !== 0;

@@ -480,6 +480,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = async (payload: any) => {
+    // Handle refresh action from undo/redo
+    if (payload && payload.action === 'refresh' && payload.rtStructures) {
+      console.log('Refreshing RT structures from undo/redo');
+      setLocalRTStructures(payload.rtStructures);
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(payload.rtStructures);
+      }
+      return;
+    }
+    
     // Special handling for undo/redo results which return full RT structures
     if (payload && payload.structures && !payload.action) {
       console.log('Applying undo/redo result with', payload.structures.length, 'structures');

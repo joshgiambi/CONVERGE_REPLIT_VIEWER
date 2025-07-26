@@ -384,26 +384,25 @@ export function SimpleBrushTool({
   const addBrushPoint = (x: number, y: number) => {
     if (!selectedStructure || !rtStructures?.structures || !imageMetadata) return;
 
-    // Convert canvas coordinates to world coordinates using actual DICOM metadata
-    const canvasWidth = canvasRef.current?.width || 1024;
-    const canvasHeight = canvasRef.current?.height || 1024;
-
-    // NO TRANSFORMATION NEEDED - mouse coordinates are already in canvas space
-    // The image is displayed at 2x scale to fill the canvas, so canvas coordinates
-    // directly map to the displayed image
+    // Get current zoom/pan transform
+    const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
     
-    // Use the shared coordinate transformation function with raw canvas coordinates
-    const [worldX, worldY, worldZ] = canvasToWorld(
-      x, 
-      y, 
-      canvasWidth, 
-      canvasHeight, 
-      imageMetadata,
-      currentSlicePosition
-    );
+    // Convert canvas coordinates to pixel coordinates by inverting the zoom/pan transform
+    const pixelX = (x - transform.offsetX) / transform.scale;
+    const pixelY = (y - transform.offsetY) / transform.scale;
+
+    // Parse DICOM metadata
+    const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+    const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+    const [rowSpacing, colSpacing] = pixelSpacing;
+    
+    // Convert pixel coordinates to world coordinates
+    const worldX = imagePosition[0] + (pixelX * colSpacing);
+    const worldY = imagePosition[1] + (pixelY * rowSpacing);
+    const worldZ = currentSlicePosition;
 
     console.log(
-      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
+      `Brush point: Canvas(${x.toFixed(1)}, ${y.toFixed(1)}) -> Pixel(${pixelX.toFixed(1)}, ${pixelY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ})`,
     );
   };
 
@@ -423,23 +422,26 @@ export function SimpleBrushTool({
         `Finalizing brush stroke with ${brushPointsRef.current.length} points`,
       );
 
-      // Convert all brush points to world coordinates using actual image metadata
-      const canvasWidth = canvasRef.current?.width || 1024;
-      const canvasHeight = canvasRef.current?.height || 1024;
+      // Get current zoom/pan transform
+      const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+      
+      // Parse DICOM metadata once
+      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+      const [rowSpacing, colSpacing] = pixelSpacing;
 
-      // NO TRANSFORMATION NEEDED - mouse coordinates are already in canvas space
+      // Convert all brush points to world coordinates accounting for zoom/pan
       const worldPoints = brushPointsRef.current.map((point) => {
-        // Use the shared coordinate transformation function with raw canvas coordinates
-        const [worldX, worldY, worldZ] = canvasToWorld(
-          point.x,
-          point.y,
-          canvasWidth,
-          canvasHeight,
-          imageMetadata,
-          currentSlicePosition
-        );
+        // Convert canvas coordinates to pixel coordinates by inverting the zoom/pan transform
+        const pixelX = (point.x - transform.offsetX) / transform.scale;
+        const pixelY = (point.y - transform.offsetY) / transform.scale;
         
-        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
+        // Convert pixel coordinates to world coordinates
+        const worldX = imagePosition[0] + (pixelX * colSpacing);
+        const worldY = imagePosition[1] + (pixelY * rowSpacing);
+        const worldZ = currentSlicePosition;
+        
+        console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> Pixel(${pixelX.toFixed(1)}, ${pixelY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
         
         return [worldX, worldY, worldZ];
       });
