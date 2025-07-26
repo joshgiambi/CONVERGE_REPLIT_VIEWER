@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { isPointInContour, combineContours, subtractContours } from '../../lib/clipper-boolean-operations';
+import { polygonUnion } from '../../lib/polygon-union';
 
 interface PenToolV2Props {
   isActive: boolean;
@@ -15,6 +16,77 @@ interface PenToolV2Props {
 interface Point {
   x: number;
   y: number;
+}
+
+// Helper function to check if two polygons intersect
+function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
+  // Convert flat arrays to points
+  const points1: [number, number][] = [];
+  const points2: [number, number][] = [];
+  
+  for (let i = 0; i < polygon1.length; i += 3) {
+    points1.push([polygon1[i], polygon1[i + 1]]);
+  }
+  
+  for (let i = 0; i < polygon2.length; i += 3) {
+    points2.push([polygon2[i], polygon2[i + 1]]);
+  }
+  
+  // Check if any point from polygon1 is inside polygon2 or vice versa
+  for (const point of points1) {
+    if (isPointInPolygon(point, points2)) {
+      return true;
+    }
+  }
+  
+  for (const point of points2) {
+    if (isPointInPolygon(point, points1)) {
+      return true;
+    }
+  }
+  
+  // Check if any edges intersect
+  for (let i = 0; i < points1.length; i++) {
+    const a1 = points1[i];
+    const a2 = points1[(i + 1) % points1.length];
+    
+    for (let j = 0; j < points2.length; j++) {
+      const b1 = points2[j];
+      const b2 = points2[(j + 1) % points2.length];
+      
+      if (doSegmentsIntersect(a1, a2, b1, b2)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+// Helper function to check if a point is inside a polygon
+function isPointInPolygon(point: [number, number], polygon: [number, number][]): boolean {
+  let inside = false;
+  const [x, y] = point;
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  
+  return inside;
+}
+
+// Helper function to check if two line segments intersect
+function doSegmentsIntersect(a1: [number, number], a2: [number, number], b1: [number, number], b2: [number, number]): boolean {
+  const ccw = (A: [number, number], B: [number, number], C: [number, number]) => {
+    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0]);
+  };
+  
+  return ccw(a1, b1, b2) !== ccw(a2, b1, b2) && ccw(a1, a2, b1) !== ccw(a1, a2, b2);
 }
 
 // Eclipse Pen Tool V2 - Clean implementation with proper boolean operations
@@ -360,14 +432,14 @@ export default function PenToolV2({
     
     console.log(`🔷 PenToolV2: ${currentMode} operation with ${vertices.length} vertices`);
     
-    // Get existing contours at current slice
+    // Get ALL existing contours at current slice (not just one)
     const tolerance = 1.5;
-    const existingContourIndex = structure.contours.findIndex((c: any) => 
+    const existingOnSlice = structure.contours.filter((c: any) => 
       Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
     );
     
     // Apply operations directly to the structure
-    if (currentMode === 'new' || existingContourIndex === -1) {
+    if (currentMode === 'new' || existingOnSlice.length === 0) {
       // Just add new contour
       structure.contours.push({
         slicePosition: currentSlicePosition,
@@ -375,51 +447,128 @@ export default function PenToolV2({
         numberOfPoints: worldPoints.length / 3
       });
       
-    } else if (currentMode === 'union' && existingContourIndex >= 0) {
-      // Combine with existing
-      const existingContour = structure.contours[existingContourIndex];
-      const combinedContours = await combineContours(existingContour.points, worldPoints);
+    } else if (currentMode === 'union' && existingOnSlice.length > 0) {
+      // Use same approach as brush tool - check intersections and merge
+      const intersectingContours: any[] = [];
+      const nonIntersectingContours: any[] = [];
       
-      // Remove old contour
-      structure.contours.splice(existingContourIndex, 1);
-      
-      // Add combined result
-      if (combinedContours.length > 0) {
-        const combined = combinedContours[0]; // Take first result
-        const points: number[] = [];
-        for (let i = 0; i < combined.length; i += 2) {
-          points.push(combined[i], combined[i + 1], currentSlicePosition);
+      // Check which contours intersect with the new pen polygon
+      for (const contour of existingOnSlice) {
+        if (contour.points && contour.points.length >= 9) {
+          // Check if pen polygon intersects with this contour
+          const intersects = doPolygonsIntersect(worldPoints, contour.points);
+          if (intersects) {
+            intersectingContours.push(contour);
+          } else {
+            nonIntersectingContours.push(contour);
+          }
         }
+      }
+      
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - currentSlicePosition) > tolerance
+      );
+      
+      if (intersectingContours.length > 0) {
+        // Union pen polygon with intersecting contours using polygonUnion
+        const polygonsToUnion: number[][] = [];
+        
+        // Add intersecting contours
+        for (const contour of intersectingContours) {
+          polygonsToUnion.push(contour.points);
+        }
+        
+        // Add the new pen polygon
+        polygonsToUnion.push(worldPoints);
+        
+        // Perform union of intersecting polygons
+        const unionResult = polygonUnion(polygonsToUnion);
+        
+        // Add the unified contour
+        if (unionResult.length >= 9) {
+          structure.contours.push({
+            slicePosition: currentSlicePosition,
+            points: unionResult,
+            numberOfPoints: unionResult.length / 3,
+          });
+        }
+        
+        // Re-add non-intersecting contours as separate blobs
+        for (const contour of nonIntersectingContours) {
+          structure.contours.push({
+            slicePosition: currentSlicePosition,
+            points: contour.points,
+            numberOfPoints: contour.numberOfPoints,
+          });
+        }
+      } else {
+        // Pen polygon doesn't intersect - create separate blob
         structure.contours.push({
           slicePosition: currentSlicePosition,
-          points: points,
-          numberOfPoints: points.length / 3
+          points: worldPoints,
+          numberOfPoints: worldPoints.length / 3
         });
-      }
-      console.log('🔷 Applied union operation');
-      
-    } else if (currentMode === 'subtract' && existingContourIndex >= 0) {
-      // Subtract from existing
-      const existingContour = structure.contours[existingContourIndex];
-      const subtractedContours = await subtractContours(existingContour.points, worldPoints);
-      
-      // Remove old contour
-      structure.contours.splice(existingContourIndex, 1);
-      
-      // Add subtraction results
-      if (subtractedContours.length > 0) {
-        const subtracted = subtractedContours[0]; // Take first result
-        const points: number[] = [];
-        for (let i = 0; i < subtracted.length; i += 2) {
-          points.push(subtracted[i], subtracted[i + 1], currentSlicePosition);
+        
+        // Re-add all existing contours unchanged
+        for (const contour of existingOnSlice) {
+          structure.contours.push({
+            slicePosition: currentSlicePosition,
+            points: contour.points,
+            numberOfPoints: contour.numberOfPoints,
+          });
         }
-        structure.contours.push({
-          slicePosition: currentSlicePosition,
-          points: points,
-          numberOfPoints: points.length / 3
-        });
       }
-      console.log('🔷 Applied subtract operation');
+      console.log('🔷 Applied union operation using polygonUnion');
+      
+    } else if (currentMode === 'subtract' && existingOnSlice.length > 0) {
+      // Handle subtraction for all contours on slice
+      const newContours: any[] = [];
+      
+      // Process each existing contour
+      for (const contour of existingOnSlice) {
+        if (contour.points && contour.points.length >= 9) {
+          // Check if pen polygon intersects with this contour
+          const intersects = doPolygonsIntersect(worldPoints, contour.points);
+          
+          if (intersects) {
+            // Subtract pen polygon from this contour
+            const subtractedContours = await subtractContours(contour.points, worldPoints);
+            
+            // Add all resulting contours (might be multiple if pen splits the contour)
+            if (subtractedContours.length > 0) {
+              for (const subtracted of subtractedContours) {
+                const points: number[] = [];
+                for (let i = 0; i < subtracted.length; i += 2) {
+                  points.push(subtracted[i], subtracted[i + 1], currentSlicePosition);
+                }
+                if (points.length >= 9) {
+                  newContours.push({
+                    slicePosition: currentSlicePosition,
+                    points: points,
+                    numberOfPoints: points.length / 3
+                  });
+                }
+              }
+            }
+          } else {
+            // No intersection - keep contour unchanged
+            newContours.push(contour);
+          }
+        }
+      }
+      
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - currentSlicePosition) > tolerance
+      );
+      
+      // Add all new contours
+      for (const contour of newContours) {
+        structure.contours.push(contour);
+      }
+      
+      console.log('🔷 Applied subtract operation to all intersecting contours');
     }
     
     // Send simple update to trigger save
