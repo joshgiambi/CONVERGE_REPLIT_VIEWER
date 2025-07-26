@@ -146,7 +146,10 @@ export default function PenToolV2({
       (c: any) => Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
     );
     
-    if (contoursAtSlice.length === 0) return 'new';
+    if (contoursAtSlice.length === 0) {
+      console.log('🔷 No existing contours at this slice → NEW mode');
+      return 'new';
+    }
     
     // Check if first point is inside any existing contour of selected structure
     for (const contour of contoursAtSlice) {
@@ -157,8 +160,8 @@ export default function PenToolV2({
       }
     }
     
-    console.log('🔷 First click OUTSIDE existing contours → Will check for crossing when complete');
-    return 'subtract'; // Will be refined when polygon is complete
+    console.log('🔷 First click OUTSIDE existing contours → NEW mode');
+    return 'new'; // Simple: outside = new contour
   }, [selectedStructure, rtStructures, currentSlicePosition]);
 
   // Check if point is near first vertex (for closing polygon)
