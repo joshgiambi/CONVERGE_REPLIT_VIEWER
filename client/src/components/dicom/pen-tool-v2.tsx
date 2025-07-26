@@ -70,7 +70,7 @@ export default function PenToolV2({
       overlay.className = 'pen-tool-overlay';
       
       mainCanvas.parentElement?.appendChild(overlay);
-      overlayCanvasRef.current = overlay;
+      (overlayCanvasRef as any).current = overlay;
     }
     
     overlay.width = mainCanvas.width;
@@ -81,7 +81,7 @@ export default function PenToolV2({
       if (overlayElement && overlayElement.parentElement) {
         overlayElement.parentElement.removeChild(overlayElement);
       }
-      overlayCanvasRef.current = null;
+      (overlayCanvasRef as any).current = null;
     };
   }, [isActive, canvasRef]);
 
@@ -130,13 +130,14 @@ export default function PenToolV2({
   }, [imageMetadata, ctTransform]);
 
   // Determine operation mode based on first click context
-  const determineOperationMode = useCallback((firstWorldPoint: Point): 'union' | 'subtract' | 'new' => {
+  const determineOperationMode = useCallback(async (firstWorldPoint: Point): Promise<'union' | 'subtract' | 'new'> => {
     const contours = getContoursAtCurrentSlice();
     if (contours.length === 0) return 'new';
     
     // Check if first point is inside any existing contour
     for (const contour of contours) {
-      if (isPointInContour([firstWorldPoint.x, firstWorldPoint.y], contour.points)) {
+      const isInside = await isPointInContour([firstWorldPoint.x, firstWorldPoint.y], contour.points);
+      if (isInside) {
         console.log('🔷 First click INSIDE existing contour → UNION mode');
         return 'union';
       }
@@ -221,7 +222,7 @@ export default function PenToolV2({
   };
 
   // Handle mouse events
-  const handleMouseDown = useCallback((event: MouseEvent) => {
+  const handleMouseDown = useCallback(async (event: MouseEvent) => {
     if (!isActive || !selectedStructure || !canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
@@ -233,7 +234,7 @@ export default function PenToolV2({
     if (event.button === 0) { // Left click
       if (isNearFirstVertex(canvasPoint) && vertices.length >= 3) {
         // Close polygon by clicking near first vertex
-        completePolygon();
+        await completePolygon();
         return;
       }
       
@@ -243,9 +244,10 @@ export default function PenToolV2({
       // Determine operation mode on first click
       if (vertices.length === 0 && !operationMode) {
         const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-        const mode = determineOperationMode(worldPoint);
-        setOperationMode(mode);
-        console.log(`🔷 Operation mode set to: ${mode}`);
+        determineOperationMode(worldPoint).then(mode => {
+          setOperationMode(mode);
+          console.log(`🔷 Operation mode set to: ${mode}`);
+        });
       }
       
       // Start continuous drawing if holding down
@@ -254,12 +256,12 @@ export default function PenToolV2({
     } else if (event.button === 2) { // Right click
       event.preventDefault();
       if (vertices.length >= 3) {
-        completePolygon();
+        await completePolygon();
       }
     }
   }, [isActive, selectedStructure, vertices, operationMode, isNearFirstVertex, canvasToWorld, determineOperationMode]);
 
-  const handleMouseMove = useCallback((event: MouseEvent) => {
+  const handleMouseMove = useCallback(async (event: MouseEvent) => {
     if (!isActive || !canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
@@ -274,7 +276,7 @@ export default function PenToolV2({
     if (isDrawingContinuous && vertices.length > 0) {
       // Check if we're near first vertex to close
       if (vertices.length >= 3 && isNearFirstVertex(canvasPoint)) {
-        completePolygon();
+        await completePolygon();
         setIsDrawingContinuous(false);
         return;
       }
@@ -360,7 +362,8 @@ export default function PenToolV2({
     }
     
     // Send boolean operation result to parent
-    if (onContourUpdate && resultContours.length > 0) {
+    if (onContourUpdate) {
+      console.log(`🔷 Sending pen_boolean_operation: ${finalMode}, resultContours:`, resultContours.length);
       onContourUpdate({
         action: "pen_boolean_operation",
         operation: finalMode,
@@ -369,6 +372,8 @@ export default function PenToolV2({
         resultContours: resultContours,
         originalPolygon: worldPoints
       });
+    } else {
+      console.log('🔷 ERROR: onContourUpdate is not available!');
     }
     
     // Reset state
