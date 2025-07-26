@@ -106,7 +106,8 @@ export default function PenToolV2({
   const [vertices, setVertices] = useState<Point[]>([]);
   const [mousePosition, setMousePosition] = useState<Point | null>(null);
   const [isDrawingContinuous, setIsDrawingContinuous] = useState(false);
-  const [operationMode, setOperationMode] = useState<'union' | 'subtract' | 'new' | null>(null);
+  const [firstPointMode, setFirstPointMode] = useState<'inside' | 'outside' | null>(null);
+  const [hasCrossedBoundary, setHasCrossedBoundary] = useState(false);
 
   // Get contours at current slice
   const getContoursAtCurrentSlice = useCallback(() => {
@@ -204,47 +205,126 @@ export default function PenToolV2({
     return { x: canvasX, y: canvasY };
   }, [imageMetadata, ctTransform]);
 
-  // Determine operation mode based on first click context
-  const determineOperationMode = useCallback(async (firstWorldPoint: Point): Promise<'union' | 'subtract' | 'new'> => {
-    if (!selectedStructure || !rtStructures?.structures) return 'new';
+  // Determine initial operation mode based on first click
+  const determineInitialMode = useCallback((firstWorldPoint: Point): 'inside' | 'outside' => {
+    if (!selectedStructure || !rtStructures?.structures) return 'outside';
     
-    // Find the selected structure
+    const structure = rtStructures.structures.find(
+      (s: any) => s.roiNumber === selectedStructure
+    );
+    
+    if (!structure || !structure.contours) return 'outside';
+    
+    const tolerance = 1.5;
+    const contoursAtSlice = structure.contours.filter(
+      (c: any) => Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
+    );
+    
+    if (contoursAtSlice.length === 0) return 'outside';
+    
+    // Check if first point is inside any existing contour
+    for (const contour of contoursAtSlice) {
+      const contourPoints: [number, number][] = [];
+      for (let i = 0; i < contour.points.length; i += 3) {
+        contourPoints.push([contour.points[i], contour.points[i + 1]]);
+      }
+      
+      if (isPointInPolygon([firstWorldPoint.x, firstWorldPoint.y], contourPoints)) {
+        return 'inside';
+      }
+    }
+    
+    return 'outside';
+  }, [selectedStructure, rtStructures, currentSlicePosition]);
+  
+  // Determine final operation based on polygon path
+  const determineFinalOperation = useCallback((vertices: Point[]): 'union' | 'subtract' | 'new' => {
+    if (!selectedStructure || !rtStructures?.structures || vertices.length < 3) return 'new';
+    
     const structure = rtStructures.structures.find(
       (s: any) => s.roiNumber === selectedStructure
     );
     
     if (!structure || !structure.contours) return 'new';
     
-    // Get contours for selected structure at current slice
     const tolerance = 1.5;
     const contoursAtSlice = structure.contours.filter(
       (c: any) => Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
     );
     
-    if (contoursAtSlice.length === 0) {
-      console.log('🔷 No existing contours at this slice → NEW mode');
-      return 'new';
-    }
+    if (contoursAtSlice.length === 0) return 'new';
     
-    // Check if first point is inside any existing contour of selected structure
-    for (const contour of contoursAtSlice) {
-      // Convert contour points to 2D array
-      const contourPoints: [number, number][] = [];
-      for (let i = 0; i < contour.points.length; i += 3) {
-        contourPoints.push([contour.points[i], contour.points[i + 1]]);
-      }
+    // Convert vertices to world coordinates
+    const worldVertices: number[] = [];
+    vertices.forEach(v => {
+      const world = canvasToWorld(v.x, v.y);
+      worldVertices.push(world.x, world.y, world.z);
+    });
+    
+    // Create a proper closed polygon for intersection test
+    const closedWorldVertices = [...worldVertices];
+    if (closedWorldVertices.length >= 9) {
+      // Ensure polygon is closed by adding first point at end if needed
+      const firstX = closedWorldVertices[0];
+      const firstY = closedWorldVertices[1];
+      const lastX = closedWorldVertices[closedWorldVertices.length - 3];
+      const lastY = closedWorldVertices[closedWorldVertices.length - 2];
       
-      // Check if point is inside contour using simple polygon check
-      const isInside = isPointInPolygon([firstWorldPoint.x, firstWorldPoint.y], contourPoints);
-      if (isInside) {
-        console.log('🔷 First click INSIDE existing contour → UNION mode');
-        return 'union';
+      if (firstX !== lastX || firstY !== lastY) {
+        closedWorldVertices.push(firstX, firstY, closedWorldVertices[2]);
       }
     }
     
-    console.log('🔷 First click OUTSIDE existing contours → NEW mode');
-    return 'new'; // Simple: outside = new contour
-  }, [selectedStructure, rtStructures, currentSlicePosition]);
+    // Check if polygon intersects with any existing contour
+    let intersectsAny = false;
+    let crossesIntoContour = false;
+    
+    for (const contour of contoursAtSlice) {
+      if (doPolygonsIntersect(closedWorldVertices, contour.points)) {
+        intersectsAny = true;
+        
+        // Check if the polygon crosses from outside to inside
+        // by checking if some vertices are inside and some are outside
+        let hasInsideVertex = false;
+        let hasOutsideVertex = false;
+        
+        for (let i = 0; i < closedWorldVertices.length; i += 3) {
+          const vertex = [closedWorldVertices[i], closedWorldVertices[i + 1]] as [number, number];
+          const contourPoints: [number, number][] = [];
+          for (let j = 0; j < contour.points.length; j += 3) {
+            contourPoints.push([contour.points[j], contour.points[j + 1]]);
+          }
+          
+          if (isPointInPolygon(vertex, contourPoints)) {
+            hasInsideVertex = true;
+          } else {
+            hasOutsideVertex = true;
+          }
+          
+          if (hasInsideVertex && hasOutsideVertex) {
+            crossesIntoContour = true;
+            break;
+          }
+        }
+        
+        if (crossesIntoContour) break;
+      }
+    }
+    
+    // Determine based on first point and intersection
+    const firstWorld = canvasToWorld(vertices[0].x, vertices[0].y);
+    const firstInside = determineInitialMode(firstWorld) === 'inside';
+    
+    if (firstInside) {
+      return 'union'; // Started inside = always union
+    } else if (crossesIntoContour) {
+      return 'subtract'; // Started outside + crosses into contour = subtract (carve hole)
+    } else if (intersectsAny) {
+      return 'new'; // Started outside + just touches edge = new blob
+    } else {
+      return 'new'; // Started outside + no crossing = new blob
+    }
+  }, [selectedStructure, rtStructures, currentSlicePosition, canvasToWorld, determineInitialMode]);
 
   // Check if point is near first vertex (for closing polygon)
   const isNearFirstVertex = useCallback((point: Point): boolean => {
@@ -337,19 +417,16 @@ export default function PenToolV2({
         return;
       }
       
-      // Determine operation mode on first click BEFORE adding vertex
-      if (vertices.length === 0 && !operationMode) {
+      // Determine initial mode on first click
+      if (vertices.length === 0) {
         const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
-        determineOperationMode(worldPoint).then(mode => {
-          setOperationMode(mode);
-          console.log(`🔷 Operation mode set to: ${mode}`);
-          // Add first vertex after determining mode
-          setVertices(prev => [...prev, canvasPoint]);
-        });
-      } else {
-        // Add subsequent vertices
-        setVertices(prev => [...prev, canvasPoint]);
+        const mode = determineInitialMode(worldPoint);
+        setFirstPointMode(mode);
+        console.log(`🔷 First point is ${mode} existing contour`);
       }
+      
+      // Add vertex
+      setVertices(prev => [...prev, canvasPoint]);
       
       // Start continuous drawing if holding down
       setIsDrawingContinuous(true);
@@ -372,6 +449,25 @@ export default function PenToolV2({
     };
     
     setMousePosition(canvasPoint);
+    
+    // Check if crossing boundary when drawing from outside
+    if (firstPointMode === 'outside' && vertices.length > 1 && !hasCrossedBoundary) {
+      const testVertices = [...vertices, canvasPoint];
+      const worldTestPoints: number[] = [];
+      testVertices.forEach(v => {
+        const w = canvasToWorld(v.x, v.y);
+        worldTestPoints.push(w.x, w.y, w.z);
+      });
+      
+      const contours = getContoursAtCurrentSlice();
+      for (const contour of contours) {
+        if (doPolygonsIntersect(worldTestPoints, contour.points)) {
+          setHasCrossedBoundary(true);
+          console.log('🔷 Pen crossed into existing contour - will subtract');
+          break;
+        }
+      }
+    }
     
     // Add points during continuous drawing with better spacing
     if (isDrawingContinuous && vertices.length > 0) {
@@ -430,13 +526,8 @@ export default function PenToolV2({
       polygon2D.push(world.x, world.y);
     });
     
-    // Determine operation mode
-    let currentMode = operationMode;
-    if (!currentMode) {
-      const firstWorldPoint = canvasToWorld(vertices[0].x, vertices[0].y);
-      currentMode = await determineOperationMode(firstWorldPoint);
-    }
-    
+    // Determine final operation mode based on polygon path
+    const currentMode = determineFinalOperation(vertices);
     console.log(`🔷 PenToolV2: ${currentMode} operation with ${vertices.length} vertices`);
     
     // Get ALL existing contours at current slice (not just one)
@@ -530,6 +621,7 @@ export default function PenToolV2({
       
     } else if (currentMode === 'subtract' && existingOnSlice.length > 0) {
       // Handle subtraction for all contours on slice
+      console.log('🔷 Performing SUBTRACT operation');
       const newContours: any[] = [];
       
       // Process each existing contour
@@ -540,11 +632,28 @@ export default function PenToolV2({
           
           if (intersects) {
             // Subtract pen polygon from this contour
+            console.log('🔷 Subtracting pen from contour:', {
+              contourSize: contour.points.length / 3,
+              penSize: worldPoints.length / 3
+            });
+            
+            // Convert contour to 2D for subtraction (x,y pairs)
+            const contour2D: number[] = [];
+            for (let i = 0; i < contour.points.length; i += 3) {
+              contour2D.push(contour.points[i], contour.points[i + 1]);
+            }
+            
             const subtractedContours = await subtractContours(contour.points, worldPoints);
+            
+            console.log('🔷 Subtraction result:', {
+              resultCount: subtractedContours.length,
+              resultSizes: subtractedContours.map(c => c.length / 2)
+            });
             
             // Add all resulting contours (might be multiple if pen splits the contour)
             if (subtractedContours.length > 0) {
               for (const subtracted of subtractedContours) {
+                // subtractContours returns 2D arrays, need to convert back to 3D
                 const points: number[] = [];
                 for (let i = 0; i < subtracted.length; i += 2) {
                   points.push(subtracted[i], subtracted[i + 1], currentSlicePosition);
@@ -557,6 +666,8 @@ export default function PenToolV2({
                   });
                 }
               }
+            } else {
+              console.log('🔷 WARNING: Subtraction resulted in empty contour - pen completely covers structure!');
             }
           } else {
             // No intersection - keep contour unchanged
@@ -576,7 +687,11 @@ export default function PenToolV2({
       }
       
       console.log('🔷 Applied subtract operation to all intersecting contours');
+      console.log(`🔷 Final contour count after subtract: ${newContours.length}`);
     }
+    
+    // Verify we're not creating overlapping contours
+    console.log(`🔷 Operation complete - Mode: ${currentMode}, Original contours: ${existingOnSlice.length}, Final contours: ${structure.contours.filter((c: any) => Math.abs(c.slicePosition - currentSlicePosition) <= tolerance).length}`);
     
     // Send simple update to trigger save
     if (onContourUpdate) {
@@ -589,18 +704,20 @@ export default function PenToolV2({
     // Reset state
     setVertices([]);
     setIsDrawingContinuous(false);
-    setOperationMode(null);
+    setFirstPointMode(null);
+    setHasCrossedBoundary(false);
     setMousePosition(null);
     
     console.log('🔷 PenToolV2: Direct update completed');
-  }, [vertices, selectedStructure, operationMode, currentSlicePosition, canvasToWorld, 
-      rtStructures, onContourUpdate, determineOperationMode]);
+  }, [vertices, selectedStructure, currentSlicePosition, canvasToWorld, 
+      rtStructures, onContourUpdate, determineFinalOperation]);
 
   // Reset state on slice change
   useEffect(() => {
     setVertices([]);
     setIsDrawingContinuous(false);
-    setOperationMode(null);
+    setFirstPointMode(null);
+    setHasCrossedBoundary(false);
     setMousePosition(null);
   }, [currentSlicePosition]);
 
@@ -654,49 +771,35 @@ export default function PenToolV2({
       
       // Draw preview line to mouse
       if (mousePosition && vertices.length > 0) {
-        // Solid preview line
+        // Always draw preview line to mouse position
         ctx.lineTo(mousePosition.x, mousePosition.y);
-        
-        // Show close indicator if near first vertex
-        if (vertices.length >= 3 && isNearFirstVertex(mousePosition)) {
-          ctx.lineTo(vertices[0].x, vertices[0].y);
-        }
       }
       
       ctx.stroke();
       
-      // Always draw pulsating first vertex
+      // Always draw pulsating first vertex with color coding
       if (vertices.length > 0) {
         const firstVertex = vertices[0];
         const pulseRadius = 4 + Math.sin(Date.now() / 200) * 2;
         ctx.beginPath();
         ctx.arc(firstVertex.x, firstVertex.y, pulseRadius, 0, 2 * Math.PI);
         
-        // Yellow when near closing, structure color otherwise
-        const isNearClosing = vertices.length >= 3 && mousePosition && isNearFirstVertex(mousePosition);
-        ctx.fillStyle = isNearClosing ? '#ffff00' : structureColor;
+        // Color based on mode: green=inside, yellow=outside, red=crossed boundary
+        let vertexColor = '#ffff00'; // Default yellow (outside)
+        if (firstPointMode === 'inside') {
+          vertexColor = '#00ff00'; // Green
+        } else if (firstPointMode === 'outside' && hasCrossedBoundary) {
+          vertexColor = '#ff0000'; // Red (crossed boundary)
+        }
+        
+        ctx.fillStyle = vertexColor;
         ctx.fill();
-        ctx.strokeStyle = isNearClosing ? '#000000' : '#ffffff';
+        ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
         ctx.stroke();
       }
-      
-      // Show operation mode indicator (show "..." while determining)
-      if (vertices.length > 0) {
-        ctx.font = '12px Arial';
-        if (operationMode) {
-          ctx.fillStyle = operationMode === 'union' ? '#00ff00' : 
-                         operationMode === 'subtract' ? '#ff0000' : '#0080ff';
-          const modeText = operationMode === 'union' ? 'UNION' : 
-                          operationMode === 'subtract' ? 'SUBTRACT' : 'NEW';
-          ctx.fillText(modeText, vertices[0].x + 10, vertices[0].y - 10);
-        } else {
-          ctx.fillStyle = '#808080';
-          ctx.fillText('...', vertices[0].x + 10, vertices[0].y - 10);
-        }
-      }
     }
-  }, [isActive, vertices, mousePosition, operationMode, getStructureColor, isNearFirstVertex]);
+  }, [isActive, vertices, mousePosition, firstPointMode, hasCrossedBoundary, getStructureColor, isNearFirstVertex]);
 
   // Animation loop for smooth visual feedback
   useEffect(() => {
@@ -723,7 +826,8 @@ export default function PenToolV2({
     if (!isActive) {
       setVertices([]);
       setIsDrawingContinuous(false);
-      setOperationMode(null);
+      setFirstPointMode(null);
+      setHasCrossedBoundary(false);
       setMousePosition(null);
     }
   }, [isActive, selectedStructure]);
