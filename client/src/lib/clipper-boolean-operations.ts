@@ -66,7 +66,7 @@ export async function combineContours(contourA: number[], contourB: number[]): P
   const z = contourA[2]; // Assume same Z plane
   const api = await getClipper();
   const clipper = await createClipperInstance();
-  const solution = await createPaths();
+  const solution = new api.Paths();
   
   try {
     // Add both contours
@@ -108,7 +108,7 @@ export async function subtractContours(contourA: number[], contourB: number[]): 
   const z = contourA[2];
   const api = await getClipper();
   const clipper = await createClipperInstance();
-  const solution = await createPaths();
+  const solution = new api.Paths();
   
   try {
     const pathA = await contourToClipperPath(contourA);
@@ -144,7 +144,7 @@ export async function intersectContours(contourA: number[], contourB: number[]):
   const z = contourA[2];
   const api = await getClipper();
   const clipper = await createClipperInstance();
-  const solution = await createPaths();
+  const solution = new api.Paths();
   
   try {
     const pathA = await contourToClipperPath(contourA);
@@ -180,7 +180,7 @@ export async function xorContours(contourA: number[], contourB: number[]): Promi
   const z = contourA[2];
   const api = await getClipper();
   const clipper = await createClipperInstance();
-  const solution = await createPaths();
+  const solution = new api.Paths();
   
   try {
     const pathA = await contourToClipperPath(contourA);
@@ -250,7 +250,7 @@ export async function intersectAndCombine(
   // Combine all intersection results with C
   const api = await getClipper();
   const clipper = await createClipperInstance();
-  const solution = await createPaths();
+  const solution = new api.Paths();
   const z = contourA[2];
   
   try {

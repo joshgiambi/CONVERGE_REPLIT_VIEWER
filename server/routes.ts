@@ -2621,6 +2621,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       modifications.historyIndex--;
       
+      // If we're at the original state (historyIndex -1), clear all modifications
+      if (modifications.historyIndex === -1) {
+        console.log('Resetting to original state - clearing all modifications');
+        modifications.modifiedStructures.clear();
+        modifications.newStructures = [];
+      }
+      
       // Get the actual RT structure file path from the database
       let rtStructPath: string | null = null;
       try {
