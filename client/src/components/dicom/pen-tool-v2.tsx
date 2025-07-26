@@ -108,6 +108,7 @@ export default function PenToolV2({
   const [isDrawingContinuous, setIsDrawingContinuous] = useState(false);
   const [firstPointMode, setFirstPointMode] = useState<'inside' | 'outside' | null>(null);
   const [hasCrossedBoundary, setHasCrossedBoundary] = useState(false);
+  const [shouldComplete, setShouldComplete] = useState(false);
 
   // Get contours at current slice
   const getContoursAtCurrentSlice = useCallback(() => {
@@ -413,7 +414,7 @@ export default function PenToolV2({
     if (event.button === 0) { // Left click
       if (isNearFirstVertex(canvasPoint) && vertices.length >= 3) {
         // Close polygon by clicking near first vertex
-        await completePolygon();
+        setShouldComplete(true);
         return;
       }
       
@@ -434,10 +435,10 @@ export default function PenToolV2({
     } else if (event.button === 2) { // Right click
       event.preventDefault();
       if (vertices.length >= 3) {
-        await completePolygon();
+        setShouldComplete(true);
       }
     }
-  }, [isActive, selectedStructure, vertices, operationMode, isNearFirstVertex, canvasToWorld, determineOperationMode]);
+  }, [isActive, selectedStructure, vertices.length, firstPointMode, isNearFirstVertex, canvasToWorld, determineInitialMode]);
 
   const handleMouseMove = useCallback(async (event: MouseEvent) => {
     if (!isActive || !canvasRef.current) return;
@@ -473,7 +474,7 @@ export default function PenToolV2({
     if (isDrawingContinuous && vertices.length > 0) {
       // Check if we're near first vertex to close
       if (vertices.length >= 3 && isNearFirstVertex(canvasPoint)) {
-        await completePolygon();
+        setShouldComplete(true);
         setIsDrawingContinuous(false);
         return;
       }
@@ -719,7 +720,16 @@ export default function PenToolV2({
     setFirstPointMode(null);
     setHasCrossedBoundary(false);
     setMousePosition(null);
+    setShouldComplete(false);
   }, [currentSlicePosition]);
+
+  // Execute completion when shouldComplete is set
+  useEffect(() => {
+    if (shouldComplete) {
+      completePolygon();
+      setShouldComplete(false);
+    }
+  }, [shouldComplete, completePolygon]);
 
   // Set up event listeners
   useEffect(() => {
