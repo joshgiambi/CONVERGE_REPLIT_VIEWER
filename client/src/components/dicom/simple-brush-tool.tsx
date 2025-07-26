@@ -154,16 +154,20 @@ export function SimpleBrushTool({
 
     const structureColor = getStructureColor();
 
-    // Draw brush cursor - match actual stroke visual size
+    // Draw brush cursor - match actual world coordinate output size
     if (cursorPosition && !isDrawing) {
       ctx.beginPath();
-      // The stroke has lineWidth = brushSize * 2, so the visual radius is brushSize
-      // Cursor should show the actual stroke size (lineWidth / 2)
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      // Scale cursor size with zoom level
+      
+      // Convert brush size from pixels to world coordinates to match actual output
+      const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
+      const brushSizeInMM = currentBrushSize * pixelSpacing;
+      
+      // Convert world size back to screen pixels for cursor display
       const zoomScale = ctTransform?.current?.scale || 1;
-      // Show actual stroke radius (lineWidth is brushSize * 2, so radius is brushSize)
-      ctx.arc(cursorPosition.x, cursorPosition.y, currentBrushSize / zoomScale, 0, 2 * Math.PI);
+      const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
+      
+      ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
       ctx.strokeStyle = structureColor;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -578,9 +582,9 @@ export function SimpleBrushTool({
     }
     
     if (sliderFill) {
-      // Map size to slider width (0-100%)
-      const minSize = 1;
-      const maxSize = 100;
+      // Map size to slider width (0-100%) - expanded range 5-512px to cover 0.5-5cm
+      const minSize = 5;
+      const maxSize = 512;
       const percentage = ((sizePixels - minSize) / (maxSize - minSize)) * 100;
       sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
     }

@@ -743,8 +743,8 @@ export function ContourEditToolbar({
                       });
                     }
                   }}
-                  max={50}
-                  min={1}
+                  max={512}
+                  min={5}
                   step={1}
                   className="w-full"
                 />
