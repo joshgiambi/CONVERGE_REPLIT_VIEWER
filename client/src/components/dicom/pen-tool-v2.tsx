@@ -270,7 +270,7 @@ export default function PenToolV2({
     
     setMousePosition(canvasPoint);
     
-    // Add points during continuous drawing
+    // Add points during continuous drawing with better spacing
     if (isDrawingContinuous && vertices.length > 0) {
       // Check if we're near first vertex to close
       if (vertices.length >= 3 && isNearFirstVertex(canvasPoint)) {
@@ -284,8 +284,8 @@ export default function PenToolV2({
         Math.pow(canvasPoint.x - lastVertex.x, 2) + Math.pow(canvasPoint.y - lastVertex.y, 2)
       );
       
-      // Add point if moved enough distance (continuous drawing)
-      if (distance > 8) {
+      // Add point if moved enough distance (smoother drawing with larger threshold)
+      if (distance > 15) {
         setVertices(prev => [...prev, canvasPoint]);
       }
     }
