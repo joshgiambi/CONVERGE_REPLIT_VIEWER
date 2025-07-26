@@ -1762,6 +1762,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to serve image" });
     }
   });
+  
+  // Batch API endpoint for fetching multiple DICOM images at once for performance
+  app.post("/api/images/batch", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sopInstanceUIDs } = req.body;
+      
+      if (!Array.isArray(sopInstanceUIDs) || sopInstanceUIDs.length === 0) {
+        return res.status(400).json({ error: 'Invalid request: sopInstanceUIDs must be a non-empty array' });
+      }
+      
+      // Limit batch size to prevent overwhelming the server
+      const MAX_BATCH_SIZE = 20;
+      if (sopInstanceUIDs.length > MAX_BATCH_SIZE) {
+        return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE}` });
+      }
+      
+      const results: { [key: string]: { data?: string; error?: string } } = {};
+      
+      // Process all images in parallel
+      await Promise.all(sopInstanceUIDs.map(async (sopInstanceUID) => {
+        try {
+          const image = await storage.getImageByUID(sopInstanceUID);
+          
+          if (!image) {
+            results[sopInstanceUID] = { error: 'Image not found' };
+            return;
+          }
+          
+          if (!fs.existsSync(image.filePath)) {
+            results[sopInstanceUID] = { error: 'DICOM file not found' };
+            return;
+          }
+          
+          // Read file into buffer
+          const buffer = await fs.promises.readFile(image.filePath);
+          results[sopInstanceUID] = { data: buffer.toString('base64') };
+        } catch (error) {
+          console.error(`Error loading DICOM file ${sopInstanceUID}:`, error);
+          results[sopInstanceUID] = { error: 'Failed to load DICOM file' };
+        }
+      }));
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Error in batch DICOM fetch:', error);
+      res.status(500).json({ error: 'Failed to fetch DICOM files' });
+    }
+  });
 
   // Get RT Structure Set for a study
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {

@@ -1658,9 +1658,75 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     return imageData;
   };
+  
+  // Batch fetch multiple images at once for better performance
+  const fetchBatchImages = async (sopInstanceUIDs: string[], signal?: AbortSignal): Promise<Map<string, any>> => {
+    const results = new Map<string, any>();
+    
+    // Filter out already cached images
+    const uncachedUIDs = sopInstanceUIDs.filter(uid => !imageCacheRef.current.has(uid));
+    
+    if (uncachedUIDs.length === 0) {
+      // All images are cached
+      sopInstanceUIDs.forEach(uid => {
+        const cached = imageCacheRef.current.get(uid);
+        if (cached) results.set(uid, cached);
+      });
+      return results;
+    }
+    
+    try {
+      const response = await fetch('/api/images/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sopInstanceUIDs: uncachedUIDs }),
+        signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Batch fetch failed: ${response.status}`);
+      }
+      
+      const batchData = await response.json();
+      
+      // Process batch results in parallel
+      await Promise.all(Object.entries(batchData).map(async ([uid, result]: [string, any]) => {
+        if (result.data) {
+          // Convert base64 back to ArrayBuffer
+          const binaryString = atob(result.data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          
+          const imageData = await parseDicomImage(bytes.buffer);
+          if (imageData) {
+            imageCacheRef.current.set(uid, imageData);
+            results.set(uid, imageData);
+          }
+        }
+      }));
+      
+      // Add cached images to results
+      sopInstanceUIDs.forEach(uid => {
+        const cached = imageCacheRef.current.get(uid);
+        if (cached && !results.has(uid)) {
+          results.set(uid, cached);
+        }
+      });
+      
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error('Batch fetch error:', error);
+      }
+      throw error;
+    }
+    
+    return results;
+  };
 
   const preloadAllImages = async (imageList: any[]) => {
-    console.log("Starting to preload all images with concurrency limits...");
+    console.log("Starting to preload all images with batch fetching...");
     if (!imageList || imageList.length === 0) {
       console.warn("No images to preload");
       setIsPreloading(false);
@@ -1668,45 +1734,63 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     setIsPreloading(true);
     
-    // Concurrency limit - load max 4 images at a time
-    const CONCURRENT_LIMIT = 4;
+    const BATCH_SIZE = 20; // Server batch limit
     let loadedCount = 0;
     
-    // Process images in chunks
-    for (let i = 0; i < imageList.length; i += CONCURRENT_LIMIT) {
-      const chunk = imageList.slice(i, i + CONCURRENT_LIMIT);
+    // Prioritize loading images near current index first
+    const prioritizedList = [...imageList];
+    const currentIdx = currentIndex;
+    
+    // Sort by distance from current index
+    prioritizedList.sort((a, b) => {
+      const aIdx = imageList.indexOf(a);
+      const bIdx = imageList.indexOf(b);
+      const aDist = Math.abs(aIdx - currentIdx);
+      const bDist = Math.abs(bIdx - currentIdx);
+      return aDist - bDist;
+    });
+    
+    // Process images in batches
+    for (let i = 0; i < prioritizedList.length; i += BATCH_SIZE) {
+      const batch = prioritizedList.slice(i, i + BATCH_SIZE);
+      const batchUIDs = batch.map(img => img.sopInstanceUID);
       
-      // Load chunk in parallel
-      const chunkPromises = chunk.map(async (image, chunkIndex) => {
-        const index = i + chunkIndex;
-        try {
-          // Use abort controller for this series
-          await fetchAndParseImage(image.sopInstanceUID, seriesAbortRef.current?.signal);
-          loadedCount++;
-          console.log(`Preloaded image ${index + 1}/${imageList.length} (${loadedCount} loaded)`);
-        } catch (error: any) {
-          if (error.name === 'AbortError') {
-            console.log('Preloading aborted (user switched series)');
-            throw error; // Re-throw to stop preloading
-          }
-          console.warn(`Failed to preload image ${index + 1}:`, error);
-        }
-      });
-      
-      // Wait for this chunk to complete before loading next chunk
       try {
-        await Promise.all(chunkPromises);
+        // Fetch entire batch at once
+        const batchResults = await fetchBatchImages(batchUIDs, seriesAbortRef.current?.signal);
+        loadedCount += batchResults.size;
+        
+        console.log(`Batch loaded ${batchResults.size} images. Total: ${loadedCount}/${imageList.length} (${Math.round(loadedCount/imageList.length * 100)}%)`);
+        
+        // Check if current image was in this batch
+        const currentImageUID = imageList[currentIndex]?.sopInstanceUID;
+        if (currentImageUID && batchResults.has(currentImageUID)) {
+          await displayCurrentImage();
+        }
       } catch (error: any) {
         if (error.name === 'AbortError') {
-          console.log('Preloading cancelled - series changed');
+          console.log('Batch loading aborted (user switched series)');
           break;
+        }
+        console.error(`Failed to load batch:`, error);
+        
+        // Fallback to individual loading for failed batch
+        for (const image of batch) {
+          try {
+            await fetchAndParseImage(image.sopInstanceUID, seriesAbortRef.current?.signal);
+            loadedCount++;
+          } catch (individualError: any) {
+            if (individualError.name !== 'AbortError') {
+              console.error(`Failed to load individual image:`, individualError);
+            }
+          }
         }
       }
     }
     
     setIsPreloading(false);
     console.log(
-      `Preloading complete: ${imageCacheRef.current.size}/${imageList.length} images cached`,
+      `Batch loading complete: ${imageCacheRef.current.size}/${imageList.length} images cached`,
     );
   };
 
@@ -1869,7 +1953,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d");
+    const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
     if (!tempCtx) return;
 
     tempCtx.putImageData(imageData, 0, 0);
