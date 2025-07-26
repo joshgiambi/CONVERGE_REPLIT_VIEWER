@@ -156,7 +156,7 @@ export default function PenToolV2({
       Math.pow(point.x - firstVertex.x, 2) + Math.pow(point.y - firstVertex.y, 2)
     );
     
-    return distance < 12; // 12 pixel tolerance for easy closing
+    return distance < 20; // 20 pixel tolerance for easier closing
   }, [vertices]);
 
   // Get structure color
@@ -238,16 +238,18 @@ export default function PenToolV2({
         return;
       }
       
-      // Add vertex
-      setVertices(prev => [...prev, canvasPoint]);
-      
-      // Determine operation mode on first click
+      // Determine operation mode on first click BEFORE adding vertex
       if (vertices.length === 0 && !operationMode) {
         const worldPoint = canvasToWorld(canvasPoint.x, canvasPoint.y);
         determineOperationMode(worldPoint).then(mode => {
           setOperationMode(mode);
           console.log(`🔷 Operation mode set to: ${mode}`);
+          // Add first vertex after determining mode
+          setVertices(prev => [...prev, canvasPoint]);
         });
+      } else {
+        // Add subsequent vertices
+        setVertices(prev => [...prev, canvasPoint]);
       }
       
       // Start continuous drawing if holding down
@@ -307,9 +309,20 @@ export default function PenToolV2({
 
   // Complete polygon with proper Eclipse boolean operations
   const completePolygon = useCallback(async () => {
-    if (vertices.length < 3 || !selectedStructure || !operationMode) return;
+    if (vertices.length < 3 || !selectedStructure) {
+      console.log(`🔷 Cannot complete: vertices=${vertices.length}, selectedStructure=${selectedStructure}`);
+      return;
+    }
     
-    console.log(`🔷 PenToolV2: Completing polygon with ${vertices.length} vertices, mode: ${operationMode}`);
+    // Determine operation mode if not already set
+    let currentMode = operationMode;
+    if (!currentMode) {
+      const firstWorldPoint = canvasToWorld(vertices[0].x, vertices[0].y);
+      currentMode = await determineOperationMode(firstWorldPoint);
+      console.log(`🔷 Operation mode determined late: ${currentMode}`);
+    }
+    
+    console.log(`🔷 PenToolV2: Completing polygon with ${vertices.length} vertices, mode: ${currentMode}`);
     
     // Convert vertices to world coordinates
     const worldPoints: number[] = [];
@@ -321,8 +334,8 @@ export default function PenToolV2({
     const contours = getContoursAtCurrentSlice();
     
     // Refine operation mode if it was initially set to 'subtract'
-    let finalMode = operationMode;
-    if (operationMode === 'subtract') {
+    let finalMode = currentMode;
+    if (currentMode === 'subtract') {
       const crosses = doesPolygonCrossExisting(vertices);
       if (crosses) {
         finalMode = 'subtract';
@@ -384,7 +397,7 @@ export default function PenToolV2({
     
     console.log('🔷 PenToolV2: Polygon completed and boolean operation applied');
   }, [vertices, selectedStructure, operationMode, currentSlicePosition, canvasToWorld, 
-      getContoursAtCurrentSlice, doesPolygonCrossExisting, onContourUpdate]);
+      getContoursAtCurrentSlice, doesPolygonCrossExisting, onContourUpdate, determineOperationMode]);
 
   // Reset state on slice change
   useEffect(() => {
@@ -456,38 +469,33 @@ export default function PenToolV2({
       ctx.stroke();
       ctx.setLineDash([]); // Reset to solid line
       
-      // Draw vertices as circles
-      vertices.forEach((vertex, index) => {
+      // Only draw pulsating first vertex when near closing
+      if (vertices.length >= 3 && mousePosition && isNearFirstVertex(mousePosition)) {
+        // Highlight first vertex for closing with pulsing effect
+        const firstVertex = vertices[0];
+        const pulseRadius = 4 + Math.sin(Date.now() / 200) * 2;
         ctx.beginPath();
-        ctx.arc(vertex.x, vertex.y, 4, 0, 2 * Math.PI);
-        
-        if (index === 0 && vertices.length >= 3) {
-          // Highlight first vertex for closing with pulsing effect
-          const pulseRadius = 4 + Math.sin(Date.now() / 200) * 2;
-          ctx.beginPath();
-          ctx.arc(vertex.x, vertex.y, pulseRadius, 0, 2 * Math.PI);
-          ctx.fillStyle = '#ffff00'; // Yellow highlight
-          ctx.fill();
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = structureColor;
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-      });
+        ctx.arc(firstVertex.x, firstVertex.y, pulseRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ffff00'; // Yellow highlight
+        ctx.fill();
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       
-      // Show operation mode indicator
-      if (operationMode && vertices.length > 0) {
+      // Show operation mode indicator (show "..." while determining)
+      if (vertices.length > 0) {
         ctx.font = '12px Arial';
-        ctx.fillStyle = operationMode === 'union' ? '#00ff00' : 
-                       operationMode === 'subtract' ? '#ff0000' : '#0080ff';
-        const modeText = operationMode === 'union' ? 'UNION' : 
-                        operationMode === 'subtract' ? 'SUBTRACT' : 'NEW';
-        ctx.fillText(modeText, vertices[0].x + 10, vertices[0].y - 10);
+        if (operationMode) {
+          ctx.fillStyle = operationMode === 'union' ? '#00ff00' : 
+                         operationMode === 'subtract' ? '#ff0000' : '#0080ff';
+          const modeText = operationMode === 'union' ? 'UNION' : 
+                          operationMode === 'subtract' ? 'SUBTRACT' : 'NEW';
+          ctx.fillText(modeText, vertices[0].x + 10, vertices[0].y - 10);
+        } else {
+          ctx.fillStyle = '#808080';
+          ctx.fillText('...', vertices[0].x + 10, vertices[0].y - 10);
+        }
       }
     }
   }, [isActive, vertices, mousePosition, operationMode, getStructureColor, isNearFirstVertex]);
