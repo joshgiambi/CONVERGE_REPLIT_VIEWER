@@ -826,39 +826,56 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           points: payload.points,
           numberOfPoints: payload.points.length / 3,
         });
-      } else if (payload.operation === 'subtract' && payload.resultContours) {
-        // For subtraction, replace existing contours with result from ClipperLib
-        console.log('🔴 SUBTRACTION HANDLER:', {
+      } else if (payload.operation === 'subtract') {
+        // For subtraction, calculate the result using ClipperLib
+        console.log('🔴 STARTING SUBTRACTION OPERATION:', {
           contourIndex,
           existingContoursAtSlice: structure.contours.filter((c: any) => 
             Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
           ).length,
-          resultContoursCount: payload.resultContours.length,
           slicePosition: payload.slicePosition
         });
         
         if (contourIndex >= 0) {
-          if (payload.resultContours.length === 0) {
-            // Remove the contour if subtraction results in empty
-            structure.contours.splice(contourIndex, 1);
+          // Get the existing contour to subtract from
+          const existingContour = structure.contours[contourIndex];
+          
+          // Convert points to polygons for ClipperLib
+          const existingPolygon = [];
+          for (let i = 0; i < existingContour.points.length; i += 3) {
+            existingPolygon.push([existingContour.points[i], existingContour.points[i+1]]);
+          }
+          
+          const newPolygon = [];
+          for (let i = 0; i < payload.points.length; i += 3) {
+            newPolygon.push([payload.points[i], payload.points[i+1]]);
+          }
+          
+          // Perform subtraction using ClipperLib
+          const subtractResult = subtractContours(
+            existingContour.points,
+            payload.points
+          );
+          
+          console.log('📐 Subtraction result:', {
+            existingPoints: existingContour.points.length / 3,
+            newPoints: payload.points.length / 3,
+            resultPoints: subtractResult.length / 3
+          });
+          
+          // Remove the original contour
+          structure.contours.splice(contourIndex, 1);
+          
+          if (subtractResult.length === 0) {
             console.log('🗑️ Subtraction resulted in empty contour, removed slice');
           } else {
-            // Remove only the specific contour that was operated on, not all contours
-            const removedContour = structure.contours[contourIndex];
-            console.log('📐 Removing contour at index:', contourIndex, 'with points:', removedContour.points.length);
-            structure.contours.splice(contourIndex, 1);
-            
-            // Add each result contour as a separate contour object
-            payload.resultContours.forEach((contourPoints: number[], idx: number) => {
-              structure.contours.push({
-                slicePosition: payload.slicePosition,
-                points: contourPoints,
-                numberOfPoints: contourPoints.length / 3,
-              });
-              console.log(`✅ Added result contour ${idx + 1} with ${contourPoints.length / 3} points`);
+            // Add the subtraction result as new contour
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: subtractResult,
+              numberOfPoints: subtractResult.length / 3,
             });
-            
-            console.log(`🎯 Pen subtraction completed, replaced 1 contour with ${payload.resultContours.length} result contours`);
+            console.log(`✅ Pen subtraction completed, replaced contour with ${subtractResult.length / 3} points`);
           }
         } else {
           console.warn('⚠️ Subtraction operation called but no existing contour found');

@@ -202,6 +202,17 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 26, 2025: Pen Tool Deletion Fix - Boolean Subtraction Calculation - COMPLETED ✅
+  - ✅ Fixed critical pen tool deletion bug where subtract operation wasn't working
+  - ✅ Root cause: Handler was checking for 'union' operation but pen tool was sending 'add'
+  - ✅ Secondary issue: Handler expected payload.resultContours but pen tool wasn't calculating it
+  - ✅ Changed handler to calculate subtraction result using ClipperLib's subtractContours() function
+  - ✅ Pen tool now properly deletes portions of contours when drawing from outside to inside
+  - ✅ Eclipse-style boolean operations fully functional: inside→union, outside crossing→subtract, outside separate→new blob
+  - Technical details:
+    - Added subtractContours() call in pen_boolean_operation handler for 'subtract' operation
+    - Handler now calculates subtraction result instead of expecting it in payload
+    - Removes original contour and adds subtraction result (if not empty)
 - July 25, 2025: Boolean Operations and Cornerstone Performance Optimization - COMPLETED ✅
   - ✅ Replaced all placeholder union/difference/intersection functions in PolygonOperationsV2 with proper ClipperLib implementations
   - ✅ Added multiPolygonToContours() and contoursToMultiPolygon() helper functions for seamless format conversion
