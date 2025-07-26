@@ -157,11 +157,12 @@ export function SimpleBrushTool({
     // Draw brush cursor - match actual stroke visual size
     if (cursorPosition && !isDrawing) {
       ctx.beginPath();
-      // The stroke has lineWidth = brushSize * 2, which creates a visual radius of brushSize
-      // So cursor should show the same visual size
+      // The stroke has lineWidth = brushSize * 2, so the visual radius is brushSize
+      // Cursor should show the actual stroke size (lineWidth / 2)
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
       // Scale cursor size with zoom level
       const zoomScale = ctTransform?.current?.scale || 1;
+      // Show actual stroke radius (lineWidth is brushSize * 2, so radius is brushSize)
       ctx.arc(cursorPosition.x, cursorPosition.y, currentBrushSize / zoomScale, 0, 2 * Math.PI);
       ctx.strokeStyle = structureColor;
       ctx.lineWidth = 2;
@@ -253,7 +254,7 @@ export function SimpleBrushTool({
         
         // Calculate new size based on horizontal mouse movement
         const deltaX = e.clientX - sizeAdjustStart.x;
-        const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
+        const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 1.171875;
         const sizeChangePixels = deltaX * 0.5; // Sensitivity factor
         const newSizePixels = Math.max(1, Math.min(100, sizeAdjustStart.size + sizeChangePixels));  // Clamp between 1 and 100
         
@@ -493,7 +494,7 @@ export function SimpleBrushTool({
     }
     
     const mainCanvas = canvasRef.current;
-    const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875;
+    const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 1.171875;
     
     // Create overlay div
     const overlay = document.createElement("div");
