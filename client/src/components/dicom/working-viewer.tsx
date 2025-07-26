@@ -3063,27 +3063,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               />
             )}
 
-          {/* Eclipse Pen Tool with Boolean Operations - Using PenToolUnifiedV2 */}
+          {/* Eclipse Pen Tool V2 - Clean implementation with proper boolean operations */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "pen" &&
-            selectedForEdit && (
-              <PenToolUnifiedV2
-                canvasRef={canvasRef}
-                isActive={brushToolState.isActive}
-                selectedStructure={selectedForEdit}
-                rtStructures={rtStructures}
-                onContourUpdate={(payload: any) => {
-                  handleContourUpdate(payload);
-                }}
-                imageMetadata={imageMetadata}
-                worldToCanvas={worldToCanvas}
-                canvasToWorld={canvasToWorld}
-              />
-            )}
-
-          {/* Simple Pen Tool V2 - Basic vertex placement */}
-          {brushToolState?.isActive &&
-            brushToolState?.tool === "planar-contour" &&
             selectedForEdit && (
               <PenToolV2
                 isActive={brushToolState.isActive}
@@ -3102,6 +3084,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 }}
                 canvasRef={canvasRef}
                 ctTransform={ctTransform}
+              />
+            )}
+
+          {/* Eclipse Planar Contour Tool - Using PenToolUnifiedV2 */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "planar-contour" &&
+            selectedForEdit && (
+              <PenToolUnifiedV2
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                imageMetadata={imageMetadata}
+                worldToCanvas={worldToCanvas}
+                canvasToWorld={canvasToWorld}
               />
             )}
 

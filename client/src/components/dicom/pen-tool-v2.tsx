@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { isPointInContour, unionContours, subtractContours } from '../../lib/clipper-boolean-operations';
+import { isPointInContour, combineContours, subtractContours } from '../../lib/clipper-boolean-operations';
 
 interface PenToolV2Props {
   isActive: boolean;
@@ -304,7 +304,7 @@ export default function PenToolV2({
   }, [isActive]);
 
   // Complete polygon with proper Eclipse boolean operations
-  const completePolygon = useCallback(() => {
+  const completePolygon = useCallback(async () => {
     if (vertices.length < 3 || !selectedStructure || !operationMode) return;
     
     console.log(`🔷 PenToolV2: Completing polygon with ${vertices.length} vertices, mode: ${operationMode}`);
@@ -342,14 +342,21 @@ export default function PenToolV2({
     } else if (finalMode === 'union') {
       // Union with existing contours
       console.log('🔷 Performing UNION operation');
-      const existingContours = contours.map(c => c.points);
-      resultContours = unionContours(existingContours, [worldPoints]);
+      if (contours.length > 0) {
+        // Combine new polygon with first existing contour
+        const existingContour = contours[0].points;
+        resultContours = await combineContours(existingContour, worldPoints);
+      } else {
+        resultContours = [worldPoints];
+      }
       
     } else if (finalMode === 'subtract') {
       // Subtract from existing contours
       console.log('🔷 Performing SUBTRACT operation');
-      const existingContours = contours.map(c => c.points);
-      resultContours = subtractContours(existingContours, [worldPoints]);
+      if (contours.length > 0) {
+        const existingContour = contours[0].points;
+        resultContours = await subtractContours(existingContour, worldPoints);
+      }
     }
     
     // Send boolean operation result to parent
@@ -478,32 +485,34 @@ export default function PenToolV2({
         ctx.fillText(modeText, vertices[0].x + 10, vertices[0].y - 10);
       }
     }
-  }, [isActive, vertices, mousePosition, isDrawing, getStructureColor, isNearFirstVertex]);
+  }, [isActive, vertices, mousePosition, operationMode, getStructureColor, isNearFirstVertex]);
 
-  // Animation loop
+  // Animation loop for smooth visual feedback
   useEffect(() => {
+    let animationId: number;
+    
     const animate = () => {
       drawOverlay();
-      animationFrameRef.current = requestAnimationFrame(animate) as number;
+      animationId = requestAnimationFrame(animate);
     };
 
-    if (isActive) {
+    if (isActive && (vertices.length > 0 || mousePosition)) {
       animate();
     }
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      if (animationId) {
+        cancelAnimationFrame(animationId);
       }
     };
-  }, [isActive, drawOverlay]);
+  }, [isActive, drawOverlay, vertices.length, mousePosition]);
 
   // Reset when switching structures or becoming inactive
   useEffect(() => {
     if (!isActive) {
       setVertices([]);
-      setIsDrawing(false);
-      setIsComplete(false);
+      setIsDrawingContinuous(false);
+      setOperationMode(null);
       setMousePosition(null);
     }
   }, [isActive, selectedStructure]);
