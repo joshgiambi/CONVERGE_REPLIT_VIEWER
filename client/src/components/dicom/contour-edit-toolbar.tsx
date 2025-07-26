@@ -828,9 +828,9 @@ export function ContourEditToolbar({
         ) : showSettings === 'pen' ? (
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
-              <div className="text-sm text-gray-300 font-medium">ITK-SNAP Pen Tool</div>
+              <div className="text-sm text-gray-300 font-medium">Eclipse Pen Tool V2</div>
               <div className="text-xs text-gray-400">
-                Simplified polygon tool following ITK-SNAP medical imaging standard
+                Advanced pen tool with Eclipse-style boolean operations and vertex editing
               </div>
               
               <div className="flex items-center justify-between">
@@ -850,19 +850,19 @@ export function ContourEditToolbar({
             
             <div className="space-y-3">
               <div className="text-xs text-gray-400">
-                • Click to place vertices
+                • Click to place vertices or hold+drag for continuous drawing
               </div>
               <div className="text-xs text-gray-400">
-                • Click near first vertex to close
+                • Right-click to complete polygon
               </div>
               <div className="text-xs text-gray-400">
-                • Right-click to close polygon
+                • Draw inside structure: union operation
               </div>
               <div className="text-xs text-gray-400">
-                • Escape to cancel
+                • Draw crossing boundary: subtract (carve hole)
               </div>
               <div className="text-xs text-gray-400">
-                • Ctrl+V to paste
+                • Draw outside: create new blob
               </div>
             </div>
           </div>
