@@ -24,6 +24,7 @@ import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { undoRedoManager } from "@/lib/undo-system";
+import { combineContours as clipperCombineContours } from "@/lib/clipper-boolean-operations";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -734,16 +735,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Add the new brush polygon
         polygonsToUnion.push(brushPolygon);
 
-        // Perform union of intersecting polygons
-        const unionResult = polygonUnion(polygonsToUnion);
+        // Perform union of intersecting polygons using ClipperLib (maintains precision)
+        // combineContours is async and takes two contours at a time
+        // We need to combine them iteratively
+        let unionResult: number[][] = [];
         
-        // Add the unified contour
-        if (unionResult.length >= 9) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: unionResult,
-            numberOfPoints: unionResult.length / 3,
-          });
+        if (polygonsToUnion.length > 0) {
+          // Start with the first polygon
+          unionResult = [polygonsToUnion[0]];
+          
+          // Combine each subsequent polygon with the current result
+          for (let i = 1; i < polygonsToUnion.length; i++) {
+            const newResult: number[][] = [];
+            
+            // Try to union this polygon with each existing result contour
+            for (const existingContour of unionResult) {
+              const combined = await clipperCombineContours(existingContour, polygonsToUnion[i]);
+              newResult.push(...combined);
+            }
+            
+            unionResult = newResult;
+          }
+        }
+        
+        // Add the unified contours
+        for (const contour of unionResult) {
+          if (contour.length >= 9) {
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contour,
+              numberOfPoints: contour.length / 3,
+            });
+          }
         }
         
         // Re-add non-intersecting contours as separate blobs
