@@ -562,7 +562,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         setLocalRTStructures(payload.rtStructures);
         // Force re-render of the canvas
         if (images.length > 0) {
-          scheduleRender();
+          // Add a small delay to ensure state updates are processed
+          setTimeout(() => {
+            scheduleRender();
+          }, 50);
         }
       }
       return;

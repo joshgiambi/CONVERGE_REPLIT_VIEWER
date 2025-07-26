@@ -29,11 +29,29 @@ export async function polishContour(
 
     // Convert contour to Clipper path
     const path = new api.Path();
+    const clipperPoints = [];
     for (let i = 0; i < contourPoints.length; i += 3) {
-      path.push({
+      clipperPoints.push({
         X: Math.round(contourPoints[i] * POLISH_SCALE),
         Y: Math.round(contourPoints[i + 1] * POLISH_SCALE)
       });
+    }
+    
+    // Try different methods to add points
+    if (path.AddPoints && typeof path.AddPoints === 'function') {
+      path.AddPoints(clipperPoints);
+    } else if (path.add && typeof path.add === 'function') {
+      for (const pt of clipperPoints) {
+        path.add(pt);
+      }
+    } else if (typeof path.push === 'function') {
+      for (const pt of clipperPoints) {
+        path.push(pt);
+      }
+    } else if (typeof path.Add === 'function') {
+      for (const pt of clipperPoints) {
+        path.Add(pt);
+      }
     }
 
     // Create paths container

@@ -202,6 +202,17 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 26, 2025: Brush Tool Undo Fix and ClipperLib Compatibility - COMPLETED ✅
+  - ✅ Fixed brush tool undo functionality by clearing selected structure state on undo/redo operations
+  - ✅ Added onSelectStructure(null) call in undo/redo success handlers to reset tool state
+  - ✅ Prevents "Structure X not found" errors after undo by ensuring clean state transition
+  - ✅ Fixed ClipperLib WASM compatibility issues with Path.push() method
+  - ✅ Implemented fallback chain: AddPoints() → add() → push() → Add() for cross-version support
+  - ✅ Updated both clipper-boolean-operations.ts and contour-polish.ts with robust path handling
+  - Technical details:
+    - Brush tool was attempting to update structures that no longer existed after undo
+    - ClipperLib WASM version has different API methods than JavaScript version
+    - Fallback methods ensure compatibility across all ClipperLib implementations
 - July 26, 2025: Pen Tool Deletion Fix - Boolean Subtraction Calculation - COMPLETED ✅
   - ✅ Fixed critical pen tool deletion bug where subtract operation wasn't working
   - ✅ Root cause: Handler was checking for 'union' operation but pen tool was sending 'add'

@@ -16,11 +16,36 @@ async function contourToClipperPath(points: number[]): Promise<any> {
   const api = await getClipper();
   const path = new api.Path();
   
+  // Create an array of points first
+  const clipperPoints = [];
   for (let i = 0; i < points.length; i += 3) {
-    path.push({
+    clipperPoints.push({
       X: Math.round(points[i] * SCALE),
       Y: Math.round(points[i + 1] * SCALE)
     });
+  }
+  
+  // Add all points at once using AddPoints if available, or iterate
+  if (path.AddPoints && typeof path.AddPoints === 'function') {
+    path.AddPoints(clipperPoints);
+  } else if (path.add && typeof path.add === 'function') {
+    for (const pt of clipperPoints) {
+      path.add(pt);
+    }
+  } else {
+    // If neither method exists, try direct assignment or array methods
+    for (const pt of clipperPoints) {
+      if (typeof path.push === 'function') {
+        path.push(pt);
+      } else if (typeof path.Add === 'function') {
+        path.Add(pt);
+      } else {
+        // Last resort - log error and return empty path
+        console.error('Cannot add points to ClipperLib Path - no suitable method found');
+        console.log('Available path methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(path)));
+        break;
+      }
+    }
   }
   
   return path;

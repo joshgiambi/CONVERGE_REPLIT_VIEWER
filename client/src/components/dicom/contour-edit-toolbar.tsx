@@ -203,6 +203,10 @@ export function ContourEditToolbar({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Undo successful" });
+      // Clear selected structure to reset tool state
+      if (onSelectStructure) {
+        onSelectStructure(null);
+      }
       // Send a refresh action instead of the raw data
       if (onContourUpdate) {
         onContourUpdate({
@@ -230,6 +234,10 @@ export function ContourEditToolbar({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/rt-structures'] });
       toast({ title: "Redo successful" });
+      // Clear selected structure to reset tool state
+      if (onSelectStructure) {
+        onSelectStructure(null);
+      }
       // Send a refresh action instead of the raw data
       if (onContourUpdate) {
         onContourUpdate({
