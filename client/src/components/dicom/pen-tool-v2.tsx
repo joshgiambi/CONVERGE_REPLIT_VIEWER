@@ -374,7 +374,6 @@ export default function PenToolV2({
         points: worldPoints,
         numberOfPoints: worldPoints.length / 3
       });
-      console.log('🔷 Added new contour');
       
     } else if (currentMode === 'union' && existingContourIndex >= 0) {
       // Combine with existing
