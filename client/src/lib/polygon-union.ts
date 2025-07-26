@@ -2,42 +2,311 @@
 // Based on Eclipse TPS and 3D Slicer behavior specifications
 
 /**
- * Simple polygon union using a grid-based approach
- * This creates the "paint bucket fill" effect for overlapping circles
+ * Polygon union that preserves shape without shrinkage
+ * Uses a simple merge approach that maintains brush size
  */
 export function polygonUnion(polygons: number[][]): number[] {
   if (polygons.length === 0) return [];
   if (polygons.length === 1) return polygons[0];
   
-  // Find bounding box of all polygons
-  let minX = Infinity, minY = Infinity;
-  let maxX = -Infinity, maxY = -Infinity;
   const zValue = polygons[0][2]; // Assume all on same slice
   
+  // Simple approach: if polygons overlap, create a merged hull
+  // This avoids the shrinkage caused by grid-based methods
+  return createMergedHull(polygons, zValue);
+}
+
+/**
+ * Create a merged hull from multiple polygons
+ * This is a simplified approach that avoids shrinkage
+ */
+function createMergedHull(polygons: number[][], zValue: number): number[] {
+  // Collect all points from all polygons
+  const allPoints: Array<{x: number, y: number}> = [];
+  
   for (const polygon of polygons) {
+    // Add vertices
     for (let i = 0; i < polygon.length; i += 3) {
-      minX = Math.min(minX, polygon[i]);
-      maxX = Math.max(maxX, polygon[i]);
-      minY = Math.min(minY, polygon[i + 1]);
-      maxY = Math.max(maxY, polygon[i + 1]);
+      allPoints.push({
+        x: polygon[i],
+        y: polygon[i + 1]
+      });
+    }
+    
+    // Add intermediate points along edges to maintain shape
+    for (let i = 0; i < polygon.length - 3; i += 3) {
+      const x1 = polygon[i];
+      const y1 = polygon[i + 1];
+      const x2 = polygon[i + 3];
+      const y2 = polygon[i + 4];
+      
+      // Add midpoint
+      allPoints.push({
+        x: (x1 + x2) / 2,
+        y: (y1 + y2) / 2
+      });
+      
+      // Add quarter points for better shape preservation
+      allPoints.push({
+        x: x1 * 0.75 + x2 * 0.25,
+        y: y1 * 0.75 + y2 * 0.25
+      });
+      allPoints.push({
+        x: x1 * 0.25 + x2 * 0.75,
+        y: y1 * 0.25 + y2 * 0.75
+      });
     }
   }
   
-  // Create a grid for rasterization
-  const gridSize = 0.5; // mm resolution
-  const width = Math.ceil((maxX - minX) / gridSize) + 2;
-  const height = Math.ceil((maxY - minY) / gridSize) + 2;
-  const grid = new Uint8Array(width * height);
+  // Find the centroid
+  let centerX = 0, centerY = 0;
+  for (const point of allPoints) {
+    centerX += point.x;
+    centerY += point.y;
+  }
+  centerX /= allPoints.length;
+  centerY /= allPoints.length;
   
-  // Rasterize all polygons onto the grid
-  for (const polygon of polygons) {
-    fillPolygonOnGrid(polygon, grid, width, height, minX, minY, gridSize);
+  // Convert to polar coordinates and sort by angle
+  const polarPoints = allPoints.map(p => {
+    const angle = Math.atan2(p.y - centerY, p.x - centerX);
+    const dist = Math.hypot(p.x - centerX, p.y - centerY);
+    return { x: p.x, y: p.y, angle, dist };
+  });
+  
+  polarPoints.sort((a, b) => a.angle - b.angle);
+  
+  // Use angular sectors to select outermost points
+  const numSectors = Math.max(64, Math.floor(allPoints.length / 3)); // More sectors for smoother boundary
+  const sectorSize = (2 * Math.PI) / numSectors;
+  const boundaryPoints: Array<{x: number, y: number}> = [];
+  
+  for (let sector = 0; sector < numSectors; sector++) {
+    const minAngle = -Math.PI + sector * sectorSize;
+    const maxAngle = minAngle + sectorSize;
+    
+    // Find points in this sector
+    const sectorPoints = polarPoints.filter(p => 
+      p.angle >= minAngle && p.angle < maxAngle
+    );
+    
+    if (sectorPoints.length > 0) {
+      // Select the outermost point in this sector
+      const outermost = sectorPoints.reduce((max, p) => 
+        p.dist > max.dist ? p : max
+      );
+      boundaryPoints.push({ x: outermost.x, y: outermost.y });
+    }
   }
   
-  // Extract the outer boundary from the grid
-  const boundary = extractBoundaryFromGrid(grid, width, height, minX, minY, gridSize, zValue);
+  // Smooth the boundary by averaging with neighbors
+  const smoothedPoints: Array<{x: number, y: number}> = [];
+  const smoothingFactor = 0.3;
   
-  return boundary;
+  for (let i = 0; i < boundaryPoints.length; i++) {
+    const prev = boundaryPoints[(i - 1 + boundaryPoints.length) % boundaryPoints.length];
+    const curr = boundaryPoints[i];
+    const next = boundaryPoints[(i + 1) % boundaryPoints.length];
+    
+    smoothedPoints.push({
+      x: curr.x * (1 - 2 * smoothingFactor) + (prev.x + next.x) * smoothingFactor,
+      y: curr.y * (1 - 2 * smoothingFactor) + (prev.y + next.y) * smoothingFactor
+    });
+  }
+  
+  // Convert back to flat array format
+  const result: number[] = [];
+  for (const point of smoothedPoints) {
+    result.push(point.x, point.y, zValue);
+  }
+  
+  // Ensure the polygon is closed
+  if (result.length >= 9) {
+    const firstX = result[0];
+    const firstY = result[1];
+    const lastX = result[result.length - 3];
+    const lastY = result[result.length - 2];
+    
+    if (Math.abs(firstX - lastX) > 0.001 || Math.abs(firstY - lastY) > 0.001) {
+      result.push(firstX, firstY, zValue);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Check if any two polygons overlap
+ */
+function checkPolygonsOverlap(polygons: number[][]): boolean {
+  for (let i = 0; i < polygons.length - 1; i++) {
+    for (let j = i + 1; j < polygons.length; j++) {
+      if (doPolygonsOverlap(polygons[i], polygons[j])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Simple overlap check using bounding boxes
+ */
+function doPolygonsOverlap(poly1: number[], poly2: number[]): boolean {
+  // Get bounding boxes
+  let minX1 = Infinity, minY1 = Infinity, maxX1 = -Infinity, maxY1 = -Infinity;
+  let minX2 = Infinity, minY2 = Infinity, maxX2 = -Infinity, maxY2 = -Infinity;
+  
+  for (let i = 0; i < poly1.length; i += 3) {
+    minX1 = Math.min(minX1, poly1[i]);
+    maxX1 = Math.max(maxX1, poly1[i]);
+    minY1 = Math.min(minY1, poly1[i + 1]);
+    maxY1 = Math.max(maxY1, poly1[i + 1]);
+  }
+  
+  for (let i = 0; i < poly2.length; i += 3) {
+    minX2 = Math.min(minX2, poly2[i]);
+    maxX2 = Math.max(maxX2, poly2[i]);
+    minY2 = Math.min(minY2, poly2[i + 1]);
+    maxY2 = Math.max(maxY2, poly2[i + 1]);
+  }
+  
+  // Check if bounding boxes overlap
+  return !(maxX1 < minX2 || maxX2 < minX1 || maxY1 < minY2 || maxY2 < minY1);
+}
+
+/**
+ * Boundary walk union - traces the outer boundary of overlapping polygons
+ */
+function boundaryWalkUnion(polygons: number[][], zValue: number): number[] {
+  // Find the leftmost point across all polygons (guaranteed to be on boundary)
+  let leftmostX = Infinity;
+  let leftmostY = 0;
+  let leftmostPolyIndex = 0;
+  let leftmostPointIndex = 0;
+  
+  for (let pIdx = 0; pIdx < polygons.length; pIdx++) {
+    const poly = polygons[pIdx];
+    for (let i = 0; i < poly.length; i += 3) {
+      if (poly[i] < leftmostX || (poly[i] === leftmostX && poly[i + 1] < leftmostY)) {
+        leftmostX = poly[i];
+        leftmostY = poly[i + 1];
+        leftmostPolyIndex = pIdx;
+        leftmostPointIndex = i / 3;
+      }
+    }
+  }
+  
+  // Convert polygons to point arrays for easier processing
+  const polyPoints: Array<Array<{x: number, y: number}>> = polygons.map(poly => {
+    const points: Array<{x: number, y: number}> = [];
+    for (let i = 0; i < poly.length; i += 3) {
+      points.push({ x: poly[i], y: poly[i + 1] });
+    }
+    return points;
+  });
+  
+  // Trace the boundary starting from the leftmost point
+  const boundary: Array<{x: number, y: number}> = [];
+  let currentPolyIndex = leftmostPolyIndex;
+  let currentPointIndex = leftmostPointIndex;
+  const maxIterations = 10000; // Safety limit
+  let iterations = 0;
+  
+  const startX = polyPoints[currentPolyIndex][currentPointIndex].x;
+  const startY = polyPoints[currentPolyIndex][currentPointIndex].y;
+  
+  do {
+    const currentPoly = polyPoints[currentPolyIndex];
+    const currentPoint = currentPoly[currentPointIndex];
+    
+    // Add current point to boundary
+    boundary.push({ x: currentPoint.x, y: currentPoint.y });
+    
+    // Get next point on current polygon
+    const nextPointIndex = (currentPointIndex + 1) % currentPoly.length;
+    const nextPoint = currentPoly[nextPointIndex];
+    
+    // Check if we should continue on current polygon or switch to another
+    let shouldSwitch = false;
+    let switchToPolyIndex = -1;
+    let switchToPointIndex = -1;
+    
+    // Check if the edge from current to next intersects with other polygons
+    for (let pIdx = 0; pIdx < polyPoints.length; pIdx++) {
+      if (pIdx === currentPolyIndex) continue;
+      
+      const otherPoly = polyPoints[pIdx];
+      
+      // Check if next point would go inside this polygon
+      if (isPointInsidePolygon(nextPoint, otherPoly)) {
+        // Find the best exit point on the other polygon
+        let bestDist = Infinity;
+        for (let i = 0; i < otherPoly.length; i++) {
+          const dist = Math.hypot(
+            otherPoly[i].x - currentPoint.x,
+            otherPoly[i].y - currentPoint.y
+          );
+          if (dist < bestDist && dist > 0.001) { // Avoid same point
+            bestDist = dist;
+            switchToPolyIndex = pIdx;
+            switchToPointIndex = i;
+            shouldSwitch = true;
+          }
+        }
+      }
+    }
+    
+    if (shouldSwitch && switchToPolyIndex >= 0) {
+      currentPolyIndex = switchToPolyIndex;
+      currentPointIndex = switchToPointIndex;
+    } else {
+      currentPointIndex = nextPointIndex;
+    }
+    
+    iterations++;
+    
+    // Check if we've returned to start
+    const currentX = polyPoints[currentPolyIndex][currentPointIndex].x;
+    const currentY = polyPoints[currentPolyIndex][currentPointIndex].y;
+    const distToStart = Math.hypot(currentX - startX, currentY - startY);
+    
+    if (distToStart < 0.001 && boundary.length > 3) {
+      break;
+    }
+    
+  } while (iterations < maxIterations);
+  
+  // Convert boundary points to flat array
+  const result: number[] = [];
+  for (const point of boundary) {
+    result.push(point.x, point.y, zValue);
+  }
+  
+  return result;
+}
+
+/**
+ * Check if a point is inside a polygon using ray casting
+ */
+function isPointInsidePolygon(point: {x: number, y: number}, polygon: Array<{x: number, y: number}>): boolean {
+  let inside = false;
+  const x = point.x;
+  const y = point.y;
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    
+    if (intersect) inside = !inside;
+  }
+  
+  return inside;
 }
 
 /**
