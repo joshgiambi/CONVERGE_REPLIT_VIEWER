@@ -640,12 +640,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (payload.predictionEnabled) {
         console.log("Next slice prediction is enabled, predicting contours for adjacent slices");
         
-        // Get the final contour on this slice (either merged or new)
-        let finalContour = mergedWithContour;
-        if (!finalContour) {
-          // Find the contour we just created
-          finalContour = structure.contours[structure.contours.length - 1];
-        }
+        // Get the final contour on this slice
+        // Find the contour we just created
+        const finalContour = structure.contours[structure.contours.length - 1];
         
         if (finalContour && finalContour.points && finalContour.points.length > 0) {
           // Calculate next slice positions (assuming 3mm slice spacing as typical)
@@ -2422,25 +2419,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     e.preventDefault();
     e.stopPropagation();
 
-    // ZOOM DISABLED FOR DEBUGGING
-    /*
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
       setZoom((prev) => Math.max(0.1, Math.min(5, prev * zoomFactor)));
     } else {
-    */
       // Regular scroll for slice navigation
       if (e.deltaY > 0) {
         goToNext();
       } else {
         goToPrevious();
       }
-    //}
+    }
   };
 
-  // ZOOM FUNCTIONS DISABLED FOR DEBUGGING
-  /*
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(5, prev * 1.2));
   };
@@ -2454,10 +2446,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     setPanX(0);
     setPanY(0);
   };
-  */
 
-  // ZOOM EXPOSURE DISABLED FOR DEBUGGING
-  /*
   // Expose zoom functions to parent component via imperative handle
   useEffect(() => {
     // Always expose zoom functions for toolbar access
@@ -2471,7 +2460,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       delete (window as any).currentViewerZoom;
     };
   }, []);
-  */
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
