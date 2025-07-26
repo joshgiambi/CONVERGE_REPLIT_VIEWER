@@ -61,6 +61,7 @@ interface ContourEditToolbarProps {
   }>;
   onTargetStructureSelect?: (structureId: number | null) => void;
   seriesId?: number;
+  imageMetadata?: any;
 }
 
 export function ContourEditToolbar({ 

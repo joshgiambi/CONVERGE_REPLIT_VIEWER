@@ -45,6 +45,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
+  const [imageMetadata, setImageMetadata] = useState<any>(null);
   
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
@@ -512,6 +513,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 onSecondarySeriesSelect={setSecondarySeriesId}
                 onFusionOpacityChange={setFusionOpacity}
                 hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
+                onImageMetadataChange={setImageMetadata}
               />
               
               {/* Structure Tags on Right Side */}
@@ -606,6 +608,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             console.log('Target structure selected:', structureId);
           }}
           seriesId={selectedSeries?.id}
+          imageMetadata={imageMetadata}
         />
       )}
 

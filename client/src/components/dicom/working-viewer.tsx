@@ -125,6 +125,7 @@ interface WorkingViewerProps {
   onSecondarySeriesSelect?: (id: number | null) => void;
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
+  onImageMetadataChange?: (metadata: any) => void;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -151,6 +152,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onSecondarySeriesSelect,
     onFusionOpacityChange,
     hasSecondarySeriesForFusion,
+    onImageMetadataChange,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -168,6 +170,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
+  const [imageMetadata, setImageMetadata] = useState<any>(null);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -545,7 +548,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
@@ -1951,6 +1953,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const metadata = await response.json();
         console.log("Image metadata:", metadata);
         setImageMetadata(metadata);
+        
+        // Notify parent component of metadata change
+        if (onImageMetadataChange) {
+          onImageMetadataChange(metadata);
+        }
 
         // Frame of Reference UIDs are verified during data import
       }
