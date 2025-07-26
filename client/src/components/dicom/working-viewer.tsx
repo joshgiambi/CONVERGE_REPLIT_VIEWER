@@ -157,12 +157,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
+  const displayCurrentImageRef = useRef<() => Promise<void>>();
+  
   const scheduleRender = useCallback(() => {
     if (needsRenderRef.current) return;
     needsRenderRef.current = true;
     requestAnimationFrame(async () => {
       needsRenderRef.current = false;
-      await displayCurrentImage();
+      if (displayCurrentImageRef.current) {
+        await displayCurrentImageRef.current();
+      }
     });
   }, []);
   
@@ -1455,7 +1459,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       return () => clearTimeout(timeoutId);
     }
-  }, [images, currentIndex, currentWindowLevel, isPreloading]);
+  }, [images, currentIndex, isPreloading]); // Removed currentWindowLevel from dependencies to prevent infinite loop
+
+  // Separate effect for window level changes - only re-render, don't reload metadata
+  useEffect(() => {
+    if (images.length > 0 && !isPreloading) {
+      scheduleRender();
+    }
+  }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading]);
 
   const loadImages = async () => {
     try {
@@ -1767,9 +1778,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
-      
-      // Debug: Check if ctTransform was populated by render16BitImage
-      console.log('🔍 After render16BitImage, ctTransform:', ctTransform.current);
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
@@ -2326,6 +2334,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       onSlicePositionChange(slicePosition);
     }
   }, [currentIndex, images, onSlicePositionChange]);
+  
+  // Set the displayCurrentImageRef to point to displayCurrentImage
+  useEffect(() => {
+    displayCurrentImageRef.current = displayCurrentImage;
+  });
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Check if any drawing tool is active - if so, skip pan functionality
