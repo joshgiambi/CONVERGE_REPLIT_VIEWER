@@ -131,11 +131,25 @@ export default function PenToolV2({
 
   // Determine operation mode based on first click context
   const determineOperationMode = useCallback(async (firstWorldPoint: Point): Promise<'union' | 'subtract' | 'new'> => {
-    const contours = getContoursAtCurrentSlice();
-    if (contours.length === 0) return 'new';
+    if (!selectedStructure || !rtStructures?.structures) return 'new';
     
-    // Check if first point is inside any existing contour
-    for (const contour of contours) {
+    // Find the selected structure
+    const structure = rtStructures.structures.find(
+      (s: any) => s.roiNumber === selectedStructure
+    );
+    
+    if (!structure || !structure.contours) return 'new';
+    
+    // Get contours for selected structure at current slice
+    const tolerance = 1.5;
+    const contoursAtSlice = structure.contours.filter(
+      (c: any) => Math.abs(c.slicePosition - currentSlicePosition) <= tolerance
+    );
+    
+    if (contoursAtSlice.length === 0) return 'new';
+    
+    // Check if first point is inside any existing contour of selected structure
+    for (const contour of contoursAtSlice) {
       const isInside = await isPointInContour([firstWorldPoint.x, firstWorldPoint.y], contour.points);
       if (isInside) {
         console.log('🔷 First click INSIDE existing contour → UNION mode');
@@ -145,7 +159,7 @@ export default function PenToolV2({
     
     console.log('🔷 First click OUTSIDE existing contours → Will check for crossing when complete');
     return 'subtract'; // Will be refined when polygon is complete
-  }, [getContoursAtCurrentSlice]);
+  }, [selectedStructure, rtStructures, currentSlicePosition]);
 
   // Check if point is near first vertex (for closing polygon)
   const isNearFirstVertex = useCallback((point: Point): boolean => {
@@ -457,7 +471,7 @@ export default function PenToolV2({
       
       // Draw preview line to mouse
       if (mousePosition && vertices.length > 0) {
-        ctx.setLineDash([5, 3]); // Dashed preview line
+        // Solid preview line
         ctx.lineTo(mousePosition.x, mousePosition.y);
         
         // Show close indicator if near first vertex
@@ -467,18 +481,19 @@ export default function PenToolV2({
       }
       
       ctx.stroke();
-      ctx.setLineDash([]); // Reset to solid line
       
-      // Only draw pulsating first vertex when near closing
-      if (vertices.length >= 3 && mousePosition && isNearFirstVertex(mousePosition)) {
-        // Highlight first vertex for closing with pulsing effect
+      // Always draw pulsating first vertex
+      if (vertices.length > 0) {
         const firstVertex = vertices[0];
         const pulseRadius = 4 + Math.sin(Date.now() / 200) * 2;
         ctx.beginPath();
         ctx.arc(firstVertex.x, firstVertex.y, pulseRadius, 0, 2 * Math.PI);
-        ctx.fillStyle = '#ffff00'; // Yellow highlight
+        
+        // Yellow when near closing, structure color otherwise
+        const isNearClosing = vertices.length >= 3 && mousePosition && isNearFirstVertex(mousePosition);
+        ctx.fillStyle = isNearClosing ? '#ffff00' : structureColor;
         ctx.fill();
-        ctx.strokeStyle = '#000000';
+        ctx.strokeStyle = isNearClosing ? '#000000' : '#ffffff';
         ctx.lineWidth = 2;
         ctx.stroke();
       }
