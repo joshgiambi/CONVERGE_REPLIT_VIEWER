@@ -75,7 +75,8 @@ export function ContourEditToolbar({
   onContourUpdate,
   availableStructures = [],
   onTargetStructureSelect,
-  seriesId
+  seriesId,
+  imageMetadata
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
