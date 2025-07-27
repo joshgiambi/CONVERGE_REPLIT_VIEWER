@@ -257,6 +257,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     z: 0    // Will be set to current slice index
   });
   
+  // Active tool state
+  const [activeTool, setActiveTool] = useState<'pan' | 'crosshair'>('pan');
+  
   // Update current slice when crosshair Z position changes
   useEffect(() => {
     if (crosshairPosition.z !== currentIndex && crosshairPosition.z >= 0 && crosshairPosition.z < images.length) {
@@ -274,7 +277,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log('Setting MPR layout mode to:', mode);
       setMprLayoutMode(mode);
     },
-    getMprLayoutMode: () => mprLayoutMode
+    getMprLayoutMode: () => mprLayoutMode,
+    setActiveTool: (tool: 'pan' | 'crosshair') => {
+      console.log('Setting active tool to:', tool);
+      setActiveTool(tool);
+    }
   }), [mprLayoutMode]);
   
   // Initialize GPU acceleration when enabled
@@ -2535,9 +2542,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.save();
       
       // Draw crosshair lines
-      ctx.strokeStyle = 'yellow';
+      ctx.strokeStyle = '#00ff00'; // Green color
       ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.8;
+      ctx.globalAlpha = 0.6; // Semi-transparent
+      ctx.setLineDash([5, 5]); // Dashed line
       
       // Vertical line at center of image
       const centerX = x + scaledWidth / 2;
@@ -3033,11 +3041,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (e.button === 0 && !isDrawingToolActive) {
-      // Left click for pan (disabled during drawing mode)
-      setIsDragging(true);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setLastPanX(panX);
-      setLastPanY(panY);
+      // Left click
+      if (activeTool === 'crosshair' && canvasRef.current) {
+        // In crosshair mode, update crosshair position
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = (e.clientX - rect.left - panX) / zoom;
+        const y = (e.clientY - rect.top - panY) / zoom;
+        
+        // Update crosshair position in pixel coordinates
+        setCrosshairPosition(prev => ({
+          ...prev,
+          x: Math.round(x),
+          y: Math.round(y)
+        }));
+        
+        console.log('🎯 Updated crosshair position:', { x: Math.round(x), y: Math.round(y) });
+      } else {
+        // Pan mode
+        setIsDragging(true);
+        setDragStart({ x: e.clientX, y: e.clientY });
+        setLastPanX(panX);
+        setLastPanY(panY);
+      }
     } else if (e.button === 2 && !isDrawingToolActive) {
       // Right click for window/level (disabled during drawing mode)
       const startX = e.clientX;

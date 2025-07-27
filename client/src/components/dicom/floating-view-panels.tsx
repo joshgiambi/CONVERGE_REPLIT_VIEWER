@@ -127,9 +127,10 @@ export function FloatingViewPanels({
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair
-    ctx.strokeStyle = 'yellow';
+    ctx.strokeStyle = '#00ff00'; // Green color
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.6; // Semi-transparent
+    ctx.setLineDash([5, 5]); // Dashed line
     
     // Vertical line representing current axial slice
     const slicePositionNormalized = currentSliceIndex / images.length;
@@ -226,9 +227,10 @@ export function FloatingViewPanels({
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair
-    ctx.strokeStyle = 'yellow';
+    ctx.strokeStyle = '#00ff00'; // Green color
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.6; // Semi-transparent
+    ctx.setLineDash([5, 5]); // Dashed line
     
     // Vertical line representing current axial slice
     const slicePositionNormalized = currentSliceIndex / images.length;

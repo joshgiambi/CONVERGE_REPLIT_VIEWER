@@ -46,6 +46,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
+  const [activeTool, setActiveToolState] = useState<string>('pan');
   
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
@@ -201,9 +202,22 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const handlePanTool = () => setActiveTool('Pan');
+  const handlePanTool = () => {
+    setActiveTool('Pan');
+    setActiveToolState('pan');
+    if (workingViewerRef.current?.setActiveTool) {
+      workingViewerRef.current.setActiveTool('pan');
+    }
+  };
   const handleMeasureTool = () => setActiveTool('Length');
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
+  
+  const handleCrosshairTool = () => {
+    setActiveToolState('crosshair');
+    if (workingViewerRef.current?.setActiveTool) {
+      workingViewerRef.current.setActiveTool('crosshair');
+    }
+  };
 
   const handleRotate = () => {
     try {
@@ -590,6 +604,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               console.error('❌ workingViewerRef not available or methods missing!');
             }
           }}
+          onCrosshairTool={handleCrosshairTool}
         />
       )}
 

@@ -74,9 +74,10 @@ export function MPRThreePaneView({
     destCtx.drawImage(axialCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair lines on axial view
-    destCtx.strokeStyle = 'yellow';
+    destCtx.strokeStyle = '#00ff00'; // Green color
     destCtx.lineWidth = 1;
-    destCtx.globalAlpha = 0.8;
+    destCtx.globalAlpha = 0.6; // Semi-transparent
+    destCtx.setLineDash([5, 5]); // Dashed line
     
     // Vertical line (sagittal position)
     const sagittalX = x + (scaledWidth * (crosshairPosition.x / 512));
@@ -197,9 +198,10 @@ export function MPRThreePaneView({
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair lines on sagittal view
-    ctx.strokeStyle = 'yellow';
+    ctx.strokeStyle = '#00ff00'; // Green color
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.6; // Semi-transparent
+    ctx.setLineDash([5, 5]); // Dashed line
     
     // Vertical line representing current axial slice (Z position)
     const slicePositionNormalized = crosshairPosition.z / images.length;
@@ -322,9 +324,10 @@ export function MPRThreePaneView({
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair lines on coronal view
-    ctx.strokeStyle = 'yellow';
+    ctx.strokeStyle = '#00ff00'; // Green color
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.6; // Semi-transparent
+    ctx.setLineDash([5, 5]); // Dashed line
     
     // Vertical line representing current axial slice (Z position)
     const slicePositionNormalized = crosshairPosition.z / images.length;

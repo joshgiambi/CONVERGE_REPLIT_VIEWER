@@ -14,7 +14,8 @@ import {
   HelpCircle,
   Keyboard,
   Layers,
-  LayoutGrid
+  LayoutGrid,
+  Crosshair
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -33,6 +34,7 @@ interface ViewerToolbarProps {
   isContourEditActive?: boolean;
   showFusionButton?: boolean;
   onThreePaneMPR?: () => void;
+  onCrosshairTool?: () => void;
 }
 
 export function ViewerToolbar({
@@ -50,7 +52,8 @@ export function ViewerToolbar({
   windowLevel,
   isContourEditActive,
   showFusionButton,
-  onThreePaneMPR
+  onThreePaneMPR,
+  onCrosshairTool
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -67,6 +70,9 @@ export function ViewerToolbar({
     { id: 'zoom-out', icon: ZoomOut, label: 'Zoom Out', action: onZoomOut },
     { id: 'reset-zoom', icon: Maximize2, label: 'Fit to Window', action: onResetZoom },
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
+    ...(onCrosshairTool ? [
+      { id: 'crosshair', icon: Crosshair, label: 'Crosshair', action: onCrosshairTool, selectable: true }
+    ] : []),
     { id: 'separator' },
     { id: 'contour-edit', icon: Edit3, label: 'Contour Edit', action: onContourEdit },
     { id: 'contour-settings', icon: Settings, label: 'Contour Settings', action: onContourSettings },
