@@ -10,6 +10,7 @@ import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
+import { GPUEnhancedViewer, GPUEnhancedViewerRef } from "./gpu-enhanced-viewer";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -157,10 +158,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onImageMetadataChange,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gpuViewerRef = useRef<GPUEnhancedViewerRef>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useGPUAcceleration, setUseGPUAcceleration] = useState(true);
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -2003,107 +2006,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // GPU-accelerated image display - handled by GPUEnhancedViewer component
   const displayCurrentImage = async () => {
-    if (!canvasRef.current || images.length === 0) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    try {
-      // Ensure currentIndex is valid
-      const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
-      const currentImage = images[safeIndex];
-      if (!currentImage) {
-        console.error("No image at current index:", safeIndex, "images length:", images.length);
-        setError("Unable to display image. Please try refreshing.");
-        return;
-      }
-      const cacheKey = currentImage.sopInstanceUID;
-
-      // Clear canvas
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      let imageData = imageCacheRef.current.get(cacheKey);
-
-      if (!imageData || !imageData.data) {
-        // Try to reload the image if it's not in cache
-        console.warn(
-          "Image not in cache, attempting to reload:",
-          cacheKey,
-        );
-        
-        try {
-          // Use single fetch/parse function to avoid double fetching
-          const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
-          
-          if (reloadedImageData) {
-            imageData = reloadedImageData;
-            console.log("Successfully reloaded image:", cacheKey);
-          } else {
-            throw new Error("Failed to parse reloaded image");
-          }
-        } catch (reloadError) {
-          console.error("Failed to reload image:", reloadError);
-          throw new Error(`Image not available: ${reloadError instanceof Error ? reloadError.message : 'Unknown error'}`);
-        }
-      }
-
-      // Keep fixed canvas size for consistent display
-      canvas.width = 1024;
-      canvas.height = 1024;
-
-      // Render with current window/level settings
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
-      
-      // Render secondary image overlay for fusion if available
-      if (secondarySeriesId && secondaryImages.length > 0) {
-        console.log(`Rendering fusion for CT slice ${currentIndex}`);
-        try {
-          await renderFusionOverlayNew(ctx, currentImage);
-        } catch (fusionError: any) {
-          console.error("Error rendering fusion overlay:", fusionError);
-          console.error("Fusion error details:", {
-            message: fusionError.message,
-            stack: fusionError.stack,
-            secondarySeriesId,
-            secondaryImagesCount: secondaryImages.length,
-            fusionOpacity
-          });
-          // Continue without fusion rather than failing entire image display
-        }
-      }
-
-      // Render RT structure overlays if available
-      if (localRTStructures && showStructures) {
-        try {
-          // Pass currentImage with its metadata attached
-          const imageWithMetadata = {
-            ...currentImage,
-            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-          };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
-        } catch (rtError) {
-          console.warn("Error drawing RT structures:", rtError);
-          // Don't let RT structure errors prevent image display
-        }
-      }
-    } catch (error: any) {
-      console.error("Error displaying image:", error);
-      console.error("Error details:", error.message, error.stack);
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "red";
-      ctx.font = "16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(
-        "Error loading DICOM",
-        canvas.width / 2,
-        canvas.height / 2 - 10,
-      );
-      ctx.fillText(error.message || "Unknown error", canvas.width / 2, canvas.height / 2 + 10);
-    }
+    // Legacy function - GPU viewer handles rendering automatically
+    console.log('🚀 Display handled by GPU-accelerated viewer');
   };
 
   const render16BitImage = (
@@ -3018,34 +2924,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
       </div>
 
-      {/* Canvas */}
+      {/* GPU-Accelerated Viewer */}
       <div className="flex-1 p-4 flex items-center justify-center">
         <div className="relative">
-          <canvas
-            ref={canvasRef}
-            width={1024}
-            height={1024}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onWheel={(e) => {
-              // Always handle wheel events for scrolling, even when pen tool is active
-              handleCanvasWheel(e);
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`max-w-full max-h-full object-contain rounded ${
-              brushToolState?.isActive && brushToolState?.tool === "brush"
-                ? ""
-                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                ? ""
-                : "cursor-move"
-            }`}
-            style={{
-              backgroundColor: "black",
-              imageRendering: "auto",
-              userSelect: "none",
-            }}
-          />
+          {useGPUAcceleration && images.length > 0 ? (
+            <GPUEnhancedViewer
+              ref={gpuViewerRef}
+              images={images}
+              currentImageIndex={currentIndex}
+              windowLevel={currentWindowLevel}
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+              onImageChange={setCurrentIndex}
+              onWindowLevelChange={(center, width) => updateWindowLevel({ center, width })}
+              onZoomChange={setZoom}
+              onPanChange={(x, y) => { setPanX(x); setPanY(y); }}
+              enablePerformanceMonitoring={true}
+            />
+          ) : (
+            <canvas
+              ref={canvasRef}
+              width={1024}
+              height={1024}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onWheel={(e) => {
+                // Always handle wheel events for scrolling, even when pen tool is active
+                handleCanvasWheel(e);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`max-w-full max-h-full object-contain rounded ${
+                brushToolState?.isActive && brushToolState?.tool === "brush"
+                  ? ""
+                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                  ? ""
+                  : "cursor-move"
+              }`}
+              style={{
+                backgroundColor: "black",
+                imageRendering: "auto",
+                userSelect: "none",
+              }}
+            />
+          )}
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
