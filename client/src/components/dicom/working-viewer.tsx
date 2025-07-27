@@ -3086,21 +3086,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       <div className="flex-1 p-4 flex items-center justify-center relative">
         {mprLayoutMode === 'three-pane' && images.length > 0 ? (
           <MPRThreePaneView
+            axialCanvas={canvasRef.current}
+            currentSliceIndex={currentIndex}
             images={images}
-            currentIndex={currentIndex}
-            windowLevel={currentWindowLevel}
-            rtStructures={rtStructures}
-            selectedStructure={selectedForEdit}
-            onViewChange={(view) => setActiveView(view)}
-            onMaximize={(view) => {
+            pixelData={pixelDataCache.get(currentIndex) || null}
+            windowWidth={currentWindowLevel.width}
+            windowCenter={currentWindowLevel.center}
+            onViewMaximize={(view: 'axial' | 'sagittal' | 'coronal') => {
               // When maximizing a view, switch to single view mode
               setMprLayoutMode('single');
               setActiveView(view);
             }}
-            onRestore={() => {
-              // When restoring, go back to floating mode
-              setMprLayoutMode('floating');
-            }}
+            pixelDataCache={pixelDataCache}
           />
         ) : (
           <div className="relative w-full h-full" ref={canvasContainerRef}>

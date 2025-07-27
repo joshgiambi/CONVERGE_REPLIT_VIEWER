@@ -8,7 +8,7 @@ export interface MPRThreePaneViewProps {
   axialCanvas: HTMLCanvasElement | null;
   currentSliceIndex: number;
   images: any[];
-  pixelData: Float32Array | null;
+  pixelData: Uint16Array | null;
   windowWidth: number;
   windowCenter: number;
   onViewMaximize: (view: 'axial' | 'sagittal' | 'coronal') => void;
@@ -70,7 +70,20 @@ export function MPRThreePaneView({
 
   // Reconstruct sagittal view
   useEffect(() => {
-    if (!sagittalCanvasRef.current || images.length === 0 || !pixelDataCache.size) return;
+    console.log('🔍 MPR Sagittal reconstruction triggered:', {
+      hasCanvas: !!sagittalCanvasRef.current,
+      imagesLength: images.length,
+      pixelDataCacheSize: pixelDataCache.size
+    });
+    
+    if (!sagittalCanvasRef.current || images.length === 0 || !pixelDataCache.size) {
+      console.log('❌ MPR Sagittal reconstruction early return:', {
+        canvas: !sagittalCanvasRef.current ? 'missing' : 'present',
+        images: images.length === 0 ? 'empty' : `${images.length} images`,
+        cache: pixelDataCache.size === 0 ? 'empty' : `${pixelDataCache.size} entries`
+      });
+      return;
+    }
 
     const canvas = sagittalCanvasRef.current;
     const container = canvas.parentElement;
@@ -98,7 +111,18 @@ export function MPRThreePaneView({
       middleColumn
     );
 
-    if (!sagittalData) return;
+    console.log('📊 MPR Sagittal data generated:', {
+      hasData: !!sagittalData,
+      width: sagittalData?.width,
+      height: sagittalData?.height,
+      pixelDataLength: sagittalData?.pixelData?.length,
+      metadata: sagittalData?.metadata
+    });
+
+    if (!sagittalData) {
+      console.log('❌ No sagittal data generated');
+      return;
+    }
 
     // Create image data
     const imageData = ctx.createImageData(sagittalData.width, sagittalData.height);
@@ -148,7 +172,20 @@ export function MPRThreePaneView({
 
   // Reconstruct coronal view
   useEffect(() => {
-    if (!coronalCanvasRef.current || images.length === 0 || !pixelDataCache.size) return;
+    console.log('🔍 MPR Coronal reconstruction triggered:', {
+      hasCanvas: !!coronalCanvasRef.current,
+      imagesLength: images.length,
+      pixelDataCacheSize: pixelDataCache.size
+    });
+    
+    if (!coronalCanvasRef.current || images.length === 0 || !pixelDataCache.size) {
+      console.log('❌ MPR Coronal reconstruction early return:', {
+        canvas: !coronalCanvasRef.current ? 'missing' : 'present',
+        images: images.length === 0 ? 'empty' : `${images.length} images`,
+        cache: pixelDataCache.size === 0 ? 'empty' : `${pixelDataCache.size} entries`
+      });
+      return;
+    }
 
     const canvas = coronalCanvasRef.current;
     const container = canvas.parentElement;
@@ -176,7 +213,18 @@ export function MPRThreePaneView({
       middleRow
     );
 
-    if (!coronalData) return;
+    console.log('📊 MPR Coronal data generated:', {
+      hasData: !!coronalData,
+      width: coronalData?.width,
+      height: coronalData?.height,
+      pixelDataLength: coronalData?.pixelData?.length,
+      metadata: coronalData?.metadata
+    });
+
+    if (!coronalData) {
+      console.log('❌ No coronal data generated');
+      return;
+    }
 
     // Create image data
     const imageData = ctx.createImageData(coronalData.width, coronalData.height);
