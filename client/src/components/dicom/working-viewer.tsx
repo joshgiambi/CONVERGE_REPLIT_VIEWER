@@ -239,6 +239,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
   const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
   
+  // Expose methods to parent component via ref
+  useImperativeHandle(ref, () => ({
+    setMprLayoutMode: (mode: 'single' | 'floating' | 'three-pane') => {
+      console.log('Setting MPR layout mode to:', mode);
+      setMprLayoutMode(mode);
+    },
+    getMprLayoutMode: () => mprLayoutMode
+  }), [mprLayoutMode]);
+  
   // Populate pixelDataCache when MPR mode is activated
   useEffect(() => {
     if (mprLayoutMode !== 'three-pane' || images.length === 0) return;
