@@ -8,6 +8,7 @@ import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
+import { SAMSegmentationTool } from "./sam-segmentation-tool";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
 import { FloatingViewPanels } from "./floating-view-panels";
@@ -411,11 +412,72 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
 
   // Save contour updates to server
-  const saveContourUpdates = async (updatedStructures: any, action?: string) => {
+  const saveContourUpdates = async (updatedStructures: any, action?: string, predictionEnabled?: boolean) => {
     if (!seriesId || isSaving) return;
     
     setIsSaving(true);
     try {
+      // Generate predictions if enabled and action is a contour modification
+      if (predictionEnabled && (action === 'brush_stroke' || action === 'pen_stroke' || action === 'add_contour' || action === 'grow_contour')) {
+        console.log('Generating next slice predictions...');
+        
+        // Find the currently edited structure and contour
+        const currentSlice = images[currentIndex]?.parsedSliceLocation || images[currentIndex]?.parsedZPosition || 0;
+        
+        // Generate predictions for adjacent slices
+        for (const structure of updatedStructures.structures) {
+          // Find the contour on the current slice
+          const currentContour = structure.contours?.find((c: any) => 
+            Math.abs(c.slicePosition - currentSlice) < 0.5
+          );
+          
+          if (currentContour && currentContour.points && currentContour.points.length > 0) {
+            // Calculate adjacent slice positions (assuming ~3mm slice thickness)
+            const sliceThickness = 3.0; // mm
+            const adjacentSlices = [
+              currentSlice - sliceThickness,
+              currentSlice + sliceThickness
+            ];
+            
+            for (const targetSlice of adjacentSlices) {
+              // Check if there's already a contour on the target slice
+              const existingContour = structure.contours.find((c: any) => 
+                Math.abs(c.slicePosition - targetSlice) < 0.5
+              );
+              
+              // Only predict if no existing contour
+              if (!existingContour) {
+                try {
+                  const predictionResult = predictNextSliceContour({
+                    currentContour: currentContour.points,
+                    currentSlicePosition: currentSlice,
+                    targetSlicePosition: targetSlice,
+                    anatomicalRegion: 'head', // Could be determined from study description
+                    predictionMode: 'adaptive',
+                    confidenceThreshold: 0.7
+                  });
+                  
+                  // Add predicted contour if confidence is high enough
+                  if (predictionResult.confidence > 0.5) {
+                    structure.contours.push({
+                      slicePosition: targetSlice,
+                      points: predictionResult.predictedContour,
+                      numberOfPoints: predictionResult.predictedContour.length / 3,
+                      isPrediction: true, // Flag to indicate this is a prediction
+                      confidence: predictionResult.confidence
+                    });
+                    
+                    console.log(`Added prediction for slice ${targetSlice} with confidence ${predictionResult.confidence}`);
+                  }
+                } catch (error) {
+                  console.error('Error generating prediction:', error);
+                }
+              }
+            }
+          }
+        }
+      }
+      
       const response = await fetch(`/api/rt-structures/${seriesId}/contours`, {
         method: 'PUT',
         headers: {
@@ -506,7 +568,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         // Update local structures and save to server
         setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures, 'boolean_operation');
+        saveContourUpdates(updatedRTStructures, 'boolean_operation', brushToolState?.predictionEnabled);
         
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
@@ -601,7 +663,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_margin');
+      saveContourUpdates(updatedRTStructures, 'apply_margin', brushToolState?.predictionEnabled);
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -695,7 +757,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'grow_contour');
+      saveContourUpdates(updatedRTStructures, 'grow_contour', brushToolState?.predictionEnabled);
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -1206,7 +1268,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'pen_boolean_operation');
+      saveContourUpdates(updatedStructures, 'pen_boolean_operation', brushToolState?.predictionEnabled);
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
@@ -1215,7 +1277,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
       }
       // Save to server
-      saveContourUpdates(updatedStructures, 'pen_tool');
+      saveContourUpdates(updatedStructures, 'pen_tool', brushToolState?.predictionEnabled);
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
@@ -1283,7 +1345,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'merge_contours');
+      saveContourUpdates(updatedStructures, 'merge_contours', brushToolState?.predictionEnabled);
     } else if (payload.action === "subtract_contours") {
       // Handle boolean subtract operation (difference)
       const structure = updatedStructures.structures.find(
@@ -1316,13 +1378,81 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'subtract_contours');
+      saveContourUpdates(updatedStructures, 'subtract_contours', brushToolState?.predictionEnabled);
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
     } else if (payload.action === "apply_margin") {
       // Handle margin operation (Eclipse TPS style)
       handleMarginOperation(payload);
+    } else if (payload.action === "localizer") {
+      // Handle localizer - move view to contour centroid
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Find contour at current slice
+      const tolerance = 1.5;
+      const contour = structure.contours.find(
+        (c: any) =>
+          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
+      );
+      
+      if (!contour || !contour.points || contour.points.length < 3) {
+        console.log("No contour found at current slice for localizer");
+        return;
+      }
+
+      // Calculate centroid of the contour
+      let sumX = 0, sumY = 0, sumZ = 0;
+      const numPoints = contour.points.length / 3;
+      
+      for (let i = 0; i < contour.points.length; i += 3) {
+        sumX += contour.points[i];
+        sumY += contour.points[i + 1];
+        sumZ += contour.points[i + 2];
+      }
+      
+      const centroidX = sumX / numPoints;
+      const centroidY = sumY / numPoints;
+      const centroidZ = sumZ / numPoints;
+      
+      console.log(`Localizer centroid: (${centroidX.toFixed(2)}, ${centroidY.toFixed(2)}, ${centroidZ.toFixed(2)})`);
+      
+      // Convert world coordinates to screen coordinates
+      const currentImage = images[currentImageIndex];
+      if (!currentImage) return;
+      
+      // Get image metadata for coordinate transformation
+      const imagePosition = toNumberArray(currentImage.imagePosition);
+      const pixelSpacing = toNumberArray(currentImage.pixelSpacing);
+      const imageOrientation = toNumberArray(currentImage.imageOrientationPatient);
+      
+      // Calculate pixel coordinates
+      const dx = centroidX - imagePosition[0];
+      const dy = centroidY - imagePosition[1];
+      
+      // Apply orientation (assuming standard axial orientation)
+      const pixelX = dx / pixelSpacing[1];
+      const pixelY = dy / pixelSpacing[0];
+      
+      // Apply current zoom and pan to center on the centroid
+      const canvasCenter = 512; // Canvas is 1024x1024, center is 512
+      const targetPanX = canvasCenter - (pixelX * zoom);
+      const targetPanY = canvasCenter - (pixelY * zoom);
+      
+      // Update pan position
+      setPanX(targetPanX);
+      setPanY(targetPanY);
+      setLastPanX(targetPanX);
+      setLastPanY(targetPanY);
+      
+      // Force a render
+      scheduleRender();
+      
+      console.log(`Localizer: Moved view to centroid at pixel (${pixelX.toFixed(1)}, ${pixelY.toFixed(1)})`);
+      return; // Don't save this as a contour update
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       await handleBooleanOperation(payload);
@@ -1362,7 +1492,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-      saveContourUpdates(updatedStructures, 'delete_slice');
+      saveContourUpdates(updatedStructures, 'delete_slice', brushToolState?.predictionEnabled);
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(
@@ -1376,7 +1506,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared all contours for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_all');
+      saveContourUpdates(updatedStructures, 'clear_all', brushToolState?.predictionEnabled);
     } else if (payload.action === "interpolate") {
       // Handle interpolate missing slices
       const structure = updatedStructures.structures.find(
@@ -1444,7 +1574,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Interpolated missing slices for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'interpolate');
+      saveContourUpdates(updatedStructures, 'interpolate', brushToolState?.predictionEnabled);
     } else if (payload.action === "delete_nth_slice") {
       // Handle delete every nth slice
       const structure = updatedStructures.structures.find(
@@ -1466,7 +1596,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Deleted ${deletedCount} contours (every ${payload.nth} slice) for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'delete_nth_slice');
+      saveContourUpdates(updatedStructures, 'delete_nth_slice', brushToolState?.predictionEnabled);
     } else if (payload.action === "clear_below") {
       // Handle clear below current slice
       const structure = updatedStructures.structures.find(
@@ -1483,7 +1613,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours below slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_below');
+      saveContourUpdates(updatedStructures, 'clear_below', brushToolState?.predictionEnabled);
     } else if (payload.action === "clear_above") {
       // Handle clear above current slice
       const structure = updatedStructures.structures.find(
@@ -1500,7 +1630,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours above slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_above');
+      saveContourUpdates(updatedStructures, 'clear_above', brushToolState?.predictionEnabled);
     }
   };
 
@@ -2993,6 +3123,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const animate = (timestamp: number) => {
       setAnimationTime(timestamp);
       
+      // Trigger re-render to update the animated dashed borders
+      scheduleRender();
+      
       // Check if we need to keep animating (if there are predicted contours)
       const hasPredictedContours = rtStructures?.structures?.some((structure: any) =>
         structure.contours?.some((contour: any) => contour.isPredicted)
@@ -3430,6 +3563,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 panX={panX}
                 panY={panY}
                 imageMetadata={imageMetadata}
+              />
+            )}
+
+          {/* SAM Segmentation Tool overlay */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "sam" &&
+            selectedForEdit && (
+              <SAMSegmentationTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                imageMetadata={imageMetadata}
+                worldToCanvas={worldToCanvas}
+                canvasToWorld={canvasToWorld}
+                ctTransform={ctTransform}
               />
             )}
 
