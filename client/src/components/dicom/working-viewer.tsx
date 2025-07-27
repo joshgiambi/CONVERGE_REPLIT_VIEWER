@@ -10,6 +10,7 @@ import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
+import { FloatingViewPanels } from "./floating-view-panels";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -230,6 +231,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
+  
+  // Multi-planar reconstruction state
+  const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
+  const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
@@ -1774,7 +1779,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
-  const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
+  const parseDicomImage = async (arrayBuffer: ArrayBuffer, sopInstanceUID?: string) => {
     try {
       // Load dicom-parser if not already loaded
       if (!window.dicomParser) {
@@ -1806,6 +1811,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           pixelDataElement.dataOffset,
           pixelDataElement.length / 2,
         );
+        
+        // Cache raw pixel data for MPR if we have the sopInstanceUID
+        if (sopInstanceUID) {
+          const imageIndex = images.findIndex(img => img.sopInstanceUID === sopInstanceUID);
+          if (imageIndex >= 0) {
+            setPixelDataCache(prev => new Map(prev).set(imageIndex, rawPixelArray));
+          }
+        }
+        
         // Convert to Hounsfield Units
         const huPixelArray = new Float32Array(rawPixelArray.length);
         for (let i = 0; i < rawPixelArray.length; i++) {
@@ -1816,6 +1830,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           data: huPixelArray,
           width: cols,
           height: rows,
+          rawData: rawPixelArray, // Include raw data in return
+          rescaleSlope,
+          rescaleIntercept
         };
       } else {
         throw new Error("Only 16-bit images supported");
@@ -1839,7 +1856,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     const arrayBuffer = await response.arrayBuffer();
-    const imageData = await parseDicomImage(arrayBuffer);
+    const imageData = await parseDicomImage(arrayBuffer, sopInstanceUID);
     
     if (imageData) {
       imageCacheRef.current.set(sopInstanceUID, imageData);
@@ -1888,7 +1905,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             bytes[i] = binaryString.charCodeAt(i);
           }
           
-          const imageData = await parseDicomImage(bytes.buffer);
+          const imageData = await parseDicomImage(bytes.buffer, uid);
           if (imageData) {
             imageCacheRef.current.set(uid, imageData);
             results.set(uid, imageData);
@@ -3194,6 +3211,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
+            />
+          )}
+          
+          {/* Floating View Panels for MPR */}
+          {images.length > 0 && (
+            <FloatingViewPanels
+              axialCanvas={canvasRef.current}
+              currentSliceIndex={currentIndex}
+              images={images}
+              pixelData={pixelDataCache.get(currentIndex) || null}
+              windowWidth={currentWindowLevel.width}
+              windowCenter={currentWindowLevel.center}
+              activeView={activeView}
+              onViewChange={(view) => setActiveView(view)}
+              rtStructures={rtStructures}
+              selectedStructure={selectedForEdit ? selectedForEdit.toString() : null}
             />
           )}
         </div>
