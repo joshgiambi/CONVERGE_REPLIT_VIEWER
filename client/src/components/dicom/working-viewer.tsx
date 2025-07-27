@@ -249,9 +249,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Update current slice when crosshair Z position changes
   useEffect(() => {
     if (crosshairPosition.z !== currentIndex && crosshairPosition.z >= 0 && crosshairPosition.z < images.length) {
+      console.log('🎯 Updating currentIndex from crosshair:', {
+        oldIndex: currentIndex,
+        newIndex: crosshairPosition.z
+      });
       setCurrentIndex(crosshairPosition.z);
     }
-  }, [crosshairPosition.z, images.length]);
+  }, [crosshairPosition.z, images.length]); // Removed currentIndex to avoid circular dependency
   
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
@@ -262,58 +266,84 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     getMprLayoutMode: () => mprLayoutMode
   }), [mprLayoutMode]);
   
-  // Populate pixelDataCache when MPR mode is activated
+  // Progressive loading for MPR mode - only load visible slices plus buffer
   useEffect(() => {
     if (mprLayoutMode !== 'three-pane' || images.length === 0) return;
     
-    // Check if we need to populate the cache
-    if (pixelDataCache.size >= images.length) return;
+    const BUFFER_SIZE = 20; // Load 20 slices before and after current
+    const startIdx = Math.max(0, currentIndex - BUFFER_SIZE);
+    const endIdx = Math.min(images.length - 1, currentIndex + BUFFER_SIZE);
     
-    console.log('🔧 Populating pixelDataCache for MPR reconstruction...');
+    console.log('🔧 Progressive loading MPR data:', {
+      currentIndex,
+      startIdx,
+      endIdx,
+      totalImages: images.length,
+      cacheSize: pixelDataCache.size
+    });
     
-    const loadPixelDataForMPR = async () => {
-      const newCache = new Map<number, Uint16Array>();
-      let loadedCount = 0;
+    const loadPixelDataProgressive = async () => {
+      const newEntries: Array<[number, Uint16Array]> = [];
       
-      // Load pixel data for all images
-      for (let i = 0; i < images.length; i++) {
-        const image = images[i];
-        try {
-          // Fetch the raw DICOM file
-          const response = await fetch(`/api/images/${image.sopInstanceUID}`);
-          if (!response.ok) continue;
-          
-          const arrayBuffer = await response.arrayBuffer();
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataSet = window.dicomParser.parseDicom(byteArray);
-          
-          const pixelDataElement = dataSet.elements.x7fe00010;
-          if (pixelDataElement) {
-            const rawPixelArray = new Uint16Array(
-              arrayBuffer,
-              pixelDataElement.dataOffset,
-              pixelDataElement.length / 2
-            );
-            newCache.set(i, rawPixelArray);
-            loadedCount++;
-            
-            // Update cache periodically
-            if (loadedCount % 20 === 0) {
-              console.log(`📊 Loaded ${loadedCount}/${images.length} images for MPR`);
-              setPixelDataCache(new Map(newCache));
+      // Load slices in range that aren't already cached
+      const loadPromises = [];
+      for (let i = startIdx; i <= endIdx; i++) {
+        if (pixelDataCache.has(i)) continue;
+        
+        loadPromises.push(
+          (async () => {
+            const image = images[i];
+            try {
+              const response = await fetch(`/api/images/${image.sopInstanceUID}`);
+              if (!response.ok) return;
+              
+              const arrayBuffer = await response.arrayBuffer();
+              const byteArray = new Uint8Array(arrayBuffer);
+              const dataSet = window.dicomParser.parseDicom(byteArray);
+              
+              const pixelDataElement = dataSet.elements.x7fe00010;
+              if (pixelDataElement) {
+                const rawPixelArray = new Uint16Array(
+                  arrayBuffer,
+                  pixelDataElement.dataOffset,
+                  pixelDataElement.length / 2
+                );
+                newEntries.push([i, rawPixelArray]);
+                console.log(`📊 Loaded slice ${i} for MPR`);
+              }
+            } catch (err) {
+              console.error(`Failed to load pixel data for image ${i}:`, err);
             }
-          }
-        } catch (err) {
-          console.error(`Failed to load pixel data for image ${i}:`, err);
-        }
+          })()
+        );
       }
       
-      console.log(`✅ MPR pixel data cache populated: ${loadedCount}/${images.length} images`);
-      setPixelDataCache(newCache);
+      await Promise.all(loadPromises);
+      
+      // Update cache with new entries
+      if (newEntries.length > 0) {
+        setPixelDataCache(prev => {
+          const updated = new Map(prev);
+          newEntries.forEach(([idx, data]) => {
+            updated.set(idx, data);
+          });
+          
+          // Clean up old entries outside buffer to save memory
+          const cleaned = new Map<number, Uint16Array>();
+          updated.forEach((data, idx) => {
+            if (idx >= startIdx - BUFFER_SIZE && idx <= endIdx + BUFFER_SIZE) {
+              cleaned.set(idx, data);
+            }
+          });
+          
+          console.log(`✅ MPR cache updated: ${cleaned.size} slices`);
+          return cleaned;
+        });
+      }
     };
     
-    loadPixelDataForMPR();
-  }, [mprLayoutMode, images]);
+    loadPixelDataProgressive();
+  }, [mprLayoutMode, currentIndex, images]);
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);

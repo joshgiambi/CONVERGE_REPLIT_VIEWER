@@ -70,7 +70,28 @@ export function MPRThreePaneView({
     destCtx.imageSmoothingEnabled = true;
     destCtx.imageSmoothingQuality = 'high';
     destCtx.drawImage(axialCanvas, x, y, scaledWidth, scaledHeight);
-  }, [axialCanvas, currentSliceIndex]);
+    
+    // Draw crosshair lines on axial view
+    destCtx.strokeStyle = 'yellow';
+    destCtx.lineWidth = 1;
+    destCtx.globalAlpha = 0.8;
+    
+    // Vertical line (sagittal position)
+    const sagittalX = x + (scaledWidth * (crosshairPosition.x / 512));
+    destCtx.beginPath();
+    destCtx.moveTo(sagittalX, y);
+    destCtx.lineTo(sagittalX, y + scaledHeight);
+    destCtx.stroke();
+    
+    // Horizontal line (coronal position)
+    const coronalY = y + (scaledHeight * (crosshairPosition.y / 512));
+    destCtx.beginPath();
+    destCtx.moveTo(x, coronalY);
+    destCtx.lineTo(x + scaledWidth, coronalY);
+    destCtx.stroke();
+    
+    destCtx.globalAlpha = 1;
+  }, [axialCanvas, currentSliceIndex, crosshairPosition]);
 
   // Reconstruct sagittal view
   useEffect(() => {
@@ -172,7 +193,30 @@ export function MPRThreePaneView({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
-  }, [images, pixelDataCache, windowWidth, windowCenter]);
+    
+    // Draw crosshair lines on sagittal view
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8;
+    
+    // Vertical line representing current axial slice (Z position)
+    const slicePositionNormalized = crosshairPosition.z / images.length;
+    const crosshairX = x + (scaledWidth * slicePositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(crosshairX, y);
+    ctx.lineTo(crosshairX, y + scaledHeight);
+    ctx.stroke();
+    
+    // Horizontal line representing coronal position (Y position)
+    const coronalPositionNormalized = crosshairPosition.y / 512;
+    const crosshairY = y + (scaledHeight * coronalPositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(x, crosshairY);
+    ctx.lineTo(x + scaledWidth, crosshairY);
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
+  }, [images, pixelDataCache, windowWidth, windowCenter, crosshairPosition]);
 
   // Reconstruct coronal view
   useEffect(() => {
@@ -274,7 +318,30 @@ export function MPRThreePaneView({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
-  }, [images, pixelDataCache, windowWidth, windowCenter]);
+    
+    // Draw crosshair lines on coronal view
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8;
+    
+    // Vertical line representing current axial slice (Z position)
+    const slicePositionNormalized = crosshairPosition.z / images.length;
+    const crosshairX = x + (scaledWidth * slicePositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(crosshairX, y);
+    ctx.lineTo(crosshairX, y + scaledHeight);
+    ctx.stroke();
+    
+    // Horizontal line representing sagittal position (X position)
+    const sagittalPositionNormalized = crosshairPosition.x / 512;
+    const crosshairY = y + (scaledHeight * sagittalPositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(x, crosshairY);
+    ctx.lineTo(x + scaledWidth, crosshairY);
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
+  }, [images, pixelDataCache, windowWidth, windowCenter, crosshairPosition]);
 
   return (
     <div className="absolute inset-0 flex bg-black">
@@ -292,6 +359,13 @@ export function MPRThreePaneView({
             
             const delta = e.deltaY > 0 ? 1 : -1;
             const newZ = Math.max(0, Math.min(images.length - 1, currentSliceIndex + delta));
+            
+            console.log('🎡 MPR Wheel event:', {
+              currentSliceIndex,
+              delta,
+              newZ,
+              imagesLength: images.length
+            });
             
             // Update crosshair position with new Z index
             onCrosshairChange({
