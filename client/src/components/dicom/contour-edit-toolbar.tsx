@@ -880,7 +880,7 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50">
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
       <div 
         className="relative bg-black/80 backdrop-blur-sm border-2 rounded-2xl p-4 shadow-2xl w-auto"
         style={{ borderColor: `${structureColorRgb}60` }}

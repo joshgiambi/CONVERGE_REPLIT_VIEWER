@@ -10,7 +10,6 @@ import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
-import { GPUEnhancedViewer, GPUEnhancedViewerRef } from "./gpu-enhanced-viewer";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -158,12 +157,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onImageMetadataChange,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gpuViewerRef = useRef<GPUEnhancedViewerRef>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useGPUAcceleration, setUseGPUAcceleration] = useState(false);
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -3021,54 +3018,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
       </div>
 
-      {/* Main Viewer Canvas with APLR Labels */}
-      <div className="flex-1 p-2 flex items-center justify-center">
+      {/* Canvas */}
+      <div className="flex-1 p-4 flex items-center justify-center">
         <div className="relative">
-          {/* APLR Anatomical Orientation Labels */}
-          <div className="absolute inset-0 pointer-events-none z-10">
-            {/* Anterior (A) - Top */}
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 text-white text-xl font-bold drop-shadow-lg">
-              A
-            </div>
-            {/* Posterior (P) - Bottom */}
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-xl font-bold drop-shadow-lg">
-              P
-            </div>
-            {/* Left (L) - Right side (radiological convention) */}
-            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white text-xl font-bold drop-shadow-lg">
-              L
-            </div>
-            {/* Right (R) - Left side (radiological convention) */}
-            <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white text-xl font-bold drop-shadow-lg">
-              R
-            </div>
-          </div>
-          
           <canvas
-              ref={canvasRef}
-              width={1024}
-              height={1024}
-              onMouseDown={handleCanvasMouseDown}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onWheel={(e) => {
-                // Always handle wheel events for scrolling, even when pen tool is active
-                handleCanvasWheel(e);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`max-w-full max-h-full object-contain rounded ${
-                brushToolState?.isActive && brushToolState?.tool === "brush"
-                  ? ""
-                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                  ? ""
-                  : "cursor-move"
-              }`}
-              style={{
-                backgroundColor: "black",
-                imageRendering: "auto",
-                userSelect: "none",
-              }}
-            />
+            ref={canvasRef}
+            width={1024}
+            height={1024}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={(e) => {
+              // Always handle wheel events for scrolling, even when pen tool is active
+              handleCanvasWheel(e);
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? ""
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                ? ""
+                : "cursor-move"
+            }`}
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
+            }}
+          />
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
