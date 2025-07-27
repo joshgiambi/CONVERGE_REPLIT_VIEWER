@@ -13,11 +13,8 @@ import {
   Info,
   HelpCircle,
   Keyboard,
-  Layers,
-  LayoutGrid,
-  Crosshair
+  Layers
 } from 'lucide-react';
-import { ShortcutsDialog } from './shortcuts-dialog';
 
 interface ViewerToolbarProps {
   onZoomIn: () => void;
@@ -34,9 +31,6 @@ interface ViewerToolbarProps {
   windowLevel?: { window: number; level: number };
   isContourEditActive?: boolean;
   showFusionButton?: boolean;
-  onThreePaneMPR?: () => void;
-  onCrosshairTool?: () => void;
-  imageMetadata?: any;
 }
 
 export function ViewerToolbar({
@@ -53,16 +47,12 @@ export function ViewerToolbar({
   totalSlices,
   windowLevel,
   isContourEditActive,
-  showFusionButton,
-  onThreePaneMPR,
-  onCrosshairTool,
-  imageMetadata
+  showFusionButton
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
-  const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
     setActiveTool(tool);
@@ -74,9 +64,6 @@ export function ViewerToolbar({
     { id: 'zoom-out', icon: ZoomOut, label: 'Zoom Out', action: onZoomOut },
     { id: 'reset-zoom', icon: Maximize2, label: 'Fit to Window', action: onResetZoom },
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
-    ...(onCrosshairTool ? [
-      { id: 'crosshair', icon: Crosshair, label: 'Crosshair', action: onCrosshairTool, selectable: true }
-    ] : []),
     { id: 'separator' },
     { id: 'contour-edit', icon: Edit3, label: 'Contour Edit', action: onContourEdit },
     { id: 'contour-settings', icon: Settings, label: 'Contour Settings', action: onContourSettings },
@@ -84,10 +71,8 @@ export function ViewerToolbar({
       { id: 'separator' },
       { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
     ] : []),
-
     { id: 'separator' },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
-    { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', action: () => setShowShortcutsDialog(true) },
     { id: 'help', icon: HelpCircle, label: 'Interaction Guide', action: () => setTipsDialogOpen(!tipsDialogOpen) },
   ];
 
@@ -150,7 +135,7 @@ export function ViewerToolbar({
         </div>
         
         {/* Metadata Popup */}
-        {showMetadata && imageMetadata && (
+        {showMetadata && (
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-4 bg-black bg-opacity-95 text-white p-4 rounded-lg text-xs w-96 shadow-lg border border-gray-600 max-h-80 overflow-y-auto">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center">
@@ -169,41 +154,40 @@ export function ViewerToolbar({
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Patient Info</div>
                 <div className="space-y-1 text-gray-300">
-                  <div><span className="text-gray-400">Name:</span> {imageMetadata.patientName || 'N/A'}</div>
-                  <div><span className="text-gray-400">ID:</span> {imageMetadata.patientId || 'N/A'}</div>
-                  <div><span className="text-gray-400">DOB:</span> {imageMetadata.patientBirthDate || 'N/A'}</div>
-                  <div><span className="text-gray-400">Sex:</span> {imageMetadata.patientSex || 'N/A'}</div>
+                  <div><span className="text-gray-400">Name:</span> DEMO^PATIENT</div>
+                  <div><span className="text-gray-400">ID:</span> DM001</div>
+                  <div><span className="text-gray-400">DOB:</span> 1970-01-01</div>
+                  <div><span className="text-gray-400">Sex:</span> M</div>
                 </div>
               </div>
               
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Study Info</div>
                 <div className="space-y-1 text-gray-300">
-                  <div><span className="text-gray-400">Date:</span> {imageMetadata.studyDate || 'N/A'}</div>
-                  <div><span className="text-gray-400">Time:</span> {imageMetadata.studyTime || 'N/A'}</div>
-                  <div><span className="text-gray-400">Description:</span> {imageMetadata.studyDescription || 'N/A'}</div>
-                  <div><span className="text-gray-400">Modality:</span> {imageMetadata.modality || 'N/A'}</div>
+                  <div><span className="text-gray-400">Date:</span> 2024-01-15</div>
+                  <div><span className="text-gray-400">Time:</span> 14:30:00</div>
+                  <div><span className="text-gray-400">Description:</span> Chest CT</div>
+                  <div><span className="text-gray-400">Modality:</span> CT</div>
                 </div>
               </div>
               
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Image Parameters</div>
                 <div className="space-y-1 text-gray-300">
-                  <div><span className="text-gray-400">Matrix:</span> {imageMetadata.rows || 512} x {imageMetadata.columns || 512}</div>
-                  <div><span className="text-gray-400">Slice:</span> {currentSlice || 1} / {totalSlices || 1}</div>
-                  <div><span className="text-gray-400">Thickness:</span> {imageMetadata.sliceThickness ? `${imageMetadata.sliceThickness}mm` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Pixel Spacing:</span> {imageMetadata.pixelSpacing && Array.isArray(imageMetadata.pixelSpacing) && typeof imageMetadata.pixelSpacing[0] === 'number' ? `${imageMetadata.pixelSpacing[0].toFixed(2)}mm` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Slice Location:</span> {imageMetadata.sliceLocation && typeof imageMetadata.sliceLocation === 'number' ? `${imageMetadata.sliceLocation.toFixed(1)}mm` : 'N/A'}</div>
+                  <div><span className="text-gray-400">Matrix:</span> 512 x 512</div>
+                  <div><span className="text-gray-400">Slice:</span> {currentSlice || 1} / {totalSlices || 20}</div>
+                  <div><span className="text-gray-400">Thickness:</span> 1.0mm</div>
+                  <div><span className="text-gray-400">kVp:</span> 120</div>
+                  <div><span className="text-gray-400">mAs:</span> 200</div>
                 </div>
               </div>
               
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Window/Level</div>
                 <div className="space-y-1 text-gray-300">
-                  <div><span className="text-gray-400">Current W/L:</span> {windowLevel ? `${Math.round(windowLevel.window)}/${Math.round(windowLevel.level)}` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Default W/L:</span> {imageMetadata.windowCenter && imageMetadata.windowWidth ? `${Math.round(imageMetadata.windowWidth)}/${Math.round(imageMetadata.windowCenter)}` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Bits Stored:</span> {imageMetadata.bitsStored || 'N/A'}</div>
-                  <div><span className="text-gray-400">Rescale:</span> {imageMetadata.rescaleSlope ? `${imageMetadata.rescaleSlope}/${imageMetadata.rescaleIntercept || 0}` : 'N/A'}</div>
+                  <div><span className="text-gray-400">Current W/L:</span> {windowLevel ? `${Math.round(windowLevel.window)}/${Math.round(windowLevel.level)}` : '400/40'}</div>
+                  <div><span className="text-gray-400">Range:</span> [-1024, 3071] HU</div>
+                  <div><span className="text-gray-400">Reconstruction:</span> FBP</div>
                 </div>
               </div>
             </div>
@@ -270,12 +254,6 @@ export function ViewerToolbar({
           </div>
         )}
       </Card>
-      
-      {/* Shortcuts Dialog */}
-      <ShortcutsDialog 
-        open={showShortcutsDialog} 
-        onClose={() => setShowShortcutsDialog(false)} 
-      />
     </div>
   );
 }

@@ -30,9 +30,7 @@ import {
   GitBranch,
   Grid3x3,
   Eraser,
-  ChevronDown,
-  Wand2,
-  Target
+  ChevronDown
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -125,12 +123,6 @@ export function ContourEditToolbar({
       return;
     }
     
-    // Handle localizer button - move view to contour centroid
-    if (toolId === 'localizer') {
-      handleLocalizerClick();
-      return;
-    }
-    
     const isActive = activeTool === toolId;
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
@@ -150,7 +142,7 @@ export function ContourEditToolbar({
     }
     
     // Auto-expand settings for the active tool  
-    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original' || newTool === 'sam')) {
+    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original')) {
       setShowSettings(newTool);
     } else if (!newTool) {
       setShowSettings(null);
@@ -229,21 +221,6 @@ export function ContourEditToolbar({
     } else {
       toast({ title: "Nothing to redo", variant: "destructive" });
     }
-  };
-
-  // Handle localizer click - move view to contour centroid
-  const handleLocalizerClick = () => {
-    if (!selectedStructure || !currentSlicePosition || !onContourUpdate || !imageMetadata) return;
-    
-    // Send localizer action to parent
-    const updatePayload = {
-      action: 'localizer',
-      structureId: selectedStructure.roiNumber,
-      slicePosition: currentSlicePosition
-    };
-    
-    onContourUpdate(updatePayload);
-    toast({ title: "Moving to contour center" });
   };
 
   // Check undo/redo availability
@@ -454,12 +431,10 @@ export function ContourEditToolbar({
   const mainTools = [
     { id: 'brush', icon: Brush, label: 'Brush' },
     { id: 'pen', icon: Pen, label: 'Pen' },
-    { id: 'sam', icon: Wand2, label: 'SAM' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
     { id: 'margin', icon: Maximize2, label: 'Margin' },
-    { id: 'boolean', icon: Layers, label: 'Boolean' },
-    { id: 'localizer', icon: Target, label: 'Localizer' }
+    { id: 'boolean', icon: Layers, label: 'Boolean' }
   ];
 
   const renderSettingsPanel = () => {
@@ -871,40 +846,6 @@ export function ContourEditToolbar({
                   className="data-[state=checked]:bg-blue-500"
                 />
               </div>
-              
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-gray-300">Next Slice Prediction</Label>
-                  {isPredictionEnabled && (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                      <span className="text-xs text-purple-400 font-medium">ACTIVE</span>
-                    </div>
-                  )}
-                </div>
-                <Switch
-                  checked={isPredictionEnabled}
-                  onCheckedChange={(enabled) => {
-                    setIsPredictionEnabled(enabled);
-                    // Update tool state immediately when prediction toggle changes
-                    if (onToolChange && activeTool === 'pen') {
-                      onToolChange({
-                        tool: 'pen',
-                        brushSize: brushThickness[0],
-                        isActive: true,
-                        predictionEnabled: enabled
-                      });
-                    }
-                  }}
-                  className="data-[state=checked]:bg-purple-500"
-                />
-              </div>
-              
-              {isPredictionEnabled && (
-                <div className="text-xs text-purple-400 bg-purple-900/20 border border-purple-600/30 rounded p-2">
-                  AI prediction will suggest contours on adjacent slices based on your pen drawings.
-                </div>
-              )}
             </div>
             
             <div className="space-y-3">
@@ -922,54 +863,6 @@ export function ContourEditToolbar({
               </div>
               <div className="text-xs text-gray-400">
                 • Draw outside: create new blob
-              </div>
-            </div>
-          </div>
-        ) : showSettings === 'sam' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <div className="text-sm text-gray-300 font-medium">Segment Anything Model (SAM)</div>
-              <div className="text-xs text-gray-400">
-                AI-powered segmentation with include/exclude markers
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Auto-Expand Radius</Label>
-                <div className="text-xs text-gray-400">30mm</div>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Preview Mode</Label>
-                <Switch
-                  checked={true}
-                  onCheckedChange={() => {}}
-                  className="data-[state=checked]:bg-indigo-500"
-                />
-              </div>
-              
-              <div className="text-xs text-gray-400 bg-indigo-900/20 border border-indigo-600/30 rounded p-2">
-                SAM uses Meta's AI model to intelligently segment regions based on your markers.
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="text-xs text-gray-400">
-                • Left-click: Add include point (green +)
-              </div>
-              <div className="text-xs text-gray-400">
-                • Right-click: Toggle to exclude mode (red -)
-              </div>
-              <div className="text-xs text-gray-400">
-                • Click "Run SAM" to generate segmentation
-              </div>
-              <div className="text-xs text-gray-400">
-                • Preview shows dashed outline
-              </div>
-              <div className="text-xs text-gray-400">
-                • Accept or Clear to finalize
-              </div>
-              <div className="text-xs text-gray-400 font-medium mt-2">
-                Tip: Place include markers inside the target region and exclude markers to refine boundaries
               </div>
             </div>
           </div>

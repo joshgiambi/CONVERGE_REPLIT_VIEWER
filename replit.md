@@ -202,30 +202,6 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
-- July 27, 2025: OHIF 3.10 AI-Powered Contouring Features Complete - FULLY IMPLEMENTED ✅
-  - ✅ **SAM Segmentation Tool**: Successfully integrated SAMSegmentationTool with full UI and configuration controls
-  - ✅ **Next Slice Prediction System**: Implemented automatic contour prediction for adjacent slices with visibility controls
-  - ✅ **Prediction Rendering**: Added animated dashed borders for predicted contours with proper visual differentiation
-  - ✅ **Backend Integration**: Modified saveContourUpdates to generate predictions using contour-prediction library
-  - ✅ **Parameter Propagation**: Updated all 15+ saveContourUpdates calls to pass predictionEnabled parameter
-  - ✅ **Animation Loop**: Fixed render loop to properly animate dashed borders for predicted contours
-  - Technical details:
-    - SAM tool uses polygon-based segmentation with configurable parameters
-    - Prediction system generates contours for ±1 and ±2 slices with decreasing confidence
-    - Animated dashed borders use requestAnimationFrame for smooth 60fps animation
-    - All AI features follow OHIF 3.10 professional medical imaging standards
-- July 27, 2025: GPU-Accelerated Volume Rendering and Professional MPR Interface - COMPLETED ✅
-  - ✅ Created complete WebGL-based GPU volume rendering system with shared GPU memory
-  - ✅ Added prominent GPU acceleration toggle button with gradient styling and performance metrics
-  - ✅ Implemented real-time performance display showing ~194% speed improvement (8.5ms GPU vs 25ms CPU)
-  - ✅ Integrated OHIF3-style professional viewport overlays with orientation labels and patient info
-  - ✅ Added flexible resizable panels using ResizablePanelGroup for customizable viewport sizes
-  - ✅ GPU acceleration automatically initializes with error handling and resource cleanup
-  - ✅ Performance Mode badge with pulsing animation provides visual feedback
-  - Technical details:
-    - WebGL volume textures and ray casting for fast 3D rendering
-    - Shared GPU memory eliminates slice-by-slice data transfer overhead
-    - Professional medical imaging interface following OHIF3 standards
 - July 27, 2025: Fixed Posterior Border Shrinkage in Brush Tool - GRID RESOLUTION OPTIMIZATION ✅
   - ✅ Identified root cause: Grid-based polygon union using 0.5mm resolution caused systematic boundary shrinkage
   - ✅ Shrinkage was most visible at posterior border due to polygon closure point accumulating rounding errors

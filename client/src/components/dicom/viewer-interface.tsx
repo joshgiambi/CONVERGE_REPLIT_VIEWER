@@ -46,7 +46,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
-  const [activeTool, setActiveToolState] = useState<string>('pan');
   
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
@@ -202,26 +201,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const handlePanTool = () => {
-    setActiveTool('Pan');
-    setActiveToolState('pan');
-    if (workingViewerRef.current?.setActiveTool) {
-      workingViewerRef.current.setActiveTool('pan');
-    }
-  };
+  const handlePanTool = () => setActiveTool('Pan');
   const handleMeasureTool = () => setActiveTool('Length');
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
-  
-  const handleCrosshairTool = () => {
-    console.log('🎯 Crosshair tool button clicked');
-    setActiveToolState('crosshair');
-    if (workingViewerRef.current?.setActiveTool) {
-      console.log('✅ Calling setActiveTool on workingViewerRef');
-      workingViewerRef.current.setActiveTool('crosshair');
-    } else {
-      console.error('❌ workingViewerRef.current.setActiveTool not available');
-    }
-  };
 
   const handleRotate = () => {
     try {
@@ -451,7 +433,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             windowLevel={windowLevel}
             onWindowLevelChange={setWindowLevel}
             studyId={studyData.studies[0]?.id}
-            studyIds={studyData.studies.map((s: any) => s.id)}
+            studyIds={studyData.studies.map(s => s.id)}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
@@ -591,25 +573,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
           showFusionButton={series.some(s => s.modality === 'MR')}
-          onThreePaneMPR={() => {
-            console.log('🎯 3-Pane MPR button clicked!');
-            console.log('workingViewerRef.current:', workingViewerRef.current);
-            console.log('setMprLayoutMode method exists?', workingViewerRef.current?.setMprLayoutMode);
-            
-            // Toggle between three-pane and floating/single mode
-            if (workingViewerRef.current && workingViewerRef.current.setMprLayoutMode) {
-              const currentMode = workingViewerRef.current.getMprLayoutMode ? 
-                workingViewerRef.current.getMprLayoutMode() : 'floating';
-              const newMode = currentMode === 'three-pane' ? 'floating' : 'three-pane';
-              console.log('Changing MPR mode from', currentMode, 'to', newMode);
-              workingViewerRef.current.setMprLayoutMode(newMode);
-              console.log('MPR layout mode changed to:', newMode);
-            } else {
-              console.error('❌ workingViewerRef not available or methods missing!');
-            }
-          }}
-          onCrosshairTool={handleCrosshairTool}
-          imageMetadata={imageMetadata}
         />
       )}
 

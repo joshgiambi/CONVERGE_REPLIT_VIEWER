@@ -2,17 +2,14 @@ import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallba
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Zap } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
 import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
-import { SAMSegmentationTool } from "./sam-segmentation-tool";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
-import { FloatingViewPanels } from "./floating-view-panels";
-import { MPRThreePaneView } from "./mpr-three-pane-view";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -27,8 +24,6 @@ import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { undoRedoManager } from "@/lib/undo-system";
-import { GPUVolumeManager } from "@/lib/gpu-volume-renderer";
-import { cn } from "@/lib/utils";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -162,20 +157,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onImageMetadataChange,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mprLayoutMode, setMprLayoutMode] = useState<'single' | 'floating' | 'three-pane'>('floating');
-  const [useGPUAcceleration, setUseGPUAcceleration] = useState(true); // Enable GPU by default
-  const [gpuPerformanceMetrics, setGPUPerformanceMetrics] = useState<{
-    loadTime: number;
-    renderTime: number;
-    memoryUsage: number;
-  } | null>(null);
-  const gpuVolumeManager = useRef<GPUVolumeManager | null>(null);
-  
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -246,165 +231,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   
-  // Multi-planar reconstruction state
-  const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
-  const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
-  
-  // Crosshair position for MPR (in pixel coordinates)
-  const [crosshairPosition, setCrosshairPosition] = useState({
-    x: 256, // Center of 512x512 image
-    y: 256,
-    z: 0    // Will be set to current slice index
-  });
-  
-  // Active tool state
-  const [activeTool, setActiveTool] = useState<'pan' | 'crosshair'>('pan');
-  
-  // Debug active tool changes
-  useEffect(() => {
-    console.log('🔧 Active tool changed to:', activeTool);
-  }, [activeTool]);
-  
-  // Update current slice when crosshair Z position changes
-  useEffect(() => {
-    if (crosshairPosition.z !== currentIndex && crosshairPosition.z >= 0 && crosshairPosition.z < images.length) {
-      console.log('🎯 Updating currentIndex from crosshair:', {
-        oldIndex: currentIndex,
-        newIndex: crosshairPosition.z
-      });
-      setCurrentIndex(crosshairPosition.z);
-    }
-  }, [crosshairPosition.z, images.length]); // Removed currentIndex to avoid circular dependency
-  
-
-  
-  // Expose methods to parent component via ref
-  useImperativeHandle(ref, () => ({
-    setMprLayoutMode: (mode: 'single' | 'floating' | 'three-pane') => {
-      console.log('Setting MPR layout mode to:', mode);
-      setMprLayoutMode(mode);
-    },
-    getMprLayoutMode: () => mprLayoutMode,
-    setActiveTool: (tool: 'pan' | 'crosshair') => {
-      console.log('Setting active tool to:', tool);
-      setActiveTool(tool);
-    }
-  }), [mprLayoutMode]);
-  
-  // Initialize GPU acceleration when enabled
-  useEffect(() => {
-    if (useGPUAcceleration && images.length > 0) {
-      console.log('🚀 Initializing GPU acceleration...');
-      const startTime = performance.now();
-      
-      // Initialize GPU volume manager
-      if (!gpuVolumeManager.current && canvasRef.current) {
-        try {
-          gpuVolumeManager.current = new GPUVolumeManager(canvasRef.current);
-          gpuVolumeManager.current.initialize().then(() => {
-            const initTime = performance.now() - startTime;
-            console.log(`✅ GPU acceleration initialized in ${initTime.toFixed(1)}ms`);
-            
-            // Set performance metrics to show improvement
-            setGPUPerformanceMetrics({
-              loadTime: initTime,
-              renderTime: 8.5, // GPU renders ~8.5ms vs ~25ms CPU
-              memoryUsage: 256 // MB in GPU memory
-            });
-          });
-        } catch (error) {
-          console.error('Failed to initialize GPU acceleration:', error);
-          setUseGPUAcceleration(false);
-        }
-      }
-    } else if (!useGPUAcceleration && gpuVolumeManager.current) {
-      // Cleanup GPU resources when disabled
-      gpuVolumeManager.current.dispose();
-      gpuVolumeManager.current = null;
-      setGPUPerformanceMetrics(null);
-      console.log('🔌 GPU acceleration disabled');
-    }
-  }, [useGPUAcceleration, images.length]);
-
-  // Progressive loading for MPR mode - only load visible slices plus buffer
-  useEffect(() => {
-    if (mprLayoutMode !== 'three-pane' || images.length === 0) return;
-    
-    const BUFFER_SIZE = 20; // Load 20 slices before and after current
-    const startIdx = Math.max(0, currentIndex - BUFFER_SIZE);
-    const endIdx = Math.min(images.length - 1, currentIndex + BUFFER_SIZE);
-    
-    console.log('🔧 Progressive loading MPR data:', {
-      currentIndex,
-      startIdx,
-      endIdx,
-      totalImages: images.length,
-      cacheSize: pixelDataCache.size
-    });
-    
-    const loadPixelDataProgressive = async () => {
-      const newEntries: Array<[number, Uint16Array]> = [];
-      
-      // Load slices in range that aren't already cached
-      const loadPromises = [];
-      for (let i = startIdx; i <= endIdx; i++) {
-        if (pixelDataCache.has(i)) continue;
-        
-        loadPromises.push(
-          (async () => {
-            const image = images[i];
-            try {
-              const response = await fetch(`/api/images/${image.sopInstanceUID}`);
-              if (!response.ok) return;
-              
-              const arrayBuffer = await response.arrayBuffer();
-              const byteArray = new Uint8Array(arrayBuffer);
-              const dataSet = window.dicomParser.parseDicom(byteArray);
-              
-              const pixelDataElement = dataSet.elements.x7fe00010;
-              if (pixelDataElement) {
-                const rawPixelArray = new Uint16Array(
-                  arrayBuffer,
-                  pixelDataElement.dataOffset,
-                  pixelDataElement.length / 2
-                );
-                newEntries.push([i, rawPixelArray]);
-                console.log(`📊 Loaded slice ${i} for MPR`);
-              }
-            } catch (err) {
-              console.error(`Failed to load pixel data for image ${i}:`, err);
-            }
-          })()
-        );
-      }
-      
-      await Promise.all(loadPromises);
-      
-      // Update cache with new entries
-      if (newEntries.length > 0) {
-        setPixelDataCache(prev => {
-          const updated = new Map(prev);
-          newEntries.forEach(([idx, data]) => {
-            updated.set(idx, data);
-          });
-          
-          // Clean up old entries outside buffer to save memory
-          const cleaned = new Map<number, Uint16Array>();
-          updated.forEach((data, idx) => {
-            if (idx >= startIdx - BUFFER_SIZE && idx <= endIdx + BUFFER_SIZE) {
-              cleaned.set(idx, data);
-            }
-          });
-          
-          console.log(`✅ MPR cache updated: ${cleaned.size} slices`);
-          return cleaned;
-        });
-      }
-    };
-    
-    loadPixelDataProgressive();
-  }, [mprLayoutMode, currentIndex, images]);
-  
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
   const displayCurrentImageRef = useRef<() => Promise<void>>();
@@ -426,72 +252,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
 
   // Save contour updates to server
-  const saveContourUpdates = async (updatedStructures: any, action?: string, predictionEnabled?: boolean) => {
+  const saveContourUpdates = async (updatedStructures: any, action?: string) => {
     if (!seriesId || isSaving) return;
     
     setIsSaving(true);
     try {
-      // Generate predictions if enabled and action is a contour modification
-      if (predictionEnabled && (action === 'brush_stroke' || action === 'pen_stroke' || action === 'add_contour' || action === 'grow_contour')) {
-        console.log('Generating next slice predictions...');
-        
-        // Find the currently edited structure and contour
-        const currentSlice = images[currentIndex]?.parsedSliceLocation || images[currentIndex]?.parsedZPosition || 0;
-        
-        // Generate predictions for adjacent slices
-        for (const structure of updatedStructures.structures) {
-          // Find the contour on the current slice
-          const currentContour = structure.contours?.find((c: any) => 
-            Math.abs(c.slicePosition - currentSlice) < 0.5
-          );
-          
-          if (currentContour && currentContour.points && currentContour.points.length > 0) {
-            // Calculate adjacent slice positions (assuming ~3mm slice thickness)
-            const sliceThickness = 3.0; // mm
-            const adjacentSlices = [
-              currentSlice - sliceThickness,
-              currentSlice + sliceThickness
-            ];
-            
-            for (const targetSlice of adjacentSlices) {
-              // Check if there's already a contour on the target slice
-              const existingContour = structure.contours.find((c: any) => 
-                Math.abs(c.slicePosition - targetSlice) < 0.5
-              );
-              
-              // Only predict if no existing contour
-              if (!existingContour) {
-                try {
-                  const predictionResult = predictNextSliceContour({
-                    currentContour: currentContour.points,
-                    currentSlicePosition: currentSlice,
-                    targetSlicePosition: targetSlice,
-                    anatomicalRegion: 'head', // Could be determined from study description
-                    predictionMode: 'adaptive',
-                    confidenceThreshold: 0.7
-                  });
-                  
-                  // Add predicted contour if confidence is high enough
-                  if (predictionResult.confidence > 0.5) {
-                    structure.contours.push({
-                      slicePosition: targetSlice,
-                      points: predictionResult.predictedContour,
-                      numberOfPoints: predictionResult.predictedContour.length / 3,
-                      isPrediction: true, // Flag to indicate this is a prediction
-                      confidence: predictionResult.confidence
-                    });
-                    
-                    console.log(`Added prediction for slice ${targetSlice} with confidence ${predictionResult.confidence}`);
-                  }
-                } catch (error) {
-                  console.error('Error generating prediction:', error);
-                }
-              }
-            }
-          }
-        }
-      }
-      
       const response = await fetch(`/api/rt-structures/${seriesId}/contours`, {
         method: 'PUT',
         headers: {
@@ -582,7 +347,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         // Update local structures and save to server
         setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures, 'boolean_operation', brushToolState?.predictionEnabled);
+        saveContourUpdates(updatedRTStructures, 'boolean_operation');
         
         // Pass the updated structures up to parent component
         if (onContourUpdate) {
@@ -677,7 +442,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_margin', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedRTStructures, 'apply_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -771,7 +536,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Update local structures and save to server
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'grow_contour', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedRTStructures, 'grow_contour');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -1282,7 +1047,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'pen_boolean_operation', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'pen_boolean_operation');
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
@@ -1291,7 +1056,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
       }
       // Save to server
-      saveContourUpdates(updatedStructures, 'pen_tool', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'pen_tool');
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
@@ -1359,7 +1124,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'merge_contours', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'merge_contours');
     } else if (payload.action === "subtract_contours") {
       // Handle boolean subtract operation (difference)
       const structure = updatedStructures.structures.find(
@@ -1392,81 +1157,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'subtract_contours', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'subtract_contours');
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
     } else if (payload.action === "apply_margin") {
       // Handle margin operation (Eclipse TPS style)
       handleMarginOperation(payload);
-    } else if (payload.action === "localizer") {
-      // Handle localizer - move view to contour centroid
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (!structure) return;
-
-      // Find contour at current slice
-      const tolerance = 1.5;
-      const contour = structure.contours.find(
-        (c: any) =>
-          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
-      );
-      
-      if (!contour || !contour.points || contour.points.length < 3) {
-        console.log("No contour found at current slice for localizer");
-        return;
-      }
-
-      // Calculate centroid of the contour
-      let sumX = 0, sumY = 0, sumZ = 0;
-      const numPoints = contour.points.length / 3;
-      
-      for (let i = 0; i < contour.points.length; i += 3) {
-        sumX += contour.points[i];
-        sumY += contour.points[i + 1];
-        sumZ += contour.points[i + 2];
-      }
-      
-      const centroidX = sumX / numPoints;
-      const centroidY = sumY / numPoints;
-      const centroidZ = sumZ / numPoints;
-      
-      console.log(`Localizer centroid: (${centroidX.toFixed(2)}, ${centroidY.toFixed(2)}, ${centroidZ.toFixed(2)})`);
-      
-      // Convert world coordinates to screen coordinates
-      const currentImage = images[currentImageIndex];
-      if (!currentImage) return;
-      
-      // Get image metadata for coordinate transformation
-      const imagePosition = toNumberArray(currentImage.imagePosition);
-      const pixelSpacing = toNumberArray(currentImage.pixelSpacing);
-      const imageOrientation = toNumberArray(currentImage.imageOrientationPatient);
-      
-      // Calculate pixel coordinates
-      const dx = centroidX - imagePosition[0];
-      const dy = centroidY - imagePosition[1];
-      
-      // Apply orientation (assuming standard axial orientation)
-      const pixelX = dx / pixelSpacing[1];
-      const pixelY = dy / pixelSpacing[0];
-      
-      // Apply current zoom and pan to center on the centroid
-      const canvasCenter = 512; // Canvas is 1024x1024, center is 512
-      const targetPanX = canvasCenter - (pixelX * zoom);
-      const targetPanY = canvasCenter - (pixelY * zoom);
-      
-      // Update pan position
-      setPanX(targetPanX);
-      setPanY(targetPanY);
-      setLastPanX(targetPanX);
-      setLastPanY(targetPanY);
-      
-      // Force a render
-      scheduleRender();
-      
-      console.log(`Localizer: Moved view to centroid at pixel (${pixelX.toFixed(1)}, ${pixelY.toFixed(1)})`);
-      return; // Don't save this as a contour update
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       await handleBooleanOperation(payload);
@@ -1506,7 +1203,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-      saveContourUpdates(updatedStructures, 'delete_slice', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'delete_slice');
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(
@@ -1520,7 +1217,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared all contours for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_all', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'clear_all');
     } else if (payload.action === "interpolate") {
       // Handle interpolate missing slices
       const structure = updatedStructures.structures.find(
@@ -1588,7 +1285,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Interpolated missing slices for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'interpolate', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'interpolate');
     } else if (payload.action === "delete_nth_slice") {
       // Handle delete every nth slice
       const structure = updatedStructures.structures.find(
@@ -1610,7 +1307,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Deleted ${deletedCount} contours (every ${payload.nth} slice) for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'delete_nth_slice', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'delete_nth_slice');
     } else if (payload.action === "clear_below") {
       // Handle clear below current slice
       const structure = updatedStructures.structures.find(
@@ -1627,7 +1324,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours below slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_below', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'clear_below');
     } else if (payload.action === "clear_above") {
       // Handle clear above current slice
       const structure = updatedStructures.structures.find(
@@ -1644,16 +1341,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours above slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_above', brushToolState?.predictionEnabled);
+      saveContourUpdates(updatedStructures, 'clear_above');
     }
   };
 
-  // Expose handleContourUpdate and MPR layout control methods to parent component
+  // Expose handleContourUpdate method to parent component
   useImperativeHandle(ref, () => ({
-    handleContourUpdate,
-    setMprLayoutMode,
-    getMprLayoutMode: () => mprLayoutMode
-  }), [rtStructures, mprLayoutMode]);
+    handleContourUpdate
+  }), [rtStructures]);
 
   // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
   /*
@@ -1922,41 +1617,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadSecondaryImages();
   }, [secondarySeriesId]);
 
-  // Canvas resizing effect to eliminate dead space
-  useEffect(() => {
-    if (!canvasContainerRef.current || !canvasRef.current) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        
-        // Update canvas size to match container
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
-          
-          // Store current canvas content
-          const imageData = ctx?.getImageData(0, 0, canvas.width, canvas.height);
-          
-          // Update canvas dimensions to match container
-          canvas.width = Math.floor(width);
-          canvas.height = Math.floor(height);
-          
-          // Re-render the image with new dimensions
-          if (images.length > 0) {
-            scheduleRender();
-          }
-        }
-      }
-    });
-
-    resizeObserver.observe(canvasContainerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [images.length]);
-
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
       // Add a small delay to ensure state is stable after contour operations
@@ -2114,7 +1774,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
-  const parseDicomImage = async (arrayBuffer: ArrayBuffer, sopInstanceUID?: string) => {
+  const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
     try {
       // Load dicom-parser if not already loaded
       if (!window.dicomParser) {
@@ -2146,18 +1806,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           pixelDataElement.dataOffset,
           pixelDataElement.length / 2,
         );
-        
-        // Get instance number for caching
-        const instanceNumber = dataSet.intString("x00200013") || 0;
-        
-        // Cache raw pixel data for MPR using instance number as key
-        setPixelDataCache(prev => {
-          const newCache = new Map(prev);
-          newCache.set(instanceNumber, rawPixelArray);
-          console.log(`📊 Cached pixel data for instance ${instanceNumber}, cache size: ${newCache.size}`);
-          return newCache;
-        });
-        
         // Convert to Hounsfield Units
         const huPixelArray = new Float32Array(rawPixelArray.length);
         for (let i = 0; i < rawPixelArray.length; i++) {
@@ -2168,10 +1816,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           data: huPixelArray,
           width: cols,
           height: rows,
-          rawData: rawPixelArray, // Include raw data in return
-          instanceNumber, // Include instance number for reference
-          rescaleSlope,
-          rescaleIntercept
         };
       } else {
         throw new Error("Only 16-bit images supported");
@@ -2195,7 +1839,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     const arrayBuffer = await response.arrayBuffer();
-    const imageData = await parseDicomImage(arrayBuffer, sopInstanceUID);
+    const imageData = await parseDicomImage(arrayBuffer);
     
     if (imageData) {
       imageCacheRef.current.set(sopInstanceUID, imageData);
@@ -2244,7 +1888,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             bytes[i] = binaryString.charCodeAt(i);
           }
           
-          const imageData = await parseDicomImage(bytes.buffer, uid);
+          const imageData = await parseDicomImage(bytes.buffer);
           if (imageData) {
             imageCacheRef.current.set(uid, imageData);
             results.set(uid, imageData);
@@ -2406,34 +2050,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Use dynamic canvas size from container if available, otherwise use defaults
-      if (canvasContainerRef.current) {
-        const containerRect = canvasContainerRef.current.getBoundingClientRect();
-        canvas.width = Math.floor(containerRect.width);
-        canvas.height = Math.floor(containerRect.height);
-      } else {
-        // Fallback to fixed size if container not available
-        canvas.width = 1024;
-        canvas.height = 1024;
-      }
+      // Keep fixed canvas size for consistent display
+      canvas.width = 1024;
+      canvas.height = 1024;
 
-      // Render based on active view
-      if (activeView === 'axial') {
-        // Render axial view (default)
-        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
-      } else if (activeView === 'sagittal' && pixelDataCache.size > 0) {
-        // Render sagittal view
-        const sagittalData = generateSagittalView(images, pixelDataCache, crosshairPosition.x);
-        if (sagittalData) {
-          render16BitImage(ctx, sagittalData.pixelData, sagittalData.width, sagittalData.height);
-        }
-      } else if (activeView === 'coronal' && pixelDataCache.size > 0) {
-        // Render coronal view
-        const coronalData = generateCoronalView(images, pixelDataCache, crosshairPosition.y);
-        if (coronalData) {
-          render16BitImage(ctx, coronalData.pixelData, coronalData.width, coronalData.height);
-        }
-      }
+      // Render with current window/level settings
+      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
@@ -2456,36 +2078,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Render RT structure overlays if available
       if (localRTStructures && showStructures) {
         try {
-          if (activeView === 'axial') {
-            // Pass currentImage with its metadata attached for axial view
-            const imageWithMetadata = {
-              ...currentImage,
-              imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-            };
-            renderRTStructures(ctx, canvas, imageWithMetadata);
-          } else if (activeView === 'sagittal' && pixelDataCache.size > 0) {
-            // Render contours on sagittal view
-            renderContoursOnSagittalView(
-              ctx,
-              canvas,
-              rtStructures,
-              images,
-              pixelDataCache,
-              structureVisibility,
-              crosshairPosition.x
-            );
-          } else if (activeView === 'coronal' && pixelDataCache.size > 0) {
-            // Render contours on coronal view
-            renderContoursOnCoronalView(
-              ctx,
-              canvas,
-              rtStructures,
-              images,
-              pixelDataCache,
-              structureVisibility,
-              crosshairPosition.y
-            );
-          }
+          // Pass currentImage with its metadata attached
+          const imageWithMetadata = {
+            ...currentImage,
+            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+          };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
         } catch (rtError) {
           console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
@@ -2581,74 +2179,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
-
-    // Draw crosshair overlay and orientation labels
-    ctx.save();
-    
-    // Draw crosshair lines
-    ctx.strokeStyle = '#00ff00'; // Green color
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.6; // Semi-transparent
-    ctx.setLineDash([5, 5]); // Dashed line
-    
-    // Vertical line at center of image
-    const centerX = x + scaledWidth / 2;
-    ctx.beginPath();
-    ctx.moveTo(centerX, 0);
-    ctx.lineTo(centerX, canvasHeight);
-    ctx.stroke();
-    
-    // Horizontal line at center of image
-    const centerY = y + scaledHeight / 2;
-    ctx.beginPath();
-    ctx.moveTo(0, centerY);
-    ctx.lineTo(canvasWidth, centerY);
-    ctx.stroke();
-    
-    // Draw orientation labels
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    
-    if (activeView === 'axial') {
-      // A (Anterior) - Top
-      ctx.fillText('A', canvasWidth / 2, 20);
-      // P (Posterior) - Bottom
-      ctx.fillText('P', canvasWidth / 2, canvasHeight - 20);
-      // R (Right) - Left side (radiological convention)
-      ctx.textAlign = 'left';
-      ctx.fillText('R', 20, canvasHeight / 2);
-      // L (Left) - Right side (radiological convention)
-      ctx.textAlign = 'right';
-      ctx.fillText('L', canvasWidth - 20, canvasHeight / 2);
-    } else if (activeView === 'sagittal') {
-      // S (Superior) - Top
-      ctx.fillText('S', canvasWidth / 2, 20);
-      // I (Inferior) - Bottom
-      ctx.fillText('I', canvasWidth / 2, canvasHeight - 20);
-      // P (Posterior) - Left
-      ctx.textAlign = 'left';
-      ctx.fillText('P', 20, canvasHeight / 2);
-      // A (Anterior) - Right
-      ctx.textAlign = 'right';
-      ctx.fillText('A', canvasWidth - 20, canvasHeight / 2);
-    } else if (activeView === 'coronal') {
-      // S (Superior) - Top
-      ctx.fillText('S', canvasWidth / 2, 20);
-      // I (Inferior) - Bottom
-      ctx.fillText('I', canvasWidth / 2, canvasHeight - 20);
-      // R (Right) - Left
-      ctx.textAlign = 'left';
-      ctx.fillText('R', 20, canvasHeight / 2);
-      // L (Left) - Right
-      ctx.textAlign = 'right';
-      ctx.fillText('L', canvasWidth - 20, canvasHeight / 2);
-    }
-    
-    // Restore context state
-    ctx.restore();
   };
 
   const render8BitImage = (
@@ -3063,14 +2593,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
-      setCrosshairPosition(prev => ({ ...prev, z: currentIndex - 1 }));
     }
   };
 
   const goToNext = () => {
     if (currentIndex < images.length - 1) {
       setCurrentIndex(currentIndex + 1);
-      setCrosshairPosition(prev => ({ ...prev, z: currentIndex + 1 }));
     }
   };
 
@@ -3089,23 +2617,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     displayCurrentImageRef.current = displayCurrentImage;
   });
-  
-  // Re-render when active view changes
-  useEffect(() => {
-    if (images.length > 0 && canvasRef.current) {
-      console.log('Active view changed to:', activeView);
-      displayCurrentImage();
-    }
-  }, [activeView]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    console.log('🖱️ Canvas mouse down:', {
-      button: e.button,
-      activeTool,
-      isDrawingToolActive: brushToolState?.isActive,
-      brushTool: brushToolState?.tool
-    });
-    
     // Check if any drawing tool is active - if so, skip pan functionality
     const isDrawingToolActive =
       brushToolState?.isActive && 
@@ -3120,30 +2633,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (e.button === 0 && !isDrawingToolActive) {
-      // Left click
-      if (activeTool === 'crosshair' && canvasRef.current) {
-        console.log('🎯 Crosshair mode active, updating position...');
-        // In crosshair mode, update crosshair position
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = (e.clientX - rect.left - panX) / zoom;
-        const y = (e.clientY - rect.top - panY) / zoom;
-        
-        // Update crosshair position in pixel coordinates
-        setCrosshairPosition(prev => ({
-          ...prev,
-          x: Math.round(x),
-          y: Math.round(y)
-        }));
-        
-        console.log('🎯 Updated crosshair position:', { x: Math.round(x), y: Math.round(y) });
-      } else {
-        console.log('🔄 Pan mode active, starting drag...');
-        // Pan mode
-        setIsDragging(true);
-        setDragStart({ x: e.clientX, y: e.clientY });
-        setLastPanX(panX);
-        setLastPanY(panY);
-      }
+      // Left click for pan (disabled during drawing mode)
+      setIsDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setLastPanX(panX);
+      setLastPanY(panY);
     } else if (e.button === 2 && !isDrawingToolActive) {
       // Right click for window/level (disabled during drawing mode)
       const startX = e.clientX;
@@ -3277,9 +2771,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const animate = (timestamp: number) => {
       setAnimationTime(timestamp);
-      
-      // Trigger re-render to update the animated dashed borders
-      scheduleRender();
       
       // Check if we need to keep animating (if there are predicted contours)
       const hasPredictedContours = rtStructures?.structures?.some((structure: any) =>
@@ -3496,43 +2987,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* GPU Acceleration Toggle */}
-          <div className="flex items-center space-x-2 mr-2">
-            <Button
-              size="sm"
-              variant={useGPUAcceleration ? "default" : "outline"}
-              onClick={() => setUseGPUAcceleration(!useGPUAcceleration)}
-              className={cn(
-                "flex items-center gap-1",
-                useGPUAcceleration 
-                  ? "bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white border-0" 
-                  : "border-indigo-600 hover:bg-indigo-800"
-              )}
-              title={useGPUAcceleration ? "GPU Acceleration Enabled" : "Enable GPU Acceleration"}
-            >
-              <Zap className="w-4 h-4" />
-              <span className="text-xs font-medium">GPU</span>
-            </Button>
-            {useGPUAcceleration && (
-              <>
-                <Badge variant="secondary" className="bg-gradient-to-r from-yellow-900 to-orange-900 text-yellow-100 text-xs animate-pulse">
-                  Performance Mode
-                </Badge>
-                {gpuPerformanceMetrics && (
-                  <div className="flex items-center space-x-2 text-xs">
-                    <Badge variant="outline" className="border-yellow-600 text-yellow-300 bg-yellow-950/50">
-                      <Zap className="w-3 h-3 mr-1" />
-                      {gpuPerformanceMetrics.renderTime.toFixed(1)}ms
-                    </Badge>
-                    <Badge variant="outline" className="border-green-600 text-green-300 bg-green-950/50">
-                      {((25 / gpuPerformanceMetrics.renderTime) * 100 - 100).toFixed(0)}% faster
-                    </Badge>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-          
           {rtStructures && (
             <Button
               size="sm"
@@ -3564,50 +3018,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
       </div>
 
-      {/* Canvas - Show three-pane or standard layout */}
-      <div className="flex-1 p-4 flex items-center justify-center relative">
-        {mprLayoutMode === 'three-pane' && images.length > 0 ? (
-          <MPRThreePaneView
-            axialCanvas={canvasRef.current}
-            currentSliceIndex={currentIndex}
-            images={images}
-            pixelData={pixelDataCache.get(currentIndex) || null}
-            windowWidth={currentWindowLevel.width}
-            windowCenter={currentWindowLevel.center}
-            onViewMaximize={(view: 'axial' | 'sagittal' | 'coronal') => {
-              // When maximizing a view, switch to single view mode
-              setMprLayoutMode('single');
-              setActiveView(view);
+      {/* Canvas */}
+      <div className="flex-1 p-4 flex items-center justify-center">
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            width={1024}
+            height={1024}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={(e) => {
+              // Always handle wheel events for scrolling, even when pen tool is active
+              handleCanvasWheel(e);
             }}
-            pixelDataCache={pixelDataCache}
-            crosshairPosition={crosshairPosition}
-            onCrosshairChange={setCrosshairPosition}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? ""
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                ? ""
+                : "cursor-move"
+            }`}
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
+            }}
           />
-        ) : (
-          <div className="relative w-full h-full" ref={canvasContainerRef}>
-            <canvas
-              ref={canvasRef}
-              onMouseDown={handleCanvasMouseDown}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onWheel={(e) => {
-                // Always handle wheel events for scrolling, even when pen tool is active
-                handleCanvasWheel(e);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`w-full h-full rounded ${
-                brushToolState?.isActive && brushToolState?.tool === "brush"
-                  ? ""
-                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                  ? ""
-                  : "cursor-move"
-              }`}
-              style={{
-                backgroundColor: "black",
-                imageRendering: "auto",
-                userSelect: "none",
-              }}
-            />
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
@@ -3721,36 +3159,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               />
             )}
 
-          {/* SAM Segmentation Tool overlay */}
-          {brushToolState?.isActive &&
-            brushToolState?.tool === "sam" &&
-            selectedForEdit && (
-              <SAMSegmentationTool
-                canvasRef={canvasRef}
-                isActive={brushToolState.isActive}
-                selectedStructure={selectedForEdit}
-                rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
-                onContourUpdate={(payload: any) => {
-                  handleContourUpdate(payload);
-                }}
-                imageMetadata={imageMetadata}
-                worldToCanvas={worldToCanvas}
-                canvasToWorld={canvasToWorld}
-                ctTransform={ctTransform}
-              />
-            )}
-
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
-          
+
           {/* Current Window/Level and Z position display */}
-          <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+          <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>
               W:{Math.round(currentWindowLevel.width)} L:
               {Math.round(currentWindowLevel.center)}
@@ -3784,28 +3196,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
             />
           )}
-          
-          {/* Floating View Panels for MPR - Only show when not in three-pane mode */}
-          {images.length > 0 && mprLayoutMode !== 'three-pane' && (
-            <FloatingViewPanels
-              images={images}
-              currentSliceIndex={currentIndex}
-              pixelData={pixelDataCache.get(currentIndex) || null}
-              windowWidth={currentWindowLevel.width}
-              windowCenter={currentWindowLevel.center}
-              activeView={activeView}
-              onViewChange={(view) => setActiveView(view)}
-              pixelDataCache={pixelDataCache}
-              crosshairPosition={crosshairPosition}
-              onCrosshairPositionChange={setCrosshairPosition}
-              rtStructures={rtStructures}
-              visibleStructures={structureVisibility}
-              ctTransform={ctTransform.current}
-              isValid={!isLoading && !error}
-            />
-          )}
-          </div>
-        )}
+        </div>
       </div>
     </Card>
   );
