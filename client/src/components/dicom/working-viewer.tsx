@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallba
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ruler } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
 import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
@@ -10,6 +10,7 @@ import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
+import { MeasurementTool } from "./measurement-tool";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -207,6 +208,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -2999,6 +3001,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
           <Button
             size="sm"
+            variant={isMeasurementToolActive ? "default" : "outline"}
+            onClick={() => {
+              setIsMeasurementToolActive(!isMeasurementToolActive);
+              if (brushToolState?.isActive) {
+                // Disable brush/pen tools when measurement is active
+                if (onBrushToolChange) {
+                  onBrushToolChange({
+                    ...brushToolState,
+                    isActive: false
+                  });
+                }
+              }
+            }}
+            className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
+            title="Measurement Tool"
+          >
+            <Ruler className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
             variant="outline"
             onClick={goToPrevious}
             disabled={currentIndex === 0}
@@ -3158,6 +3180,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
               />
             )}
+            
+          {/* Measurement Tool overlay */}
+          {isMeasurementToolActive && (
+            <MeasurementTool
+              canvasRef={canvasRef}
+              isActive={isMeasurementToolActive}
+              imageMetadata={imageMetadata}
+              ctTransform={ctTransform}
+              currentSlicePosition={
+                images.length > 0 && images[currentIndex]
+                  ? (images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex)
+                  : 0
+              }
+              onMeasurementComplete={(distance, unit) => {
+                console.log(`Measurement completed: ${distance.toFixed(1)} ${unit}`);
+              }}
+            />
+          )}
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 

@@ -719,8 +719,8 @@ export function ContourEditToolbar({
                       });
                     }
                   }}
-                  max={512}
-                  min={5}
+                  max={50}  // Max ~5cm for typical pixel spacing of 1mm
+                  min={1}   // Min ~0.1cm
                   step={1}
                   className="w-full"
                 />
