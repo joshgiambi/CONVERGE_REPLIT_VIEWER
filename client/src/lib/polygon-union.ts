@@ -24,7 +24,7 @@ export function polygonUnion(polygons: number[][]): number[] {
   }
   
   // Create a grid for rasterization
-  const gridSize = 0.5; // mm resolution
+  const gridSize = 0.1; // mm resolution - reduced from 0.5mm to minimize boundary shrinkage
   const width = Math.ceil((maxX - minX) / gridSize) + 2;
   const height = Math.ceil((maxY - minY) / gridSize) + 2;
   const grid = new Uint8Array(width * height);
