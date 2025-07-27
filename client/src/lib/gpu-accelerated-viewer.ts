@@ -35,6 +35,9 @@ export class GPUAcceleratedViewer {
     };
 
     try {
+      // Wait for element to have dimensions
+      await this.waitForElementDimensions();
+
       // Initialize Cornerstone3D
       await cornerstone3DConfig.initialize();
 
@@ -58,6 +61,27 @@ export class GPUAcceleratedViewer {
       console.error('Failed to initialize GPU viewer:', error);
       throw error;
     }
+  }
+
+  private async waitForElementDimensions(timeout = 5000): Promise<void> {
+    const startTime = Date.now();
+    
+    return new Promise<void>((resolve, reject) => {
+      const checkDimensions = () => {
+        const rect = this.element.getBoundingClientRect();
+        
+        if (rect.width > 0 && rect.height > 0) {
+          console.log(`✅ Container ready with dimensions: ${rect.width}x${rect.height}`);
+          resolve();
+        } else if (Date.now() - startTime > timeout) {
+          reject(new Error('Timeout waiting for container dimensions'));
+        } else {
+          requestAnimationFrame(checkDimensions);
+        }
+      };
+      
+      checkDimensions();
+    });
   }
 
   async loadImages(imageIds: string[]): Promise<void> {

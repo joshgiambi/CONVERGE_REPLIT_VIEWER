@@ -163,7 +163,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useGPUAcceleration, setUseGPUAcceleration] = useState(false);
+  const [useGPUAcceleration, setUseGPUAcceleration] = useState(true);
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -3025,20 +3025,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       <div className="flex-1 p-4 flex items-center justify-center">
         <div className="relative">
           {useGPUAcceleration && images.length > 0 ? (
-            <GPUEnhancedViewer
-              ref={gpuViewerRef}
-              images={images}
-              currentImageIndex={currentIndex}
-              windowLevel={currentWindowLevel}
-              zoom={zoom}
-              panX={panX}
-              panY={panY}
-              onImageChange={setCurrentIndex}
-              onWindowLevelChange={(center, width) => updateWindowLevel({ center, width })}
-              onZoomChange={setZoom}
-              onPanChange={(x, y) => { setPanX(x); setPanY(y); }}
-              enablePerformanceMonitoring={true}
-            />
+            <div className="w-full h-full">
+              <GPUEnhancedViewer
+                ref={gpuViewerRef}
+                images={images}
+                currentImageIndex={currentIndex}
+                windowLevel={currentWindowLevel}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                onImageChange={setCurrentIndex}
+                onWindowLevelChange={(center, width) => updateWindowLevel({ center, width })}
+                onZoomChange={setZoom}
+                onPanChange={(x, y) => { setPanX(x); setPanY(y); }}
+                enablePerformanceMonitoring={true}
+              />
+            </div>
           ) : (
             <canvas
               ref={canvasRef}

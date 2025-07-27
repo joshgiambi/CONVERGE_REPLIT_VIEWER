@@ -161,7 +161,9 @@ export const GPUEnhancedViewer = forwardRef<GPUEnhancedViewerRef, GPUEnhancedVie
         className="w-full h-full cursor-crosshair"
         style={{ 
           touchAction: 'none',
-          userSelect: 'none'
+          userSelect: 'none',
+          minHeight: '512px', // Ensure minimum dimensions
+          minWidth: '512px'
         }}
       />
       

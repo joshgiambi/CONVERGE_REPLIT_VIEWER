@@ -874,4 +874,5 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## User Preferences
 
-Preferred communication style: Simple, everyday language.
+- Preferred communication style: Simple, everyday language.
+- GPU acceleration: User specifically wants GPU acceleration option enabled for medical imaging performance.
