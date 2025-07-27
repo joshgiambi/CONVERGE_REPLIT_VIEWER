@@ -3797,6 +3797,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               onViewChange={(view) => setActiveView(view)}
               pixelDataCache={pixelDataCache}
               crosshairPosition={crosshairPosition}
+              onCrosshairPositionChange={setCrosshairPosition}
               rtStructures={rtStructures}
               visibleStructures={structureVisibility}
               ctTransform={ctTransform.current}

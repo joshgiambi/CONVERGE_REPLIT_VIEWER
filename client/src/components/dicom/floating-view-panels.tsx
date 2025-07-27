@@ -5,13 +5,14 @@ import { generateSagittalView, generateCoronalView, projectContourToView } from 
 interface FloatingViewPanelsProps {
   images: any[];
   currentSliceIndex: number;
-  pixelData: Uint16Array | null;
+  pixelData: Float32Array | null;
   windowWidth: number;
   windowCenter: number;
   activeView: 'axial' | 'sagittal' | 'coronal';
   onViewChange: (view: 'axial' | 'sagittal' | 'coronal') => void;
-  pixelDataCache: Map<number, Uint16Array>;
-  crosshairPosition: { x: number; y: number };
+  pixelDataCache: Map<number, Float32Array>;
+  crosshairPosition: { x: number; y: number; z: number };
+  onCrosshairPositionChange?: (position: { x: number; y: number; z: number }) => void;
   rtStructures?: any;
   visibleStructures?: Set<number>;
   ctTransform?: any;
@@ -28,6 +29,7 @@ export const FloatingViewPanels: React.FC<FloatingViewPanelsProps> = ({
   onViewChange,
   pixelDataCache,
   crosshairPosition,
+  onCrosshairPositionChange,
   rtStructures,
   visibleStructures,
   ctTransform,
@@ -463,6 +465,32 @@ export const FloatingViewPanels: React.FC<FloatingViewPanelsProps> = ({
     }
   };
 
+  const handleSagittalWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (!onCrosshairPositionChange) return;
+    
+    const delta = e.deltaY > 0 ? 1 : -1;
+    const newX = Math.max(0, Math.min(511, crosshairPosition.x + delta * 5)); // Move by 5 pixels
+    
+    onCrosshairPositionChange({
+      ...crosshairPosition,
+      x: newX
+    });
+  };
+
+  const handleCoronalWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (!onCrosshairPositionChange) return;
+    
+    const delta = e.deltaY > 0 ? 1 : -1;
+    const newY = Math.max(0, Math.min(511, crosshairPosition.y + delta * 5)); // Move by 5 pixels
+    
+    onCrosshairPositionChange({
+      ...crosshairPosition,
+      y: newY
+    });
+  };
+
   return (
     <div className="absolute right-1 top-2 space-y-2 z-50">
       {/* Sagittal View Panel */}
@@ -476,6 +504,7 @@ export const FloatingViewPanels: React.FC<FloatingViewPanelsProps> = ({
           onMouseEnter={() => setHoveredView('sagittal')}
           onMouseLeave={() => setHoveredView(null)}
           onClick={() => handleViewClick('sagittal')}
+          onWheel={handleSagittalWheel}
           style={{ width: panelWidth, height: panelHeight }}
         >
           <canvas
@@ -502,6 +531,7 @@ export const FloatingViewPanels: React.FC<FloatingViewPanelsProps> = ({
           onMouseEnter={() => setHoveredView('coronal')}
           onMouseLeave={() => setHoveredView(null)}
           onClick={() => handleViewClick('coronal')}
+          onWheel={handleCoronalWheel}
           style={{ width: panelWidth, height: panelHeight }}
         >
           <canvas
