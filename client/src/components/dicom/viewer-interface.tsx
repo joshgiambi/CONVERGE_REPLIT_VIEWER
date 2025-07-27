@@ -573,6 +573,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
           showFusionButton={series.some(s => s.modality === 'MR')}
+          onThreePaneMPR={() => {
+            // Toggle between three-pane and floating/single mode
+            if (workingViewerRef.current && workingViewerRef.current.setMprLayoutMode) {
+              const currentMode = workingViewerRef.current.getMprLayoutMode ? 
+                workingViewerRef.current.getMprLayoutMode() : 'floating';
+              const newMode = currentMode === 'three-pane' ? 'floating' : 'three-pane';
+              workingViewerRef.current.setMprLayoutMode(newMode);
+              console.log('MPR layout mode changed to:', newMode);
+            }
+          }}
         />
       )}
 

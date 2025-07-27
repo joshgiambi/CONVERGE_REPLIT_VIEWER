@@ -11,6 +11,7 @@ import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
 import { FloatingViewPanels } from "./floating-view-panels";
+import { MPRThreePaneView } from "./mpr-three-pane-view";
 import { BrushOperation } from "@shared/schema";
 import { growContour, smoothContour } from "@/lib/contour-grow";
 import {
@@ -158,10 +159,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onImageMetadataChange,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mprLayoutMode, setMprLayoutMode] = useState<'single' | 'floating' | 'three-pane'>('floating');
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -1350,10 +1353,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
-  // Expose handleContourUpdate method to parent component
+  // Expose handleContourUpdate and MPR layout control methods to parent component
   useImperativeHandle(ref, () => ({
-    handleContourUpdate
-  }), [rtStructures]);
+    handleContourUpdate,
+    setMprLayoutMode,
+    getMprLayoutMode: () => mprLayoutMode
+  }), [rtStructures, mprLayoutMode]);
 
   // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
   /*
@@ -1621,6 +1626,41 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     loadSecondaryImages();
   }, [secondarySeriesId]);
+
+  // Canvas resizing effect to eliminate dead space
+  useEffect(() => {
+    if (!canvasContainerRef.current || !canvasRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        
+        // Update canvas size to match container
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          
+          // Store current canvas content
+          const imageData = ctx?.getImageData(0, 0, canvas.width, canvas.height);
+          
+          // Update canvas dimensions to match container
+          canvas.width = Math.floor(width);
+          canvas.height = Math.floor(height);
+          
+          // Re-render the image with new dimensions
+          if (images.length > 0) {
+            scheduleRender();
+          }
+        }
+      }
+    });
+
+    resizeObserver.observe(canvasContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [images.length]);
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
@@ -2067,9 +2107,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Keep fixed canvas size for consistent display
-      canvas.width = 1024;
-      canvas.height = 1024;
+      // Use dynamic canvas size from container if available, otherwise use defaults
+      if (canvasContainerRef.current) {
+        const containerRect = canvasContainerRef.current.getBoundingClientRect();
+        canvas.width = Math.floor(containerRect.width);
+        canvas.height = Math.floor(containerRect.height);
+      } else {
+        // Fallback to fixed size if container not available
+        canvas.width = 1024;
+        canvas.height = 1024;
+      }
 
       // Render with current window/level settings
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
@@ -3035,34 +3082,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 p-4 flex items-center justify-center">
-        <div className="relative">
-          <canvas
-            ref={canvasRef}
-            width={1024}
-            height={1024}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onWheel={(e) => {
-              // Always handle wheel events for scrolling, even when pen tool is active
-              handleCanvasWheel(e);
+      {/* Canvas - Show three-pane or standard layout */}
+      <div className="flex-1 p-4 flex items-center justify-center relative">
+        {mprLayoutMode === 'three-pane' && images.length > 0 ? (
+          <MPRThreePaneView
+            images={images}
+            currentIndex={currentIndex}
+            windowLevel={currentWindowLevel}
+            rtStructures={rtStructures}
+            selectedStructure={selectedForEdit}
+            onViewChange={(view) => setActiveView(view)}
+            onMaximize={(view) => {
+              // When maximizing a view, switch to single view mode
+              setMprLayoutMode('single');
+              setActiveView(view);
             }}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`max-w-full max-h-full object-contain rounded ${
-              brushToolState?.isActive && brushToolState?.tool === "brush"
-                ? ""
-                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                ? ""
-                : "cursor-move"
-            }`}
-            style={{
-              backgroundColor: "black",
-              imageRendering: "auto",
-              userSelect: "none",
+            onRestore={() => {
+              // When restoring, go back to floating mode
+              setMprLayoutMode('floating');
             }}
           />
+        ) : (
+          <div className="relative w-full h-full" ref={canvasContainerRef}>
+            <canvas
+              ref={canvasRef}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onWheel={(e) => {
+                // Always handle wheel events for scrolling, even when pen tool is active
+                handleCanvasWheel(e);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`w-full h-full rounded ${
+                brushToolState?.isActive && brushToolState?.tool === "brush"
+                  ? ""
+                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                  ? ""
+                  : "cursor-move"
+              }`}
+              style={{
+                backgroundColor: "black",
+                imageRendering: "auto",
+                userSelect: "none",
+              }}
+            />
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
@@ -3177,7 +3241,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             )}
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
-
+          
           {/* Current Window/Level and Z position display */}
           <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
             <div>
@@ -3214,8 +3278,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             />
           )}
           
-          {/* Floating View Panels for MPR */}
-          {images.length > 0 && (
+          {/* Floating View Panels for MPR - Only show when not in three-pane mode */}
+          {images.length > 0 && mprLayoutMode !== 'three-pane' && (
             <FloatingViewPanels
               axialCanvas={canvasRef.current}
               currentSliceIndex={currentIndex}
@@ -3229,7 +3293,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               selectedStructure={selectedForEdit ? selectedForEdit.toString() : null}
             />
           )}
-        </div>
+          </div>
+        )}
       </div>
     </Card>
   );

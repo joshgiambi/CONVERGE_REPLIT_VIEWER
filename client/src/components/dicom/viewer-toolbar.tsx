@@ -13,7 +13,8 @@ import {
   Info,
   HelpCircle,
   Keyboard,
-  Layers
+  Layers,
+  LayoutGrid
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -31,6 +32,7 @@ interface ViewerToolbarProps {
   windowLevel?: { window: number; level: number };
   isContourEditActive?: boolean;
   showFusionButton?: boolean;
+  onThreePaneMPR?: () => void;
 }
 
 export function ViewerToolbar({
@@ -47,7 +49,8 @@ export function ViewerToolbar({
   totalSlices,
   windowLevel,
   isContourEditActive,
-  showFusionButton
+  showFusionButton,
+  onThreePaneMPR
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -70,6 +73,10 @@ export function ViewerToolbar({
     ...(showFusionButton && onFusion ? [
       { id: 'separator' },
       { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
+    ] : []),
+    ...(onThreePaneMPR ? [
+      { id: 'separator' },
+      { id: 'three-pane-mpr', icon: LayoutGrid, label: '3-Pane MPR', action: onThreePaneMPR }
     ] : []),
     { id: 'separator' },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
