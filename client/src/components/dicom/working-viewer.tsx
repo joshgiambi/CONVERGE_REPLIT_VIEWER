@@ -3721,21 +3721,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {/* Floating View Panels for MPR - Only show when not in three-pane mode */}
           {images.length > 0 && mprLayoutMode !== 'three-pane' && (
             <FloatingViewPanels
-              axialCanvas={canvasRef.current}
-              currentSliceIndex={currentIndex}
               images={images}
+              currentSliceIndex={currentIndex}
               pixelData={pixelDataCache.get(currentIndex) || null}
               windowWidth={currentWindowLevel.width}
               windowCenter={currentWindowLevel.center}
               activeView={activeView}
               onViewChange={(view) => setActiveView(view)}
-              rtStructures={rtStructures}
-              selectedStructure={selectedForEdit ? selectedForEdit.toString() : null}
               pixelDataCache={pixelDataCache}
-              onCrosshairChange={(position) => {
-                // Update crosshair position when floating panels are clicked
-                setCrosshairPosition(position);
-              }}
+              crosshairPosition={crosshairPosition}
+              rtStructures={rtStructures}
+              visibleStructures={structureVisibility}
+              ctTransform={ctTransform.current}
+              isValid={!isLoading && !error}
             />
           )}
           </div>

@@ -80,10 +80,7 @@ export function ViewerToolbar({
       { id: 'separator' },
       { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
     ] : []),
-    ...(onThreePaneMPR ? [
-      { id: 'separator' },
-      { id: 'three-pane-mpr', icon: LayoutGrid, label: '3-Pane MPR', action: onThreePaneMPR }
-    ] : []),
+
     { id: 'separator' },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
     { id: 'help', icon: HelpCircle, label: 'Interaction Guide', action: () => setTipsDialogOpen(!tipsDialogOpen) },

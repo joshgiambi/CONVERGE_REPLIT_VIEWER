@@ -1,72 +1,69 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { generateSagittalView, generateCoronalView } from '@/lib/multiplanar-reconstruction';
+import { generateSagittalView, generateCoronalView, projectContourToView } from '@/lib/multiplanar-reconstruction';
 
 interface FloatingViewPanelsProps {
-  axialCanvas: HTMLCanvasElement | null;
-  currentSliceIndex: number;
   images: any[];
+  currentSliceIndex: number;
   pixelData: Uint16Array | null;
   windowWidth: number;
   windowCenter: number;
   activeView: 'axial' | 'sagittal' | 'coronal';
   onViewChange: (view: 'axial' | 'sagittal' | 'coronal') => void;
+  pixelDataCache: Map<number, Uint16Array>;
+  crosshairPosition: { x: number; y: number };
   rtStructures?: any;
-  selectedStructure?: string | null;
-  pixelDataCache?: Map<number, Uint16Array>;
-  onCrosshairChange?: (position: { x: number; y: number; z: number }) => void;
+  visibleStructures?: Set<number>;
+  ctTransform?: any;
+  isValid?: boolean;
 }
 
-export function FloatingViewPanels({
-  axialCanvas,
-  currentSliceIndex,
+export const FloatingViewPanels: React.FC<FloatingViewPanelsProps> = ({
   images,
+  currentSliceIndex,
   pixelData,
   windowWidth,
   windowCenter,
   activeView,
   onViewChange,
+  pixelDataCache,
+  crosshairPosition,
   rtStructures,
-  selectedStructure,
-  pixelDataCache = new Map(),
-  onCrosshairChange
-}: FloatingViewPanelsProps) {
+  visibleStructures,
+  ctTransform,
+  isValid = true
+}) => {
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [hoveredView, setHoveredView] = useState<string | null>(null);
-  const [crosshairPosition, setCrosshairPosition] = useState({ x: 256, y: 256, z: currentSliceIndex });
+  const [hoveredView, setHoveredView] = useState<'sagittal' | 'coronal' | null>(null);
+  
+  // Fixed dimensions for tall MPR views to match aspect ratio
+  const panelWidth = 512;
+  const panelHeight = 214;
 
-  // Panel size - 20% of viewport width for better visibility
-  const panelSize = Math.floor(window.innerWidth * 0.2);
-
-  // Update crosshair z position when slice changes
+  // Render MPR views when data changes
   useEffect(() => {
-    setCrosshairPosition(prev => ({ ...prev, z: currentSliceIndex }));
-  }, [currentSliceIndex]);
-
-  useEffect(() => {
-    if (!images.length || !axialCanvas) return;
-
-    // Set canvas sizes
-    if (sagittalCanvasRef.current) {
-      sagittalCanvasRef.current.width = panelSize;
-      sagittalCanvasRef.current.height = panelSize;
-    }
-    if (coronalCanvasRef.current) {
-      coronalCanvasRef.current.width = panelSize;
-      coronalCanvasRef.current.height = panelSize;
+    if (!images.length || !pixelDataCache.size) {
+      console.log('[MPR] Skipping render - no images or cache');
+      return;
     }
 
-    // Render sagittal view
-    if (sagittalCanvasRef.current && activeView !== 'sagittal') {
+    if (!isValid) {
+      console.log('[MPR] Skipping render - invalid state');
+      return;
+    }
+
+    console.log('[MPR] Rendering views with cache size:', pixelDataCache.size);
+    
+    // Only render views that are not active
+    if (activeView !== 'sagittal') {
       renderSagittalView();
     }
-
-    // Render coronal view
-    if (coronalCanvasRef.current && activeView !== 'coronal') {
+    
+    if (activeView !== 'coronal') {
       renderCoronalView();
     }
-  }, [currentSliceIndex, images, pixelData, windowWidth, windowCenter, activeView, pixelDataCache, crosshairPosition]);
+  }, [currentSliceIndex, images, pixelData, windowWidth, windowCenter, activeView, pixelDataCache, crosshairPosition, rtStructures, visibleStructures, ctTransform, isValid]);
 
   const renderSagittalView = () => {
     if (!sagittalCanvasRef.current || images.length === 0 || pixelDataCache.size === 0) return;
@@ -77,13 +74,14 @@ export function FloatingViewPanels({
 
     // Clear canvas
     ctx.fillStyle = 'black';
-    ctx.fillRect(0, 0, panelSize, panelSize);
+    ctx.fillRect(0, 0, panelWidth, panelHeight);
 
     // Generate sagittal reconstruction
-    const sagittalColumn = Math.floor(crosshairPosition.x);
-    const sagittalData = generateSagittalView(images, pixelDataCache, sagittalColumn);
-    
-    if (!sagittalData) return;
+    const sagittalData = generateSagittalView(images, pixelDataCache, crosshairPosition.x);
+    if (!sagittalData) {
+      console.log('[MPR] Failed to generate sagittal view');
+      return;
+    }
 
     // Create temp canvas for the sagittal data
     const tempCanvas = document.createElement('canvas');
@@ -98,8 +96,31 @@ export function FloatingViewPanels({
     // Apply window/level to sagittal data
     const pixelData = sagittalData.pixelData;
     const rgba = new Uint8ClampedArray(pixelData.length * 4);
-    const min = windowCenter - windowWidth / 2;
-    const max = windowCenter + windowWidth / 2;
+    
+    // For PET scans, use different default window/level if values are extreme
+    let adjustedWindowWidth = windowWidth;
+    let adjustedWindowCenter = windowCenter;
+    
+    // PET scans often have different intensity ranges
+    if (windowWidth > 10000 || windowCenter > 5000) {
+      // Auto-calculate from pixel data if window/level seems wrong
+      let minPixel = Infinity;
+      let maxPixel = -Infinity;
+      for (let i = 0; i < pixelData.length; i++) {
+        if (pixelData[i] < minPixel) minPixel = pixelData[i];
+        if (pixelData[i] > maxPixel) maxPixel = pixelData[i];
+      }
+      adjustedWindowWidth = maxPixel - minPixel;
+      adjustedWindowCenter = (maxPixel + minPixel) / 2;
+      console.log('[MPR] Auto-adjusted window/level for PET:', {
+        original: { width: windowWidth, center: windowCenter },
+        adjusted: { width: adjustedWindowWidth, center: adjustedWindowCenter },
+        pixelRange: { min: minPixel, max: maxPixel }
+      });
+    }
+    
+    const min = adjustedWindowCenter - adjustedWindowWidth / 2;
+    const max = adjustedWindowCenter + adjustedWindowWidth / 2;
     
     for (let i = 0; i < pixelData.length; i++) {
       const value = pixelData[i];
@@ -116,11 +137,11 @@ export function FloatingViewPanels({
     tempCtx.putImageData(imageData, 0, 0);
 
     // Scale to fit panel
-    const scale = Math.min(panelSize / tempCanvas.width, panelSize / tempCanvas.height);
+    const scale = Math.min(panelWidth / tempCanvas.width, panelHeight / tempCanvas.height);
     const scaledWidth = tempCanvas.width * scale;
     const scaledHeight = tempCanvas.height * scale;
-    const x = (panelSize - scaledWidth) / 2;
-    const y = (panelSize - scaledHeight) / 2;
+    const x = (panelWidth - scaledWidth) / 2;
+    const y = (panelHeight - scaledHeight) / 2;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -157,15 +178,20 @@ export function FloatingViewPanels({
     ctx.textBaseline = 'middle';
     
     // S (Superior) - Top
-    ctx.fillText('S', panelSize / 2, 15);
+    ctx.fillText('S', panelWidth / 2, 15);
     // I (Inferior) - Bottom
-    ctx.fillText('I', panelSize / 2, panelSize - 15);
+    ctx.fillText('I', panelWidth / 2, panelHeight - 15);
     // P (Posterior) - Left
     ctx.textAlign = 'left';
-    ctx.fillText('P', 15, panelSize / 2);
+    ctx.fillText('P', 15, panelHeight / 2);
     // A (Anterior) - Right
     ctx.textAlign = 'right';
-    ctx.fillText('A', panelSize - 15, panelSize / 2);
+    ctx.fillText('A', panelWidth - 15, panelHeight / 2);
+
+    // Draw contours on sagittal view
+    if (rtStructures && visibleStructures && ctTransform) {
+      renderContoursOnSagittalView(ctx, x, y, scaledWidth, scaledHeight, sagittalData);
+    }
   };
 
   const renderCoronalView = () => {
@@ -177,13 +203,14 @@ export function FloatingViewPanels({
 
     // Clear canvas
     ctx.fillStyle = 'black';
-    ctx.fillRect(0, 0, panelSize, panelSize);
+    ctx.fillRect(0, 0, panelWidth, panelHeight);
 
     // Generate coronal reconstruction
-    const coronalRow = Math.floor(crosshairPosition.y);
-    const coronalData = generateCoronalView(images, pixelDataCache, coronalRow);
-    
-    if (!coronalData) return;
+    const coronalData = generateCoronalView(images, pixelDataCache, crosshairPosition.y);
+    if (!coronalData) {
+      console.log('[MPR] Failed to generate coronal view');
+      return;
+    }
 
     // Create temp canvas for the coronal data
     const tempCanvas = document.createElement('canvas');
@@ -198,8 +225,31 @@ export function FloatingViewPanels({
     // Apply window/level to coronal data
     const pixelData = coronalData.pixelData;
     const rgba = new Uint8ClampedArray(pixelData.length * 4);
-    const min = windowCenter - windowWidth / 2;
-    const max = windowCenter + windowWidth / 2;
+    
+    // For PET scans, use different default window/level if values are extreme
+    let adjustedWindowWidth = windowWidth;
+    let adjustedWindowCenter = windowCenter;
+    
+    // PET scans often have different intensity ranges
+    if (windowWidth > 10000 || windowCenter > 5000) {
+      // Auto-calculate from pixel data if window/level seems wrong
+      let minPixel = Infinity;
+      let maxPixel = -Infinity;
+      for (let i = 0; i < pixelData.length; i++) {
+        if (pixelData[i] < minPixel) minPixel = pixelData[i];
+        if (pixelData[i] > maxPixel) maxPixel = pixelData[i];
+      }
+      adjustedWindowWidth = maxPixel - minPixel;
+      adjustedWindowCenter = (maxPixel + minPixel) / 2;
+      console.log('[MPR] Auto-adjusted window/level for PET (coronal):', {
+        original: { width: windowWidth, center: windowCenter },
+        adjusted: { width: adjustedWindowWidth, center: adjustedWindowCenter },
+        pixelRange: { min: minPixel, max: maxPixel }
+      });
+    }
+    
+    const min = adjustedWindowCenter - adjustedWindowWidth / 2;
+    const max = adjustedWindowCenter + adjustedWindowWidth / 2;
     
     for (let i = 0; i < pixelData.length; i++) {
       const value = pixelData[i];
@@ -216,11 +266,11 @@ export function FloatingViewPanels({
     tempCtx.putImageData(imageData, 0, 0);
 
     // Scale to fit panel
-    const scale = Math.min(panelSize / tempCanvas.width, panelSize / tempCanvas.height);
+    const scale = Math.min(panelWidth / tempCanvas.width, panelHeight / tempCanvas.height);
     const scaledWidth = tempCanvas.width * scale;
     const scaledHeight = tempCanvas.height * scale;
-    const x = (panelSize - scaledWidth) / 2;
-    const y = (panelSize - scaledHeight) / 2;
+    const x = (panelWidth - scaledWidth) / 2;
+    const y = (panelHeight - scaledHeight) / 2;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -257,15 +307,154 @@ export function FloatingViewPanels({
     ctx.textBaseline = 'middle';
     
     // S (Superior) - Top
-    ctx.fillText('S', panelSize / 2, 15);
+    ctx.fillText('S', panelWidth / 2, 15);
     // I (Inferior) - Bottom
-    ctx.fillText('I', panelSize / 2, panelSize - 15);
+    ctx.fillText('I', panelWidth / 2, panelHeight - 15);
     // R (Right) - Left
     ctx.textAlign = 'left';
-    ctx.fillText('R', 15, panelSize / 2);
+    ctx.fillText('R', 15, panelHeight / 2);
     // L (Left) - Right
     ctx.textAlign = 'right';
-    ctx.fillText('L', panelSize - 15, panelSize / 2);
+    ctx.fillText('L', panelWidth - 15, panelHeight / 2);
+
+    // Draw contours on coronal view
+    if (rtStructures && visibleStructures && ctTransform) {
+      renderContoursOnCoronalView(ctx, x, y, scaledWidth, scaledHeight, coronalData);
+    }
+  };
+
+  const renderContoursOnSagittalView = (
+    ctx: CanvasRenderingContext2D,
+    offsetX: number,
+    offsetY: number,
+    scaledWidth: number,
+    scaledHeight: number,
+    sagittalData: any
+  ) => {
+    if (!images.length || !rtStructures || !visibleStructures) return;
+    
+    const firstImage = images[0];
+    const imagePosition = firstImage.imagePosition?.split('\\').map(Number) || [0, 0, 0];
+    const pixelSpacing = firstImage.pixelSpacing?.split('\\').map(Number) || [1, 1];
+    
+    // Calculate physical X position from pixel coordinate
+    const physicalX = imagePosition[0] + (crosshairPosition.x * pixelSpacing[0]);
+    
+    ctx.save();
+    
+    // Iterate through visible structures
+    rtStructures.structures?.forEach((structure: any) => {
+      if (!visibleStructures.has(structure.id)) return;
+      
+      const color = structure.color || '#FF0000';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.8;
+      
+      // Project each contour to sagittal view
+      structure.contours?.forEach((contour: any) => {
+        const projectedPoints = projectContourToView(
+          contour.points,
+          'sagittal',
+          physicalX,
+          5 // 5mm tolerance
+        );
+        
+        if (projectedPoints && projectedPoints.length >= 6) {
+          // Convert projected world coordinates to canvas coordinates
+          ctx.beginPath();
+          for (let i = 0; i < projectedPoints.length; i += 3) {
+            const z = projectedPoints[i];
+            const y = projectedPoints[i + 1];
+            
+            // Calculate normalized positions using sagittal data bounds
+            const normalizedZ = (z - sagittalData.bounds.zMin) / (sagittalData.bounds.zMax - sagittalData.bounds.zMin);
+            const normalizedY = (y - sagittalData.bounds.yMin) / (sagittalData.bounds.yMax - sagittalData.bounds.yMin);
+            
+            // Map to canvas coordinates
+            const canvasX = offsetX + normalizedZ * scaledWidth;
+            const canvasY = offsetY + (1 - normalizedY) * scaledHeight; // Flip Y for display
+            
+            if (i === 0) {
+              ctx.moveTo(canvasX, canvasY);
+            } else {
+              ctx.lineTo(canvasX, canvasY);
+            }
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+      });
+    });
+    
+    ctx.restore();
+  };
+
+  const renderContoursOnCoronalView = (
+    ctx: CanvasRenderingContext2D,
+    offsetX: number,
+    offsetY: number,
+    scaledWidth: number,
+    scaledHeight: number,
+    coronalData: any
+  ) => {
+    if (!images.length || !rtStructures || !visibleStructures) return;
+    
+    const firstImage = images[0];
+    const imagePosition = firstImage.imagePosition?.split('\\').map(Number) || [0, 0, 0];
+    const pixelSpacing = firstImage.pixelSpacing?.split('\\').map(Number) || [1, 1];
+    
+    // Calculate physical Y position from pixel coordinate
+    const physicalY = imagePosition[1] + (crosshairPosition.y * pixelSpacing[1]);
+    
+    ctx.save();
+    
+    // Iterate through visible structures
+    rtStructures.structures?.forEach((structure: any) => {
+      if (!visibleStructures.has(structure.id)) return;
+      
+      const color = structure.color || '#FF0000';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.8;
+      
+      // Project each contour to coronal view
+      structure.contours?.forEach((contour: any) => {
+        const projectedPoints = projectContourToView(
+          contour.points,
+          'coronal',
+          physicalY,
+          5 // 5mm tolerance
+        );
+        
+        if (projectedPoints && projectedPoints.length >= 6) {
+          // Convert projected world coordinates to canvas coordinates
+          ctx.beginPath();
+          for (let i = 0; i < projectedPoints.length; i += 3) {
+            const x = projectedPoints[i];
+            const z = projectedPoints[i + 1];
+            
+            // Calculate normalized positions using coronal data bounds
+            const normalizedX = (x - coronalData.bounds.xMin) / (coronalData.bounds.xMax - coronalData.bounds.xMin);
+            const normalizedZ = (z - coronalData.bounds.zMin) / (coronalData.bounds.zMax - coronalData.bounds.zMin);
+            
+            // Map to canvas coordinates
+            const canvasX = offsetX + normalizedX * scaledWidth;
+            const canvasY = offsetY + (1 - normalizedZ) * scaledHeight; // Flip Z for display
+            
+            if (i === 0) {
+              ctx.moveTo(canvasX, canvasY);
+            } else {
+              ctx.lineTo(canvasX, canvasY);
+            }
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+      });
+    });
+    
+    ctx.restore();
   };
 
   const handleViewClick = (view: 'axial' | 'sagittal' | 'coronal') => {
@@ -287,12 +476,12 @@ export function FloatingViewPanels({
           onMouseEnter={() => setHoveredView('sagittal')}
           onMouseLeave={() => setHoveredView(null)}
           onClick={() => handleViewClick('sagittal')}
-          style={{ width: panelSize, height: panelSize }}
+          style={{ width: panelWidth, height: panelHeight }}
         >
           <canvas
             ref={sagittalCanvasRef}
-            width={panelSize}
-            height={panelSize}
+            width={panelWidth}
+            height={panelHeight}
             className="w-full h-full"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
@@ -313,12 +502,12 @@ export function FloatingViewPanels({
           onMouseEnter={() => setHoveredView('coronal')}
           onMouseLeave={() => setHoveredView(null)}
           onClick={() => handleViewClick('coronal')}
-          style={{ width: panelSize, height: panelSize }}
+          style={{ width: panelWidth, height: panelHeight }}
         >
           <canvas
             ref={coronalCanvasRef}
-            width={panelSize}
-            height={panelSize}
+            width={panelWidth}
+            height={panelHeight}
             className="w-full h-full"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
@@ -327,28 +516,6 @@ export function FloatingViewPanels({
           </div>
         </div>
       )}
-
-      {/* Axial View Panel (when not active) */}
-      {activeView !== 'axial' && (
-        <div
-          className={cn(
-            "relative cursor-pointer transition-all duration-200",
-            "border-2 rounded-lg overflow-hidden shadow-lg",
-            hoveredView === 'axial' ? "border-blue-500 scale-110" : "border-gray-600"
-          )}
-          onMouseEnter={() => setHoveredView('axial')}
-          onMouseLeave={() => setHoveredView(null)}
-          onClick={() => handleViewClick('axial')}
-          style={{ width: panelSize, height: panelSize }}
-        >
-          <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-            <div className="text-white text-center">
-              <div className="text-xs font-medium">AXIAL</div>
-              <div className="text-[10px] opacity-60">Slice {currentSliceIndex + 1}</div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
-}
+};
