@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { generateSagittalView, generateCoronalView } from '@/lib/multiplanar-reconstruction';
+import { GPUVolumeManager } from '@/lib/gpu-volume-renderer';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 
 export interface MPRThreePaneViewProps {
   axialCanvas: HTMLCanvasElement | null;
@@ -343,118 +345,175 @@ export function MPRThreePaneView({
     ctx.globalAlpha = 1;
   }, [images, pixelDataCache, windowWidth, windowCenter, crosshairPosition]);
 
+  // Helper function to render viewport overlays
+  const renderViewportOverlay = (
+    view: 'axial' | 'sagittal' | 'coronal',
+    position: { top?: boolean; bottom?: boolean; left?: boolean; right?: boolean }
+  ) => {
+    const orientationLabels = {
+      axial: { top: 'A', bottom: 'P', left: 'R', right: 'L' },
+      sagittal: { top: 'S', bottom: 'I', left: 'P', right: 'A' },
+      coronal: { top: 'S', bottom: 'I', left: 'R', right: 'L' }
+    };
+    
+    const labels = orientationLabels[view];
+    
+    return (
+      <>
+        {/* Orientation labels */}
+        {position.top && (
+          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-white text-sm font-bold">
+            {labels.top}
+          </div>
+        )}
+        {position.bottom && (
+          <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 text-white text-sm font-bold">
+            {labels.bottom}
+          </div>
+        )}
+        {position.left && (
+          <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-white text-sm font-bold">
+            {labels.left}
+          </div>
+        )}
+        {position.right && (
+          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-white text-sm font-bold">
+            {labels.right}
+          </div>
+        )}
+        
+        {/* View type label */}
+        <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+          {view.charAt(0).toUpperCase() + view.slice(1)}
+        </div>
+        
+        {/* Technical info */}
+        <div className="absolute bottom-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+          <div>W: {windowWidth} L: {windowCenter}</div>
+          {view === 'axial' && <div>Slice: {currentSliceIndex + 1}/{images.length}</div>}
+        </div>
+      </>
+    );
+  };
+
   return (
-    <div className="absolute inset-0 flex bg-black">
-      {/* Left pane - Axial (70% width) */}
-      <div className="relative flex-[7] border-r border-gray-700">
-        <canvas
-          ref={axialPaneCanvasRef}
-          className="w-full h-full"
-          onMouseEnter={() => setHoveredView('axial')}
-          onMouseLeave={() => setHoveredView(null)}
-          onWheel={(e) => {
-            // Handle wheel events to allow scrolling through slices
-            e.preventDefault();
-            if (!onCrosshairChange) return;
-            
-            const delta = e.deltaY > 0 ? 1 : -1;
-            const newZ = Math.max(0, Math.min(images.length - 1, currentSliceIndex + delta));
-            
-            console.log('🎡 MPR Wheel event:', {
-              currentSliceIndex,
-              delta,
-              newZ,
-              imagesLength: images.length
-            });
-            
-            // Update crosshair position with new Z index
-            onCrosshairChange({
-              ...crosshairPosition,
-              z: newZ
-            });
-          }}
-        />
-        
-        {/* Maximize button */}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onViewMaximize('axial')}
-          className={cn(
-            "absolute top-2 right-2 p-1 transition-opacity",
-            "bg-black/50 hover:bg-black/70 text-white",
-            hoveredView === 'axial' ? 'opacity-100' : 'opacity-0'
-          )}
-        >
-          <Maximize2 className="w-4 h-4" />
-        </Button>
-        
-        {/* View label */}
-        <div className="absolute bottom-2 left-2 text-xs text-white font-medium bg-black/50 px-2 py-1 rounded">
-          AXIAL
-        </div>
-      </div>
-
-      {/* Right pane - Sagittal and Coronal (30% width) */}
-      <div className="flex-[3] flex flex-col">
-        {/* Sagittal (top half) */}
-        <div className="relative flex-1 border-b border-gray-700">
+    <ResizablePanelGroup direction="horizontal" className="absolute inset-0 bg-black">
+      {/* Left pane - Axial (default 70% width) */}
+      <ResizablePanel defaultSize={70} minSize={30}>
+        <div className="relative h-full">
           <canvas
-            ref={sagittalCanvasRef}
+            ref={axialPaneCanvasRef}
             className="w-full h-full"
-            onMouseEnter={() => setHoveredView('sagittal')}
+            onMouseEnter={() => setHoveredView('axial')}
             onMouseLeave={() => setHoveredView(null)}
+            onWheel={(e) => {
+              // Handle wheel events to allow scrolling through slices
+              e.preventDefault();
+              if (!onCrosshairChange) return;
+              
+              const delta = e.deltaY > 0 ? 1 : -1;
+              const newZ = Math.max(0, Math.min(images.length - 1, currentSliceIndex + delta));
+              
+              console.log('🎡 MPR Wheel event:', {
+                currentSliceIndex,
+                delta,
+                newZ,
+                imagesLength: images.length
+              });
+              
+              // Update crosshair position with new Z index
+              onCrosshairChange({
+                ...crosshairPosition,
+                z: newZ
+              });
+            }}
           />
           
           {/* Maximize button */}
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => onViewMaximize('sagittal')}
+            onClick={() => onViewMaximize('axial')}
             className={cn(
               "absolute top-2 right-2 p-1 transition-opacity",
               "bg-black/50 hover:bg-black/70 text-white",
-              hoveredView === 'sagittal' ? 'opacity-100' : 'opacity-0'
+              hoveredView === 'axial' ? 'opacity-100' : 'opacity-0'
             )}
           >
             <Maximize2 className="w-4 h-4" />
           </Button>
           
-          {/* View label */}
-          <div className="absolute bottom-2 left-2 text-xs text-white font-medium bg-black/50 px-2 py-1 rounded">
-            SAG
-          </div>
+          {/* OHIF3-style viewport overlay */}
+          {renderViewportOverlay('axial', { top: true, bottom: true, left: true, right: true })}
         </div>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
 
-        {/* Coronal (bottom half) */}
-        <div className="relative flex-1">
-          <canvas
-            ref={coronalCanvasRef}
-            className="w-full h-full"
-            onMouseEnter={() => setHoveredView('coronal')}
-            onMouseLeave={() => setHoveredView(null)}
-          />
+      {/* Right pane - Sagittal and Coronal (default 30% width) */}
+      <ResizablePanel defaultSize={30} minSize={20}>
+        <ResizablePanelGroup direction="vertical">
+          {/* Sagittal (top half) */}
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <div className="relative h-full">
+              <canvas
+                ref={sagittalCanvasRef}
+                className="w-full h-full"
+                onMouseEnter={() => setHoveredView('sagittal')}
+                onMouseLeave={() => setHoveredView(null)}
+              />
+              
+              {/* Maximize button */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onViewMaximize('sagittal')}
+                className={cn(
+                  "absolute top-2 right-2 p-1 transition-opacity",
+                  "bg-black/50 hover:bg-black/70 text-white",
+                  hoveredView === 'sagittal' ? 'opacity-100' : 'opacity-0'
+                )}
+              >
+                <Maximize2 className="w-4 h-4" />
+              </Button>
+              
+              {/* OHIF3-style viewport overlay */}
+              {renderViewportOverlay('sagittal', { top: true, bottom: true, left: true, right: true })}
+            </div>
+          </ResizablePanel>
           
-          {/* Maximize button */}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onViewMaximize('coronal')}
-            className={cn(
-              "absolute top-2 right-2 p-1 transition-opacity",
-              "bg-black/50 hover:bg-black/70 text-white",
-              hoveredView === 'coronal' ? 'opacity-100' : 'opacity-0'
-            )}
-          >
-            <Maximize2 className="w-4 h-4" />
-          </Button>
-          
-          {/* View label */}
-          <div className="absolute bottom-2 left-2 text-xs text-white font-medium bg-black/50 px-2 py-1 rounded">
-            COR
-          </div>
-        </div>
-      </div>
-    </div>
+          <ResizableHandle withHandle />
+
+          {/* Coronal (bottom half) */}
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <div className="relative h-full">
+              <canvas
+                ref={coronalCanvasRef}
+                className="w-full h-full"
+                onMouseEnter={() => setHoveredView('coronal')}
+                onMouseLeave={() => setHoveredView(null)}
+              />
+              
+              {/* Maximize button */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onViewMaximize('coronal')}
+                className={cn(
+                  "absolute top-2 right-2 p-1 transition-opacity",
+                  "bg-black/50 hover:bg-black/70 text-white",
+                  hoveredView === 'coronal' ? 'opacity-100' : 'opacity-0'
+                )}
+              >
+                <Maximize2 className="w-4 h-4" />
+              </Button>
+              
+              {/* OHIF3-style viewport overlay */}
+              {renderViewportOverlay('coronal', { top: true, bottom: true, left: true, right: true })}
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
