@@ -239,6 +239,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
   const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
   
+  // Populate pixelDataCache from existing cached images
+  useEffect(() => {
+    if (images.length === 0) return;
+    
+    // Check if we need to populate the cache
+    const needsPopulation = pixelDataCache.size === 0 && imageCacheRef.current.size > 0;
+    if (!needsPopulation) return;
+    
+    console.log('🔧 Populating pixelDataCache from existing image cache...');
+    const newCache = new Map<number, Uint16Array>();
+    
+    images.forEach((image, index) => {
+      const cachedData = imageCacheRef.current.get(image.sopInstanceUID);
+      if (cachedData?.rawData) {
+        newCache.set(index, cachedData.rawData);
+        console.log(`📊 Cached pixel data for index ${index} (instance ${cachedData.instanceNumber || index})`);
+      }
+    });
+    
+    if (newCache.size > 0) {
+      setPixelDataCache(newCache);
+      console.log(`✅ Populated pixelDataCache with ${newCache.size} entries`);
+    }
+  }, [images, pixelDataCache.size]);
+  
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
   const displayCurrentImageRef = useRef<() => Promise<void>>();
@@ -1852,13 +1877,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           pixelDataElement.length / 2,
         );
         
-        // Cache raw pixel data for MPR if we have the sopInstanceUID
-        if (sopInstanceUID) {
-          const imageIndex = images.findIndex(img => img.sopInstanceUID === sopInstanceUID);
-          if (imageIndex >= 0) {
-            setPixelDataCache(prev => new Map(prev).set(imageIndex, rawPixelArray));
-          }
-        }
+        // Get instance number for caching
+        const instanceNumber = dataSet.intString("x00200013") || 0;
+        
+        // Cache raw pixel data for MPR using instance number as key
+        setPixelDataCache(prev => {
+          const newCache = new Map(prev);
+          newCache.set(instanceNumber, rawPixelArray);
+          console.log(`📊 Cached pixel data for instance ${instanceNumber}, cache size: ${newCache.size}`);
+          return newCache;
+        });
         
         // Convert to Hounsfield Units
         const huPixelArray = new Float32Array(rawPixelArray.length);
@@ -1871,6 +1899,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           width: cols,
           height: rows,
           rawData: rawPixelArray, // Include raw data in return
+          instanceNumber, // Include instance number for reference
           rescaleSlope,
           rescaleIntercept
         };
