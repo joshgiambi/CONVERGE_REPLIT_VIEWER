@@ -118,6 +118,12 @@ interface WorkingViewerProps {
   };
   selectedForEdit?: number | null;
   onBrushSizeChange?: (size: number) => void;
+  onBrushToolChange?: (state: {
+    tool: string | null;
+    brushSize: number;
+    isActive: boolean;
+    predictionEnabled?: boolean;
+  }) => void;
   onContourUpdate?: (updatedStructures: any) => void;
   contourSettings?: { width: number; opacity: number };
   autoZoomLevel?: number;
@@ -145,6 +151,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     brushToolState,
     selectedForEdit,
     onBrushSizeChange,
+    onBrushToolChange,
     onContourUpdate,
     contourSettings,
     autoZoomLevel,
@@ -2621,21 +2628,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   });
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Check if any drawing tool is active - if so, skip pan functionality
+    // Check if any drawing tool or measurement tool is active - if so, skip pan functionality
     const isDrawingToolActive =
-      brushToolState?.isActive && 
-      (brushToolState?.tool === "brush" || 
-       brushToolState?.tool === "pen" || 
-       brushToolState?.tool === "planar-contour");
+      (brushToolState?.isActive && 
+       (brushToolState?.tool === "brush" || 
+        brushToolState?.tool === "pen" || 
+        brushToolState?.tool === "planar-contour")) ||
+      isMeasurementToolActive;
 
-    // Only prevent default and stop propagation if drawing tool is NOT active
+    // Only prevent default and stop propagation if drawing/measurement tool is NOT active
     if (!isDrawingToolActive) {
       e.preventDefault();
       e.stopPropagation();
     }
 
     if (e.button === 0 && !isDrawingToolActive) {
-      // Left click for pan (disabled during drawing mode)
+      // Left click for pan (disabled during drawing/measurement mode)
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
       setLastPanX(panX);
@@ -2678,14 +2686,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Skip pan functionality if any drawing tool is active
+    // Skip pan functionality if any drawing tool or measurement tool is active
     const isDrawingToolActive =
-      brushToolState?.isActive && 
-      (brushToolState?.tool === "brush" || 
-       brushToolState?.tool === "pen" || 
-       brushToolState?.tool === "planar-contour");
+      (brushToolState?.isActive && 
+       (brushToolState?.tool === "brush" || 
+        brushToolState?.tool === "pen" || 
+        brushToolState?.tool === "planar-contour")) ||
+      isMeasurementToolActive;
 
-    // Only handle pan if drawing tool is NOT active
+    // Only handle pan if drawing/measurement tool is NOT active
     if (isDragging && !isDrawingToolActive) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
@@ -2695,12 +2704,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCanvasMouseUp = () => {
-    // Skip pan functionality if any drawing tool is active
+    // Skip pan functionality if any drawing tool or measurement tool is active
     const isDrawingToolActive =
-      brushToolState?.isActive && 
-      (brushToolState?.tool === "brush" || 
-       brushToolState?.tool === "pen" || 
-       brushToolState?.tool === "planar-contour");
+      (brushToolState?.isActive && 
+       (brushToolState?.tool === "brush" || 
+        brushToolState?.tool === "pen" || 
+        brushToolState?.tool === "planar-contour")) ||
+      isMeasurementToolActive;
 
     if (!isDrawingToolActive) {
       setIsDragging(false);

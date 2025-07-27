@@ -704,7 +704,7 @@ export function ContourEditToolbar({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <div>
-                <Label className="text-xs text-gray-300 mb-2 block">Brush Thickness</Label>
+                <Label className="text-xs text-gray-300 mb-2 block">Brush Radius</Label>
                 <Slider
                   value={brushThickness}
                   onValueChange={(value) => {
@@ -719,8 +719,8 @@ export function ContourEditToolbar({
                       });
                     }
                   }}
-                  max={50}  // Max ~5cm for typical pixel spacing of 1mm
-                  min={1}   // Min ~0.1cm
+                  max={102}  // Max ~100mm for typical pixel spacing of ~1mm
+                  min={1}    // Min ~1mm
                   step={1}
                   className="w-full"
                 />

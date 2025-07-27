@@ -36,6 +36,8 @@ export function MeasurementTool({
       }
       setFirstPoint(null);
       setCurrentMousePos(null);
+      // Clear all measurements when tool is deactivated
+      measurementsRef.current = [];
       return;
     }
 

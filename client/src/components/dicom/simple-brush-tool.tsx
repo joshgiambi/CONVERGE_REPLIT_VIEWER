@@ -601,9 +601,9 @@ export function SimpleBrushTool({
     }
     
     if (sliderFill) {
-      // Map size to slider width (0-100%) - medical range 1-50px to cover 0.1-5cm
+      // Map size to slider width (0-100%) - medical range 1-102px to cover 1mm-100mm
       const minSize = 1;
-      const maxSize = 50;
+      const maxSize = 102;
       const percentage = ((sizePixels - minSize) / (maxSize - minSize)) * 100;
       sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
     }
