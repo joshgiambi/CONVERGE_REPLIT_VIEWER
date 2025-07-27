@@ -192,8 +192,8 @@ export function ViewerToolbar({
                   <div><span className="text-gray-400">Matrix:</span> {imageMetadata.rows || 512} x {imageMetadata.columns || 512}</div>
                   <div><span className="text-gray-400">Slice:</span> {currentSlice || 1} / {totalSlices || 1}</div>
                   <div><span className="text-gray-400">Thickness:</span> {imageMetadata.sliceThickness ? `${imageMetadata.sliceThickness}mm` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Pixel Spacing:</span> {imageMetadata.pixelSpacing ? `${imageMetadata.pixelSpacing[0].toFixed(2)}mm` : 'N/A'}</div>
-                  <div><span className="text-gray-400">Slice Location:</span> {imageMetadata.sliceLocation ? `${imageMetadata.sliceLocation.toFixed(1)}mm` : 'N/A'}</div>
+                  <div><span className="text-gray-400">Pixel Spacing:</span> {imageMetadata.pixelSpacing && Array.isArray(imageMetadata.pixelSpacing) && typeof imageMetadata.pixelSpacing[0] === 'number' ? `${imageMetadata.pixelSpacing[0].toFixed(2)}mm` : 'N/A'}</div>
+                  <div><span className="text-gray-400">Slice Location:</span> {imageMetadata.sliceLocation && typeof imageMetadata.sliceLocation === 'number' ? `${imageMetadata.sliceLocation.toFixed(1)}mm` : 'N/A'}</div>
                 </div>
               </div>
               
