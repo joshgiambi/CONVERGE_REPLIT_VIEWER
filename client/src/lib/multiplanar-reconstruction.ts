@@ -48,12 +48,13 @@ export function generateSagittalView(
   // Calculate slice thickness (average distance between slices)
   const sliceThickness = calculateSliceThickness(sortedImages);
   
-  // Output dimensions: height = original rows, width = number of slices
-  const outputHeight = rows;
-  const outputWidth = sortedImages.length;
+  // Output dimensions: Rotate 90 degrees so head is at top
+  // Width = original height (rows), Height = number of slices
+  const outputWidth = rows;
+  const outputHeight = sortedImages.length;
   const outputData = new Uint16Array(outputWidth * outputHeight);
 
-  // Extract sagittal slice
+  // Extract sagittal slice and rotate 90 degrees clockwise
   for (let z = 0; z < sortedImages.length; z++) {
     const image = sortedImages[z];
     const pixelData = pixelDataCache.get(images.indexOf(image));
@@ -61,9 +62,13 @@ export function generateSagittalView(
     if (!pixelData) continue;
 
     // Extract column at xPosition for this slice
+    // Rotate 90 degrees: source y becomes dest x (flipped), z becomes dest y
     for (let y = 0; y < rows; y++) {
       const sourceIndex = y * columns + Math.floor(xPosition);
-      const destIndex = y * outputWidth + z;
+      // After rotation: x = rows - 1 - y, y = z
+      const destX = rows - 1 - y;
+      const destY = z;
+      const destIndex = destY * outputWidth + destX;
       outputData[destIndex] = pixelData[sourceIndex] || 0;
     }
   }
@@ -79,7 +84,8 @@ export function generateSagittalView(
     width: outputWidth,
     height: outputHeight,
     metadata: {
-      pixelSpacing: [sliceThickness, pixelSpacing[0]], // [z spacing, y spacing]
+      // After rotation: width uses Y spacing, height uses Z spacing (slice thickness)
+      pixelSpacing: [pixelSpacing[0], sliceThickness], // [y spacing, z spacing]
       origin: [xPosition * pixelSpacing[1], imagePosArray[1] || 0, imagePosArray[2] || 0],
       orientation: 'sagittal'
     }
@@ -146,7 +152,8 @@ export function generateCoronalView(
     width: outputWidth,
     height: outputHeight,
     metadata: {
-      pixelSpacing: [sliceThickness, pixelSpacing[1]], // [z spacing, x spacing]
+      // Coronal view: width uses X spacing, height uses Z spacing (slice thickness)
+      pixelSpacing: [pixelSpacing[1], sliceThickness], // [x spacing, z spacing]
       origin: [imagePosArray[0] || 0, yPosition * pixelSpacing[0], imagePosArray[2] || 0],
       orientation: 'coronal'
     }
