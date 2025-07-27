@@ -239,30 +239,39 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
   const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
   
-  // Populate pixelDataCache from existing cached images
+  // Rebuild pixelDataCache when images change to ensure correct index mapping
   useEffect(() => {
     if (images.length === 0) return;
     
-    // Check if we need to populate the cache
-    const needsPopulation = pixelDataCache.size === 0 && imageCacheRef.current.size > 0;
-    if (!needsPopulation) return;
-    
-    console.log('🔧 Populating pixelDataCache from existing image cache...');
+    console.log('🔧 Rebuilding pixelDataCache with correct indices...');
     const newCache = new Map<number, Uint16Array>();
+    let foundCount = 0;
     
+    // For each image, find its pixel data either from the existing cache or from imageCacheRef
     images.forEach((image, index) => {
+      // First check if we have it in imageCacheRef
       const cachedData = imageCacheRef.current.get(image.sopInstanceUID);
       if (cachedData?.rawData) {
         newCache.set(index, cachedData.rawData);
-        console.log(`📊 Cached pixel data for index ${index} (instance ${cachedData.instanceNumber || index})`);
+        foundCount++;
+      } else {
+        // Try to find it in the existing pixelDataCache using instance number
+        const instanceNum = image.instanceNumber || image.parsedInstanceNumber;
+        if (instanceNum && pixelDataCache.has(instanceNum)) {
+          const pixelData = pixelDataCache.get(instanceNum);
+          if (pixelData) {
+            newCache.set(index, pixelData);
+            foundCount++;
+          }
+        }
       }
     });
     
-    if (newCache.size > 0) {
+    if (foundCount > 0 && foundCount !== pixelDataCache.size) {
+      console.log(`✅ Rebuilt pixelDataCache: ${foundCount}/${images.length} entries with correct indices`);
       setPixelDataCache(newCache);
-      console.log(`✅ Populated pixelDataCache with ${newCache.size} entries`);
     }
-  }, [images, pixelDataCache.size]);
+  }, [images]);
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
