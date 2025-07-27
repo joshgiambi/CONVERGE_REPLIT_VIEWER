@@ -108,14 +108,14 @@ export function FloatingViewPanels({
   };
 
   return (
-    <div className="absolute right-2 top-2 space-y-2 z-50">
+    <div className="absolute right-1 top-2 space-y-2 z-50">
       {/* Sagittal View Panel */}
       {activeView !== 'sagittal' && (
         <div
           className={cn(
             "relative cursor-pointer transition-all duration-200",
             "border rounded-lg overflow-hidden shadow-lg",
-            hoveredView === 'sagittal' ? "border-blue-500 scale-125 shadow-2xl" : "border-gray-700"
+            hoveredView === 'sagittal' ? "border-blue-500 scale-110 shadow-2xl" : "border-gray-700"
           )}
           onMouseEnter={() => setHoveredView('sagittal')}
           onMouseLeave={() => setHoveredView(null)}
@@ -141,7 +141,7 @@ export function FloatingViewPanels({
           className={cn(
             "relative cursor-pointer transition-all duration-200",
             "border rounded-lg overflow-hidden shadow-lg",
-            hoveredView === 'coronal' ? "border-blue-500 scale-125 shadow-2xl" : "border-gray-700"
+            hoveredView === 'coronal' ? "border-blue-500 scale-110 shadow-2xl" : "border-gray-700"
           )}
           onMouseEnter={() => setHoveredView('coronal')}
           onMouseLeave={() => setHoveredView(null)}
