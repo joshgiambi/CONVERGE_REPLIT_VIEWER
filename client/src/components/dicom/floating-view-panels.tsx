@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { generateSagittalView, generateCoronalView } from '@/lib/multiplanar-reconstruction';
 
 interface FloatingViewPanelsProps {
   axialCanvas: HTMLCanvasElement | null;
@@ -12,6 +13,8 @@ interface FloatingViewPanelsProps {
   onViewChange: (view: 'axial' | 'sagittal' | 'coronal') => void;
   rtStructures?: any;
   selectedStructure?: string | null;
+  pixelDataCache?: Map<number, Uint16Array>;
+  onCrosshairChange?: (position: { x: number; y: number; z: number }) => void;
 }
 
 export function FloatingViewPanels({
@@ -24,17 +27,35 @@ export function FloatingViewPanels({
   activeView,
   onViewChange,
   rtStructures,
-  selectedStructure
+  selectedStructure,
+  pixelDataCache = new Map(),
+  onCrosshairChange
 }: FloatingViewPanelsProps) {
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredView, setHoveredView] = useState<string | null>(null);
+  const [crosshairPosition, setCrosshairPosition] = useState({ x: 256, y: 256, z: currentSliceIndex });
 
-  // Panel size - 10% of viewport width
-  const panelSize = Math.floor(window.innerWidth * 0.1);
+  // Panel size - 20% of viewport width for better visibility
+  const panelSize = Math.floor(window.innerWidth * 0.2);
+
+  // Update crosshair z position when slice changes
+  useEffect(() => {
+    setCrosshairPosition(prev => ({ ...prev, z: currentSliceIndex }));
+  }, [currentSliceIndex]);
 
   useEffect(() => {
     if (!images.length || !axialCanvas) return;
+
+    // Set canvas sizes
+    if (sagittalCanvasRef.current) {
+      sagittalCanvasRef.current.width = panelSize;
+      sagittalCanvasRef.current.height = panelSize;
+    }
+    if (coronalCanvasRef.current) {
+      coronalCanvasRef.current.width = panelSize;
+      coronalCanvasRef.current.height = panelSize;
+    }
 
     // Render sagittal view
     if (sagittalCanvasRef.current && activeView !== 'sagittal') {
@@ -45,60 +66,204 @@ export function FloatingViewPanels({
     if (coronalCanvasRef.current && activeView !== 'coronal') {
       renderCoronalView();
     }
-  }, [currentSliceIndex, images, pixelData, windowWidth, windowCenter, activeView]);
+  }, [currentSliceIndex, images, pixelData, windowWidth, windowCenter, activeView, pixelDataCache, crosshairPosition]);
 
   const renderSagittalView = () => {
-    const canvas = sagittalCanvasRef.current;
-    if (!canvas) return;
+    if (!sagittalCanvasRef.current || images.length === 0 || pixelDataCache.size === 0) return;
 
+    const canvas = sagittalCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // For now, show a placeholder with view label
-    ctx.fillStyle = '#1a1a1a';
+    // Clear canvas
+    ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, panelSize, panelSize);
+
+    // Generate sagittal reconstruction
+    const sagittalColumn = Math.floor(crosshairPosition.x);
+    const sagittalData = generateSagittalView(images, pixelDataCache, sagittalColumn);
+    
+    if (!sagittalData) return;
+
+    // Create temp canvas for the sagittal data
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = sagittalData.width;
+    tempCanvas.height = sagittalData.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
+    // Create image data
+    const imageData = tempCtx.createImageData(sagittalData.width, sagittalData.height);
+    
+    // Apply window/level to sagittal data
+    const pixelData = sagittalData.pixelData;
+    const rgba = new Uint8ClampedArray(pixelData.length * 4);
+    const min = windowCenter - windowWidth / 2;
+    const max = windowCenter + windowWidth / 2;
+    
+    for (let i = 0; i < pixelData.length; i++) {
+      const value = pixelData[i];
+      let normalized = (value - min) / (max - min);
+      normalized = Math.max(0, Math.min(1, normalized));
+      const gray = Math.floor(normalized * 255);
+      
+      rgba[i * 4] = gray;
+      rgba[i * 4 + 1] = gray;
+      rgba[i * 4 + 2] = gray;
+      rgba[i * 4 + 3] = 255;
+    }
+    imageData.data.set(rgba);
+    tempCtx.putImageData(imageData, 0, 0);
+
+    // Scale to fit panel
+    const scale = Math.min(panelSize / tempCanvas.width, panelSize / tempCanvas.height);
+    const scaledWidth = tempCanvas.width * scale;
+    const scaledHeight = tempCanvas.height * scale;
+    const x = (panelSize - scaledWidth) / 2;
+    const y = (panelSize - scaledHeight) / 2;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair
-    ctx.strokeStyle = '#00ff00';
+    ctx.strokeStyle = 'yellow';
     ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8;
+    
+    // Vertical line representing current axial slice
+    const slicePositionNormalized = currentSliceIndex / images.length;
+    const crosshairX = x + (scaledWidth * slicePositionNormalized);
     ctx.beginPath();
-    ctx.moveTo(panelSize / 2, 0);
-    ctx.lineTo(panelSize / 2, panelSize);
-    ctx.moveTo(0, panelSize / 2);
-    ctx.lineTo(panelSize, panelSize / 2);
+    ctx.moveTo(crosshairX, y);
+    ctx.lineTo(crosshairX, y + scaledHeight);
     ctx.stroke();
+    
+    // Horizontal line representing coronal position
+    const coronalPositionNormalized = crosshairPosition.y / 512;
+    const crosshairY = y + (scaledHeight * coronalPositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(x, crosshairY);
+    ctx.lineTo(x + scaledWidth, crosshairY);
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
 
-    // Label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '12px Arial';
-    ctx.fillText('Sagittal', 5, 15);
+    // Draw orientation labels
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // S (Superior) - Top
+    ctx.fillText('S', panelSize / 2, 15);
+    // I (Inferior) - Bottom
+    ctx.fillText('I', panelSize / 2, panelSize - 15);
+    // P (Posterior) - Left
+    ctx.textAlign = 'left';
+    ctx.fillText('P', 15, panelSize / 2);
+    // A (Anterior) - Right
+    ctx.textAlign = 'right';
+    ctx.fillText('A', panelSize - 15, panelSize / 2);
   };
 
   const renderCoronalView = () => {
-    const canvas = coronalCanvasRef.current;
-    if (!canvas) return;
+    if (!coronalCanvasRef.current || images.length === 0 || pixelDataCache.size === 0) return;
 
+    const canvas = coronalCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // For now, show a placeholder with view label
-    ctx.fillStyle = '#1a1a1a';
+    // Clear canvas
+    ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, panelSize, panelSize);
+
+    // Generate coronal reconstruction
+    const coronalRow = Math.floor(crosshairPosition.y);
+    const coronalData = generateCoronalView(images, pixelDataCache, coronalRow);
+    
+    if (!coronalData) return;
+
+    // Create temp canvas for the coronal data
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = coronalData.width;
+    tempCanvas.height = coronalData.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
+    // Create image data
+    const imageData = tempCtx.createImageData(coronalData.width, coronalData.height);
+    
+    // Apply window/level to coronal data
+    const pixelData = coronalData.pixelData;
+    const rgba = new Uint8ClampedArray(pixelData.length * 4);
+    const min = windowCenter - windowWidth / 2;
+    const max = windowCenter + windowWidth / 2;
+    
+    for (let i = 0; i < pixelData.length; i++) {
+      const value = pixelData[i];
+      let normalized = (value - min) / (max - min);
+      normalized = Math.max(0, Math.min(1, normalized));
+      const gray = Math.floor(normalized * 255);
+      
+      rgba[i * 4] = gray;
+      rgba[i * 4 + 1] = gray;
+      rgba[i * 4 + 2] = gray;
+      rgba[i * 4 + 3] = 255;
+    }
+    imageData.data.set(rgba);
+    tempCtx.putImageData(imageData, 0, 0);
+
+    // Scale to fit panel
+    const scale = Math.min(panelSize / tempCanvas.width, panelSize / tempCanvas.height);
+    const scaledWidth = tempCanvas.width * scale;
+    const scaledHeight = tempCanvas.height * scale;
+    const x = (panelSize - scaledWidth) / 2;
+    const y = (panelSize - scaledHeight) / 2;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
     
     // Draw crosshair
-    ctx.strokeStyle = '#00ff00';
+    ctx.strokeStyle = 'yellow';
     ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8;
+    
+    // Vertical line representing current axial slice
+    const slicePositionNormalized = currentSliceIndex / images.length;
+    const crosshairX = x + (scaledWidth * slicePositionNormalized);
     ctx.beginPath();
-    ctx.moveTo(panelSize / 2, 0);
-    ctx.lineTo(panelSize / 2, panelSize);
-    ctx.moveTo(0, panelSize / 2);
-    ctx.lineTo(panelSize, panelSize / 2);
+    ctx.moveTo(crosshairX, y);
+    ctx.lineTo(crosshairX, y + scaledHeight);
     ctx.stroke();
+    
+    // Horizontal line representing sagittal position
+    const sagittalPositionNormalized = crosshairPosition.x / 512;
+    const crosshairY = y + (scaledHeight * sagittalPositionNormalized);
+    ctx.beginPath();
+    ctx.moveTo(x, crosshairY);
+    ctx.lineTo(x + scaledWidth, crosshairY);
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
 
-    // Label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '12px Arial';
-    ctx.fillText('Coronal', 5, 15);
+    // Draw orientation labels
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // S (Superior) - Top
+    ctx.fillText('S', panelSize / 2, 15);
+    // I (Inferior) - Bottom
+    ctx.fillText('I', panelSize / 2, panelSize - 15);
+    // R (Right) - Left
+    ctx.textAlign = 'left';
+    ctx.fillText('R', 15, panelSize / 2);
+    // L (Left) - Right
+    ctx.textAlign = 'right';
+    ctx.fillText('L', panelSize - 15, panelSize / 2);
   };
 
   const handleViewClick = (view: 'axial' | 'sagittal' | 'coronal') => {

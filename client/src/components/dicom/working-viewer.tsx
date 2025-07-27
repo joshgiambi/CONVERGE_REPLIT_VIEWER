@@ -168,7 +168,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mprLayoutMode, setMprLayoutMode] = useState<'single' | 'floating' | 'three-pane'>('floating');
-  const [useGPUAcceleration, setUseGPUAcceleration] = useState(false);
+  const [useGPUAcceleration, setUseGPUAcceleration] = useState(true); // Enable GPU by default
   const [gpuPerformanceMetrics, setGPUPerformanceMetrics] = useState<{
     loadTime: number;
     renderTime: number;
@@ -2528,6 +2528,55 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+
+    // Draw crosshair overlay
+    if (activeView === 'axial') {
+      // Save context state
+      ctx.save();
+      
+      // Draw crosshair lines
+      ctx.strokeStyle = 'yellow';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.8;
+      
+      // Vertical line at center of image
+      const centerX = x + scaledWidth / 2;
+      ctx.beginPath();
+      ctx.moveTo(centerX, 0);
+      ctx.lineTo(centerX, canvasHeight);
+      ctx.stroke();
+      
+      // Horizontal line at center of image
+      const centerY = y + scaledHeight / 2;
+      ctx.beginPath();
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(canvasWidth, centerY);
+      ctx.stroke();
+      
+      // Draw orientation labels
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      // A (Anterior) - Top
+      ctx.fillText('A', canvasWidth / 2, 20);
+      
+      // P (Posterior) - Bottom
+      ctx.fillText('P', canvasWidth / 2, canvasHeight - 20);
+      
+      // R (Right) - Left side (radiological convention)
+      ctx.textAlign = 'left';
+      ctx.fillText('R', 20, canvasHeight / 2);
+      
+      // L (Left) - Right side (radiological convention)
+      ctx.textAlign = 'right';
+      ctx.fillText('L', canvasWidth - 20, canvasHeight / 2);
+      
+      // Restore context state
+      ctx.restore();
+    }
   };
 
   const render8BitImage = (
@@ -3643,6 +3692,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               onViewChange={(view) => setActiveView(view)}
               rtStructures={rtStructures}
               selectedStructure={selectedForEdit ? selectedForEdit.toString() : null}
+              pixelDataCache={pixelDataCache}
+              onCrosshairChange={(position) => {
+                // Update crosshair position when floating panels are clicked
+                setCrosshairPosition(position);
+              }}
             />
           )}
           </div>

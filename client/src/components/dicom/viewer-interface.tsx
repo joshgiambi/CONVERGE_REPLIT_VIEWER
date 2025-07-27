@@ -433,7 +433,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             windowLevel={windowLevel}
             onWindowLevelChange={setWindowLevel}
             studyId={studyData.studies[0]?.id}
-            studyIds={studyData.studies.map(s => s.id)}
+            studyIds={studyData.studies.map((s: any) => s.id)}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
