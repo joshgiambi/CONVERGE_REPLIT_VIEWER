@@ -202,21 +202,18 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
-- July 27, 2025: GPU Acceleration Implementation - OHIF3-STYLE PERFORMANCE BOOST ✅
-  - ✅ Implemented Cornerstone3D GPU-accelerated rendering engine (cornerstone3d-config.ts)
-  - ✅ Created high-performance GPU viewer component (gpu-accelerated-viewer.ts) 
-  - ✅ Added real-time performance monitoring with GPU metrics display
-  - ✅ Integrated WebGL2 high-performance context for medical imaging precision
-  - ✅ Enabled hardware-accelerated image decoding and texture caching
-  - ✅ Added comprehensive GPU optimization settings (16-bit textures, volume rendering)
-  - ✅ Performance improvements: 10-100x faster rendering compared to CPU-only Cornerstone v1
-  - ✅ Built-in fallback to CPU rendering if GPU acceleration fails
+- July 27, 2025: UI Layout Improvements and APLR Labels - COMPLETED ✅
+  - ✅ Disabled GPU acceleration as per user preference (only integrate if compatible with existing viewer)
+  - ✅ Added APLR anatomical orientation labels around canvas edges
+  - ✅ Anatomical labels follow radiological convention: A (top), P (bottom), L (right side), R (left side)
+  - ✅ Enhanced label visibility with larger text (text-xl) and drop shadows
+  - ✅ Reduced canvas padding from p-4 to p-2 to better utilize screen space
+  - ✅ Repositioned contour toolbar from bottom-24 to bottom-8 for better canvas alignment
+  - ✅ Fixed empty space issues on left, right, and bottom of canvas as requested
   - Technical details:
-    - Replaces legacy Cornerstone.js with modern Cornerstone3D architecture
-    - Uses WebGL2 shaders for medical-grade 16-bit image processing
-    - Implements SharedArrayBuffer for multi-threaded performance
-    - Real-time frame rate and GPU memory monitoring
-    - Compatible with existing DICOM workflow and contour editing tools
+    - APLR labels positioned with absolute positioning on canvas overlay
+    - Contour toolbar centered horizontally with canvas using transform
+    - GPU acceleration code retained but disabled by default until proper integration
 - July 27, 2025: Fixed Posterior Border Shrinkage in Brush Tool - GRID RESOLUTION OPTIMIZATION ✅
   - ✅ Identified root cause: Grid-based polygon union using 0.5mm resolution caused systematic boundary shrinkage
   - ✅ Shrinkage was most visible at posterior border due to polygon closure point accumulating rounding errors

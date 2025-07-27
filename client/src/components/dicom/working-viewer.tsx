@@ -163,7 +163,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useGPUAcceleration, setUseGPUAcceleration] = useState(true);
+  const [useGPUAcceleration, setUseGPUAcceleration] = useState(false);
   // Use external RT structures if provided, otherwise load our own
   const [localRTStructures, setLocalRTStructures] =
     useState(externalRTStructures);
@@ -3021,28 +3021,30 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         </div>
       </div>
 
-      {/* GPU-Accelerated Viewer */}
-      <div className="flex-1 p-4 flex items-center justify-center">
+      {/* Main Viewer Canvas with APLR Labels */}
+      <div className="flex-1 p-2 flex items-center justify-center">
         <div className="relative">
-          {useGPUAcceleration && images.length > 0 ? (
-            <div className="w-full h-full">
-              <GPUEnhancedViewer
-                ref={gpuViewerRef}
-                images={images}
-                currentImageIndex={currentIndex}
-                windowLevel={currentWindowLevel}
-                zoom={zoom}
-                panX={panX}
-                panY={panY}
-                onImageChange={setCurrentIndex}
-                onWindowLevelChange={(center, width) => updateWindowLevel({ center, width })}
-                onZoomChange={setZoom}
-                onPanChange={(x, y) => { setPanX(x); setPanY(y); }}
-                enablePerformanceMonitoring={true}
-              />
+          {/* APLR Anatomical Orientation Labels */}
+          <div className="absolute inset-0 pointer-events-none z-10">
+            {/* Anterior (A) - Top */}
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 text-white text-xl font-bold drop-shadow-lg">
+              A
             </div>
-          ) : (
-            <canvas
+            {/* Posterior (P) - Bottom */}
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-xl font-bold drop-shadow-lg">
+              P
+            </div>
+            {/* Left (L) - Right side (radiological convention) */}
+            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white text-xl font-bold drop-shadow-lg">
+              L
+            </div>
+            {/* Right (R) - Left side (radiological convention) */}
+            <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white text-xl font-bold drop-shadow-lg">
+              R
+            </div>
+          </div>
+          
+          <canvas
               ref={canvasRef}
               width={1024}
               height={1024}
@@ -3067,7 +3069,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 userSelect: "none",
               }}
             />
-          )}
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
