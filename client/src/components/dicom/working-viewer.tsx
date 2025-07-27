@@ -239,6 +239,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [activeView, setActiveView] = useState<'axial' | 'sagittal' | 'coronal'>('axial');
   const [pixelDataCache, setPixelDataCache] = useState<Map<number, Uint16Array>>(new Map());
   
+  // Crosshair position for MPR (in pixel coordinates)
+  const [crosshairPosition, setCrosshairPosition] = useState({
+    x: 256, // Center of 512x512 image
+    y: 256,
+    z: 0    // Will be set to current slice index
+  });
+  
+  // Update current slice when crosshair Z position changes
+  useEffect(() => {
+    if (crosshairPosition.z !== currentIndex && crosshairPosition.z >= 0 && crosshairPosition.z < images.length) {
+      setCurrentIndex(crosshairPosition.z);
+    }
+  }, [crosshairPosition.z, images.length]);
+  
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     setMprLayoutMode: (mode: 'single' | 'floating' | 'three-pane') => {
@@ -2723,12 +2737,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
+      setCrosshairPosition(prev => ({ ...prev, z: currentIndex - 1 }));
     }
   };
 
   const goToNext = () => {
     if (currentIndex < images.length - 1) {
       setCurrentIndex(currentIndex + 1);
+      setCrosshairPosition(prev => ({ ...prev, z: currentIndex + 1 }));
     }
   };
 
@@ -3164,6 +3180,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               setActiveView(view);
             }}
             pixelDataCache={pixelDataCache}
+            crosshairPosition={crosshairPosition}
+            onCrosshairChange={setCrosshairPosition}
           />
         ) : (
           <div className="relative w-full h-full" ref={canvasContainerRef}>

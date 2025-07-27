@@ -13,6 +13,8 @@ export interface MPRThreePaneViewProps {
   windowCenter: number;
   onViewMaximize: (view: 'axial' | 'sagittal' | 'coronal') => void;
   pixelDataCache: Map<number, Uint16Array>;
+  crosshairPosition?: { x: number; y: number; z: number };
+  onCrosshairChange?: (position: { x: number; y: number; z: number }) => void;
 }
 
 export function MPRThreePaneView({
@@ -23,7 +25,9 @@ export function MPRThreePaneView({
   windowWidth,
   windowCenter,
   onViewMaximize,
-  pixelDataCache
+  pixelDataCache,
+  crosshairPosition = { x: 256, y: 256, z: 0 },
+  onCrosshairChange
 }: MPRThreePaneViewProps) {
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -281,6 +285,20 @@ export function MPRThreePaneView({
           className="w-full h-full"
           onMouseEnter={() => setHoveredView('axial')}
           onMouseLeave={() => setHoveredView(null)}
+          onWheel={(e) => {
+            // Handle wheel events to allow scrolling through slices
+            e.preventDefault();
+            if (!onCrosshairChange) return;
+            
+            const delta = e.deltaY > 0 ? 1 : -1;
+            const newZ = Math.max(0, Math.min(images.length - 1, currentSliceIndex + delta));
+            
+            // Update crosshair position with new Z index
+            onCrosshairChange({
+              ...crosshairPosition,
+              z: newZ
+            });
+          }}
         />
         
         {/* Maximize button */}

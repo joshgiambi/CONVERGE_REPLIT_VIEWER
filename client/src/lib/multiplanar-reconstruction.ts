@@ -68,13 +68,19 @@ export function generateSagittalView(
     }
   }
 
+  // Parse image position safely
+  const imagePos = firstImage.imagePosition || firstImage.parsedImagePosition || [0, 0, 0];
+  const imagePosArray = typeof imagePos === 'string' ? 
+    imagePos.split('\\').map(v => parseFloat(v)) : 
+    Array.isArray(imagePos) ? imagePos : [0, 0, 0];
+  
   return {
     pixelData: outputData,
     width: outputWidth,
     height: outputHeight,
     metadata: {
       pixelSpacing: [sliceThickness, pixelSpacing[0]], // [z spacing, y spacing]
-      origin: [xPosition * pixelSpacing[1], firstImage.imagePosition[1], firstImage.imagePosition[2]],
+      origin: [xPosition * pixelSpacing[1], imagePosArray[1] || 0, imagePosArray[2] || 0],
       orientation: 'sagittal'
     }
   };
@@ -129,13 +135,19 @@ export function generateCoronalView(
     }
   }
 
+  // Parse image position safely
+  const imagePos = firstImage.imagePosition || firstImage.parsedImagePosition || [0, 0, 0];
+  const imagePosArray = typeof imagePos === 'string' ? 
+    imagePos.split('\\').map(v => parseFloat(v)) : 
+    Array.isArray(imagePos) ? imagePos : [0, 0, 0];
+  
   return {
     pixelData: outputData,
     width: outputWidth,
     height: outputHeight,
     metadata: {
       pixelSpacing: [sliceThickness, pixelSpacing[1]], // [z spacing, x spacing]
-      origin: [firstImage.imagePosition[0], yPosition * pixelSpacing[0], firstImage.imagePosition[2]],
+      origin: [imagePosArray[0] || 0, yPosition * pixelSpacing[0], imagePosArray[2] || 0],
       orientation: 'coronal'
     }
   };
