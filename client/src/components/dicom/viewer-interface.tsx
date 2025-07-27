@@ -609,6 +609,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }
           }}
           onCrosshairTool={handleCrosshairTool}
+          imageMetadata={imageMetadata}
         />
       )}
 

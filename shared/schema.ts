@@ -362,3 +362,25 @@ export const insertPatientTagSchema = createInsertSchema(patientTags).omit({
 
 export type PatientTag = typeof patientTags.$inferSelect;
 export type InsertPatientTag = z.infer<typeof insertPatientTagSchema>;
+
+// Application shortcuts table
+export const shortcuts = pgTable("shortcuts", {
+  id: serial("id").primaryKey(),
+  category: text("category").notNull(), // e.g., "Navigation", "Tools", "View", "Edit"
+  action: text("action").notNull().unique(), // e.g., "next_slice", "previous_slice"
+  description: text("description").notNull(),
+  keys: text("keys").notNull(), // e.g., "ArrowRight", "Ctrl+Z"
+  isCustom: boolean("is_custom").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertShortcutSchema = createInsertSchema(shortcuts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Shortcut = typeof shortcuts.$inferSelect;
+export type InsertShortcut = z.infer<typeof insertShortcutSchema>;

@@ -1,4 +1,4 @@
-import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory } from "@shared/schema";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, shortcuts, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type Shortcut, type InsertShortcut } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
@@ -100,6 +100,13 @@ export interface IStorage {
   getPatientTags(patientId: number): Promise<PatientTag[]>;
   deletePatientTag(tagId: number): Promise<boolean>;
   generateAnatomicalTags(patientId: number): Promise<PatientTag[]>;
+  
+  // Shortcut operations
+  createShortcut(data: InsertShortcut): Promise<Shortcut>;
+  getShortcuts(category?: string): Promise<Shortcut[]>;
+  getShortcutByAction(action: string): Promise<Shortcut | null>;
+  updateShortcut(id: number, data: Partial<InsertShortcut>): Promise<Shortcut | null>;
+  deleteShortcut(id: number): Promise<boolean>;
   
   // Clear all data
   clearAll(): void;
@@ -231,6 +238,27 @@ export class MemStorage implements IStorage {
       seriesData.imageCount = count;
       this.series.set(seriesId, seriesData);
     }
+  }
+
+  // Shortcut operations - not implemented in MemStorage
+  async createShortcut(data: InsertShortcut): Promise<Shortcut> {
+    throw new Error('Shortcuts not implemented in MemStorage');
+  }
+
+  async getShortcuts(category?: string): Promise<Shortcut[]> {
+    throw new Error('Shortcuts not implemented in MemStorage');
+  }
+
+  async getShortcutByAction(action: string): Promise<Shortcut | null> {
+    throw new Error('Shortcuts not implemented in MemStorage');
+  }
+
+  async updateShortcut(id: number, data: Partial<InsertShortcut>): Promise<Shortcut | null> {
+    throw new Error('Shortcuts not implemented in MemStorage');
+  }
+
+  async deleteShortcut(id: number): Promise<boolean> {
+    throw new Error('Shortcuts not implemented in MemStorage');
   }
 
   clearAll(): void {
@@ -756,6 +784,49 @@ export class DatabaseStorage implements IStorage {
       .from(rtStructureHistory)
       .where(eq(rtStructureHistory.id, historyId));
     return result || null;
+  }
+
+  // Shortcut operations
+  async createShortcut(data: InsertShortcut): Promise<Shortcut> {
+    const [shortcut] = await db.insert(shortcuts).values(data).returning();
+    return shortcut;
+  }
+
+  async getShortcuts(category?: string): Promise<Shortcut[]> {
+    let query = db.select().from(shortcuts).where(eq(shortcuts.isActive, true));
+    
+    if (category) {
+      query = query.where(eq(shortcuts.category, category));
+    }
+    
+    return await query.orderBy(shortcuts.category, shortcuts.action);
+  }
+
+  async getShortcutByAction(action: string): Promise<Shortcut | null> {
+    const [shortcut] = await db
+      .select()
+      .from(shortcuts)
+      .where(eq(shortcuts.action, action));
+    return shortcut || null;
+  }
+
+  async updateShortcut(id: number, data: Partial<InsertShortcut>): Promise<Shortcut | null> {
+    const [updated] = await db
+      .update(shortcuts)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(shortcuts.id, id))
+      .returning();
+    return updated || null;
+  }
+
+  async deleteShortcut(id: number): Promise<boolean> {
+    try {
+      await db.delete(shortcuts).where(eq(shortcuts.id, id));
+      return true;
+    } catch (error) {
+      console.error('Error deleting shortcut:', error);
+      return false;
+    }
   }
 
   clearAll(): void {
