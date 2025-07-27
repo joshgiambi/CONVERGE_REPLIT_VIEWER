@@ -213,9 +213,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
   
   const handleCrosshairTool = () => {
+    console.log('🎯 Crosshair tool button clicked');
     setActiveToolState('crosshair');
     if (workingViewerRef.current?.setActiveTool) {
+      console.log('✅ Calling setActiveTool on workingViewerRef');
       workingViewerRef.current.setActiveTool('crosshair');
+    } else {
+      console.error('❌ workingViewerRef.current.setActiveTool not available');
     }
   };
 

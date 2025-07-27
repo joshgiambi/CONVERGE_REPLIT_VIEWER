@@ -260,6 +260,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Active tool state
   const [activeTool, setActiveTool] = useState<'pan' | 'crosshair'>('pan');
   
+  // Debug active tool changes
+  useEffect(() => {
+    console.log('🔧 Active tool changed to:', activeTool);
+  }, [activeTool]);
+  
   // Update current slice when crosshair Z position changes
   useEffect(() => {
     if (crosshairPosition.z !== currentIndex && crosshairPosition.z >= 0 && crosshairPosition.z < images.length) {
@@ -3027,6 +3032,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   });
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    console.log('🖱️ Canvas mouse down:', {
+      button: e.button,
+      activeTool,
+      isDrawingToolActive: brushToolState?.isActive,
+      brushTool: brushToolState?.tool
+    });
+    
     // Check if any drawing tool is active - if so, skip pan functionality
     const isDrawingToolActive =
       brushToolState?.isActive && 
@@ -3043,6 +3055,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (e.button === 0 && !isDrawingToolActive) {
       // Left click
       if (activeTool === 'crosshair' && canvasRef.current) {
+        console.log('🎯 Crosshair mode active, updating position...');
         // In crosshair mode, update crosshair position
         const rect = canvasRef.current.getBoundingClientRect();
         const x = (e.clientX - rect.left - panX) / zoom;
@@ -3057,6 +3070,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         
         console.log('🎯 Updated crosshair position:', { x: Math.round(x), y: Math.round(y) });
       } else {
+        console.log('🔄 Pan mode active, starting drag...');
         // Pan mode
         setIsDragging(true);
         setDragStart({ x: e.clientX, y: e.clientY });
