@@ -276,6 +276,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [crosshairPosition.z, images.length]); // Removed currentIndex to avoid circular dependency
   
+
+  
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     setMprLayoutMode: (mode: 'single' | 'floating' | 'three-pane') => {
@@ -2415,8 +2417,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         canvas.height = 1024;
       }
 
-      // Render with current window/level settings
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      // Render based on active view
+      if (activeView === 'axial') {
+        // Render axial view (default)
+        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      } else if (activeView === 'sagittal' && pixelDataCache.size > 0) {
+        // Render sagittal view
+        const sagittalData = generateSagittalView(images, pixelDataCache, crosshairPosition.x);
+        if (sagittalData) {
+          render16BitImage(ctx, sagittalData.pixelData, sagittalData.width, sagittalData.height);
+        }
+      } else if (activeView === 'coronal' && pixelDataCache.size > 0) {
+        // Render coronal view
+        const coronalData = generateCoronalView(images, pixelDataCache, crosshairPosition.y);
+        if (coronalData) {
+          render16BitImage(ctx, coronalData.pixelData, coronalData.width, coronalData.height);
+        }
+      }
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
@@ -2439,12 +2456,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Render RT structure overlays if available
       if (localRTStructures && showStructures) {
         try {
-          // Pass currentImage with its metadata attached
-          const imageWithMetadata = {
-            ...currentImage,
-            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-          };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
+          if (activeView === 'axial') {
+            // Pass currentImage with its metadata attached for axial view
+            const imageWithMetadata = {
+              ...currentImage,
+              imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+            };
+            renderRTStructures(ctx, canvas, imageWithMetadata);
+          } else if (activeView === 'sagittal' && pixelDataCache.size > 0) {
+            // Render contours on sagittal view
+            renderContoursOnSagittalView(
+              ctx,
+              canvas,
+              rtStructures,
+              images,
+              pixelDataCache,
+              structureVisibility,
+              crosshairPosition.x
+            );
+          } else if (activeView === 'coronal' && pixelDataCache.size > 0) {
+            // Render contours on coronal view
+            renderContoursOnCoronalView(
+              ctx,
+              canvas,
+              rtStructures,
+              images,
+              pixelDataCache,
+              structureVisibility,
+              crosshairPosition.y
+            );
+          }
         } catch (rtError) {
           console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
@@ -2541,55 +2582,73 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
 
-    // Draw crosshair overlay
+    // Draw crosshair overlay and orientation labels
+    ctx.save();
+    
+    // Draw crosshair lines
+    ctx.strokeStyle = '#00ff00'; // Green color
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.6; // Semi-transparent
+    ctx.setLineDash([5, 5]); // Dashed line
+    
+    // Vertical line at center of image
+    const centerX = x + scaledWidth / 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, canvasHeight);
+    ctx.stroke();
+    
+    // Horizontal line at center of image
+    const centerY = y + scaledHeight / 2;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(canvasWidth, centerY);
+    ctx.stroke();
+    
+    // Draw orientation labels
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
     if (activeView === 'axial') {
-      // Save context state
-      ctx.save();
-      
-      // Draw crosshair lines
-      ctx.strokeStyle = '#00ff00'; // Green color
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.6; // Semi-transparent
-      ctx.setLineDash([5, 5]); // Dashed line
-      
-      // Vertical line at center of image
-      const centerX = x + scaledWidth / 2;
-      ctx.beginPath();
-      ctx.moveTo(centerX, 0);
-      ctx.lineTo(centerX, canvasHeight);
-      ctx.stroke();
-      
-      // Horizontal line at center of image
-      const centerY = y + scaledHeight / 2;
-      ctx.beginPath();
-      ctx.moveTo(0, centerY);
-      ctx.lineTo(canvasWidth, centerY);
-      ctx.stroke();
-      
-      // Draw orientation labels
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      
       // A (Anterior) - Top
       ctx.fillText('A', canvasWidth / 2, 20);
-      
       // P (Posterior) - Bottom
       ctx.fillText('P', canvasWidth / 2, canvasHeight - 20);
-      
       // R (Right) - Left side (radiological convention)
       ctx.textAlign = 'left';
       ctx.fillText('R', 20, canvasHeight / 2);
-      
       // L (Left) - Right side (radiological convention)
       ctx.textAlign = 'right';
       ctx.fillText('L', canvasWidth - 20, canvasHeight / 2);
-      
-      // Restore context state
-      ctx.restore();
+    } else if (activeView === 'sagittal') {
+      // S (Superior) - Top
+      ctx.fillText('S', canvasWidth / 2, 20);
+      // I (Inferior) - Bottom
+      ctx.fillText('I', canvasWidth / 2, canvasHeight - 20);
+      // P (Posterior) - Left
+      ctx.textAlign = 'left';
+      ctx.fillText('P', 20, canvasHeight / 2);
+      // A (Anterior) - Right
+      ctx.textAlign = 'right';
+      ctx.fillText('A', canvasWidth - 20, canvasHeight / 2);
+    } else if (activeView === 'coronal') {
+      // S (Superior) - Top
+      ctx.fillText('S', canvasWidth / 2, 20);
+      // I (Inferior) - Bottom
+      ctx.fillText('I', canvasWidth / 2, canvasHeight - 20);
+      // R (Right) - Left
+      ctx.textAlign = 'left';
+      ctx.fillText('R', 20, canvasHeight / 2);
+      // L (Left) - Right
+      ctx.textAlign = 'right';
+      ctx.fillText('L', canvasWidth - 20, canvasHeight / 2);
     }
+    
+    // Restore context state
+    ctx.restore();
   };
 
   const render8BitImage = (
@@ -3030,6 +3089,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     displayCurrentImageRef.current = displayCurrentImage;
   });
+  
+  // Re-render when active view changes
+  useEffect(() => {
+    if (images.length > 0 && canvasRef.current) {
+      console.log('Active view changed to:', activeView);
+      displayCurrentImage();
+    }
+  }, [activeView]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     console.log('🖱️ Canvas mouse down:', {
