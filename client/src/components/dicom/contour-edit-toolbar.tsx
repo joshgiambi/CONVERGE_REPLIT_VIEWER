@@ -446,7 +446,7 @@ export function ContourEditToolbar({
     return [h * 360, s * 100, l * 100];
   };
   
-  const structureHsl = rgbToHsl(...selectedStructure.color);
+  const structureHsl = rgbToHsl(selectedStructure.color[0], selectedStructure.color[1], selectedStructure.color[2]);
   const backgroundHue = structureHsl[0];
 
   const mainTools = [
@@ -915,27 +915,27 @@ export function ContourEditToolbar({
           <div className="flex items-center space-x-3">
             {/* Structure info and controls */}
             <div 
-              className="w-4 h-4 rounded border border-gray-400"
+              className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
               style={{ backgroundColor: structureColorRgb }}
             />
-            <span className="text-white text-sm font-medium">Editing:</span>
+            <span className="text-white text-sm font-medium drop-shadow-sm">Editing:</span>
             <Input
               value={selectedStructure.structureName || ''}
               onChange={(e) => handleNameChange(e.target.value)}
-              className="w-32 h-7 bg-gray-800/70 border-gray-600 text-white text-sm rounded-lg"
+              className="w-32 h-7 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm"
               disabled={updateNameMutation.isPending}
             />
-            <span className="text-gray-300 text-sm">Color:</span>
+            <span className="text-white/90 text-sm drop-shadow-sm">Color:</span>
             <input
               type="color"
               value={currentColor}
               onChange={(e) => handleColorChange(e.target.value)}
-              className="w-7 h-7 rounded border border-gray-600 bg-gray-800 cursor-pointer"
+              className="w-7 h-7 rounded border-2 border-white/30 bg-white/10 cursor-pointer backdrop-blur-sm"
               disabled={updateColorMutation.isPending}
             />
             
             {/* Separator */}
-            <div className="w-px h-6 bg-gray-600 mx-2" />
+            <div className="w-px h-6 bg-white/30 mx-2" />
             
             {/* Undo/Redo buttons */}
             <Button
@@ -943,7 +943,7 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleUndo}
               disabled={!canUndo}
-              className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
+              className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
               title="Undo (Ctrl+Z)"
             >
               <Undo className="w-3 h-3" />
@@ -953,25 +953,25 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleRedo}
               disabled={!canRedo}
-              className="h-7 w-7 p-0 bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50 rounded-lg"
+              className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
               title="Redo (Ctrl+Y)"
             >
               <Redo className="w-3 h-3" />
             </Button>
             
             {/* Separator */}
-            <div className="w-px h-6 bg-gray-600 mx-2" />
+            <div className="w-px h-6 bg-white/30 mx-2" />
             
             {/* Delete button */}
             <Button
               variant="outline"
               size="sm"
               onClick={handleDeleteCurrentSlice}
-              className="h-7 px-2 bg-black border border-red-600/50 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg"
+              className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
               title="Delete Current Slice (Del)"
             >
               <Trash2 className="w-3 h-3 mr-1" />
-              <span className="text-xs">Del Slice</span>
+              <span className="text-xs font-medium">Del Slice</span>
             </Button>
             
             {/* Interpolate button */}
@@ -979,11 +979,11 @@ export function ContourEditToolbar({
               variant="outline"
               size="sm"
               onClick={handleInterpolate}
-              className="h-7 px-2 bg-black border border-blue-600/50 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20 rounded-lg"
+              className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
               title="Interpolate missing slices"
             >
               <GitBranch className="w-3 h-3 mr-1" />
-              <span className="text-xs">Interpolate</span>
+              <span className="text-xs font-medium">Interpolate</span>
             </Button>
             
             {/* Nth Slice Delete button with hover menu */}
@@ -992,11 +992,11 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onMouseEnter={() => setShowNthSliceMenu(true)}
-                className="h-7 px-2 bg-black border border-orange-600/50 text-orange-400 hover:text-orange-300 hover:bg-orange-900/20 rounded-lg"
+                className="h-7 px-2 bg-orange-900/30 border-2 border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Delete every nth slice"
               >
                 <Grid3x3 className="w-3 h-3 mr-1" />
-                <span className="text-xs">Nth Slice</span>
+                <span className="text-xs font-medium">Nth Slice</span>
                 <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
               
@@ -1036,11 +1036,11 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onMouseEnter={() => setShowClearMenu(true)}
-                className="h-7 px-2 bg-black border border-red-700/50 text-red-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg"
+                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Clear contours"
               >
                 <Eraser className="w-3 h-3 mr-1" />
-                <span className="text-xs">Clear</span>
+                <span className="text-xs font-medium">Clear</span>
                 <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
               
@@ -1079,7 +1079,7 @@ export function ContourEditToolbar({
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-gray-400 hover:text-white hover:bg-gray-700 h-7 w-7 p-0 rounded-lg"
+            className="text-white/70 hover:text-white hover:bg-white/20 h-7 w-7 p-0 rounded-lg backdrop-blur-sm shadow-sm"
           >
             <X size={14} />
           </Button>
