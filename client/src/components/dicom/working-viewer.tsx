@@ -3612,8 +3612,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 p-4 flex items-center justify-center relative">
-        <div className="relative" style={{ width: '1280px', height: '1280px' }}>
+      <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
+        <div className="relative w-full h-full flex items-center justify-center">
           <canvas
             ref={canvasRef}
             width={1280}

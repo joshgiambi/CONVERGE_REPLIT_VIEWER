@@ -490,9 +490,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         </div>
 
         {/* DICOM Viewer with Dynamic Border - Flexible Width */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative overflow-hidden">
           {selectedSeries ? (
-            <div className="relative h-full">
+            <div className="relative h-full overflow-hidden">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
                 className="absolute inset-0 rounded-lg pointer-events-none"
@@ -560,29 +560,31 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 />
               )}
               
-              {/* Structure Tags on Right Side */}
+              {/* Structure Tags on Right Side - Responsive */}
               {selectedStructures.size > 0 && rtStructures?.structures && (
-                <div className="absolute right-4 top-4 space-y-2 z-10">
-                  {Array.from(selectedStructures).map(structureId => {
-                    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
-                    if (!structure) return null;
-                    
-                    return (
-                      <div 
-                        key={structureId}
-                        className="flex items-center space-x-2 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border"
-                        style={{ borderColor: `rgb(${structure.color.join(',')})` }}
-                      >
+                <div className="absolute right-2 sm:right-4 top-2 sm:top-4 space-y-2 z-10 max-h-[calc(100vh-12rem)] overflow-y-auto">
+                  <div className="space-y-2 max-w-[200px] sm:max-w-[250px]">
+                    {Array.from(selectedStructures).map(structureId => {
+                      const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+                      if (!structure) return null;
+                      
+                      return (
                         <div 
-                          className="w-3 h-3 rounded-full border border-gray-400"
-                          style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                        />
-                        <span className="text-sm text-white font-medium">
-                          {structure.structureName}
-                        </span>
-                      </div>
-                    );
-                  })}
+                          key={structureId}
+                          className="flex items-center space-x-2 bg-black/80 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 border"
+                          style={{ borderColor: `rgb(${structure.color.join(',')})` }}
+                        >
+                          <div 
+                            className="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full border border-gray-400 flex-shrink-0"
+                            style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                          />
+                          <span className="text-xs sm:text-sm text-white font-medium truncate">
+                            {structure.structureName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
