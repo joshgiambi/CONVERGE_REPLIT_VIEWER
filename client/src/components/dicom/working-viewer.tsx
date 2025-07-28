@@ -2150,8 +2150,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           );
           
           if (success) {
-            // Don't hide the canvas yet - keep it as fallback
+            // Hide the canvas to reveal GPU viewport
             console.log('GPU viewport created successfully');
+            canvas.style.display = 'none';
             
             // Set a flag to track GPU viewport is active
             canvas.dataset.gpuActive = 'true';
@@ -3207,7 +3208,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center">
-        <div className="relative">
+        <div className="relative" style={{ width: '1280px', height: '1280px' }}>
           <canvas
             ref={canvasRef}
             width={1280}

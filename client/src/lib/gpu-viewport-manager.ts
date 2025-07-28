@@ -46,13 +46,15 @@ export async function createOrUpdateGPUViewport(
       // Create GPU viewport div (OHIF style)
       const gpuElement = document.createElement('div');
       gpuElement.className = 'gpu-viewport';
-      gpuElement.style.width = '100%';
-      gpuElement.style.height = '100%';
+      gpuElement.id = viewportId;
+      gpuElement.style.width = '1280px';
+      gpuElement.style.height = '1280px';
       gpuElement.style.position = 'absolute';
       gpuElement.style.top = '0';
       gpuElement.style.left = '0';
       gpuElement.style.zIndex = '10'; // Ensure GPU viewport is above canvas
       gpuElement.style.pointerEvents = 'none'; // Allow interactions to pass through
+      gpuElement.style.backgroundColor = 'black'; // Ensure background is visible
       
       // Add to container
       containerElement.appendChild(gpuElement);
