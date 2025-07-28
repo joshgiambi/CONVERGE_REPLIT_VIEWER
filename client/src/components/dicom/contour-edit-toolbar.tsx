@@ -901,7 +901,7 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 translate-x-16 z-50 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         <div 
           className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl"
@@ -1030,6 +1030,18 @@ export function ContourEditToolbar({
               )}
             </div>
             
+            {/* Smoothing button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {/* TODO: Implement smoothing */}}
+              className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              title="Smooth contours"
+            >
+              <Sparkles className="w-3 h-3 mr-1" />
+              <span className="text-xs font-medium">Smooth</span>
+            </Button>
+
             {/* Clear button with hover menu */}
             <div className="relative" onMouseLeave={() => setShowClearMenu(false)}>
               <Button
