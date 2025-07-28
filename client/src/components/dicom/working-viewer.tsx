@@ -199,6 +199,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [isGPUMode, setIsGPUMode] = useState(false);
   const [gpuCheckComplete, setGpuCheckComplete] = useState(false);
   const [cornerstone3DInitialized, setCornerstone3DInitialized] = useState(false);
+  const [prefetchProgress, setPrefetchProgress] = useState({ loaded: 0, total: 0 });
 
   // Initialize Cornerstone3D when GPU is available
   useEffect(() => {
@@ -277,6 +278,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
   const displayCurrentImageRef = useRef<() => Promise<void>>();
+  const prefetchCompleteRef = useRef(false);
   
   const scheduleRender = useCallback(() => {
     if (needsRenderRef.current) return;
@@ -1819,8 +1821,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Preload remaining images in background
-      preloadAllImages(sortedImages);
+      // OHIF 3.10-style background prefetching - runs after initial display
+      // This doesn't block the UI and loads remaining images in background
+      setTimeout(() => {
+        console.log('📚 Starting OHIF-style background prefetching...');
+        startBackgroundPrefetch(sortedImages);
+      }, 100); // Small delay to ensure UI is responsive
     } catch (error: any) {
       // Don't show error for aborted requests (happens when switching series)
       if (error.name === 'AbortError') {
@@ -1972,6 +1978,80 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return results;
   };
 
+  // OHIF 3.10-style background prefetch - non-blocking and progressive
+  const startBackgroundPrefetch = async (imageList: any[]) => {
+    if (!imageList || imageList.length === 0 || prefetchCompleteRef.current) {
+      return;
+    }
+
+    console.log(`🚀 OHIF-style background prefetch starting for ${imageList.length} images`);
+    
+    setPrefetchProgress({ loaded: imageCacheRef.current.size, total: imageList.length });
+    
+    const BATCH_SIZE = 50; // Match server batch size
+    const PREFETCH_RADIUS = 10; // Images to prioritize around current position
+    let loadedCount = imageCacheRef.current.size;
+    
+    // Create priority queue based on viewing position
+    const getPriority = (index: number) => {
+      const distance = Math.abs(index - currentIndex);
+      if (distance <= PREFETCH_RADIUS) return 0; // Highest priority
+      return distance;
+    };
+    
+    // Sort images by priority
+    const prioritizedIndices = imageList
+      .map((_, idx) => idx)
+      .sort((a, b) => getPriority(a) - getPriority(b));
+    
+    // Process batches in background using requestIdleCallback for better performance
+    const processBatch = async (startIdx: number) => {
+      if (prefetchCompleteRef.current || !seriesAbortRef.current) return;
+      
+      const batchIndices = prioritizedIndices.slice(startIdx, startIdx + BATCH_SIZE);
+      if (batchIndices.length === 0) {
+        prefetchCompleteRef.current = true;
+        console.log(`✅ Background prefetch complete: ${loadedCount}/${imageList.length} images`);
+        return;
+      }
+      
+      // Get uncached images in this batch
+      const uncachedImages = batchIndices
+        .filter(idx => !imageCacheRef.current.has(imageList[idx].sopInstanceUID))
+        .map(idx => imageList[idx]);
+      
+      if (uncachedImages.length > 0) {
+        try {
+          const batchUIDs = uncachedImages.map(img => img.sopInstanceUID);
+          const batchResults = await fetchBatchImages(batchUIDs, seriesAbortRef.current?.signal);
+          
+          loadedCount += batchResults.size;
+          const progress = Math.round((loadedCount / imageList.length) * 100);
+          console.log(`📊 Prefetch progress: ${loadedCount}/${imageList.length} (${progress}%)`);
+          setPrefetchProgress({ loaded: loadedCount, total: imageList.length });
+          
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            console.log('Background prefetch aborted');
+            return;
+          }
+          console.warn('Batch prefetch error:', error.message);
+        }
+      }
+      
+      // Schedule next batch using requestIdleCallback for non-blocking behavior
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => processBatch(startIdx + BATCH_SIZE), { timeout: 2000 });
+      } else {
+        // Fallback for browsers without requestIdleCallback
+        setTimeout(() => processBatch(startIdx + BATCH_SIZE), 100);
+      }
+    };
+    
+    // Start processing
+    processBatch(0);
+  };
+
   const preloadAllImages = async (imageList: any[]) => {
     console.log("Starting to preload all images with batch fetching...");
     if (!imageList || imageList.length === 0) {
@@ -2112,80 +2192,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width = 1024;
       canvas.height = 1024;
 
-      // Hybrid rendering decision
-      if (isGPUMode && cornerstone3DInitialized) {
-        // Use Cornerstone3D GPU-accelerated rendering with OHIF approach
-        console.log('🚀 Using GPU-accelerated Cornerstone3D rendering - OHIF style');
-        
-        // Calculate and set ctTransform before GPU rendering
-        const baseScale = Math.min(canvas.width / imageData.width, canvas.height / imageData.height);
-        const totalScale = baseScale * zoom;
-        const scaledWidth = imageData.width * totalScale;
-        const scaledHeight = imageData.height * totalScale;
-        const x = (canvas.width - scaledWidth) / 2 + panX;
-        const y = (canvas.height - scaledHeight) / 2 + panY;
-        
-        ctTransform.current = {
-          scale: totalScale,
-          offsetX: x,
-          offsetY: y,
-          imageWidth: imageData.width,
-          imageHeight: imageData.height
-        };
-        
-        // Get the canvas container
-        const container = canvas.parentElement;
-        if (container) {
-          // Create or update GPU viewport
-          const success = await createOrUpdateGPUViewport(
-            container,
-            {
-              data: imageData.data,
-              width: imageData.width,
-              height: imageData.height,
-              sopInstanceUID: currentImage.sopInstanceUID
-            },
-            currentWindowLevel,
-            ctTransform.current
-          );
-          
-          if (success) {
-            // Hide the canvas to reveal GPU viewport
-            console.log('GPU viewport created successfully');
-            canvas.style.display = 'none';
-            
-            // Set a flag to track GPU viewport is active
-            canvas.dataset.gpuActive = 'true';
-          } else {
-            // Fall back to CPU rendering if GPU viewport creation fails
-            console.warn('GPU viewport creation failed, falling back to CPU');
-            canvas.style.display = 'block';
-            canvas.dataset.gpuActive = 'false';
-            
-            // Re-get context as it might have been lost
-            const freshCtx = canvas.getContext("2d");
-            if (freshCtx) {
-              render16BitImage(freshCtx, imageData.data, imageData.width, imageData.height);
-            } else {
-              console.error('Failed to get 2D context for CPU fallback');
-            }
-          }
-        } else {
-          // No container, fall back to CPU
-          console.warn('No canvas container for GPU viewport, falling back to CPU');
-          render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
-        }
-      } else {
-        // Use existing Cornerstone Core rendering
-        console.log('📦 Using CPU-based Cornerstone Core rendering');
-        
-        // Ensure canvas is visible and GPU viewport is hidden
-        canvas.style.display = 'block';
-        canvas.dataset.gpuActive = 'false';
-        hideGPUViewport();
-        
-        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
-      }
+      // Always use CPU rendering for now - GPU integration needs more work
+      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
@@ -3371,6 +3379,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 console.log(`Measurement completed: ${distance.toFixed(1)} ${unit}`);
               }}
             />
+          )}
+
+          {/* OHIF 3.10-style background prefetch progress */}
+          {prefetchProgress.total > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
+            <div className="absolute top-4 right-4 bg-gray-800/90 rounded-lg px-3 py-2 text-white pointer-events-none backdrop-blur-sm">
+              <div className="text-xs mb-1 font-medium flex items-center gap-2">
+                <span className="text-green-400">🚀</span> OHIF Background Loading
+              </div>
+              <div className="w-48 bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-green-500 to-green-400 h-2 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${(prefetchProgress.loaded / prefetchProgress.total) * 100}%` }}
+                />
+              </div>
+              <div className="text-xs mt-1 text-gray-300">
+                {prefetchProgress.loaded}/{prefetchProgress.total} images ({Math.round((prefetchProgress.loaded / prefetchProgress.total) * 100)}%)
+              </div>
+            </div>
           )}
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
