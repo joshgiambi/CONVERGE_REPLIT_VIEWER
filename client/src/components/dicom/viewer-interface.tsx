@@ -462,7 +462,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         {/* DICOM Viewer with Dynamic Border */}
         <div className="lg:col-span-3 relative">
           {selectedSeries ? (
-            <div className="relative h-full -m-2">
+            <div className="relative h-full">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
                 className="absolute inset-0 rounded-lg pointer-events-none"

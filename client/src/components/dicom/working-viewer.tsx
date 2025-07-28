@@ -2967,7 +2967,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   return (
     <Card className="h-full bg-black border-indigo-800">
-      {/* Header with blue design */}
+      {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-indigo-700">
         <div className="flex items-center space-x-2">
           <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
@@ -2996,59 +2996,59 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               </span>
             </Badge>
           )}
-          </div>
-
-          <div className="flex items-center space-x-2">
-            {rtStructures && (
-              <Button
-                size="sm"
-                variant={showStructures ? "default" : "outline"}
-                onClick={() => setShowStructures(!showStructures)}
-                className="text-xs bg-green-600 hover:bg-green-700"
-              >
-                RT ({rtStructures?.structures?.length || 0})
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant={isMeasurementToolActive ? "default" : "outline"}
-              onClick={() => {
-                setIsMeasurementToolActive(!isMeasurementToolActive);
-                if (brushToolState?.isActive) {
-                  // Disable brush/pen tools when measurement is active
-                  if (onBrushToolChange) {
-                    onBrushToolChange({
-                      ...brushToolState,
-                      isActive: false
-                    });
-                  }
-                }
-              }}
-              className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
-              title="Measurement Tool"
-            >
-              <Ruler className="w-4 h-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={goToPrevious}
-              disabled={currentIndex === 0}
-              className="border-indigo-600 hover:bg-indigo-800"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={goToNext}
-              disabled={currentIndex === images.length - 1}
-              className="border-indigo-600 hover:bg-indigo-800"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
         </div>
+
+        <div className="flex items-center space-x-2">
+          {rtStructures && (
+            <Button
+              size="sm"
+              variant={showStructures ? "default" : "outline"}
+              onClick={() => setShowStructures(!showStructures)}
+              className="text-xs bg-green-600 hover:bg-green-700"
+            >
+              RT ({rtStructures?.structures?.length || 0})
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={isMeasurementToolActive ? "default" : "outline"}
+            onClick={() => {
+              setIsMeasurementToolActive(!isMeasurementToolActive);
+              if (brushToolState?.isActive) {
+                // Disable brush/pen tools when measurement is active
+                if (onBrushToolChange) {
+                  onBrushToolChange({
+                    ...brushToolState,
+                    isActive: false
+                  });
+                }
+              }
+            }}
+            className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
+            title="Measurement Tool"
+          >
+            <Ruler className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={goToPrevious}
+            disabled={currentIndex === 0}
+            className="border-indigo-600 hover:bg-indigo-800"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={goToNext}
+            disabled={currentIndex === images.length - 1}
+            className="border-indigo-600 hover:bg-indigo-800"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center">
