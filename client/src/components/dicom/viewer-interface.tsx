@@ -30,6 +30,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  
+  // Shared image cache to prevent reloading when switching modes
+  const imageCache = useRef<Map<string, { images: any[], metadata: any }>>(new Map());
+  
   const [rtStructures, setRTStructures] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
   const [selectedStructures, setSelectedStructures] = useState<Set<number>>(new Set());
@@ -432,8 +436,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     <div className="animate-in fade-in-50 duration-500">
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
-        {/* Series Selector - Fixed Width */}
-        <div className="w-96 h-full overflow-hidden flex-shrink-0">
+        {/* Series Selector - Responsive Width */}
+        <div className="w-full md:w-96 h-full overflow-hidden flex-shrink-0 hidden md:block">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
@@ -525,6 +529,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
+                  imageCache={imageCache}
                 />
               ) : (
                 <MultiViewport
@@ -534,6 +539,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   onRTStructureUpdate={handleContourUpdate}
                   allStructuresVisible={allStructuresVisible}
                   onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
+                  imageCache={imageCache}
                 />
               )}
               

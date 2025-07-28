@@ -22,6 +22,7 @@ interface MultiViewportProps {
   onRTStructureUpdate: (structures: any) => void;
   allStructuresVisible: boolean;
   onAllStructuresVisibilityChange: (visible: boolean) => void;
+  imageCache?: React.MutableRefObject<Map<string, { images: any[], metadata: any }>>;
 }
 
 const MultiViewport: React.FC<MultiViewportProps> = ({
@@ -30,7 +31,8 @@ const MultiViewport: React.FC<MultiViewportProps> = ({
   rtStructures,
   onRTStructureUpdate,
   allStructuresVisible,
-  onAllStructuresVisibilityChange
+  onAllStructuresVisibilityChange,
+  imageCache
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { grid, setLayout, setActiveViewport, assignSeries } = useViewportGrid();
@@ -113,6 +115,7 @@ const MultiViewport: React.FC<MultiViewportProps> = ({
               rtStructures={rtStructures}
               onContourUpdate={onRTStructureUpdate}
               allStructuresVisible={allStructuresVisible}
+              imageCache={imageCache}
             />
             
             {/* Viewport overlay info */}

@@ -143,6 +143,7 @@ interface WorkingViewerProps {
   hasSecondarySeriesForFusion?: boolean;
   onImageMetadataChange?: (metadata: any) => void;
   allStructuresVisible?: boolean;
+  imageCache?: React.MutableRefObject<Map<string, { images: any[], metadata: any }>>;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -172,6 +173,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     hasSecondarySeriesForFusion,
     onImageMetadataChange,
     allStructuresVisible = true,
+    imageCache,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -1688,6 +1690,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const loadImages = async () => {
     try {
+      // Check if images are already cached
+      if (imageCache?.current.has(seriesId.toString())) {
+        const cached = imageCache.current.get(seriesId.toString());
+        if (cached) {
+          console.log(`Using cached images for series ${seriesId}`);
+          setImages(cached.images);
+          setCurrentIndex(0);
+          setIsLoading(false);
+          // Schedule initial render
+          setTimeout(() => {
+            displayCurrentImage();
+          }, 10);
+          // Start background prefetching for remaining images
+          backgroundPrefetchImages(cached.images);
+          return;
+        }
+      }
+      
       setIsLoading(true);
       setError(null);
 
@@ -1803,6 +1823,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       setImages(sortedImages);
       setCurrentIndex(0);
+      
+      // Cache the sorted images
+      if (imageCache?.current) {
+        imageCache.current.set(seriesId.toString(), {
+          images: sortedImages,
+          metadata: null // TODO: Add metadata if needed
+        });
+        console.log(`Cached ${sortedImages.length} images for series ${seriesId}`);
+      }
 
       // Load the first image before removing loading screen
       if (sortedImages.length > 0) {
