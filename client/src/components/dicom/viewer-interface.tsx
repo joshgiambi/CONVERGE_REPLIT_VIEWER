@@ -541,6 +541,40 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   })}
                 </div>
               )}
+              
+              {/* Contour Edit Toolbar - positioned relative to viewer container */}
+              {selectedForEdit && rtStructures && rtStructures.structures && (
+                <ContourEditToolbar
+                  selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
+                  isVisible={isContourEditMode}
+                  onClose={() => {
+                    setIsContourEditMode(false);
+                    setSelectedForEdit(null);
+                  }}
+                  onStructureNameChange={(name: string) => {
+                    // Update structure name
+                  }}
+                  onStructureColorChange={(color: string) => {
+                    // Update structure color
+                  }}
+                  onToolChange={(toolState) => {
+                    setBrushToolState({
+                      ...brushToolState,
+                      ...toolState,
+                      predictionEnabled: toolState.predictionEnabled ?? brushToolState.predictionEnabled
+                    });
+                  }}
+                  currentSlicePosition={currentSlicePosition}
+                  onContourUpdate={handleContourUpdate}
+                  availableStructures={rtStructures.structures}
+                  onTargetStructureSelect={(structureId) => {
+                    // Handle target structure selection for boolean operations
+                    console.log('Target structure selected:', structureId);
+                  }}
+                  seriesId={selectedSeries?.id}
+                  imageMetadata={imageMetadata}
+                />
+              )}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
@@ -568,41 +602,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
-
-      {/* Contour Edit Toolbar */}
-      {selectedForEdit && rtStructures && rtStructures.structures && (
-        <ContourEditToolbar
-          selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
-          isVisible={isContourEditMode}
-          onClose={() => {
-            setIsContourEditMode(false);
-            setSelectedForEdit(null);
-          }}
-          onStructureNameChange={(name: string) => {
-            // Update structure name
-          }}
-          onStructureColorChange={(color: string) => {
-            // Update structure color
-          }}
-          onToolChange={(toolState) => {
-            setBrushToolState({
-              ...brushToolState,
-              ...toolState,
-              predictionEnabled: toolState.predictionEnabled ?? brushToolState.predictionEnabled
-            });
-          }}
-          currentSlicePosition={currentSlicePosition}
-          onContourUpdate={handleContourUpdate}
-          availableStructures={rtStructures.structures}
-          onTargetStructureSelect={(structureId) => {
-            // Handle target structure selection for boolean operations
-            console.log('Target structure selected:', structureId);
-          }}
-          seriesId={selectedSeries?.id}
-          imageMetadata={imageMetadata}
-        />
-      )}
+      {/* Contour Edit Toolbar is now rendered inside the viewer container for proper positioning */}
 
 
 
