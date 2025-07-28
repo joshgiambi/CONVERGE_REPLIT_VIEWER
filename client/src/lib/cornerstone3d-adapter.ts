@@ -371,19 +371,10 @@ export async function render16BitImageGPU(
         throw new Error('Canvas must have a parent element');
       }
 
-      // Create a div wrapper for Cornerstone3D since it expects a div element
-      let cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
-      if (!cs3dElement) {
-        cs3dElement = document.createElement('div');
-        cs3dElement.className = 'cs3d-viewport-wrapper';
-        cs3dElement.style.width = `${canvas.width}px`;
-        cs3dElement.style.height = `${canvas.height}px`;
-        cs3dElement.style.position = 'relative';
-        
-        // Insert the wrapper next to the canvas
-        canvas.style.display = 'none'; // Hide the original canvas
-        container.insertBefore(cs3dElement, canvas.nextSibling);
-      }
+      // For now, let's disable GPU rendering and fall back to CPU
+      // GPU rendering needs more work to properly integrate with our UI
+      console.log('GPU rendering temporarily disabled - using CPU rendering');
+      throw new Error('GPU rendering disabled - use CPU fallback');
 
       // Configure viewport for Cornerstone3D
       const viewportInput = {
