@@ -31,7 +31,6 @@ interface ViewerToolbarProps {
   windowLevel?: { window: number; level: number };
   isContourEditActive?: boolean;
   showFusionButton?: boolean;
-  isMeasurementToolActive?: boolean;
 }
 
 export function ViewerToolbar({
@@ -48,8 +47,7 @@ export function ViewerToolbar({
   totalSlices,
   windowLevel,
   isContourEditActive,
-  showFusionButton,
-  isMeasurementToolActive = false
+  showFusionButton
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string>('pan');
   const [showMetadata, setShowMetadata] = useState(false);
@@ -57,25 +55,18 @@ export function ViewerToolbar({
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
-    // For measurement tool, use the prop instead of local state
-    if (tool !== 'measure') {
-      setActiveTool(tool);
-    }
+    setActiveTool(tool);
     callback();
   };
-
-  // Update active tool based on measurement prop
-  const currentActiveTool = isMeasurementToolActive ? 'measure' : activeTool;
 
   const tools = [
     { id: 'zoom-in', icon: ZoomIn, label: 'Zoom In', action: onZoomIn },
     { id: 'zoom-out', icon: ZoomOut, label: 'Zoom Out', action: onZoomOut },
     { id: 'reset-zoom', icon: Maximize2, label: 'Fit to Window', action: onResetZoom },
-    { id: 'separator' },
     { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
-    { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasureTool, selectable: true },
     { id: 'separator' },
     { id: 'contour-edit', icon: Edit3, label: 'Contour Edit', action: onContourEdit },
+    { id: 'contour-settings', icon: Settings, label: 'Contour Settings', action: onContourSettings },
     ...(showFusionButton && onFusion ? [
       { id: 'separator' },
       { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
@@ -86,31 +77,31 @@ export function ViewerToolbar({
   ];
 
   return (
-    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-center bg-black border-2 border-gray-600 rounded-2xl p-3 shadow-2xl backdrop-blur-sm">
-        <div className="flex items-center gap-2">
+    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
+      <Card className="bg-black/70 backdrop-blur-sm border-dicom-yellow/30 px-6 py-3">
+        <div className="flex items-center space-x-1">
           {tools.map((tool, index) => {
             if (tool.id === 'separator') {
               return (
-                <div key={index} className="w-px h-8 bg-gray-600 mx-1" />
+                <div key={index} className="w-px h-6 bg-dicom-gray mx-2" />
               );
             }
 
             const IconComponent = tool.icon!;
-            const isActive = tool.selectable && currentActiveTool === tool.id;
+            const isActive = tool.selectable && activeTool === tool.id;
 
             return (
               <div key={tool.id} className="relative group">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   className={`
-                    h-10 w-10 p-0 rounded-lg transition-all duration-200 border-2
+                    p-2 rounded-full transition-all duration-200 hover:scale-110
                     ${isActive 
-                      ? 'bg-indigo-600/20 text-white border-indigo-500 shadow-lg shadow-indigo-500/20' 
+                      ? 'bg-dicom-yellow/20 text-dicom-yellow border border-dicom-yellow' 
                       : tool.id === 'contour-edit' && isContourEditActive
-                      ? 'bg-green-600/20 text-green-400 border-green-500 shadow-lg shadow-green-500/20'
-                      : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 hover:border-gray-600'
+                      ? 'bg-green-500/20 text-green-400 border border-green-400'
+                      : 'hover:bg-dicom-yellow/20 text-dicom-yellow hover:text-dicom-yellow'
                     }
                   `}
                   onClick={() => {
@@ -131,11 +122,11 @@ export function ViewerToolbar({
                     }
                   }}
                 >
-                  <IconComponent className="w-5 h-5" />
+                  <IconComponent className="w-4 h-4" />
                 </Button>
                 
                 {/* Tooltip */}
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black/95 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                   {tool.label}
                 </div>
               </div>
@@ -262,7 +253,7 @@ export function ViewerToolbar({
             )}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

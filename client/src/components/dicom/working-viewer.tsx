@@ -135,7 +135,6 @@ interface WorkingViewerProps {
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
   onImageMetadataChange?: (metadata: any) => void;
-  isMeasurementToolActive?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -216,8 +215,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  // Use the prop for measurement tool state instead of local state
-  const isMeasurementToolActive = props.isMeasurementToolActive || false;
+  const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -932,9 +930,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         for (let i = 0; i < existingContour.points.length; i += 3) {
           if (i === 0 || (i > 0 && existingContour.points[i-3] === undefined)) {
             // Start of a new polygon
-            existingPolygons.push([] as [number, number][]);
+            existingPolygons.push([]);
           }
-          (existingPolygons[existingPolygons.length - 1] as [number, number][]).push([
+          existingPolygons[existingPolygons.length - 1].push([
             existingContour.points[i],
             existingContour.points[i+1]
           ]);
@@ -951,7 +949,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const unionResult = performPolygonUnion(allPolygons);
         
         // Convert union result back to points array
-        const unionPoints: number[] = [];
+        const unionPoints = [];
         unionResult.forEach(polygon => {
           polygon.forEach(([x, y]) => {
             unionPoints.push(x, y, payload.slicePosition);
@@ -3011,6 +3009,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               RT ({rtStructures?.structures?.length || 0})
             </Button>
           )}
+          <Button
+            size="sm"
+            variant={isMeasurementToolActive ? "default" : "outline"}
+            onClick={() => {
+              setIsMeasurementToolActive(!isMeasurementToolActive);
+              if (brushToolState?.isActive) {
+                // Disable brush/pen tools when measurement is active
+                if (onBrushToolChange) {
+                  onBrushToolChange({
+                    ...brushToolState,
+                    isActive: false
+                  });
+                }
+              }
+            }}
+            className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
+            title="Measurement Tool"
+          >
+            <Ruler className="w-4 h-4" />
+          </Button>
           <Button
             size="sm"
             variant="outline"
