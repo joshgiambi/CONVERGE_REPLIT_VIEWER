@@ -178,6 +178,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     orientation = 'axial',
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -965,7 +967,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (payload.operation === 'union' && contourIndex >= 0) {
         // For union, use polygon union to merge overlapping areas properly
         const existingContour = structure.contours[contourIndex];
-        const existingPolygons = [];
+        const existingPolygons: number[][][] = [];
         
         // Convert existing contour points to polygons
         for (let i = 0; i < existingContour.points.length; i += 3) {
@@ -2263,6 +2265,62 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return reconstructMPRSlice(orientation, sliceIndex);
   };
 
+  const renderMPRCanvas = async (
+    canvas: HTMLCanvasElement, 
+    targetOrientation: 'sagittal' | 'coronal',
+    currentSliceIndex: number
+  ) => {
+    if (!canvas || images.length === 0 || !images[0]) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    try {
+      const reconstructedImage = await reconstructMPRSlice(targetOrientation, currentSliceIndex);
+      
+      if (!reconstructedImage || !reconstructedImage.pixelData) return;
+      
+      // Apply window/level
+      const windowWidth = currentWindowLevel.width;
+      const windowCenter = currentWindowLevel.center;
+      const pixelData = reconstructedImage.pixelData;
+      
+      const imageData = ctx.createImageData(256, 256);
+      const data = imageData.data;
+      
+      // Calculate scale factors to fit the image into 256x256 canvas
+      const sourceWidth = reconstructedImage.columns || 512;
+      const sourceHeight = reconstructedImage.rows || 512;
+      const scaleX = sourceWidth / 256;
+      const scaleY = sourceHeight / 256;
+      
+      for (let y = 0; y < 256; y++) {
+        for (let x = 0; x < 256; x++) {
+          // Sample from the source image with bilinear interpolation
+          const sourceX = Math.floor(x * scaleX);
+          const sourceY = Math.floor(y * scaleY);
+          const sourceIndex = sourceY * sourceWidth + sourceX;
+          
+          const pixelValue = pixelData[sourceIndex] || 0;
+          
+          // Apply window/level
+          let value = ((pixelValue - (windowCenter - windowWidth / 2)) / windowWidth) * 255;
+          value = Math.max(0, Math.min(255, value));
+          
+          const destIndex = (y * 256 + x) * 4;
+          data[destIndex] = value;
+          data[destIndex + 1] = value;
+          data[destIndex + 2] = value;
+          data[destIndex + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+    } catch (error) {
+      console.error(`Error rendering ${targetOrientation} MPR:`, error);
+    }
+  };
+
   const displayCurrentImage = async () => {
     if (!canvasRef.current || images.length === 0) return;
 
@@ -2369,6 +2427,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         } catch (rtError) {
           console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
+        }
+      }
+      
+      // Render MPR views if canvases are available
+      if (orientation === 'axial' && sagittalCanvasRef.current && coronalCanvasRef.current) {
+        try {
+          // Get the middle slice index for sagittal and coronal views
+          const sagittalSliceIndex = Math.floor((images[0]?.columns || 512) / 2);
+          const coronalSliceIndex = Math.floor((images[0]?.rows || 512) / 2);
+          
+          // Render MPR views asynchronously
+          await Promise.all([
+            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex),
+            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex)
+          ]);
+        } catch (mprError) {
+          console.warn("Error rendering MPR views:", mprError);
         }
       }
     } catch (error: any) {
@@ -3401,7 +3476,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 p-4 flex items-center justify-center">
+      <div className="flex-1 p-4 flex items-center justify-center relative">
         <div className="relative" style={{ width: '1280px', height: '1280px' }}>
           <canvas
             ref={canvasRef}
@@ -3587,6 +3662,41 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
             />
           )}
+          
+          {/* Floating MPR windows for sagittal and coronal views */}
+          <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-col gap-4">
+            {/* Sagittal view */}
+            <div className="bg-gray-900 rounded-lg shadow-lg p-2 border border-gray-700">
+              <div className="text-xs text-gray-300 mb-1 text-center">Sagittal</div>
+              <canvas
+                ref={sagittalCanvasRef}
+                width={256}
+                height={256}
+                className="rounded"
+                style={{
+                  backgroundColor: "black",
+                  imageRendering: "auto",
+                  userSelect: "none",
+                }}
+              />
+            </div>
+            
+            {/* Coronal view */}
+            <div className="bg-gray-900 rounded-lg shadow-lg p-2 border border-gray-700">
+              <div className="text-xs text-gray-300 mb-1 text-center">Coronal</div>
+              <canvas
+                ref={coronalCanvasRef}
+                width={256}
+                height={256}
+                className="rounded"
+                style={{
+                  backgroundColor: "black",
+                  imageRendering: "auto",
+                  userSelect: "none",
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </Card>
