@@ -422,7 +422,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   return (
     <div className="animate-in fade-in-50 duration-500">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-2" style={{ height: 'calc(100vh - 4rem)' }}>
         
         {/* Series Selector */}
         <div className="lg:col-span-1 h-full overflow-hidden">

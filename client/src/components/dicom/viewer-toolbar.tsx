@@ -84,15 +84,15 @@ export function ViewerToolbar({
   ];
 
   return (
-    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
+    <div className="fixed top-4 left-[calc(25%+50%*3/4)] transform -translate-x-1/2 z-40 animate-in slide-in-from-top-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
-        <div className="bg-gray-900/85 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
-          <div className="flex items-center space-x-1">
+        <div className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl bg-background/90">
+          <div className="flex items-center space-x-2">
             {tools.map((tool, index) => {
               if (tool.id === 'separator') {
                 return (
-                  <div key={index} className="w-px h-5 bg-gray-600/50 mx-1.5" />
+                  <div key={index} className="w-px h-6 bg-border/40 mx-1" />
                 );
               }
 
@@ -102,15 +102,13 @@ export function ViewerToolbar({
               return (
                 <div key={tool.id} className="relative group">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    className={`
-                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-gray-300
-                      ${isActive 
-                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
-                        : 'hover:bg-gray-700/50 hover:text-white'
-                      }
-                    `}
+                    className={`h-7 px-2 rounded-lg backdrop-blur-sm shadow-sm border-2 text-xs font-medium ${
+                      isActive 
+                        ? 'bg-blue-900/30 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40' 
+                        : 'bg-background/50 border-border/60 text-foreground hover:text-foreground hover:bg-background/70'
+                    }`}
                     onClick={() => {
                       if (tool.selectable) {
                         handleToolSelect(tool.id, tool.action!);
@@ -129,7 +127,8 @@ export function ViewerToolbar({
                       }
                     }}
                   >
-                    <IconComponent className="w-4 h-4" />
+                    <IconComponent className="w-3 h-3 mr-1" />
+                    <span className="text-xs">{tool.label}</span>
                   </Button>
                   
                   {/* Tooltip */}
