@@ -46,6 +46,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
+  const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
   
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
@@ -201,8 +202,25 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const handlePanTool = () => setActiveTool('Pan');
-  const handleMeasureTool = () => setActiveTool('Length');
+  const handlePanTool = () => {
+    setActiveTool('Pan');
+    // Disable measurement tool when pan is selected
+    setIsMeasurementToolActive(false);
+  };
+  
+  const handleMeasureTool = () => {
+    setActiveTool('Length');
+    setIsMeasurementToolActive(!isMeasurementToolActive);
+    
+    // Disable brush tools when measurement is active
+    if (!isMeasurementToolActive && brushToolState.isActive) {
+      setBrushToolState({
+        ...brushToolState,
+        isActive: false
+      });
+    }
+  };
+  
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
 
   const handleRotate = () => {
@@ -514,6 +532,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 onFusionOpacityChange={setFusionOpacity}
                 hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
                 onImageMetadataChange={setImageMetadata}
+                isMeasurementToolActive={isMeasurementToolActive}
               />
               
               {/* Structure Tags on Right Side */}
@@ -573,6 +592,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
           showFusionButton={series.some(s => s.modality === 'MR')}
+          isMeasurementToolActive={isMeasurementToolActive}
         />
       )}
 

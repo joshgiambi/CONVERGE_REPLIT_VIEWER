@@ -141,15 +141,26 @@ export function MeasurementTool({
     };
   }, [isActive, firstPoint, canvasRef, imageMetadata, ctTransform, onMeasurementComplete]);
 
-  // Draw measurement lines
+  // Draw measurement lines and handle zoom changes
   useEffect(() => {
-    if (!overlayCanvasRef.current) return;
+    if (!overlayCanvasRef.current || !canvasRef.current) return;
 
-    const ctx = overlayCanvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    const overlay = overlayCanvasRef.current;
+    
+    // Update overlay canvas size and position to match main canvas
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    overlay.style.width = canvas.style.width;
+    overlay.style.height = canvas.style.height;
+    overlay.style.left = canvas.offsetLeft + 'px';
+    overlay.style.top = canvas.offsetTop + 'px';
+
+    const ctx = overlay.getContext('2d');
     if (!ctx) return;
 
     // Clear canvas
-    ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
 
     // Draw completed measurements
     ctx.strokeStyle = '#00ff00';
@@ -158,7 +169,14 @@ export function MeasurementTool({
     ctx.fillStyle = '#00ff00';
 
     measurementsRef.current.forEach(measurement => {
-      drawMeasurementLine(ctx, measurement.start, measurement.end, measurement.distance);
+      // Recalculate distance with current transform
+      const distance = calculateRealWorldDistance(
+        measurement.start,
+        measurement.end,
+        imageMetadata,
+        ctTransform
+      );
+      drawMeasurementLine(ctx, measurement.start, measurement.end, distance);
     });
 
     // Draw current measurement being drawn
@@ -176,7 +194,7 @@ export function MeasurementTool({
       drawMeasurementLine(ctx, firstPoint, currentMousePos, distance);
       ctx.setLineDash([]);
     }
-  }, [firstPoint, currentMousePos, imageMetadata, ctTransform]);
+  }, [firstPoint, currentMousePos, imageMetadata, ctTransform, canvasRef.current?.width, canvasRef.current?.height]);
 
   const calculateRealWorldDistance = (
     point1: Point,

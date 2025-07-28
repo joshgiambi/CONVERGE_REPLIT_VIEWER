@@ -880,10 +880,15 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-[30%] z-50">
       <div 
-        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-2xl p-4 shadow-2xl w-auto"
-        style={{ borderColor: `${structureColorRgb}60` }}
+        className="relative backdrop-blur-sm border rounded-2xl p-4 shadow-2xl w-auto transition-transform duration-200 hover:scale-[1.02]"
+        style={{ 
+          borderColor: structureColorRgb,
+          borderWidth: '1px',
+          backgroundColor: `${structureColorRgb}15`,
+          boxShadow: `0 0 20px ${structureColorRgb}30`
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
