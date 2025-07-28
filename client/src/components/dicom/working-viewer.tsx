@@ -2244,8 +2244,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const x = Math.min(sliceIndex, width - 1);
       
       // Fill pixel data by sampling from axial slices
+      // Reverse Z-axis to fix upside-down orientation (following OHIF convention)
       for (let z = 0; z < numSlices && z < height; z++) {
-        const axialImage = sortedImages[z];
+        const axialZ = numSlices - 1 - z; // Reverse Z for proper anatomical orientation
+        const axialImage = sortedImages[axialZ];
         const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
         
         if (axialImageData && axialImageData.data) {
@@ -2263,8 +2265,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const y = Math.min(sliceIndex, height - 1);
       
       // Fill pixel data by sampling from axial slices
+      // Reverse Z-axis to fix upside-down orientation (following OHIF convention)
       for (let z = 0; z < numSlices && z < height; z++) {
-        const axialImage = sortedImages[z];
+        const axialZ = numSlices - 1 - z; // Reverse Z for proper anatomical orientation
+        const axialImage = sortedImages[axialZ];
         const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
         
         if (axialImageData && axialImageData.data) {
@@ -2351,9 +2355,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const pixelValue = pixelData[sourceIndex] || 0;
           if (pixelValue > 0) nonZeroPixels++;
           
-          // Apply window/level
-          let value = ((pixelValue - (windowCenter - windowWidth / 2)) / windowWidth) * 255;
-          value = Math.max(0, Math.min(255, value));
+          // Apply window/level using same calculation as main viewer
+          const min = windowCenter - windowWidth / 2;
+          const max = windowCenter + windowWidth / 2;
+          
+          let value;
+          if (pixelValue <= min) {
+            value = 0; // Black for values below window minimum
+          } else if (pixelValue >= max) {
+            value = 255; // White for values above window maximum
+          } else {
+            value = ((pixelValue - min) / windowWidth) * 255;
+          }
           
           const destIndex = (y * 192 + x) * 4;
           data[destIndex] = value;
