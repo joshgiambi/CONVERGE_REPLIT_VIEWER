@@ -371,10 +371,23 @@ export async function render16BitImageGPU(
         throw new Error('Canvas must have a parent element');
       }
 
-      // For now, let's disable GPU rendering and fall back to CPU
-      // GPU rendering needs more work to properly integrate with our UI
-      console.log('GPU rendering temporarily disabled - using CPU rendering');
-      throw new Error('GPU rendering disabled - use CPU fallback');
+      // Create a div wrapper for Cornerstone3D with proper dimensions
+      let cs3dElement = document.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
+      if (!cs3dElement) {
+        cs3dElement = document.createElement('div');
+        cs3dElement.className = 'cs3d-viewport-wrapper';
+        cs3dElement.style.width = `${canvas.width}px`;
+        cs3dElement.style.height = `${canvas.height}px`;
+        cs3dElement.style.position = 'fixed';
+        cs3dElement.style.top = '0';
+        cs3dElement.style.left = '0';
+        cs3dElement.style.opacity = '0'; // Invisible but still rendered
+        cs3dElement.style.pointerEvents = 'none'; // Don't capture mouse events
+        cs3dElement.style.zIndex = '-1'; // Behind everything
+        
+        // Add to body for GPU rendering
+        document.body.appendChild(cs3dElement);
+      }
 
       // Configure viewport for Cornerstone3D
       const viewportInput = {
@@ -480,33 +493,55 @@ export async function render16BitImageGPU(
         // Render the viewport
         viewport.render();
         
-        // Make the GPU viewport visible and hide the original canvas
-        const container = canvas.parentElement;
-        if (container) {
-          const cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
-          if (cs3dElement) {
-            cs3dElement.style.display = 'block';
-            canvas.style.display = 'none';
+        // Wait a frame for GPU rendering to complete
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        
+        // Copy the GPU-rendered image back to the original canvas
+        const cs3dElement = document.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
+        if (cs3dElement) {
+          const gpuCanvas = cs3dElement.querySelector('canvas') as HTMLCanvasElement;
+          if (gpuCanvas && canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              // Clear and copy GPU render to original canvas
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(gpuCanvas, 0, 0, canvas.width, canvas.height);
+              
+              // Ensure original canvas remains visible
+              canvas.style.display = 'block';
+              canvas.style.visibility = 'visible';
+              
+              console.log('GPU canvas copied successfully', {
+                gpuCanvasSize: { width: gpuCanvas.width, height: gpuCanvas.height },
+                targetCanvasSize: { width: canvas.width, height: canvas.height }
+              });
+            } else {
+              console.error('Failed to get 2D context from display canvas');
+            }
+          } else {
+            console.error('GPU canvas not found in cs3dElement');
           }
+        } else {
+          console.error('cs3dElement not found when trying to copy GPU render');
         }
         
-        console.log('GPU rendering completed successfully');
+        console.log('GPU rendering completed and copied to display canvas');
         return;
       }
     } catch (error) {
       console.error('GPU rendering failed, falling back to CPU:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        viewportId,
+        imageId,
+        cs3dElementExists: !!cs3dElement,
+        canvasDimensions: { width: canvas.width, height: canvas.height }
+      });
       
       // On error, ensure original canvas is visible
       canvas.style.display = 'block';
-      
-      // Hide GPU viewport if it exists
-      const container = canvas.parentElement;
-      if (container) {
-        const cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
-        if (cs3dElement) {
-          cs3dElement.style.display = 'none';
-        }
-      }
+      canvas.style.visibility = 'visible';
     }
 
     // Fall back to CPU rendering if GPU fails
