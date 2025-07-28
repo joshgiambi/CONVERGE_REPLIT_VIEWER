@@ -93,7 +93,7 @@ export function FusionControlPanel({
   // Minimized view - just opacity slider
   if (isMinimized) {
     return (
-      <div className="fixed bottom-4 right-4 z-50">
+      <div className="fixed bottom-6 right-8 z-50">
         <Card className="bg-black/80 backdrop-blur-sm border-purple-500/50 p-3">
           <div className="flex items-center gap-3">
             <Button
@@ -135,7 +135,7 @@ export function FusionControlPanel({
   
   // Expanded view with thumbnails
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="fixed bottom-6 right-8 z-50">
       <Card className="bg-black/90 backdrop-blur-sm border-purple-500/50 p-3 w-80">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
