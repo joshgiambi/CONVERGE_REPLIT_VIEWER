@@ -902,7 +902,7 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 translate-x-8 z-50 animate-in slide-in-from-bottom-2 duration-300">
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 translate-x-2 z-50 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         <div 
           className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl"
