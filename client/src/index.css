@@ -361,6 +361,17 @@ input[type="range"]::-moz-range-thumb {
   to { transform: rotate(360deg); }
 }
 
+@keyframes fadeInScale {
+  from { 
+    opacity: 0; 
+    transform: translateX(-50%) scale(0.95);
+  }
+  to { 
+    opacity: 1; 
+    transform: translateX(-50%) scale(1);
+  }
+}
+
 /* Scrollbar styling for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
