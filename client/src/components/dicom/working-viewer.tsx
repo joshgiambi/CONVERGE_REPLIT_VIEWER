@@ -284,6 +284,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Crosshair position for MPR views (in pixel coordinates)
   const [crosshairPos, setCrosshairPos] = useState({ x: 256, y: 256 });
+  const [crosshairMode, setCrosshairMode] = useState(false);
+  const [isPanMode, setIsPanMode] = useState(true); // Pan mode is default
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
@@ -1400,9 +1402,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
-  // Expose handleContourUpdate method to parent component
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
-    handleContourUpdate
+    handleContourUpdate,
+    setPanMode: () => {
+      setIsPanMode(true);
+      setCrosshairMode(false);
+      console.log('Pan mode activated');
+    },
+    setCrosshairMode: () => {
+      setIsPanMode(false);
+      setCrosshairMode(true);
+      console.log('Crosshair mode activated');
+    },
   }), [rtStructures]);
 
   // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
@@ -2433,6 +2445,53 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
       
+      // Draw crosshairs if in axial view
+      if (orientation === 'axial') {
+        // Convert crosshair pixel coordinates to canvas coordinates
+        const imageWidth = currentImage.columns || currentImage.width || 512;
+        const imageHeight = currentImage.rows || currentImage.height || 512;
+        
+        // Calculate scale with zoom factor (same as render16BitImage)
+        const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+        const totalScale = baseScale * zoom;
+        const scaledWidth = imageWidth * totalScale;
+        const scaledHeight = imageHeight * totalScale;
+        
+        // Center position with pan offset
+        const imageX = (canvas.width - scaledWidth) / 2 + panX;
+        const imageY = (canvas.height - scaledHeight) / 2 + panY;
+        
+        // Convert crosshair pixel position to canvas position
+        const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
+        const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
+        
+        // Draw crosshairs
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]); // Dashed line
+        
+        // Vertical line
+        ctx.beginPath();
+        ctx.moveTo(crosshairCanvasX, 0);
+        ctx.lineTo(crosshairCanvasX, canvas.height);
+        ctx.stroke();
+        
+        // Horizontal line
+        ctx.beginPath();
+        ctx.moveTo(0, crosshairCanvasY);
+        ctx.lineTo(canvas.width, crosshairCanvasY);
+        ctx.stroke();
+        
+        // Draw center point
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        ctx.restore();
+      }
+      
       // Render MPR views if canvases are available
       if (orientation === 'axial' && sagittalCanvasRef.current && coronalCanvasRef.current) {
         try {
@@ -2440,6 +2499,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           // Ensure crosshair is within bounds
           const sagittalSliceIndex = Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1));
           const coronalSliceIndex = Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1));
+          
+          console.log(`Rendering MPR views - Sagittal: ${sagittalSliceIndex}, Coronal: ${coronalSliceIndex}`);
           
           // Render MPR views asynchronously
           await Promise.all([
@@ -3005,11 +3066,46 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (e.button === 0 && !isDrawingToolActive) {
-      // Left click for pan (disabled during drawing/measurement mode)
-      setIsDragging(true);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setLastPanX(panX);
-      setLastPanY(panY);
+      // Left click - crosshair mode or pan mode
+      if (crosshairMode && canvasRef.current && images[currentIndex]) {
+        // In crosshair mode, update crosshair position
+        const rect = canvasRef.current.getBoundingClientRect();
+        const canvasX = e.clientX - rect.left;
+        const canvasY = e.clientY - rect.top;
+        
+        // Convert canvas coordinates to image pixel coordinates
+        const canvasWidth = canvasRef.current.width;
+        const canvasHeight = canvasRef.current.height;
+        const imageWidth = images[currentIndex]?.columns || 512;
+        const imageHeight = images[currentIndex]?.rows || 512;
+        
+        // Calculate scale with zoom factor (same as render16BitImage)
+        const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+        const totalScale = baseScale * zoom;
+        const scaledWidth = imageWidth * totalScale;
+        const scaledHeight = imageHeight * totalScale;
+        
+        // Center position with pan offset
+        const imageX = (canvasWidth - scaledWidth) / 2 + panX;
+        const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+        
+        // Convert canvas coordinates to image pixel coordinates
+        const pixelX = Math.floor((canvasX - imageX) / totalScale);
+        const pixelY = Math.floor((canvasY - imageY) / totalScale);
+        
+        // Check if within image bounds
+        if (pixelX >= 0 && pixelX < imageWidth && pixelY >= 0 && pixelY < imageHeight) {
+          setCrosshairPos({ x: pixelX, y: pixelY });
+          console.log(`Crosshair repositioned to: ${pixelX}, ${pixelY}`);
+          scheduleRender(); // Re-render to show new crosshair position
+        }
+      } else {
+        // Pan mode
+        setIsDragging(true);
+        setDragStart({ x: e.clientX, y: e.clientY });
+        setLastPanX(panX);
+        setLastPanY(panY);
+      }
     } else if (e.button === 2 && !isDrawingToolActive) {
       // Right click for window/level (disabled during drawing mode)
       const startX = e.clientX;

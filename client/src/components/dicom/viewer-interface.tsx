@@ -30,6 +30,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
   
   // Shared image cache to prevent reloading when switching modes
   const imageCache = useRef<Map<string, { images: any[], metadata: any }>>(new Map());
@@ -209,12 +210,24 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const handlePanTool = () => setActiveTool('Pan');
-  const handleMeasureTool = () => setActiveTool('Length');
+  const handlePanTool = () => {
+    if (workingViewerRef.current?.setPanMode) {
+      workingViewerRef.current.setPanMode();
+      setActiveToolMode('pan');
+    }
+  };
+  
+  const handleMeasureTool = () => {
+    setActiveTool('Length');
+    setActiveToolMode('measure');
+  };
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
+  
   const handleCrosshairsTool = () => {
-    console.log('Crosshairs tool activated');
-    // For now, we'll log it. The actual implementation will be in WorkingViewer
+    if (workingViewerRef.current?.setCrosshairMode) {
+      workingViewerRef.current.setCrosshairMode();
+      setActiveToolMode('crosshairs');
+    }
   };
 
   const handleRotate = () => {
@@ -599,6 +612,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setViewMode(viewMode === 'single' ? 'mpr' : 'single');
           }}
           isMPRActive={viewMode === 'mpr'}
+          isPanActive={activeToolMode === 'pan'}
+          isCrosshairsActive={activeToolMode === 'crosshairs'}
+          isMeasureActive={activeToolMode === 'measure'}
           className="toolbar-custom"
         />
       )}
