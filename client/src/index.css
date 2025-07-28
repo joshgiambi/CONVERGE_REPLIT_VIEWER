@@ -2,19 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%) skewX(-12deg);
-  }
-  100% {
-    transform: translateX(200%) skewX(-12deg);
-  }
-}
-
-.animate-shimmer {
-  animation: shimmer 3s infinite;
-}
-
 :root {
   --background: 0 0% 0%; /* #000000 - dicom-black */
   --foreground: 0 0% 100%; /* #FFFFFF - white */
