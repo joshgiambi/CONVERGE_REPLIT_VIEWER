@@ -200,6 +200,13 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
    - Find MRI slice with minimum Z-distance to current CT slice
    - Only render fusion if Z-distance < 10mm (tight tolerance)
 
+## Recent Research & Planning
+- July 28, 2025: OHIF 3.10 Analysis - Comprehensive comparison document created
+  - Identified need for Cornerstone3D migration for GPU acceleration and MPR support
+  - Documented 10-week phased upgrade plan for multi-viewport and performance improvements
+  - Key gaps: ViewportGridService, study prefetching, web workers, MPR implementation
+  - See ohif-3.10-comparison-upgrade-plan.md for full details
+
 ## Changelog
 
 - July 28, 2025: Enlarged DICOM Viewer Canvas ✅
