@@ -1990,7 +1990,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const BATCH_SIZE = 50; // Match server batch size
     const PREFETCH_RADIUS = 10; // Images to prioritize around current position
+    const COMPLETION_THRESHOLD = 0.95; // Hide progress at 95% complete
+    const MAX_PREFETCH_TIME = 30000; // 30 second timeout
     let loadedCount = imageCacheRef.current.size;
+    let failedCount = 0;
+    const startTime = Date.now();
+    
+    // Auto-hide progress after timeout
+    setTimeout(() => {
+      if (!prefetchCompleteRef.current) {
+        console.log('⏱️ Background prefetch timeout - hiding progress indicator');
+        prefetchCompleteRef.current = true;
+        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
+      }
+    }, MAX_PREFETCH_TIME);
     
     // Create priority queue based on viewing position
     const getPriority = (index: number) => {
@@ -2008,10 +2021,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const processBatch = async (startIdx: number) => {
       if (prefetchCompleteRef.current || !seriesAbortRef.current) return;
       
+      // Check if we've loaded enough images
+      const loadedPercentage = loadedCount / imageList.length;
+      if (loadedPercentage >= COMPLETION_THRESHOLD) {
+        prefetchCompleteRef.current = true;
+        console.log(`✅ Background prefetch sufficient: ${loadedCount}/${imageList.length} images (${Math.round(loadedPercentage * 100)}%)`);
+        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
+        return;
+      }
+      
       const batchIndices = prioritizedIndices.slice(startIdx, startIdx + BATCH_SIZE);
       if (batchIndices.length === 0) {
         prefetchCompleteRef.current = true;
-        console.log(`✅ Background prefetch complete: ${loadedCount}/${imageList.length} images`);
+        console.log(`✅ Background prefetch complete: ${loadedCount}/${imageList.length} images, ${failedCount} failed`);
+        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
         return;
       }
       
@@ -2026,6 +2049,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const batchResults = await fetchBatchImages(batchUIDs, seriesAbortRef.current?.signal);
           
           loadedCount += batchResults.size;
+          failedCount += (batchUIDs.length - batchResults.size);
+          
           const progress = Math.round((loadedCount / imageList.length) * 100);
           console.log(`📊 Prefetch progress: ${loadedCount}/${imageList.length} (${progress}%)`);
           setPrefetchProgress({ loaded: loadedCount, total: imageList.length });
@@ -2033,9 +2058,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         } catch (error: any) {
           if (error.name === 'AbortError') {
             console.log('Background prefetch aborted');
+            setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
             return;
           }
           console.warn('Batch prefetch error:', error.message);
+          failedCount += uncachedImages.length;
         }
       }
       
@@ -3382,7 +3409,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
 
           {/* OHIF 3.10-style background prefetch progress */}
-          {prefetchProgress.total > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
+          {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
             <div className="absolute top-4 right-4 bg-gray-800/90 rounded-lg px-3 py-2 text-white pointer-events-none backdrop-blur-sm">
               <div className="text-xs mb-1 font-medium flex items-center gap-2">
                 <span className="text-green-400">🚀</span> OHIF Background Loading
