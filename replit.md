@@ -207,6 +207,7 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
   - ✅ Preserved card size and position - only canvas itself is larger for better image detail
   - ✅ Drawing functions automatically adapt to new canvas size using dynamic width/height parameters
   - ✅ Maintains same UI layout while providing 25% more viewing area for medical images
+  - ✅ Reduced canvas container padding from p-4 to p-1 to minimize whitespace and maximize canvas space utilization
   - Technical details: Canvas uses max-w-full max-h-full classes to constrain within container
 - July 28, 2025: Fixed Contour Toolbar Animation - Pop-in-Place Effect ✅
   - ✅ Changed contour toolbar animation from slide-in-from-left to pop-in-place effect

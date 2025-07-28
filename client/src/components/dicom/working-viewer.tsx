@@ -3093,7 +3093,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 p-4 flex items-center justify-center">
+      <div className="flex-1 p-1 flex items-center justify-center">
         <div className="relative">
           <canvas
             ref={canvasRef}
