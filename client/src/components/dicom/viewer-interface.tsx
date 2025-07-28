@@ -425,7 +425,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector - Fixed Width */}
-        <div className="w-80 h-full overflow-hidden flex-shrink-0">
+        <div className="w-96 h-full overflow-hidden flex-shrink-0">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
