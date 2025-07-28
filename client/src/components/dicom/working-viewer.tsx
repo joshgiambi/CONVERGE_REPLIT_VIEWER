@@ -932,9 +932,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         for (let i = 0; i < existingContour.points.length; i += 3) {
           if (i === 0 || (i > 0 && existingContour.points[i-3] === undefined)) {
             // Start of a new polygon
-            existingPolygons.push([]);
+            existingPolygons.push([] as [number, number][]);
           }
-          existingPolygons[existingPolygons.length - 1].push([
+          (existingPolygons[existingPolygons.length - 1] as [number, number][]).push([
             existingContour.points[i],
             existingContour.points[i+1]
           ]);
@@ -951,7 +951,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const unionResult = performPolygonUnion(allPolygons);
         
         // Convert union result back to points array
-        const unionPoints = [];
+        const unionPoints: number[] = [];
         unionResult.forEach(polygon => {
           polygon.forEach(([x, y]) => {
             unionPoints.push(x, y, payload.slicePosition);
