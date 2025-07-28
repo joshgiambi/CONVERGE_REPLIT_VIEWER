@@ -87,7 +87,7 @@ export function ViewerToolbar({
     <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
-        <div className="bg-gray-900/95 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
+        <div className="bg-gray-900/85 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
           <div className="flex items-center space-x-1">
             {tools.map((tool, index) => {
               if (tool.id === 'separator') {
@@ -142,17 +142,23 @@ export function ViewerToolbar({
           </div>
         </div>
 
-        {/* Contour Edit Hover Button */}
+        {/* Contour Edit Popout Icon */}
         {isContourEditActive && onContourEdit && (
-          <div className="absolute -right-12 top-1/2 transform -translate-y-1/2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 bg-green-600/20 text-green-400 border border-green-500/50 rounded-lg shadow-sm hover:bg-green-600/30"
-              onClick={onContourEdit}
-            >
-              <Edit3 className="w-4 h-4" />
-            </Button>
+          <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+            <div className="bg-gray-900/85 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-600/20 transition-all duration-200"
+                onClick={onContourEdit}
+              >
+                <Edit3 className="w-4 h-4" />
+              </Button>
+            </div>
+            {/* Tooltip */}
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+              Edit Contours
+            </div>
           </div>
         )}
         

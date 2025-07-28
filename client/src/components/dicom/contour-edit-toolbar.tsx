@@ -427,6 +427,27 @@ export function ContourEditToolbar({
 
   const currentColor = rgbToHex(selectedStructure.color || [255, 255, 255]);
   const structureColorRgb = `rgb(${selectedStructure.color.join(',')})`;
+  
+  // Convert RGB to HSL for background hue blending
+  const rgbToHsl = (r: number, g: number, b: number) => {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0, l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h /= 6;
+    }
+    return [h * 360, s * 100, l * 100];
+  };
+  
+  const structureHsl = rgbToHsl(...selectedStructure.color);
+  const backgroundHue = structureHsl[0];
 
   const mainTools = [
     { id: 'brush', icon: Brush, label: 'Brush' },
@@ -883,8 +904,11 @@ export function ContourEditToolbar({
     <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         <div 
-          className="bg-gray-900/95 backdrop-blur-md border border-gray-700/50 rounded-xl px-4 py-3 shadow-2xl"
-          style={{ borderColor: `${structureColorRgb}60` }}
+          className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl"
+          style={{ 
+            backgroundColor: `hsla(${backgroundHue}, 20%, 10%, 0.75)`,
+            borderColor: `${structureColorRgb}60` 
+          }}
         >
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
