@@ -2147,7 +2147,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       } else {
         // Use existing Cornerstone Core rendering
         console.log('📦 Using CPU-based Cornerstone Core rendering');
-        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+        await render16BitImage(canvas, imageData.data, currentWindowLevel, imageData.width, imageData.height);
       }
       
       // Render secondary image overlay for fusion if available
