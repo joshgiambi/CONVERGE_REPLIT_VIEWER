@@ -60,6 +60,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
+  
+  // MPR visibility state
+  const [mprVisible, setMprVisible] = useState(false);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -547,6 +550,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
+                  onMPRToggle={() => setMprVisible(!mprVisible)}
+                  isMPRVisible={mprVisible}
                 />
               ) : (
                 <MultiViewport
@@ -611,9 +616,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }
           }}
           onMPRToggle={() => {
-            setViewMode(viewMode === 'single' ? 'mpr' : 'single');
+            setMprVisible(!mprVisible);
           }}
-          isMPRActive={viewMode === 'mpr'}
+          isMPRActive={mprVisible}
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}

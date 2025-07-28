@@ -120,7 +120,9 @@ export function ViewerToolbar({
                     size="sm"
                     className={`
                       h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90
-                      ${isActive 
+                      ${tool.id === 'mpr' && isMPRActive
+                        ? 'bg-green-600/20 text-green-400 border border-green-500/50 shadow-sm' 
+                        : isActive 
                         ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
                         : 'hover:bg-white/20 hover:text-white'
                       }

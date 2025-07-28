@@ -145,6 +145,8 @@ interface WorkingViewerProps {
   allStructuresVisible?: boolean;
   imageCache?: React.MutableRefObject<Map<string, { images: any[], metadata: any }>>;
   orientation?: 'axial' | 'sagittal' | 'coronal';
+  onMPRToggle?: () => void;
+  isMPRVisible?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -260,6 +262,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
   const [isLoadingMPR, setIsLoadingMPR] = useState(false);
+  // Use external MPR visibility state or fallback to internal state
+  const mprVisible = props.isMPRVisible ?? false;
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -4078,7 +4082,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
           
           {/* Floating MPR windows for sagittal and coronal views */}
-          {orientation === 'axial' && images.length > 0 && (
+          {orientation === 'axial' && images.length > 0 && mprVisible && (
             <div className="absolute right-4 top-16 flex flex-col gap-3">
               {/* Sagittal view */}
               <div className="mpr-window">
