@@ -51,9 +51,13 @@ export async function createOrUpdateGPUViewport(
       gpuElement.style.position = 'absolute';
       gpuElement.style.top = '0';
       gpuElement.style.left = '0';
+      gpuElement.style.zIndex = '10'; // Ensure GPU viewport is above canvas
+      gpuElement.style.pointerEvents = 'none'; // Allow interactions to pass through
       
       // Add to container
       containerElement.appendChild(gpuElement);
+      
+      console.log('GPU viewport element created and added to DOM');
 
       // Create rendering engine
       const renderingEngine = new cornerstone3D.RenderingEngine(renderingEngineId);
@@ -88,6 +92,9 @@ export async function createOrUpdateGPUViewport(
     const cache = cornerstone3D.cache;
     
     // Create a proper image object for Cornerstone3D
+    const pixelData = imageData.data;
+    const sizeInBytes = pixelData.byteLength;
+    
     const image = {
       imageId,
       rows: imageData.height,
@@ -98,15 +105,23 @@ export async function createOrUpdateGPUViewport(
       windowCenter: windowLevel.center,
       windowWidth: windowLevel.width,
       pixelSpacing: [1, 1],
-      getPixelData: () => imageData.data,
-      minPixelValue: Math.min(...Array.from(imageData.data.slice(0, 1000))), // Sample for performance
-      maxPixelValue: Math.max(...Array.from(imageData.data.slice(0, 1000))),
+      getPixelData: () => pixelData,
+      minPixelValue: Math.min(...Array.from(pixelData.slice(0, 1000))), // Sample for performance
+      maxPixelValue: Math.max(...Array.from(pixelData.slice(0, 1000))),
+      sizeInBytes: sizeInBytes,
+      invert: false,
+      intercept: 0,
+      slope: 1,
     };
 
-    // Put image in cache
-    cache.putImageLoadObject(imageId, {
-      promise: Promise.resolve(image),
-    });
+    // Check if image is already in cache
+    const cachedImage = cache.getImageLoadObject(imageId);
+    if (!cachedImage) {
+      // Put image in cache
+      cache.putImageLoadObject(imageId, {
+        promise: Promise.resolve(image),
+      });
+    }
 
     // Set the stack
     await viewportState.viewport.setStack([imageId], 0);
@@ -140,6 +155,14 @@ export async function createOrUpdateGPUViewport(
 
     // Show GPU viewport
     viewportState.element.style.display = 'block';
+    
+    console.log('GPU viewport rendering complete:', {
+      viewportId,
+      imageId,
+      dimensions: `${imageData.width}x${imageData.height}`,
+      windowLevel: `W:${windowLevel.width} C:${windowLevel.center}`,
+      transform: ctTransform
+    });
 
     return true;
   } catch (error) {

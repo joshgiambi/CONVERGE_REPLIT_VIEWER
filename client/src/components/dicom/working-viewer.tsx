@@ -28,7 +28,6 @@ import { undoRedoManager } from "@/lib/undo-system";
 import { 
   isGPUAccelerationAvailable,
   initializeCornerstone3D,
-  isCornerstone3DReady,
   render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
@@ -984,7 +983,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const unionResult = performPolygonUnion(allPolygons);
         
         // Convert union result back to points array
-        const unionPoints = [];
+        const unionPoints: number[] = [];
         unionResult.forEach(polygon => {
           polygon.forEach(([x, y]) => {
             unionPoints.push(x, y, payload.slicePosition);
@@ -3353,7 +3352,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               canvasRef={canvasRef}
               isActive={isMeasurementToolActive}
               imageMetadata={imageMetadata}
-              ctTransform={ctTransform}
+              ctTransform={ctTransform.current ? {
+                current: {
+                  scale: ctTransform.current.scale,
+                  offsetX: ctTransform.current.offsetX,
+                  offsetY: ctTransform.current.offsetY
+                }
+              } as React.MutableRefObject<{ scale: number; offsetX: number; offsetY: number }> : null}
               currentSlicePosition={
                 images.length > 0 && images[currentIndex]
                   ? (images[currentIndex].parsedSliceLocation ??
