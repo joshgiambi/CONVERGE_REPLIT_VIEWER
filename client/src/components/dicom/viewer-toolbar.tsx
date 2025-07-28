@@ -86,13 +86,16 @@ export function ViewerToolbar({
   ];
 
   return (
-    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-center bg-black border-2 border-gray-600 rounded-2xl p-3 shadow-2xl backdrop-blur-sm">
-        <div className="flex items-center gap-2">
+    <div className="fixed bottom-12 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
+      <div className="flex items-center bg-gradient-to-r from-gray-900 via-black to-gray-900 border-2 border-indigo-500/30 rounded-2xl p-4 shadow-[0_20px_50px_rgba(99,102,241,0.3)] backdrop-blur-md relative overflow-hidden">
+        {/* Animated gradient border effect */}
+        <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 opacity-20 blur-xl animate-pulse" />
+        
+        <div className="relative flex items-center gap-2">
           {tools.map((tool, index) => {
             if (tool.id === 'separator') {
               return (
-                <div key={index} className="w-px h-8 bg-gray-600 mx-1" />
+                <div key={index} className="w-px h-8 bg-gradient-to-b from-transparent via-indigo-500/30 to-transparent mx-1" />
               );
             }
 
@@ -105,12 +108,12 @@ export function ViewerToolbar({
                   variant="outline"
                   size="sm"
                   className={`
-                    h-10 w-10 p-0 rounded-lg transition-all duration-200 border-2
+                    h-10 w-10 p-0 rounded-lg transition-all duration-200 border-2 relative overflow-hidden
                     ${isActive 
-                      ? 'bg-indigo-600/20 text-white border-indigo-500 shadow-lg shadow-indigo-500/20' 
+                      ? 'bg-gradient-to-br from-indigo-600/30 to-indigo-600/10 text-white border-indigo-500 shadow-lg shadow-indigo-500/30' 
                       : tool.id === 'contour-edit' && isContourEditActive
-                      ? 'bg-green-600/20 text-green-400 border-green-500 shadow-lg shadow-green-500/20'
-                      : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 hover:border-gray-600'
+                      ? 'bg-gradient-to-br from-green-600/30 to-green-600/10 text-green-400 border-green-500 shadow-lg shadow-green-500/30'
+                      : 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700 text-gray-400 hover:text-white hover:from-gray-700 hover:to-gray-800 hover:border-indigo-500/50 hover:shadow-md hover:shadow-indigo-500/20'
                     }
                   `}
                   onClick={() => {
