@@ -1,0 +1,36 @@
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875108", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+✓ Drawing CouchTop contour at RT 108.0mm (CT slice: 108.0mm, diff: 0.0mm)
+Drawing contour with metadata: 
+Object {imagePosition: "-249.51171875-466.01171875108", pixelSpacing: "0.97656250.9765625", firstWorldPoint: Array(3), canvasSize: Array(2), zoom: 1, …}
+[vite] hot updated: /src/components/dicom/working-viewer.tsx
+[vite] hot updated: /src/index.css?v=EznXthlkDZNIvEnUvN0Zb
+RT Structures update - external: 
+Object {studyInstanceUID: "1.2.246.352.221.542647491840797586611209963346051663505", seriesInstanceUID: "1.2.246.352.221.52560561778000225277796940325388831111", sopInstanceUID: "1.2.246.352.221.53786568746445840257415868340616626833", structureSetLabel: "3dHeadNeck", structureSetDate: "20240417", …}
+🔥 Registration matrix useEffect: 
+Object {hasMatrix: false, matrixLength: undefined, secondarySeriesId: null, secondarySeriesType: "object", imagesLength: 214, …}
+🚀 Using GPU-accelerated Cornerstone3D rendering - OHIF style
+Cornerstone3D not available
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+GPU viewport creation failed, falling back to CPU
+Error displaying image: 
+TypeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+Error details: ctx.createImageData is not a function TypeError: ctx.createImageData is not a function
+    at render16BitImage (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:1602:27)
+    at Object.displayCurrentImage [as current] (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:1545:19)
+    at async https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:201:9
+at render16BitImage (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:1602:27)
+at Object.displayCurrentImage [as current] (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:1545:19)
+at async https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/src/components/dicom/working-viewer.tsx?t=1753723030038:201:9
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400

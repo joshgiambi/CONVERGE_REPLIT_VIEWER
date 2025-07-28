@@ -11,7 +11,7 @@ import { init as initCore3D } from '@cornerstonejs/core';
 import { init as initTools3D } from '@cornerstonejs/tools';
 
 // Feature flag to control migration phases
-export const ENABLE_CORNERSTONE3D = false; // Will be enabled gradually
+export const ENABLE_CORNERSTONE3D = true; // Enabled for GPU acceleration
 
 // Store initialization state
 let isInitialized = false;
@@ -65,6 +65,10 @@ export async function initializeCornerstone3D(): Promise<boolean> {
       
       // Register our custom image loader for Float32Array data
       registerCustomImageLoader();
+      
+      // Make Cornerstone3D available globally for GPU viewport manager
+      (window as any).cornerstone3D = cornerstone3D;
+      (window as any).cornerstone3DTools = cornerstone3DTools;
       
       isInitialized = true;
       console.log('Cornerstone3D initialized successfully with GPU acceleration');

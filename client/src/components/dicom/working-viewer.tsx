@@ -31,6 +31,7 @@ import {
   isCornerstone3DReady,
   render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
+import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -2114,8 +2115,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Hybrid rendering decision
       if (isGPUMode && cornerstone3DInitialized) {
-        // Use Cornerstone3D GPU-accelerated rendering
-        console.log('🚀 Using GPU-accelerated Cornerstone3D rendering');
+        // Use Cornerstone3D GPU-accelerated rendering with OHIF approach
+        console.log('🚀 Using GPU-accelerated Cornerstone3D rendering - OHIF style');
         
         // Calculate and set ctTransform before GPU rendering
         const baseScale = Math.min(canvas.width / imageData.width, canvas.height / imageData.height);
@@ -2133,21 +2134,57 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           imageHeight: imageData.height
         };
         
-        await render16BitImageGPU(
-          canvas,
-          {
-            data: imageData.data,
-            width: imageData.width,
-            height: imageData.height,
-            sopInstanceUID: currentImage.sopInstanceUID
-          },
-          currentWindowLevel,
-          ctTransform.current
-        );
+        // Get the canvas container
+        const container = canvas.parentElement;
+        if (container) {
+          // Create or update GPU viewport
+          const success = await createOrUpdateGPUViewport(
+            container,
+            {
+              data: imageData.data,
+              width: imageData.width,
+              height: imageData.height,
+              sopInstanceUID: currentImage.sopInstanceUID
+            },
+            currentWindowLevel,
+            ctTransform.current
+          );
+          
+          if (success) {
+            // Don't hide the canvas yet - keep it as fallback
+            console.log('GPU viewport created successfully');
+            
+            // Set a flag to track GPU viewport is active
+            canvas.dataset.gpuActive = 'true';
+          } else {
+            // Fall back to CPU rendering if GPU viewport creation fails
+            console.warn('GPU viewport creation failed, falling back to CPU');
+            canvas.style.display = 'block';
+            canvas.dataset.gpuActive = 'false';
+            
+            // Re-get context as it might have been lost
+            const freshCtx = canvas.getContext("2d");
+            if (freshCtx) {
+              render16BitImage(freshCtx, imageData.data, imageData.width, imageData.height);
+            } else {
+              console.error('Failed to get 2D context for CPU fallback');
+            }
+          }
+        } else {
+          // No container, fall back to CPU
+          console.warn('No canvas container for GPU viewport, falling back to CPU');
+          render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+        }
       } else {
         // Use existing Cornerstone Core rendering
         console.log('📦 Using CPU-based Cornerstone Core rendering');
-        await render16BitImage(canvas, imageData.data, currentWindowLevel, imageData.width, imageData.height);
+        
+        // Ensure canvas is visible and GPU viewport is hidden
+        canvas.style.display = 'block';
+        canvas.dataset.gpuActive = 'false';
+        hideGPUViewport();
+        
+        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       }
       
       // Render secondary image overlay for fusion if available
