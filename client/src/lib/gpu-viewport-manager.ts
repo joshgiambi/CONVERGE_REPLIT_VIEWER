@@ -59,23 +59,46 @@ export async function createOrUpdateGPUViewport(
       // Add to container
       containerElement.appendChild(gpuElement);
       
-      console.log('GPU viewport element created and added to DOM');
+      // Force layout calculation
+      gpuElement.offsetHeight; // Force reflow
+      
+      const rect = gpuElement.getBoundingClientRect();
+      console.log('GPU viewport element dimensions:', {
+        width: rect.width,
+        height: rect.height,
+        offsetWidth: gpuElement.offsetWidth,
+        offsetHeight: gpuElement.offsetHeight
+      });
 
       // Create rendering engine
+      const renderingEngineId = `gpu-engine-${Date.now()}`; // Unique ID
       const renderingEngine = new cornerstone3D.RenderingEngine(renderingEngineId);
 
-      // Enable the element
+      // Enable the element with explicit dimensions
       const viewportInput = {
         viewportId,
         type: cornerstone3D.Enums.ViewportType.STACK,
         element: gpuElement,
         defaultOptions: {
           background: [0, 0, 0] as [number, number, number],
+          displayArea: {
+            imageArea: [1.0, 1.0],
+            imageCanvasPoint: {
+              imagePoint: [0.5, 0.5],
+              canvasPoint: [0.5, 0.5]
+            }
+          }
         },
       };
 
       renderingEngine.enableElement(viewportInput);
       const viewport = renderingEngine.getViewport(viewportId);
+      
+      // Force resize with timeout to ensure DOM is ready
+      setTimeout(() => {
+        renderingEngine.resize();
+        viewport.render();
+      }, 100);
 
       viewportState = {
         renderingEngine,
@@ -135,6 +158,9 @@ export async function createOrUpdateGPUViewport(
         upper: windowLevel.center + windowLevel.width / 2,
       },
     });
+    
+    // Force render after setting stack
+    viewportState.viewport.render();
 
     // Apply zoom and pan
     const camera = viewportState.viewport.getCamera();
