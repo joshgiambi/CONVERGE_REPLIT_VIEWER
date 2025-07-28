@@ -3059,7 +3059,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 flex items-center justify-center relative viewer-container" style={{ marginBottom: '20px' }}>
+      <div className="flex-1 flex items-center justify-center relative viewer-container">
         <canvas
           ref={canvasRef}
           width={1024}

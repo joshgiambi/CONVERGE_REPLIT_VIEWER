@@ -421,11 +421,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   }
 
   return (
-    <div className="animate-in fade-in-50 duration-500 h-full flex flex-col">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 overflow-hidden">
+    <div className="animate-in fade-in-50 duration-500">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
-        <div className="lg:col-span-1 h-full flex flex-col">
+        <div className="lg:col-span-1 h-full overflow-hidden">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
@@ -460,9 +460,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         </div>
 
         {/* DICOM Viewer with Dynamic Border */}
-        <div className="lg:col-span-3 relative h-full flex flex-col">
+        <div className="lg:col-span-3 relative">
           {selectedSeries ? (
-            <div className="relative flex-1 overflow-hidden">
+            <div className="relative h-full">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
                 className="absolute inset-0 rounded-lg pointer-events-none"

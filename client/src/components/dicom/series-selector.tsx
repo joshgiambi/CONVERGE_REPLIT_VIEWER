@@ -473,10 +473,10 @@ export function SeriesSelector({
   return (
     <div className="h-full flex flex-col space-y-4">
       {/* Main Series and Structures Panel */}
-      <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up flex flex-col min-h-0">
-        <CardContent className="p-0 flex-1 flex flex-col min-h-0">
-          <div className="flex-1 overflow-y-auto">
-            <Accordion type="multiple" defaultValue={["series"]} className="w-full">
+      <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
+        <CardContent className="p-0 h-full flex flex-col">
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
             <AccordionItem value="series" className="border-dicom-indigo/30">
@@ -1279,12 +1279,12 @@ export function SeriesSelector({
             </AccordionItem>
 
           </Accordion>
-          </div>
+        </div>
         </CardContent>
       </Card>
 
-      {/* Window/Level Controls - Fixed at bottom */}
-      <Card className="bg-dicom-dark/60 backdrop-blur-md border border-orange-500/30 rounded-2xl overflow-hidden flex-shrink-0">
+      {/* Window/Level Controls - Separate collapsible panel */}
+      <Card className="bg-dicom-dark/60 backdrop-blur-md border border-orange-500/30 rounded-2xl overflow-hidden">
         <CardContent className="p-0">
           <Accordion type="single" collapsible defaultValue="window-level">
             <AccordionItem value="window-level" className="border-orange-500/30">
