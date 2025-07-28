@@ -36,6 +36,8 @@ interface ViewerToolbarProps {
     level: number;
   };
   className?: string;
+  onMPRToggle?: () => void;
+  isMPRActive?: boolean;
 }
 
 export function ViewerToolbar({
@@ -51,7 +53,9 @@ export function ViewerToolbar({
   currentSlice,
   totalSlices,
   windowLevel,
-  className
+  className,
+  onMPRToggle,
+  isMPRActive = false
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
@@ -59,9 +63,13 @@ export function ViewerToolbar({
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
-    // Ensure only one selectable tool is active at a time
+    // Ensure only one selectable tool is active at a time (except MPR which is a toggle)
     if (tool === 'pan' || tool === 'measure') {
       setActiveTool(tool);
+    } else if (tool === 'mpr') {
+      // MPR is a toggle button, not an exclusive tool
+      callback();
+      return;
     }
     callback();
   };
@@ -74,7 +82,7 @@ export function ViewerToolbar({
     { id: 'pan', icon: Hand, label: 'Pan', action: onPan, selectable: true },
     { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasure, selectable: true },
     { id: 'separator' },
-    { id: 'mpr', icon: Grid3x3, label: 'MPR View (Coming Soon)', action: () => console.log('MPR View - Coming Soon') },
+    { id: 'mpr', icon: Grid3x3, label: 'MPR View', action: onMPRToggle || (() => console.log('MPR Toggle not configured')), selectable: true },
     { id: 'fusion', icon: Layers, label: 'New Fusion (Coming Soon)', action: () => console.log('New Fusion - Coming Soon') },
     { id: 'dose-plan', icon: Activity, label: 'Dose/Plan Review (Coming Soon)', action: () => console.log('Dose/Plan Review - Coming Soon') },
     { id: 'separator' },
@@ -97,7 +105,7 @@ export function ViewerToolbar({
               }
 
               const IconComponent = tool.icon!;
-              const isActive = tool.selectable && activeTool === tool.id;
+              const isActive = tool.id === 'mpr' ? isMPRActive : (tool.selectable && activeTool === tool.id);
 
               return (
                 <div key={tool.id} className="relative group">

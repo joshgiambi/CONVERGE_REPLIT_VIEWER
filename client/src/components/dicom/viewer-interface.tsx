@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
+import MultiViewport from './multi-viewport';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
@@ -440,7 +441,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             windowLevel={windowLevel}
             onWindowLevelChange={setWindowLevel}
             studyId={studyData.studies[0]?.id}
-            studyIds={studyData.studies.map(s => s.id)}
+            studyIds={studyData.studies.map((s: any) => s.id)}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
@@ -499,31 +500,42 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 </div>
               )}
               
-              {/* Main Viewer */}
-              <WorkingViewer 
-                ref={workingViewerRef}
-                seriesId={selectedSeries.id}
-                studyId={studyData.studies[0]?.id}
-                windowLevel={windowLevel}
-                onWindowLevelChange={setWindowLevel}
-                rtStructures={rtStructures}
-                structureVisibility={structureVisibility}
-                brushToolState={brushToolState}
-                selectedForEdit={selectedForEdit}
-                onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
-                onContourUpdate={handleContourUpdate}
-                onSlicePositionChange={setCurrentSlicePosition}
-                contourSettings={contourSettings}
-                autoZoomLevel={autoZoomLevel}
-                autoLocalizeTarget={autoLocalizeTarget}
-                secondarySeriesId={secondarySeriesId}
-                fusionOpacity={fusionOpacity}
-                onSecondarySeriesSelect={setSecondarySeriesId}
-                onFusionOpacityChange={setFusionOpacity}
-                hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
-                onImageMetadataChange={setImageMetadata}
-                allStructuresVisible={allStructuresVisible}
-              />
+              {/* Main Viewer - Single or Multi-viewport based on view mode */}
+              {viewMode === 'single' ? (
+                <WorkingViewer 
+                  ref={workingViewerRef}
+                  seriesId={selectedSeries.id}
+                  studyId={studyData.studies[0]?.id}
+                  windowLevel={windowLevel}
+                  onWindowLevelChange={setWindowLevel}
+                  rtStructures={rtStructures}
+                  structureVisibility={structureVisibility}
+                  brushToolState={brushToolState}
+                  selectedForEdit={selectedForEdit}
+                  onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
+                  onContourUpdate={handleContourUpdate}
+                  onSlicePositionChange={setCurrentSlicePosition}
+                  contourSettings={contourSettings}
+                  autoZoomLevel={autoZoomLevel}
+                  autoLocalizeTarget={autoLocalizeTarget}
+                  secondarySeriesId={secondarySeriesId}
+                  fusionOpacity={fusionOpacity}
+                  onSecondarySeriesSelect={setSecondarySeriesId}
+                  onFusionOpacityChange={setFusionOpacity}
+                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
+                  onImageMetadataChange={setImageMetadata}
+                  allStructuresVisible={allStructuresVisible}
+                />
+              ) : (
+                <MultiViewport
+                  studyId={studyData.studies[0]?.id}
+                  initialSeriesId={selectedSeries.id}
+                  rtStructures={rtStructures}
+                  onRTStructureUpdate={handleContourUpdate}
+                  allStructuresVisible={allStructuresVisible}
+                  onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
+                />
+              )}
               
               {/* Structure Tags on Right Side */}
               {selectedStructures.size > 0 && rtStructures?.structures && (
@@ -572,7 +584,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               setIsContourEditMode(true);
             }
           }}
-
+          onMPRToggle={() => {
+            setViewMode(viewMode === 'single' ? 'mpr' : 'single');
+          }}
+          isMPRActive={viewMode === 'mpr'}
           className="toolbar-custom"
         />
       )}
