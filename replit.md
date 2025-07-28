@@ -250,6 +250,20 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Viewport successfully renders GPU-accelerated images
     - "Viewport is too small" warning from Cornerstone3D doesn't affect functionality
 
+- July 28, 2025: MPR View Crosshair and Rendering Fix - COMPLETED ✅
+  - ✅ Fixed crosshair behavior to only move on left-click when in crosshair mode (pan mode as default)
+  - ✅ Resolved black MPR windows by fixing pixel data type conversion (Float32Array to Uint16Array)
+  - ✅ Added proper pixel value clamping (0-65535) for Uint16 data format
+  - ✅ Implemented comprehensive MPR caching system to avoid redundant calculations
+  - ✅ Fixed MPR pixel data stats showing proper values (min=1, max=1961 instead of all zeros)
+  - ✅ Added working crosshairs to MPR views (sagittal and coronal) that update with axial crosshair position
+  - ✅ MPR canvases increased from 192x192 to 384x384 for better image quality
+  - Technical details:
+    - Fixed Float32 to Uint16 conversion in reconstructMPRSlice function
+    - Added caching with mprCacheRef Map for performance
+    - Crosshairs on MPR views show intersection planes correctly
+    - MPR views successfully render anatomical data with proper orientation
+
 - July 28, 2025: GPU Display Fix and Batch Loading Optimization
   - ⚠️ Temporarily disabled GPU rendering due to display integration issue
     - GPU rendering pipeline works but doesn't display images on the canvas

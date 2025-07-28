@@ -255,6 +255,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Use refs for caches to avoid expensive React re-renders
   const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
+  const mprCacheRef = useRef<Map<string, { data: Uint16Array; width: number; height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
@@ -2204,6 +2205,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return images[sliceIndex];
     }
     
+    // Check cache first
+    const cacheKey = `${orientation}-${sliceIndex}`;
+    const cached = mprCacheRef.current.get(cacheKey);
+    if (cached) {
+      console.log(`Using cached MPR data for ${cacheKey}`);
+      return cached;
+    }
+    
     // For MPR reconstruction, we need all images loaded with pixel data
     // Sort images by Z position
     const sortedImages = [...images].sort((a, b) => {
@@ -2254,7 +2263,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           for (let y = 0; y < height; y++) {
             const srcIndex = y * width + x;
             const dstIndex = z * width + y;
-            const pixelValue = axialImageData.data[srcIndex] || 0;
+            // Convert Float32 to Uint16, handling negative values properly
+            const floatValue = axialImageData.data[srcIndex] || 0;
+            const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
             mprImage.pixelData[dstIndex] = pixelValue;
             if (pixelValue > 0) pixelsSet++;
           }
@@ -2275,7 +2286,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           for (let x = 0; x < width; x++) {
             const srcIndex = y * width + x;
             const dstIndex = z * width + x;
-            const pixelValue = axialImageData.data[srcIndex] || 0;
+            // Convert Float32 to Uint16, handling negative values properly
+            const floatValue = axialImageData.data[srcIndex] || 0;
+            const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
             mprImage.pixelData[dstIndex] = pixelValue;
             if (pixelValue > 0) pixelsSet++;
           }
@@ -2284,6 +2297,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     console.log(`MPR ${orientation}: ${pixelsSet} pixels set out of ${width * height}`);
+    
+    // Cache the result for performance
+    mprCacheRef.current.set(cacheKey, mprImage);
     
     return mprImage;
   };
@@ -2332,54 +2348,154 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const windowCenter = currentWindowLevel.center;
       const pixelData = reconstructedImage.pixelData;
       
-      console.log(`MPR pixel data stats: min=${Math.min(...Array.from(pixelData).slice(0, 1000))}, max=${Math.max(...Array.from(pixelData).slice(0, 1000))}`);
-      
-      const imageData = ctx.createImageData(192, 192);
-      const data = imageData.data;
-      
-      // Calculate scale factors to fit the image into 192x192 canvas
-      const sourceWidth = reconstructedImage.columns || 512;
-      const sourceHeight = reconstructedImage.rows || 512;
-      const scaleX = sourceWidth / 192;
-      const scaleY = sourceHeight / 192;
-      
-      let nonZeroPixels = 0;
-      
-      for (let y = 0; y < 192; y++) {
-        for (let x = 0; x < 192; x++) {
-          // Sample from the source image
-          const sourceX = Math.floor(x * scaleX);
-          const sourceY = Math.floor(y * scaleY);
-          const sourceIndex = sourceY * sourceWidth + sourceX;
-          
-          const pixelValue = pixelData[sourceIndex] || 0;
-          if (pixelValue > 0) nonZeroPixels++;
-          
-          // Apply window/level using same calculation as main viewer
-          const min = windowCenter - windowWidth / 2;
-          const max = windowCenter + windowWidth / 2;
-          
-          let value;
-          if (pixelValue <= min) {
-            value = 0; // Black for values below window minimum
-          } else if (pixelValue >= max) {
-            value = 255; // White for values above window maximum
-          } else {
-            value = ((pixelValue - min) / windowWidth) * 255;
-          }
-          
-          const destIndex = (y * 192 + x) * 4;
-          data[destIndex] = value;
-          data[destIndex + 1] = value;
-          data[destIndex + 2] = value;
-          data[destIndex + 3] = 255;
+      // Fix typescript error and improve performance
+      const pixelArray = pixelData as Uint16Array;
+      let minVal = 65535, maxVal = 0;
+      let hasData = false;
+      for (let i = 0; i < pixelArray.length; i++) {
+        const val = pixelArray[i];
+        if (val > 0) {
+          hasData = true;
+          minVal = Math.min(minVal, val);
+          maxVal = Math.max(maxVal, val);
         }
       }
       
-      console.log(`${targetOrientation} MPR: ${nonZeroPixels} non-zero pixels out of ${192*192}`);
+      if (!hasData) {
+        console.warn(`MPR ${targetOrientation} has no pixel data!`);
+        minVal = 0;
+      }
+      
+      console.log(`MPR pixel data stats: min=${minVal}, max=${maxVal}, hasData=${hasData}`);
+      
+      // Use larger canvas size for better resolution
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
+      const imageData = ctx.createImageData(canvasWidth, canvasHeight);
+      const data = imageData.data;
+      
+      // Get proper dimensions
+      const sourceWidth = reconstructedImage.columns || 512;
+      const sourceHeight = reconstructedImage.rows || 512;
+      
+      // For sagittal: width=numSlices (Z), height=imageHeight (Y)
+      // For coronal: width=imageWidth (X), height=numSlices (Z)
+      let displayWidth = sourceWidth;
+      let displayHeight = sourceHeight;
+      
+      if (targetOrientation === 'sagittal') {
+        displayWidth = images.length; // Z dimension (number of slices)
+        displayHeight = sourceHeight; // Y dimension
+      } else if (targetOrientation === 'coronal') {
+        displayWidth = sourceWidth; // X dimension
+        displayHeight = images.length; // Z dimension (number of slices)
+      }
+      
+      // Calculate scale to fit canvas while preserving aspect ratio
+      const scale = Math.min(canvasWidth / displayWidth, canvasHeight / displayHeight);
+      const scaledWidth = displayWidth * scale;
+      const scaledHeight = displayHeight * scale;
+      const offsetX = (canvasWidth - scaledWidth) / 2;
+      const offsetY = (canvasHeight - scaledHeight) / 2;
+      
+      // Clear the data array first (ensure black background)
+      data.fill(0);
+      
+      // Apply window/level parameters
+      const min = windowCenter - windowWidth / 2;
+      const max = windowCenter + windowWidth / 2;
+      
+      // Render pixels with proper scaling and aspect ratio
+      for (let y = 0; y < canvasHeight; y++) {
+        for (let x = 0; x < canvasWidth; x++) {
+          // Check if we're within the scaled image bounds
+          if (x >= offsetX && x < offsetX + scaledWidth && 
+              y >= offsetY && y < offsetY + scaledHeight) {
+            
+            // Calculate source coordinates
+            const sourceX = Math.floor(((x - offsetX) / scale));
+            const sourceY = Math.floor(((y - offsetY) / scale));
+            
+            // Ensure source coords are within bounds
+            if (sourceX >= 0 && sourceX < displayWidth && 
+                sourceY >= 0 && sourceY < displayHeight) {
+              
+              const sourceIndex = sourceY * sourceWidth + sourceX;
+              const pixelValue = pixelArray[sourceIndex] || 0;
+              
+              // Apply window/level
+              let normalizedValue;
+              if (pixelValue <= min) {
+                normalizedValue = 0;
+              } else if (pixelValue >= max) {
+                normalizedValue = 255;
+              } else {
+                normalizedValue = Math.round(((pixelValue - min) / windowWidth) * 255);
+              }
+              
+              const destIndex = (y * canvasWidth + x) * 4;
+              data[destIndex] = normalizedValue;     // R
+              data[destIndex + 1] = normalizedValue; // G
+              data[destIndex + 2] = normalizedValue; // B
+              data[destIndex + 3] = 255;            // A
+            }
+          }
+        }
+      }
       
       ctx.putImageData(imageData, 0, 0);
-      console.log(`✓ ${targetOrientation} MPR rendered successfully`);
+      
+      // Draw crosshairs on MPR views
+      if (crosshairPos) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+        ctx.lineWidth = 2;
+        
+        if (targetOrientation === 'sagittal') {
+          // Draw vertical line at coronal position and horizontal line at axial position
+          // Vertical line corresponds to coronal slice position
+          const coronalPos = Math.floor(crosshairPos.y);
+          const lineX = offsetX + (coronalPos * scale);
+          
+          ctx.beginPath();
+          ctx.moveTo(lineX, 0);
+          ctx.lineTo(lineX, canvasHeight);
+          ctx.stroke();
+          
+          // Horizontal line corresponds to axial slice position (inverted Z)
+          const axialPos = displayHeight - 1 - currentIndex;
+          const lineY = offsetY + (axialPos * scale);
+          
+          ctx.beginPath();
+          ctx.moveTo(0, lineY);
+          ctx.lineTo(canvasWidth, lineY);
+          ctx.stroke();
+          
+        } else if (targetOrientation === 'coronal') {
+          // Draw vertical line at sagittal position and horizontal line at axial position
+          // Vertical line corresponds to sagittal slice position
+          const sagittalPos = Math.floor(crosshairPos.x);
+          const lineX = offsetX + (sagittalPos * scale);
+          
+          ctx.beginPath();
+          ctx.moveTo(lineX, 0);
+          ctx.lineTo(lineX, canvasHeight);
+          ctx.stroke();
+          
+          // Horizontal line corresponds to axial slice position (inverted Z)
+          const axialPos = displayHeight - 1 - currentIndex;
+          const lineY = offsetY + (axialPos * scale);
+          
+          ctx.beginPath();
+          ctx.moveTo(0, lineY);
+          ctx.lineTo(canvasWidth, lineY);
+          ctx.stroke();
+        }
+        
+        ctx.restore();
+      }
+      
+      console.log(`✓ ${targetOrientation} MPR rendered`);
     } catch (error) {
       console.error(`Error rendering ${targetOrientation} MPR:`, error);
     }
@@ -3826,14 +3942,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Sagittal</div>
               <canvas
                 ref={sagittalCanvasRef}
-                width={192}
-                height={192}
+                width={384}
+                height={384}
                 className="rounded block"
                 style={{
                   backgroundColor: "black",
-                  imageRendering: "auto",
+                  imageRendering: "pixelated",
                   userSelect: "none",
                   display: "block",
+                  width: "192px",
+                  height: "192px"
                 }}
               />
             </div>
@@ -3843,14 +3961,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Coronal</div>
               <canvas
                 ref={coronalCanvasRef}
-                width={192}
-                height={192}
+                width={384}
+                height={384}
                 className="rounded block"
                 style={{
                   backgroundColor: "black",
-                  imageRendering: "auto",
+                  imageRendering: "pixelated",
                   userSelect: "none",
                   display: "block",
+                  width: "192px",
+                  height: "192px"
                 }}
               />
             </div>
