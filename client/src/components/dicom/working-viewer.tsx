@@ -2967,58 +2967,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   return (
     <Card className="h-full bg-black border-indigo-800">
-      {/* Header with new design */}
-      <div 
-        className="backdrop-blur-md border-b rounded-t-xl px-4 py-3 shadow-sm"
-        style={{ 
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          borderColor: 'rgba(156, 163, 175, 0.3)',
-        }}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Badge className="bg-white/20 text-white border-white/30 text-xs">CT Scan</Badge>
-            {images.length > 0 && (
-              <Badge
-                variant="outline"  
-                className="border-white/30 text-white text-xs"
-              >
-                {currentIndex + 1} / {images.length}
-              </Badge>
-            )}
-            {secondarySeriesId && secondaryImages.length > 0 && (
-              <Badge className={`flex items-center gap-1 text-xs ${
+      {/* Header with blue design */}
+      <div className="flex items-center justify-between p-4 border-b border-indigo-700">
+        <div className="flex items-center space-x-2">
+          <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
+          {images.length > 0 && (
+            <Badge
+              variant="outline"
+              className="border-indigo-600 text-indigo-300"
+            >
+              {currentIndex + 1} / {images.length}
+            </Badge>
+          )}
+          {secondarySeriesId && secondaryImages.length > 0 && (
+            <Badge className={`flex items-center gap-1 ${
+              secondaryModality === 'PT' 
+                ? 'bg-yellow-900 text-yellow-200' 
+                : 'bg-purple-900 text-purple-200'
+            }`}>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${
                 secondaryModality === 'PT' 
-                  ? 'bg-yellow-900/60 text-yellow-200 border-yellow-400/30' 
-                  : 'bg-purple-900/60 text-purple-200 border-purple-400/30'
-              }`}>
-                <div className={`w-2 h-2 rounded-full animate-pulse ${
-                  secondaryModality === 'PT' 
-                    ? 'bg-yellow-400' 
-                    : 'bg-purple-400'
-                }`} />
-                {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
-                <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
-                  ({Math.round(fusionOpacity * 100)}%)
-                </span>
-              </Badge>
-            )}
+                  ? 'bg-yellow-400' 
+                  : 'bg-purple-400'
+              }`} />
+              {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
+              <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
+                ({Math.round(fusionOpacity * 100)}%)
+              </span>
+            </Badge>
+          )}
           </div>
 
           <div className="flex items-center space-x-2">
             {rtStructures && (
               <Button
-                size="sm" 
+                size="sm"
                 variant={showStructures ? "default" : "outline"}
                 onClick={() => setShowStructures(!showStructures)}
-                className="h-7 px-2 text-xs bg-green-600/20 border-2 border-green-500/50 text-green-400 hover:text-green-300 hover:bg-green-600/30 rounded-lg backdrop-blur-sm shadow-sm"
+                className="text-xs bg-green-600 hover:bg-green-700"
               >
                 RT ({rtStructures?.structures?.length || 0})
               </Button>
             )}
             <Button
               size="sm"
-              variant="outline"
+              variant={isMeasurementToolActive ? "default" : "outline"}
               onClick={() => {
                 setIsMeasurementToolActive(!isMeasurementToolActive);
                 if (brushToolState?.isActive) {
@@ -3031,39 +3024,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   }
                 }
               }}
-              className={`h-7 px-2 border-2 rounded-lg backdrop-blur-sm shadow-sm ${
-                isMeasurementToolActive 
-                  ? "bg-blue-600/20 border-blue-500/50 text-blue-400 hover:text-blue-300 hover:bg-blue-600/30" 
-                  : "bg-white/10 border-white/30 text-white hover:text-white hover:bg-white/20"
-              }`}
+              className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
               title="Measurement Tool"
             >
-              <Ruler className="w-3 h-3" />
+              <Ruler className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={goToPrevious}
               disabled={currentIndex === 0}
-              className="h-7 px-2 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="border-indigo-600 hover:bg-indigo-800"
             >
-              <ChevronLeft className="w-3 h-3" />
+              <ChevronLeft className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={goToNext}
               disabled={currentIndex === images.length - 1}
-              className="h-7 px-2 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="border-indigo-600 hover:bg-indigo-800"
             >
-              <ChevronRight className="w-3 h-3" />
+              <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
-      </div>
 
       {/* Canvas */}
-      <div className="flex-1 p-2 flex items-center justify-center">
+      <div className="flex-1 p-4 flex items-center justify-center">
         <div className="relative">
           <canvas
             ref={canvasRef}
