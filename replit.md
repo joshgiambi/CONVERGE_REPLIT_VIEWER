@@ -202,6 +202,21 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 28, 2025: Fixed Contour Toolbar Animation - Pop-in-Place Effect ✅
+  - ✅ Changed contour toolbar animation from slide-in-from-left to pop-in-place effect
+  - ✅ Replaced slide-in animation with zoom-in-95 class for smooth scale-up appearance
+  - ✅ Toolbar now appears with subtle scale transition (95% to 100%) instead of sliding motion
+  - ✅ Provides more polished, professional animation that feels responsive and modern
+  - Technical details: animate-in fade-in zoom-in-95 duration-300 creates smooth pop-in effect
+- July 28, 2025: RT Structure Button Synchronization - COMPLETED ✅
+  - ✅ Synchronized RT structures button state between top toolbar and left panel "Hide All" button
+  - ✅ Added allStructuresVisible state to viewer-interface component with proper callback system
+  - ✅ Created handleAllStructuresVisibilityChange function to manage state across components
+  - ✅ Updated SeriesSelector interface to include onAllStructuresVisibilityChange prop
+  - ✅ Modified toggleAllVisibility function to notify parent component of state changes
+  - ✅ Added allStructuresVisible prop to WorkingViewer with useEffect synchronization
+  - ✅ Both buttons now update together maintaining consistent visibility state
+  - Technical details: Complete TypeScript interface updates with proper prop passing chain
 - July 27, 2025: Fixed Posterior Border Shrinkage in Brush Tool - GRID RESOLUTION OPTIMIZATION ✅
   - ✅ Identified root cause: Grid-based polygon union using 0.5mm resolution caused systematic boundary shrinkage
   - ✅ Shrinkage was most visible at posterior border due to polygon closure point accumulating rounding errors
