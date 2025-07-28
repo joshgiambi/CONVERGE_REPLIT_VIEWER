@@ -2320,7 +2320,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const renderMPRCanvas = async (
     canvas: HTMLCanvasElement, 
     targetOrientation: 'sagittal' | 'coronal',
-    currentSliceIndex: number
+    currentSliceIndex: number,
+    windowWidth: number,
+    windowCenter: number
   ) => {
     if (!canvas || images.length === 0 || !images[0]) {
       console.warn(`MPR render skipped - no canvas or images`);
@@ -2343,9 +2345,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       
-      // Apply window/level
-      const windowWidth = currentWindowLevel.width;
-      const windowCenter = currentWindowLevel.center;
+      // Get pixel data from reconstructed image
       const pixelData = reconstructedImage.pixelData;
       
       // Fix typescript error and improve performance
@@ -2378,32 +2378,74 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const sourceWidth = reconstructedImage.columns || 512;
       const sourceHeight = reconstructedImage.rows || 512;
       
-      // For sagittal: width=numSlices (Z), height=imageHeight (Y)
+      // For sagittal: width=imageHeight (Y), height=numSlices (Z)
       // For coronal: width=imageWidth (X), height=numSlices (Z)
       let displayWidth = sourceWidth;
       let displayHeight = sourceHeight;
       
       if (targetOrientation === 'sagittal') {
-        displayWidth = images.length; // Z dimension (number of slices)
-        displayHeight = sourceHeight; // Y dimension
+        // Sagittal view shows Y (horizontal) x Z (vertical)
+        displayWidth = sourceHeight; // Y dimension (512)
+        displayHeight = images.length; // Z dimension (number of slices)
       } else if (targetOrientation === 'coronal') {
-        displayWidth = sourceWidth; // X dimension
+        // Coronal view shows X (horizontal) x Z (vertical)
+        displayWidth = sourceWidth; // X dimension (512)
         displayHeight = images.length; // Z dimension (number of slices)
       }
       
-      // Calculate scale to fit canvas while preserving aspect ratio
-      const scale = Math.min(canvasWidth / displayWidth, canvasHeight / displayHeight);
-      const scaledWidth = displayWidth * scale;
-      const scaledHeight = displayHeight * scale;
+      // Calculate scale to fit canvas while preserving physical aspect ratio
+      // Both sagittal and coronal should have the same display height
+      
+      // Get pixel spacing from first image for proper aspect ratio calculation
+      const firstImageMetadata = await getImageMetadata(images[0]?.sopInstanceUID);
+      const pixelSpacingX = firstImageMetadata?.pixelSpacing?.[1] || 0.9765625;
+      const pixelSpacingY = firstImageMetadata?.pixelSpacing?.[0] || 0.9765625;
+      const sliceThickness = 2.0; // Typical slice thickness for CT
+      
+      // Calculate physical dimensions in mm
+      let physicalWidth, physicalHeight;
+      
+      if (targetOrientation === 'sagittal') {
+        // Sagittal: Y (horizontal) x Z (vertical)
+        physicalWidth = displayWidth * pixelSpacingY;
+        physicalHeight = displayHeight * sliceThickness;
+      } else if (targetOrientation === 'coronal') {
+        // Coronal: X (horizontal) x Z (vertical)
+        physicalWidth = displayWidth * pixelSpacingX;
+        physicalHeight = displayHeight * sliceThickness;
+      } else {
+        physicalWidth = displayWidth;
+        physicalHeight = displayHeight;
+      }
+      
+      // Calculate scale to make both views have same height
+      const targetHeight = canvasHeight * 0.9; // Use 90% of canvas height
+      let scale = targetHeight / displayHeight;
+      
+      // Calculate scaled dimensions maintaining physical aspect ratio
+      let scaledHeight = targetHeight;
+      let scaledWidth = (physicalWidth / physicalHeight) * scaledHeight;
+      
+      // If width exceeds canvas, scale down proportionally
+      if (scaledWidth > canvasWidth * 0.9) {
+        const widthScale = (canvasWidth * 0.9) / scaledWidth;
+        scaledWidth *= widthScale;
+        scaledHeight *= widthScale;
+        scale *= widthScale;
+      }
+      
+      // Center the image
       const offsetX = (canvasWidth - scaledWidth) / 2;
       const offsetY = (canvasHeight - scaledHeight) / 2;
       
       // Clear the data array first (ensure black background)
       data.fill(0);
       
-      // Apply window/level parameters
+      // Use the same window/level settings as the axial view
       const min = windowCenter - windowWidth / 2;
       const max = windowCenter + windowWidth / 2;
+      
+      console.log(`MPR ${targetOrientation} using window/level: W=${windowWidth}, C=${windowCenter}`);
       
       // Render pixels with proper scaling and aspect ratio
       for (let y = 0; y < canvasHeight; y++) {
@@ -2667,10 +2709,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           console.log(`Rendering MPR views - Sagittal: ${sagittalSliceIndex}, Coronal: ${coronalSliceIndex}`);
           
-          // Render MPR views asynchronously
+          // Render MPR views asynchronously with same window/level as axial
           await Promise.all([
-            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex),
-            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex)
+            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, currentWindowLevel.width, currentWindowLevel.center),
+            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, currentWindowLevel.width, currentWindowLevel.center)
           ]);
         } catch (mprError) {
           console.warn("Error rendering MPR views:", mprError);

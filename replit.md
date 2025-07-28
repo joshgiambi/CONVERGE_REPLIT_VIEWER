@@ -264,6 +264,20 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Crosshairs on MPR views show intersection planes correctly
     - MPR views successfully render anatomical data with proper orientation
 
+- July 28, 2025: MPR View Aspect Ratio and Window/Level Consistency - COMPLETED ✅
+  - ✅ Fixed MPR view aspect ratios by calculating physical dimensions using pixel spacing
+  - ✅ Ensured sagittal and coronal views have identical heights for consistent display
+  - ✅ Applied proper aspect ratio scaling: physical_width/physical_height maintaining anatomical proportions
+  - ✅ Fixed window/level consistency - MPR views now use same settings as axial view
+  - ✅ Updated renderMPRCanvas to accept window/level parameters directly
+  - ✅ Fixed const variable assignment errors by using let for mutable values
+  - Technical details:
+    - Sagittal physical width = Y-dimension × pixelSpacingY
+    - Coronal physical width = X-dimension × pixelSpacingX  
+    - Both views use Z-dimension × sliceThickness (2.0mm) for height
+    - Target height set to 90% of canvas height for both views
+    - Window/level passed as parameters to ensure consistency across all views
+
 - July 28, 2025: GPU Display Fix and Batch Loading Optimization
   - ⚠️ Temporarily disabled GPU rendering due to display integration issue
     - GPU rendering pipeline works but doesn't display images on the canvas
