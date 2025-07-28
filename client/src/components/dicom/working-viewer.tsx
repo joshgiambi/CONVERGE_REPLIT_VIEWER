@@ -2112,12 +2112,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width = 1024;
       canvas.height = 1024;
 
-      // Temporarily disable GPU rendering to fix display issue
-      // GPU rendering needs more work to properly display on the canvas
-      const useGPU = false; // Will re-enable after fixing canvas integration
-      
       // Hybrid rendering decision
-      if (useGPU && isGPUMode && cornerstone3DInitialized) {
+      if (isGPUMode && cornerstone3DInitialized) {
         // Use Cornerstone3D GPU-accelerated rendering
         console.log('🚀 Using GPU-accelerated Cornerstone3D rendering');
         

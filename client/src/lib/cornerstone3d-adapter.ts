@@ -362,24 +362,11 @@ export async function render16BitImageGPU(
         throw new Error('Canvas must have a parent element');
       }
 
-      // Create a div element for Cornerstone3D to render into
-      let cs3dElement = container.querySelector('.cs3d-viewport') as HTMLDivElement;
-      if (!cs3dElement) {
-        cs3dElement = document.createElement('div');
-        cs3dElement.className = 'cs3d-viewport';
-        cs3dElement.style.width = `${canvas.width}px`;
-        cs3dElement.style.height = `${canvas.height}px`;
-        cs3dElement.style.position = 'absolute';
-        cs3dElement.style.top = '0';
-        cs3dElement.style.left = '0';
-        container.appendChild(cs3dElement);
-      }
-
-      // Enable the element for Cornerstone3D
+      // Use the canvas directly for Cornerstone3D rendering
       const viewportInput = {
         viewportId,
         type: cornerstone3D.Enums.ViewportType.STACK,
-        element: cs3dElement,
+        element: canvas as any, // Cast canvas to any since Cornerstone3D expects HTMLDivElement
         defaultOptions: {
           background: [0, 0, 0] as [number, number, number],
         },
@@ -387,9 +374,6 @@ export async function render16BitImageGPU(
 
       renderingEngine.enableElement(viewportInput);
       viewport = renderingEngine.getViewport(viewportId);
-      
-      // Restore canvas display after setup
-      canvas.style.display = originalDisplay;
     }
 
     // Create image object for Cornerstone3D
