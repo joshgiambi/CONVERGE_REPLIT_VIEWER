@@ -87,12 +87,12 @@ export function ViewerToolbar({
     <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
-        <div className="bg-gray-900/85 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
+        <div className="bg-white/10 backdrop-blur-md border-2 border-white/40 rounded-xl px-3 py-2 shadow-2xl">
           <div className="flex items-center space-x-1">
             {tools.map((tool, index) => {
               if (tool.id === 'separator') {
                 return (
-                  <div key={index} className="w-px h-5 bg-gray-600/50 mx-1.5" />
+                  <div key={index} className="w-px h-5 bg-white/30 mx-1.5" />
                 );
               }
 
@@ -105,10 +105,10 @@ export function ViewerToolbar({
                     variant="ghost"
                     size="sm"
                     className={`
-                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-gray-300
+                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90
                       ${isActive 
                         ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
-                        : 'hover:bg-gray-700/50 hover:text-white'
+                        : 'hover:bg-white/20 hover:text-white'
                       }
                     `}
                     onClick={() => {
@@ -131,7 +131,7 @@ export function ViewerToolbar({
                   >
                     <IconComponent className="w-4 h-4" />
                   </Button>
-                  
+
                   {/* Tooltip */}
                   <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                     {tool.label}
@@ -145,11 +145,11 @@ export function ViewerToolbar({
         {/* Contour Edit Popout Icon */}
         {isContourEditActive && onContourEdit && (
           <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="bg-gray-900/85 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+            <div className="bg-white/10 backdrop-blur-md border-2 border-green-500/50 rounded-lg shadow-lg">
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-600/20 transition-all duration-200"
+                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
                 onClick={onContourEdit}
               >
                 <Edit3 className="w-4 h-4" />
@@ -161,7 +161,7 @@ export function ViewerToolbar({
             </div>
           </div>
         )}
-        
+
         {/* Metadata Popup */}
         {showMetadata && (
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-4 bg-black bg-opacity-95 text-white p-4 rounded-lg text-xs w-96 shadow-lg border border-gray-600 max-h-80 overflow-y-auto">
@@ -177,7 +177,7 @@ export function ViewerToolbar({
                 ×
               </button>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Patient Info</div>
@@ -188,7 +188,7 @@ export function ViewerToolbar({
                   <div><span className="text-gray-400">Sex:</span> M</div>
                 </div>
               </div>
-              
+
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Study Info</div>
                 <div className="space-y-1 text-gray-300">
@@ -198,7 +198,7 @@ export function ViewerToolbar({
                   <div><span className="text-gray-400">Modality:</span> CT</div>
                 </div>
               </div>
-              
+
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Image Parameters</div>
                 <div className="space-y-1 text-gray-300">
@@ -209,7 +209,7 @@ export function ViewerToolbar({
                   <div><span className="text-gray-400">mAs:</span> 200</div>
                 </div>
               </div>
-              
+
               <div>
                 <div className="font-semibold text-indigo-300 mb-2">Window/Level</div>
                 <div className="space-y-1 text-gray-300">
@@ -229,7 +229,7 @@ export function ViewerToolbar({
               <Keyboard className="w-4 h-4 mr-2 text-indigo-400" />
               <h3 className="font-semibold text-indigo-300">Interaction Guide</h3>
             </div>
-            
+
             <div className="space-y-3">
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Navigation</h4>
@@ -239,7 +239,7 @@ export function ViewerToolbar({
                   <div>• Left Click + Drag: Pan image</div>
                 </div>
               </div>
-              
+
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Zoom Controls</h4>
                 <div className="space-y-1 text-gray-300">
@@ -248,7 +248,7 @@ export function ViewerToolbar({
                   <div>• Fit to Window button: Reset zoom</div>
                 </div>
               </div>
-              
+
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Window/Level</h4>
                 <div className="space-y-1 text-gray-300">
@@ -257,7 +257,7 @@ export function ViewerToolbar({
                   <div>• Vertical: Window level</div>
                 </div>
               </div>
-              
+
               <div>
                 <h4 className="font-medium text-yellow-300 mb-1">Shortcuts (Coming Soon)</h4>
                 <div className="grid grid-cols-2 gap-2 text-gray-400">
@@ -268,7 +268,7 @@ export function ViewerToolbar({
                 </div>
               </div>
             </div>
-            
+
             {tipsDialogOpen && (
               <div className="mt-3 pt-2 border-t border-gray-600">
                 <button
