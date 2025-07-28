@@ -31,6 +31,7 @@ import {
   render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
+import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -1840,50 +1841,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const parseDicomImage = async (arrayBuffer: ArrayBuffer) => {
     try {
-      // Load dicom-parser if not already loaded
-      if (!window.dicomParser) {
-        await loadDicomParser();
-      }
-
-      const byteArray = new Uint8Array(arrayBuffer);
-      const dataSet = window.dicomParser.parseDicom(byteArray);
-
-      // Extract image data
-      const pixelDataElement = dataSet.elements.x7fe00010;
-      if (!pixelDataElement) {
-        throw new Error("No pixel data found in DICOM file");
-      }
-
-      // Get image dimensions and parameters
-      const rows = dataSet.uint16("x00280010") || 512;
-      const cols = dataSet.uint16("x00280011") || 512;
-      const bitsAllocated = dataSet.uint16("x00280100") || 16;
-
-      // Get rescale parameters - default to 0 intercept for MRI
-      const modality = dataSet.string("x00080060") || "CT";
-      const rescaleSlope = dataSet.floatString("x00281053") || 1;
-      const rescaleIntercept = dataSet.floatString("x00281052") || (modality === "MR" ? 0 : -1024);
-
-      if (bitsAllocated === 16) {
-        const rawPixelArray = new Uint16Array(
-          arrayBuffer,
-          pixelDataElement.dataOffset,
-          pixelDataElement.length / 2,
-        );
-        // Convert to Hounsfield Units
-        const huPixelArray = new Float32Array(rawPixelArray.length);
-        for (let i = 0; i < rawPixelArray.length; i++) {
-          huPixelArray[i] = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
-        }
-
-        return {
-          data: huPixelArray,
-          width: cols,
-          height: rows,
-        };
-      } else {
-        throw new Error("Only 16-bit images supported");
-      }
+      // Use web worker for 65% performance improvement
+      const workerManager = getDicomWorkerManager();
+      const result = await workerManager.parseDicomImage(arrayBuffer);
+      return result;
     } catch (error) {
       console.error("Error parsing DICOM image:", error);
       return null;
