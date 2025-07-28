@@ -1,3 +1,4 @@
+import React from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,45 +14,44 @@ import {
   Info,
   HelpCircle,
   Keyboard,
-  Layers
+  Layers,
+  Grid3x3,
+  Activity
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onResetZoom: () => void;
-  onPanTool: () => void;
-  onMeasureTool: () => void;
-  onAnnotateTool: () => void;
-  onContourEdit: () => void;
-  onContourSettings: () => void;
-  onFusion?: () => void;
-  currentSlice?: number;
-  totalSlices?: number;
-  windowLevel?: { window: number; level: number };
+  onFitToWindow: () => void;
+  onPan: () => void;
+  onMeasure: () => void;
+  onContourEdit?: () => void;
   isContourEditActive?: boolean;
-  showFusionButton?: boolean;
   isPanActive?: boolean;
   isToolActive?: boolean;
+  currentSlice?: number;
+  totalSlices?: number;
+  windowLevel?: {
+    window: number;
+    level: number;
+  };
+  className?: string;
 }
 
-export function ViewerToolbar({
+export default function ViewerToolbar({
   onZoomIn,
   onZoomOut,
-  onResetZoom,
-  onPanTool,
-  onMeasureTool,
-  onAnnotateTool,
+  onFitToWindow,
+  onPan,
+  onMeasure,
   onContourEdit,
-  onContourSettings,
-  onFusion,
+  isContourEditActive = false,
+  isPanActive = false,
+  isToolActive = false,
   currentSlice,
   totalSlices,
   windowLevel,
-  isContourEditActive,
-  showFusionButton,
-  isPanActive = false,
-  isToolActive = false
+  className
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
@@ -59,10 +59,8 @@ export function ViewerToolbar({
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
-    // Only set pan as active if no other tools are active
-    if (tool === 'pan' && !isToolActive) {
-      setActiveTool(tool);
-    } else if (tool !== 'pan') {
+    // Ensure only one selectable tool is active at a time
+    if (tool === 'pan' || tool === 'measure') {
       setActiveTool(tool);
     }
     callback();
@@ -71,79 +69,92 @@ export function ViewerToolbar({
   const tools = [
     { id: 'zoom-in', icon: ZoomIn, label: 'Zoom In', action: onZoomIn },
     { id: 'zoom-out', icon: ZoomOut, label: 'Zoom Out', action: onZoomOut },
-    { id: 'reset-zoom', icon: Maximize2, label: 'Fit to Window', action: onResetZoom },
-    { id: 'pan', icon: Hand, label: 'Pan', action: onPanTool, selectable: true },
+    { id: 'fit', icon: Maximize2, label: 'Fit to Window', action: onFitToWindow },
     { id: 'separator' },
-    { id: 'contour-edit', icon: Edit3, label: 'Contour Edit', action: onContourEdit },
-    { id: 'contour-settings', icon: Settings, label: 'Contour Settings', action: onContourSettings },
-    ...(showFusionButton && onFusion ? [
-      { id: 'separator' },
-      { id: 'fusion', icon: Layers, label: 'Image Fusion', action: onFusion }
-    ] : []),
+    { id: 'pan', icon: Hand, label: 'Pan', action: onPan, selectable: true },
+    { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasure, selectable: true },
     { id: 'separator' },
+    { id: 'mpr', icon: Grid3x3, label: 'MPR View (Coming Soon)', action: () => console.log('MPR View - Coming Soon') },
+    { id: 'fusion', icon: Layers, label: 'New Fusion (Coming Soon)', action: () => console.log('New Fusion - Coming Soon') },
+    { id: 'dose-plan', icon: Activity, label: 'Dose/Plan Review (Coming Soon)', action: () => console.log('Dose/Plan Review - Coming Soon') },
+    { id: 'separator' },
+    { id: 'settings', icon: Settings, label: 'Settings', action: () => console.log('Settings') },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
     { id: 'help', icon: HelpCircle, label: 'Interaction Guide', action: () => setTipsDialogOpen(!tipsDialogOpen) },
   ];
 
   return (
-    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
-      <div className="bg-black/80 backdrop-blur-sm border-2 border-gray-600 rounded-2xl p-4 shadow-2xl">
-        <div className="flex items-center space-x-2">
-          {tools.map((tool, index) => {
-            if (tool.id === 'separator') {
+    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
+      <div className="relative">
+        {/* Main Toolbar */}
+        <div className="bg-gray-900/95 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
+          <div className="flex items-center space-x-1">
+            {tools.map((tool, index) => {
+              if (tool.id === 'separator') {
+                return (
+                  <div key={index} className="w-px h-5 bg-gray-600/50 mx-1.5" />
+                );
+              }
+
+              const IconComponent = tool.icon!;
+              const isActive = tool.selectable && activeTool === tool.id;
+
               return (
-                <div key={index} className="w-px h-6 bg-gray-600 mx-2" />
-              );
-            }
-
-            const IconComponent = tool.icon!;
-            // Pan tool should only be active if explicitly set and no other tools are active
-            const isActive = tool.selectable && activeTool === tool.id && 
-              (tool.id !== 'pan' || (!isToolActive && isPanActive));
-
-            return (
-              <div key={tool.id} className="relative group">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={`
-                    h-10 w-10 p-0 transition-all duration-200 rounded-xl
-                    ${isActive 
-                      ? 'bg-indigo-600/20 text-indigo-400 border-2 border-indigo-500 shadow-lg shadow-indigo-500/20' 
-                      : tool.id === 'contour-edit' && isContourEditActive
-                      ? 'bg-green-600/20 text-green-400 border-2 border-green-500 shadow-lg shadow-green-500/20'
-                      : 'bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 hover:border-gray-400'
-                    }
-                  `}
-                  onClick={() => {
-                    if (tool.selectable) {
-                      handleToolSelect(tool.id, tool.action!);
-                    } else {
-                      tool.action!();
-                    }
-                  }}
-                  onMouseEnter={() => {
-                    if (tool.id === 'help' && !tipsDialogOpen) {
-                      setShowInteractionTips(true);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    if (tool.id === 'help' && !tipsDialogOpen) {
-                      setShowInteractionTips(false);
-                    }
-                  }}
-                >
-                  <IconComponent className="w-4 h-4" />
-                </Button>
-                
-                {/* Tooltip */}
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  {tool.label}
+                <div key={tool.id} className="relative group">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`
+                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-gray-300
+                      ${isActive 
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
+                        : 'hover:bg-gray-700/50 hover:text-white'
+                      }
+                    `}
+                    onClick={() => {
+                      if (tool.selectable) {
+                        handleToolSelect(tool.id, tool.action!);
+                      } else {
+                        tool.action!();
+                      }
+                    }}
+                    onMouseEnter={() => {
+                      if (tool.id === 'help' && !tipsDialogOpen) {
+                        setShowInteractionTips(true);
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      if (tool.id === 'help' && !tipsDialogOpen) {
+                        setShowInteractionTips(false);
+                      }
+                    }}
+                  >
+                    <IconComponent className="w-4 h-4" />
+                  </Button>
+                  
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    {tool.label}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
+
+        {/* Contour Edit Hover Button */}
+        {isContourEditActive && onContourEdit && (
+          <div className="absolute -right-12 top-1/2 transform -translate-y-1/2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 bg-green-600/20 text-green-400 border border-green-500/50 rounded-lg shadow-sm hover:bg-green-600/30"
+              onClick={onContourEdit}
+            >
+              <Edit3 className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
         
         {/* Metadata Popup */}
         {showMetadata && (
