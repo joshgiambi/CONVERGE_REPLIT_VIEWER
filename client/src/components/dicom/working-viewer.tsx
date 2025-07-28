@@ -282,6 +282,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   
+  // Crosshair position for MPR views (in pixel coordinates)
+  const [crosshairPos, setCrosshairPos] = useState({ x: 256, y: 256 });
+  
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
   const displayCurrentImageRef = useRef<() => Promise<void>>();
@@ -2285,17 +2288,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const windowCenter = currentWindowLevel.center;
       const pixelData = reconstructedImage.pixelData;
       
-      const imageData = ctx.createImageData(256, 256);
+      const imageData = ctx.createImageData(192, 192);
       const data = imageData.data;
       
-      // Calculate scale factors to fit the image into 256x256 canvas
+      // Calculate scale factors to fit the image into 192x192 canvas
       const sourceWidth = reconstructedImage.columns || 512;
       const sourceHeight = reconstructedImage.rows || 512;
-      const scaleX = sourceWidth / 256;
-      const scaleY = sourceHeight / 256;
+      const scaleX = sourceWidth / 192;
+      const scaleY = sourceHeight / 192;
       
-      for (let y = 0; y < 256; y++) {
-        for (let x = 0; x < 256; x++) {
+      for (let y = 0; y < 192; y++) {
+        for (let x = 0; x < 192; x++) {
           // Sample from the source image with bilinear interpolation
           const sourceX = Math.floor(x * scaleX);
           const sourceY = Math.floor(y * scaleY);
@@ -2307,7 +2310,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           let value = ((pixelValue - (windowCenter - windowWidth / 2)) / windowWidth) * 255;
           value = Math.max(0, Math.min(255, value));
           
-          const destIndex = (y * 256 + x) * 4;
+          const destIndex = (y * 192 + x) * 4;
           data[destIndex] = value;
           data[destIndex + 1] = value;
           data[destIndex + 2] = value;
@@ -2433,9 +2436,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Render MPR views if canvases are available
       if (orientation === 'axial' && sagittalCanvasRef.current && coronalCanvasRef.current) {
         try {
-          // Get the middle slice index for sagittal and coronal views
-          const sagittalSliceIndex = Math.floor((images[0]?.columns || 512) / 2);
-          const coronalSliceIndex = Math.floor((images[0]?.rows || 512) / 2);
+          // Use crosshair position for MPR slice indices
+          // Ensure crosshair is within bounds
+          const sagittalSliceIndex = Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1));
+          const coronalSliceIndex = Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1));
           
           // Render MPR views asynchronously
           await Promise.all([
@@ -3052,6 +3056,42 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         brushToolState?.tool === "planar-contour")) ||
       isMeasurementToolActive;
 
+    // Update crosshair position for MPR
+    if (canvasRef.current && orientation === 'axial' && !isDrawingToolActive) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+      
+      // Convert canvas coordinates to image pixel coordinates
+      const canvasWidth = canvasRef.current.width;
+      const canvasHeight = canvasRef.current.height;
+      const imageWidth = images[currentIndex]?.columns || 512;
+      const imageHeight = images[currentIndex]?.rows || 512;
+      
+      // Calculate scale with zoom factor (same as render16BitImage)
+      const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+      const totalScale = baseScale * zoom;
+      const scaledWidth = imageWidth * totalScale;
+      const scaledHeight = imageHeight * totalScale;
+      
+      // Center position with pan offset
+      const imageX = (canvasWidth - scaledWidth) / 2 + panX;
+      const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+      
+      // Convert canvas coordinates to image pixel coordinates
+      const pixelX = Math.floor((canvasX - imageX) / totalScale);
+      const pixelY = Math.floor((canvasY - imageY) / totalScale);
+      
+      // Check if within image bounds
+      if (pixelX >= 0 && pixelX < imageWidth && pixelY >= 0 && pixelY < imageHeight) {
+        // Update crosshair position
+        setCrosshairPos({ x: pixelX, y: pixelY });
+        
+        // Schedule render to update MPR views
+        scheduleRender();
+      }
+    }
+
     // Only handle pan if drawing/measurement tool is NOT active
     if (isDragging && !isDrawingToolActive) {
       const deltaX = e.clientX - dragStart.x;
@@ -3483,7 +3523,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             width={1280}
             height={1280}
             onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
+            onMouseMove={(e) => {
+              handleCanvasMouseMove(e);
+              // Update crosshair position for MPR views when in axial mode
+              if (orientation === 'axial' && canvasRef.current && !brushToolState?.isActive) {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = Math.floor((e.clientX - rect.left) / rect.width * 512);
+                const y = Math.floor((e.clientY - rect.top) / rect.height * 512);
+                setCrosshairPos({ x: Math.max(0, Math.min(511, x)), y: Math.max(0, Math.min(511, y)) });
+                scheduleRender(); // Trigger MPR update
+              }
+            }}
             onMouseUp={handleCanvasMouseUp}
             onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
@@ -3664,14 +3714,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
           
           {/* Floating MPR windows for sagittal and coronal views */}
-          <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-col gap-4">
+          <div className="absolute right-4 top-16 flex flex-col gap-3">
             {/* Sagittal view */}
-            <div className="bg-gray-900 rounded-lg shadow-lg p-2 border border-gray-700">
-              <div className="text-xs text-gray-300 mb-1 text-center">Sagittal</div>
+            <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800">
+              <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Sagittal</div>
               <canvas
                 ref={sagittalCanvasRef}
-                width={256}
-                height={256}
+                width={192}
+                height={192}
                 className="rounded"
                 style={{
                   backgroundColor: "black",
@@ -3682,12 +3732,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             </div>
             
             {/* Coronal view */}
-            <div className="bg-gray-900 rounded-lg shadow-lg p-2 border border-gray-700">
-              <div className="text-xs text-gray-300 mb-1 text-center">Coronal</div>
+            <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800">
+              <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Coronal</div>
               <canvas
                 ref={coronalCanvasRef}
-                width={256}
-                height={256}
+                width={192}
+                height={192}
                 className="rounded"
                 style={{
                   backgroundColor: "black",
