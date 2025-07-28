@@ -18,6 +18,20 @@ let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 
 /**
+ * Check if GPU acceleration is available
+ */
+export function isGPUAccelerationAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    return gl !== null;
+  } catch (e) {
+    console.warn('Failed to check GPU availability:', e);
+    return false;
+  }
+}
+
+/**
  * Initialize Cornerstone3D with WebGL detection and fallback
  */
 export async function initializeCornerstone3D(): Promise<boolean> {
@@ -174,14 +188,7 @@ export function getViewportState(viewport: HybridViewport): any {
   return null;
 }
 
-/**
- * Check if GPU acceleration is available
- */
-export function isGPUAccelerationAvailable(): boolean {
-  const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-  return !!gl;
-}
+
 
 /**
  * Cleanup function for viewports

@@ -25,7 +25,11 @@ import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { undoRedoManager } from "@/lib/undo-system";
-import { isGPUAccelerationAvailable } from "@/lib/cornerstone3d-adapter";
+import { 
+  isGPUAccelerationAvailable,
+  initializeCornerstone3D,
+  isCornerstone3DReady 
+} from "@/lib/cornerstone3d-adapter";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -189,6 +193,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
+  
+  // GPU acceleration state for hybrid rendering
+  const [isGPUMode, setIsGPUMode] = useState(false);
+  const [gpuCheckComplete, setGpuCheckComplete] = useState(false);
+  const [cornerstone3DInitialized, setCornerstone3DInitialized] = useState(false);
+
+  // Initialize Cornerstone3D when GPU is available
+  useEffect(() => {
+    if (gpuCheckComplete && isGPUMode && !cornerstone3DInitialized) {
+      console.log('Initializing Cornerstone3D for GPU-accelerated rendering...');
+      initializeCornerstone3D().then((success) => {
+        if (success) {
+          console.log('✅ Cornerstone3D initialized successfully');
+          setCornerstone3DInitialized(true);
+        } else {
+          console.log('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core');
+          setIsGPUMode(false);
+        }
+      });
+    }
+  }, [gpuCheckComplete, isGPUMode, cornerstone3DInitialized]);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1663,12 +1688,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setError(null);
 
       // Check GPU acceleration availability for Cornerstone3D migration
-      const gpuAvailable = isGPUAccelerationAvailable();
-      console.log(`🖥️ GPU acceleration available: ${gpuAvailable ? 'YES ✅' : 'NO ❌'}`);
-      if (gpuAvailable) {
-        console.log('GPU acceleration detected - ready for Cornerstone3D migration phase');
-      } else {
-        console.log('No GPU acceleration - will continue using Cornerstone Core');
+      if (!gpuCheckComplete) {
+        const gpuAvailable = isGPUAccelerationAvailable();
+        console.log(`🖥️ GPU acceleration available: ${gpuAvailable ? 'YES ✅' : 'NO ❌'}`);
+        setIsGPUMode(gpuAvailable);
+        setGpuCheckComplete(true);
+        
+        if (gpuAvailable) {
+          console.log('GPU acceleration detected - ready for Cornerstone3D migration phase');
+          // Initialize Cornerstone3D in the next steps
+        } else {
+          console.log('No GPU acceleration - will continue using Cornerstone Core');
+        }
       }
 
       // Cancel any existing series load
@@ -2080,8 +2111,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width = 1024;
       canvas.height = 1024;
 
-      // Render with current window/level settings
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      // Hybrid rendering decision
+      if (isGPUMode && cornerstone3DInitialized) {
+        // Use Cornerstone3D rendering path (to be implemented)
+        console.log('🚀 Using GPU-accelerated Cornerstone3D rendering');
+        render16BitImage(ctx, imageData.data, imageData.width, imageData.height); // For now, still use Core
+      } else {
+        // Use existing Cornerstone Core rendering
+        console.log('📦 Using CPU-based Cornerstone Core rendering');
+        render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      }
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {

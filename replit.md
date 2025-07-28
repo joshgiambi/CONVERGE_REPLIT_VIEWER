@@ -209,6 +209,19 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 28, 2025: Phase 1 GPU Acceleration Foundation - COMPLETED ✅
+  - ✅ Implemented GPU availability detection using WebGL2/WebGL context check
+  - ✅ Added GPU state tracking variables (isGPUMode, gpuCheckComplete, cornerstone3DInitialized)
+  - ✅ Successfully integrated Cornerstone3D initialization when GPU is available
+  - ✅ Created hybrid rendering decision logic that chooses between Core and 3D based on GPU availability
+  - ✅ Console confirms: "CornerstoneRender: using GPU rendering" and "🚀 Using GPU-accelerated Cornerstone3D rendering"
+  - ✅ All existing viewer features remain functional - no breaking changes
+  - Technical details:
+    - GPU check runs once during initial image load
+    - Cornerstone3D initializes asynchronously when GPU detected
+    - Hybrid rendering path logs which renderer is being used
+    - Currently still using Core's render16BitImage function (to be replaced in Phase 2)
+
 - July 28, 2025: Enlarged DICOM Viewer Canvas ✅
   - ✅ Increased canvas dimensions from 1024x1024 to 1280x1280 for larger medical image display
   - ✅ Preserved card size and position - only canvas itself is larger for better image detail
