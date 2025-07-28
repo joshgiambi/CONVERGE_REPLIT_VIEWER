@@ -135,6 +135,7 @@ interface WorkingViewerProps {
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
   onImageMetadataChange?: (metadata: any) => void;
+  isMeasurementToolActive?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -215,7 +216,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
+  // Use the prop for measurement tool state instead of local state
+  const isMeasurementToolActive = props.isMeasurementToolActive || false;
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -3009,26 +3011,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               RT ({rtStructures?.structures?.length || 0})
             </Button>
           )}
-          <Button
-            size="sm"
-            variant={isMeasurementToolActive ? "default" : "outline"}
-            onClick={() => {
-              setIsMeasurementToolActive(!isMeasurementToolActive);
-              if (brushToolState?.isActive) {
-                // Disable brush/pen tools when measurement is active
-                if (onBrushToolChange) {
-                  onBrushToolChange({
-                    ...brushToolState,
-                    isActive: false
-                  });
-                }
-              }
-            }}
-            className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
-            title="Measurement Tool"
-          >
-            <Ruler className="w-4 h-4" />
-          </Button>
           <Button
             size="sm"
             variant="outline"
