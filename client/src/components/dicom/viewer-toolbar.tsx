@@ -87,12 +87,12 @@ export function ViewerToolbar({
     <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
-        <div className="bg-gray-900/85 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-2 shadow-2xl">
+        <div className="bg-white/10 backdrop-blur-md border-2 border-white/40 rounded-xl px-3 py-2 shadow-2xl">
           <div className="flex items-center space-x-1">
             {tools.map((tool, index) => {
               if (tool.id === 'separator') {
                 return (
-                  <div key={index} className="w-px h-5 bg-gray-600/50 mx-1.5" />
+                  <div key={index} className="w-px h-5 bg-white/30 mx-1.5" />
                 );
               }
 
@@ -105,10 +105,10 @@ export function ViewerToolbar({
                     variant="ghost"
                     size="sm"
                     className={`
-                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-gray-300
+                      h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90
                       ${isActive 
                         ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
-                        : 'hover:bg-gray-700/50 hover:text-white'
+                        : 'hover:bg-white/20 hover:text-white'
                       }
                     `}
                     onClick={() => {
@@ -145,11 +145,11 @@ export function ViewerToolbar({
         {/* Contour Edit Popout Icon */}
         {isContourEditActive && onContourEdit && (
           <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="bg-gray-900/85 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+            <div className="bg-white/10 backdrop-blur-md border-2 border-green-500/50 rounded-lg shadow-lg">
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-600/20 transition-all duration-200"
+                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
                 onClick={onContourEdit}
               >
                 <Edit3 className="w-4 h-4" />
