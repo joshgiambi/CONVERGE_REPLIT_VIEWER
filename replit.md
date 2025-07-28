@@ -278,7 +278,7 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Target height set to 90% of canvas height for both views
     - Window/level passed as parameters to ensure consistency across all views
 
-- July 28, 2025: GPU Display Fix and Batch Loading Optimization
+- July 28, 2025: GPU Display Fix and Batch Loading Optimization  
   - ⚠️ Temporarily disabled GPU rendering due to display integration issue
     - GPU rendering pipeline works but doesn't display images on the canvas
     - Cornerstone3D creates its own viewport element separate from UI canvas
@@ -287,6 +287,19 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Increased batch size from 20 to 50 images per request
     - Updated both client and server MAX_BATCH_SIZE to 50
     - Reduces number of round trips for loading large image series
+
+- July 28, 2025: Performance Analysis vs OHIF
+  - Identified key performance gaps compared to OHIF viewer:
+    - OHIF uses Web Workers for DICOM decoding (keeps UI responsive)
+    - OHIF has full GPU acceleration via Cornerstone3D
+    - OHIF implements progressive loading with intelligent prefetching
+    - OHIF has optimized memory management with image unloading
+    - OHIF uses SharedArrayBuffer for multi-threaded processing
+  - Current bottlenecks in our viewer:
+    - All DICOM decoding on main thread (blocks UI)
+    - CPU-based rendering for images and MPR
+    - RT structures loaded on every slice change
+    - All images kept in memory after loading
 
 - July 28, 2025: OHIF 3.10 Performance Optimization Implementation - IN PROGRESS 🚧
   - ✅ Disabled broken GPU viewport implementation that was causing 0x0 dimensions

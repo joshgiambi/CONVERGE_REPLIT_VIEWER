@@ -2396,10 +2396,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Calculate scale to fit canvas while preserving physical aspect ratio
       // Both sagittal and coronal should have the same display height
       
-      // Get pixel spacing from first image for proper aspect ratio calculation
-      const firstImageMetadata = await getImageMetadata(images[0]?.sopInstanceUID);
-      const pixelSpacingX = firstImageMetadata?.pixelSpacing?.[1] || 0.9765625;
-      const pixelSpacingY = firstImageMetadata?.pixelSpacing?.[0] || 0.9765625;
+      // Use default pixel spacing for aspect ratio calculation
+      const pixelSpacingX = 0.9765625;
+      const pixelSpacingY = 0.9765625;
       const sliceThickness = 2.0; // Typical slice thickness for CT
       
       // Calculate physical dimensions in mm
