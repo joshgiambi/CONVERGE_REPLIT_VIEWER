@@ -2966,8 +2966,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }
 
   return (
-    <Card className="h-full bg-black border-indigo-800 flex flex-col">
-      {/* Header */}
+    <Card className="h-full bg-black border-indigo-800">
+      {/* Header with blue design */}
       <div className="flex items-center justify-between p-4 border-b border-indigo-700">
         <div className="flex items-center space-x-2">
           <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
@@ -2996,95 +2996,88 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               </span>
             </Badge>
           )}
-        </div>
+          </div>
 
-        <div className="flex items-center gap-1">
-          {rtStructures && (
+          <div className="flex items-center space-x-2">
+            {rtStructures && (
+              <Button
+                size="sm"
+                variant={showStructures ? "default" : "outline"}
+                onClick={() => setShowStructures(!showStructures)}
+                className="text-xs bg-green-600 hover:bg-green-700"
+              >
+                RT ({rtStructures?.structures?.length || 0})
+              </Button>
+            )}
             <Button
               size="sm"
-              variant={showStructures ? "default" : "outline"}
-              onClick={() => setShowStructures(!showStructures)}
-              className={`h-7 px-2 ${
-                showStructures 
-                  ? 'bg-green-600 hover:bg-green-700' 
-                  : 'bg-white/10 border-2 border-white/40 text-white/90 hover:text-white hover:bg-white/20 backdrop-blur-sm shadow-sm'
-              }`}
-            >
-              RT ({rtStructures?.structures?.length || 0})
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant={isMeasurementToolActive ? "default" : "outline"}
-            onClick={() => {
-              setIsMeasurementToolActive(!isMeasurementToolActive);
-              if (brushToolState?.isActive) {
-                // Disable brush/pen tools when measurement is active
-                if (onBrushToolChange) {
-                  onBrushToolChange({
-                    ...brushToolState,
-                    isActive: false
-                  });
+              variant={isMeasurementToolActive ? "default" : "outline"}
+              onClick={() => {
+                setIsMeasurementToolActive(!isMeasurementToolActive);
+                if (brushToolState?.isActive) {
+                  // Disable brush/pen tools when measurement is active
+                  if (onBrushToolChange) {
+                    onBrushToolChange({
+                      ...brushToolState,
+                      isActive: false
+                    });
+                  }
                 }
-              }
-            }}
-            className={`h-7 px-2 ${
-              isMeasurementToolActive 
-                ? 'bg-blue-600 hover:bg-blue-700' 
-                : 'bg-white/10 border-2 border-white/40 text-white/90 hover:text-white hover:bg-white/20 backdrop-blur-sm shadow-sm'
-            }`}
-            title="Measurement Tool"
-          >
-            <Ruler className="w-3 h-3" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={goToPrevious}
-            disabled={currentIndex === 0}
-            className="h-7 px-2 bg-white/10 border-2 border-white/40 text-white/90 hover:text-white hover:bg-white/20 backdrop-blur-sm shadow-sm disabled:opacity-50"
-          >
-            <ChevronLeft className="w-3 h-3" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={goToNext}
-            disabled={currentIndex === images.length - 1}
-            className="h-7 px-2 bg-white/10 border-2 border-white/40 text-white/90 hover:text-white hover:bg-white/20 backdrop-blur-sm shadow-sm disabled:opacity-50"
-          >
-            <ChevronRight className="w-3 h-3" />
-          </Button>
+              }}
+              className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
+              title="Measurement Tool"
+            >
+              <Ruler className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={goToPrevious}
+              disabled={currentIndex === 0}
+              className="border-indigo-600 hover:bg-indigo-800"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={goToNext}
+              disabled={currentIndex === images.length - 1}
+              className="border-indigo-600 hover:bg-indigo-800"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
-      </div>
 
       {/* Canvas */}
-      <div className="flex-1 flex items-center justify-center relative viewer-container" style={{ marginBottom: '20px' }}>
-        <canvas
-          ref={canvasRef}
-          width={1024}
-          height={1024}
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onWheel={(e) => {
-            // Always handle wheel events for scrolling, even when pen tool is active
-            handleCanvasWheel(e);
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          className={`w-full h-full object-contain ${
-            brushToolState?.isActive && brushToolState?.tool === "brush"
-              ? ""
-              : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-              ? ""
-              : "cursor-move"
-          }`}
-          style={{
-            backgroundColor: "black",
-            imageRendering: "auto",
-            userSelect: "none",
-          }}
-        />
+      <div className="flex-1 p-4 flex items-center justify-center">
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            width={1024}
+            height={1024}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={(e) => {
+              // Always handle wheel events for scrolling, even when pen tool is active
+              handleCanvasWheel(e);
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? ""
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                ? ""
+                : "cursor-move"
+            }`}
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
+            }}
+          />
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
@@ -3255,6 +3248,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
             />
           )}
+        </div>
       </div>
     </Card>
   );

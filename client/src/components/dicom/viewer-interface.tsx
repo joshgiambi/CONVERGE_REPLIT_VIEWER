@@ -421,11 +421,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   }
 
   return (
-    <div className="animate-in fade-in-50 duration-500 h-full flex flex-col">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 overflow-hidden">
+    <div className="animate-in fade-in-50 duration-500">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector */}
-        <div className="lg:col-span-1 h-full flex flex-col">
+        <div className="lg:col-span-1 h-full overflow-hidden">
           <SeriesSelector
             series={series}
             selectedSeries={selectedSeries}
@@ -460,9 +460,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         </div>
 
         {/* DICOM Viewer with Dynamic Border */}
-        <div className="lg:col-span-3 relative h-full flex flex-col">
+        <div className="lg:col-span-3 relative">
           {selectedSeries ? (
-            <div className="relative flex-1 overflow-hidden">
+            <div className="relative h-full -m-2">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
                 className="absolute inset-0 rounded-lg pointer-events-none"
@@ -541,40 +541,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   })}
                 </div>
               )}
-              
-              {/* Contour Edit Toolbar - positioned relative to viewer container */}
-              {selectedForEdit && rtStructures && rtStructures.structures && (
-                <ContourEditToolbar
-                  selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
-                  isVisible={isContourEditMode}
-                  onClose={() => {
-                    setIsContourEditMode(false);
-                    setSelectedForEdit(null);
-                  }}
-                  onStructureNameChange={(name: string) => {
-                    // Update structure name
-                  }}
-                  onStructureColorChange={(color: string) => {
-                    // Update structure color
-                  }}
-                  onToolChange={(toolState) => {
-                    setBrushToolState({
-                      ...brushToolState,
-                      ...toolState,
-                      predictionEnabled: toolState.predictionEnabled ?? brushToolState.predictionEnabled
-                    });
-                  }}
-                  currentSlicePosition={currentSlicePosition}
-                  onContourUpdate={handleContourUpdate}
-                  availableStructures={rtStructures.structures}
-                  onTargetStructureSelect={(structureId) => {
-                    // Handle target structure selection for boolean operations
-                    console.log('Target structure selected:', structureId);
-                  }}
-                  seriesId={selectedSeries?.id}
-                  imageMetadata={imageMetadata}
-                />
-              )}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
@@ -602,7 +568,41 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Contour Edit Toolbar is now rendered inside the viewer container for proper positioning */}
+      {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
+
+      {/* Contour Edit Toolbar */}
+      {selectedForEdit && rtStructures && rtStructures.structures && (
+        <ContourEditToolbar
+          selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
+          isVisible={isContourEditMode}
+          onClose={() => {
+            setIsContourEditMode(false);
+            setSelectedForEdit(null);
+          }}
+          onStructureNameChange={(name: string) => {
+            // Update structure name
+          }}
+          onStructureColorChange={(color: string) => {
+            // Update structure color
+          }}
+          onToolChange={(toolState) => {
+            setBrushToolState({
+              ...brushToolState,
+              ...toolState,
+              predictionEnabled: toolState.predictionEnabled ?? brushToolState.predictionEnabled
+            });
+          }}
+          currentSlicePosition={currentSlicePosition}
+          onContourUpdate={handleContourUpdate}
+          availableStructures={rtStructures.structures}
+          onTargetStructureSelect={(structureId) => {
+            // Handle target structure selection for boolean operations
+            console.log('Target structure selected:', structureId);
+          }}
+          seriesId={selectedSeries?.id}
+          imageMetadata={imageMetadata}
+        />
+      )}
 
 
 
