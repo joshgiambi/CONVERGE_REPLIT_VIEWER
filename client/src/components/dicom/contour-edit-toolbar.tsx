@@ -880,11 +880,12 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
-      <div 
-        className="relative bg-black/80 backdrop-blur-sm border-2 rounded-2xl p-4 shadow-2xl w-auto"
-        style={{ borderColor: `${structureColorRgb}60` }}
-      >
+    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
+      <div className="relative">
+        <div 
+          className="bg-gray-900/95 backdrop-blur-md border border-gray-700/50 rounded-xl px-4 py-3 shadow-2xl"
+          style={{ borderColor: `${structureColorRgb}60` }}
+        >
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-3">
@@ -1063,27 +1064,27 @@ export function ContourEditToolbar({
         <Separator className="my-2 bg-gray-700" />
 
         {/* Tool Buttons */}
-        <div className="flex items-center justify-center space-x-2">
+        <div className="flex items-center space-x-1">
           {/* Main tool buttons */}
           {mainTools.map((tool) => {
             const IconComponent = tool.icon;
             const isActive = activeTool === tool.id || (tool.id === 'grow' && showSettings === 'grow');
             const hasSettings = showSettings === tool.id;
             return (
-              <div key={tool.id} className="relative flex items-center">
+              <div key={tool.id} className="relative group flex items-center">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => handleToolActivation(tool.id)}
-                  className={`h-9 px-3 transition-all duration-200 rounded-xl ${
+                  className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
                     isActive 
-                      ? 'border-2 text-white shadow-lg' 
-                      : 'bg-black border border-gray-500 text-white hover:bg-gray-800'
+                      ? 'text-white border shadow-sm' 
+                      : 'hover:bg-gray-700/50 hover:text-white'
                   }`}
                   style={isActive ? { 
                     borderColor: `${structureColorRgb}`,
                     backgroundColor: `${structureColorRgb}20`,
-                    boxShadow: `0 0 8px ${structureColorRgb}40`
+                    color: 'white'
                   } : {}}
                 >
                   <IconComponent className="w-4 h-4 mr-2" />
@@ -1096,13 +1097,18 @@ export function ContourEditToolbar({
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowSettings(hasSettings ? null : tool.id)}
-                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700 transition-all duration-200 rounded-lg ${
+                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700/50 transition-all duration-200 rounded-lg ${
                       hasSettings ? 'bg-gray-700 text-white' : ''
                     }`}
                   >
                     <Settings size={12} />
                   </Button>
                 )}
+
+                {/* Tooltip */}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  {tool.label}
+                </div>
               </div>
             );
           })}
@@ -1110,6 +1116,7 @@ export function ContourEditToolbar({
 
         {/* Settings Panel */}
         {renderSettingsPanel()}
+        </div>
       </div>
     </div>
   );
