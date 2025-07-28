@@ -1773,7 +1773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Limit batch size to prevent overwhelming the server
-      const MAX_BATCH_SIZE = 20;
+      const MAX_BATCH_SIZE = 50; // Increased to match client batch size for faster loading
       if (sopInstanceUIDs.length > MAX_BATCH_SIZE) {
         return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE}` });
       }

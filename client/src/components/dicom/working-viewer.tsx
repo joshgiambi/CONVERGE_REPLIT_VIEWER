@@ -1981,7 +1981,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     setIsPreloading(true);
     
-    const BATCH_SIZE = 20; // Server batch limit
+    const BATCH_SIZE = 50; // Increased batch size for faster loading
     let loadedCount = 0;
     
     // Prioritize loading images near current index first
@@ -2112,8 +2112,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width = 1024;
       canvas.height = 1024;
 
+      // Temporarily disable GPU rendering to fix display issue
+      // GPU rendering needs more work to properly display on the canvas
+      const useGPU = false; // Will re-enable after fixing canvas integration
+      
       // Hybrid rendering decision
-      if (isGPUMode && cornerstone3DInitialized) {
+      if (useGPU && isGPUMode && cornerstone3DInitialized) {
         // Use Cornerstone3D GPU-accelerated rendering
         console.log('🚀 Using GPU-accelerated Cornerstone3D rendering');
         

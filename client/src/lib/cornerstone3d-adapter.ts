@@ -350,17 +350,36 @@ export async function render16BitImageGPU(
     let viewport = renderingEngine.getViewport(viewportId);
     
     if (!viewport) {
+      // For GPU rendering, we need to temporarily hide the original canvas
+      // and let Cornerstone3D manage its own canvas
+      const originalDisplay = canvas.style.display;
+      canvas.style.display = 'none';
+      
       // Create a container element for Cornerstone3D
       const container = canvas.parentElement;
       if (!container) {
+        canvas.style.display = originalDisplay;
         throw new Error('Canvas must have a parent element');
+      }
+
+      // Create a div element for Cornerstone3D to render into
+      let cs3dElement = container.querySelector('.cs3d-viewport') as HTMLDivElement;
+      if (!cs3dElement) {
+        cs3dElement = document.createElement('div');
+        cs3dElement.className = 'cs3d-viewport';
+        cs3dElement.style.width = `${canvas.width}px`;
+        cs3dElement.style.height = `${canvas.height}px`;
+        cs3dElement.style.position = 'absolute';
+        cs3dElement.style.top = '0';
+        cs3dElement.style.left = '0';
+        container.appendChild(cs3dElement);
       }
 
       // Enable the element for Cornerstone3D
       const viewportInput = {
         viewportId,
         type: cornerstone3D.Enums.ViewportType.STACK,
-        element: container as HTMLDivElement,
+        element: cs3dElement,
         defaultOptions: {
           background: [0, 0, 0] as [number, number, number],
         },
@@ -368,6 +387,9 @@ export async function render16BitImageGPU(
 
       renderingEngine.enableElement(viewportInput);
       viewport = renderingEngine.getViewport(viewportId);
+      
+      // Restore canvas display after setup
+      canvas.style.display = originalDisplay;
     }
 
     // Create image object for Cornerstone3D

@@ -250,6 +250,16 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Viewport successfully renders GPU-accelerated images
     - "Viewport is too small" warning from Cornerstone3D doesn't affect functionality
 
+- July 28, 2025: GPU Display Fix and Batch Loading Optimization
+  - ⚠️ Temporarily disabled GPU rendering due to display integration issue
+    - GPU rendering pipeline works but doesn't display images on the canvas
+    - Cornerstone3D creates its own viewport element separate from UI canvas
+    - Fallback to CPU rendering ensures images are visible while GPU integration is fixed
+  - ✅ Optimized batch loading for faster initial image loading
+    - Increased batch size from 20 to 50 images per request
+    - Updated both client and server MAX_BATCH_SIZE to 50
+    - Reduces number of round trips for loading large image series
+
 - July 28, 2025: Enlarged DICOM Viewer Canvas ✅
   - ✅ Increased canvas dimensions from 1024x1024 to 1280x1280 for larger medical image display
   - ✅ Preserved card size and position - only canvas itself is larger for better image detail
