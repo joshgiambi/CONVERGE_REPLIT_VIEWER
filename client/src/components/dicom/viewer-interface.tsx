@@ -555,26 +555,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         <ViewerToolbar
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
-          onResetZoom={handleResetZoom}
-          onPanTool={handlePanTool}
-          onMeasureTool={handleMeasureTool}
-          onAnnotateTool={handleAnnotateTool}
+          onFitToWindow={handleResetZoom}
+          onPan={handlePanTool}
+          onMeasure={handleMeasureTool}
           onContourEdit={() => {
             if (selectedForEdit) {
               setIsContourEditMode(true);
             }
           }}
-          onContourSettings={() => {
-            // Open contour settings dialog
-          }}
-          onFusion={() => setShowFusionPanel(!showFusionPanel)}
-          currentSlice={1}
-          totalSlices={selectedSeries.imageCount}
-          windowLevel={windowLevel}
-          isContourEditActive={selectedForEdit !== null}
-          showFusionButton={series.some(s => s.modality === 'MR')}
-          isPanActive={!brushToolState.isActive}
-          isToolActive={brushToolState.isActive}
+
+          className="toolbar-custom"
         />
       )}
 

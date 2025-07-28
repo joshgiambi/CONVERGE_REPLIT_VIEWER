@@ -38,7 +38,7 @@ interface ViewerToolbarProps {
   className?: string;
 }
 
-export default function ViewerToolbar({
+export function ViewerToolbar({
   onZoomIn,
   onZoomOut,
   onFitToWindow,
@@ -279,3 +279,5 @@ export default function ViewerToolbar({
     </div>
   );
 }
+
+export default ViewerToolbar;
