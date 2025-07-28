@@ -31,6 +31,8 @@ interface ViewerToolbarProps {
   windowLevel?: { window: number; level: number };
   isContourEditActive?: boolean;
   showFusionButton?: boolean;
+  isPanActive?: boolean;
+  isToolActive?: boolean;
 }
 
 export function ViewerToolbar({
@@ -47,15 +49,22 @@ export function ViewerToolbar({
   totalSlices,
   windowLevel,
   isContourEditActive,
-  showFusionButton
+  showFusionButton,
+  isPanActive = false,
+  isToolActive = false
 }: ViewerToolbarProps) {
-  const [activeTool, setActiveTool] = useState<string>('pan');
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
-    setActiveTool(tool);
+    // Only set pan as active if no other tools are active
+    if (tool === 'pan' && !isToolActive) {
+      setActiveTool(tool);
+    } else if (tool !== 'pan') {
+      setActiveTool(tool);
+    }
     callback();
   };
 
@@ -78,30 +87,32 @@ export function ViewerToolbar({
 
   return (
     <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-300">
-      <Card className="bg-black/70 backdrop-blur-sm border-dicom-yellow/30 px-6 py-3">
-        <div className="flex items-center space-x-1">
+      <div className="bg-black/80 backdrop-blur-sm border-2 border-gray-600 rounded-2xl p-4 shadow-2xl">
+        <div className="flex items-center space-x-2">
           {tools.map((tool, index) => {
             if (tool.id === 'separator') {
               return (
-                <div key={index} className="w-px h-6 bg-dicom-gray mx-2" />
+                <div key={index} className="w-px h-6 bg-gray-600 mx-2" />
               );
             }
 
             const IconComponent = tool.icon!;
-            const isActive = tool.selectable && activeTool === tool.id;
+            // Pan tool should only be active if explicitly set and no other tools are active
+            const isActive = tool.selectable && activeTool === tool.id && 
+              (tool.id !== 'pan' || (!isToolActive && isPanActive));
 
             return (
               <div key={tool.id} className="relative group">
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   className={`
-                    p-2 rounded-full transition-all duration-200 hover:scale-110
+                    h-10 w-10 p-0 transition-all duration-200 rounded-xl
                     ${isActive 
-                      ? 'bg-dicom-yellow/20 text-dicom-yellow border border-dicom-yellow' 
+                      ? 'bg-indigo-600/20 text-indigo-400 border-2 border-indigo-500 shadow-lg shadow-indigo-500/20' 
                       : tool.id === 'contour-edit' && isContourEditActive
-                      ? 'bg-green-500/20 text-green-400 border border-green-400'
-                      : 'hover:bg-dicom-yellow/20 text-dicom-yellow hover:text-dicom-yellow'
+                      ? 'bg-green-600/20 text-green-400 border-2 border-green-500 shadow-lg shadow-green-500/20'
+                      : 'bg-black border border-gray-500 text-gray-400 hover:text-white hover:bg-gray-800 hover:border-gray-400'
                     }
                   `}
                   onClick={() => {
@@ -253,7 +264,7 @@ export function ViewerToolbar({
             )}
           </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 }

@@ -573,6 +573,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           windowLevel={windowLevel}
           isContourEditActive={selectedForEdit !== null}
           showFusionButton={series.some(s => s.modality === 'MR')}
+          isPanActive={!brushToolState.isActive}
+          isToolActive={brushToolState.isActive}
         />
       )}
 
