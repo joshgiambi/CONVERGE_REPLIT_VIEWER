@@ -1,0 +1,59 @@
+🎯 Current CT slice 90mm should show structures at RT positions near this value
+Maximum call stack size exceeded
+Batch loaded 20 images. Total: 20/214 (9%)
+🚀 Using GPU-accelerated Cornerstone3D rendering
+Attempting to load image with ID: superbeam://1.2.246.352.221.555677295555638586514660479722649928836
+Image data cached: true
+[Register] Image loader already registered
+About to call loadAndCacheImage...
+cornerstone3D object: 
+Module {BaseRenderingEngine: ƒ, BaseVolumeViewport: ƒ, CONSTANTS: {…}, ContextPoolRenderingEngine: ƒ, EPSILON: 0.0001, …}
+cornerstone3D.imageLoader: 
+Object {cancelLoadAll: ƒ, cancelLoadImage: ƒ, cancelLoadImages: ƒ, createAndCacheDerivedImage: ƒ, createAndCacheDerivedImages: ƒ, …}
+cornerstone3D.imageLoader.loadAndCacheImage: function loadAndCacheImage(imageId, options = { priority: 0, requestType: "prefetch" }) {
+  if (imageId === void 0) {
+    throw new Error("loadAndCacheImage: parameter imageId must not be undefined");
+  }
+  const imageLoadObject = loadImageFromImageLoader(imageId, options);
+  if (!cache_default.getImageLoadObject(imageId)) {
+    cache_default.putImageLoadObject(imageId, imageLoadObject);
+  }
+  return imageLoadObject.promise;
+}
+[Custom Loader] loadAndCacheImage called with: superbeam://1.2.246.352.221.555677295555638586514660479722649928836
+[Custom Loader] Looking for cached data with ID: 1.2.246.352.221.555677295555638586514660479722649928836
+[Custom Loader] Found cached data: 
+Object {width: 512, height: 512, dataLength: 262144, metadata: {…}}
+[Custom Loader] Error in loadAndCacheImage: 
+RangeError {}
+
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://0f1108a4-63a1-4fa8-8a50-c5cf483c0ae4-00-dp53js9wr87w.spock.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+[Custom Loader] Returning result object: 
+Object {promise: Promise}
+GPU rendering failed, falling back to CPU: 
+RangeError {}
+
+Using CPU fallback for rendering
+Error caching image superbeam://1.2.246.352.221.555677295555638586514660479722649928836: 
+RangeError {}
+🔍 SLICE POSITION DEBUG:
+      parsedSliceLocation: 90
+      parsedZPosition: 90 
+      imageMetadata.sliceLocation: 90
+      imageMetadata.imagePosition Z: 90
+      currentIndex: 0
+      FINAL currentSlicePosition: 90mm
+📋 Available structures: 
+(64) ["BODY", "zzPTVMedOut", "zzPTVMedIn", "zzPTVLoOut", "Thyroid", "Submandibular_R", "Submandibular_L", "SpinalCord", "Parotid_R", "Parotid_L", "OralCavity", "OpticNerve_R", "OpticNerve_L", "Mandible", "LN_Neck_L_AI", "Lips", "Lens_R", "Lens_L", "Larynx", "LacrimalGland_R", "LacrimalGland_L", "Eye_R", "Eye_L", "Constrictors_AI", "Cochlea_R", "Cochlea_L", "Clavicle_R_AI", "Clavicle_L_AI", "Chiasm", "BrainStem", "Brain", "BrachialPlexus_R", "BrachialPlexus_L", "zzPTVLoIn", "zzPTVHiOut", "zzPTVHiIn", "zzPostNeck", "zzBrachPlex_R_03", "zzBrachPlex_L_03", "SpinalCord_07", "SpinalCord_05", "PTVp1_####", "PTVn2_####", "PTVn1_####", "Pituitary", "Pharynx", "Patient", "Parotid_R-PTVs", "Parotid_L-PTVs", "OV_Water", "OpticNerve_R_03", "OpticNerve_L_03", "NS_Bbs", "GTVp1", "GTVn1", "Esophagus", "CTVp_6000", "CTVn_5400", "CouchTop", "Chiasm_03", "BrainStem_05", "zzAvoidance", "zzRingLo", "zzRingHi"]
+🎯 RT coordinate range: 92.0 to 500.0mm
+🎯 Current CT slice 90mm should show structures at RT positions near this value
+Maximum call stack size exceeded
+Batch loaded 20 images. Total: 40/214 (19%)
+Batch loaded 20 images. Total: 60/214 (28%)
+Batch loaded 20 images. Total: 80/214 (37%)
+Batch loaded 20 images. Total: 100/214 (47%)
+Batch loaded 20 images. Total: 120/214 (56%)
+Batch loaded 20 images. Total: 140/214 (65%)

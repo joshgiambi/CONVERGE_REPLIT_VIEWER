@@ -16,6 +16,7 @@ export const ENABLE_CORNERSTONE3D = false; // Will be enabled gradually
 // Store initialization state
 let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
+let imageLoaderRegistered = false;
 
 /**
  * Check if GPU acceleration is available
@@ -62,6 +63,9 @@ export async function initializeCornerstone3D(): Promise<boolean> {
       // Set rendering engine to use GPU (by not using CPU rendering)
       cornerstone3D.setUseCPURendering(false);
       
+      // Register our custom image loader for Float32Array data
+      registerCustomImageLoader();
+      
       isInitialized = true;
       console.log('Cornerstone3D initialized successfully with GPU acceleration');
     } catch (error) {
@@ -72,6 +76,114 @@ export async function initializeCornerstone3D(): Promise<boolean> {
 
   await initializationPromise;
   return isInitialized;
+}
+
+/**
+ * Register a custom image loader for Float32Array DICOM data
+ */
+function registerCustomImageLoader() {
+  if (imageLoaderRegistered) {
+    console.log('[Register] Image loader already registered');
+    return;
+  }
+
+  // Register custom scheme for our images
+  if (cornerstone3D && cornerstone3D.imageLoader) {
+    console.log('[Register] Cornerstone3D imageLoader available, registering custom loader...');
+    cornerstone3D.imageLoader.registerImageLoader('superbeam', loadAndCacheImage);
+    console.log('[Register] Custom image loader registered for superbeam:// scheme');
+    console.log('[Register] Registered loader function:', loadAndCacheImage);
+  } else {
+    console.error('[Register] Cornerstone3D imageLoader not available');
+    console.log('[Register] cornerstone3D object:', cornerstone3D);
+    return;
+  }
+  
+  imageLoaderRegistered = true;
+}
+
+// Store image data temporarily for the loader
+const imageDataCache = new Map<string, any>();
+
+/**
+ * Custom image loader for Float32Array data
+ */
+function loadAndCacheImage(imageId: string): any {
+  console.log('[Custom Loader] loadAndCacheImage called with:', imageId);
+  
+  // Return an object with a promise property as expected by Cornerstone3D
+  const promise = new Promise((resolve, reject) => {
+    try {
+      const cleanId = imageId.replace('superbeam://', '');
+      console.log('[Custom Loader] Looking for cached data with ID:', cleanId);
+      
+      const cachedData = imageDataCache.get(cleanId);
+      
+      if (!cachedData) {
+        console.error('[Custom Loader] No cached data found for:', cleanId);
+        reject(new Error(`Image data not found for ${imageId}`));
+        return;
+      }
+
+      const { data, width, height, metadata } = cachedData;
+      console.log('[Custom Loader] Found cached data:', { width, height, dataLength: data.length, metadata });
+      
+      // Calculate min/max values safely
+      let minPixel = Infinity;
+      let maxPixel = -Infinity;
+      
+      try {
+        for (let i = 0; i < data.length; i++) {
+          if (data[i] < minPixel) minPixel = data[i];
+          if (data[i] > maxPixel) maxPixel = data[i];
+        }
+        console.log('[Custom Loader] Calculated min/max:', minPixel, maxPixel);
+      } catch (err) {
+        console.error('[Custom Loader] Error calculating min/max:', err);
+        minPixel = -1000;
+        maxPixel = 3000;
+      }
+      
+      // Create an image object compatible with Cornerstone3D
+      const image = {
+        imageId,
+        rows: height,
+        columns: width,
+        height,
+        width,
+        intercept: 0,
+        slope: 1,
+        windowCenter: metadata?.windowCenter || 40,
+        windowWidth: metadata?.windowWidth || 300,
+        pixelSpacing: metadata?.pixelSpacing || [1, 1],
+        imagePositionPatient: metadata?.imagePosition || [0, 0, 0],
+        imageOrientationPatient: metadata?.imageOrientation || [1, 0, 0, 0, 1, 0],
+        sizeInBytes: data.byteLength,
+        getPixelData: () => data,
+        // Calculate min/max without spread operator for large arrays
+        minPixelValue: data.reduce((min, val) => val < min ? val : min, Infinity),
+        maxPixelValue: data.reduce((max, val) => val > max ? val : max, -Infinity),
+        stats: {
+          lastGetPixelDataTime: 0,
+        },
+        decodeTimeInMS: 0,
+        floatPixelData: data,
+        color: false,
+        columnPixelSpacing: metadata?.pixelSpacing?.[1] || 1,
+        rowPixelSpacing: metadata?.pixelSpacing?.[0] || 1,
+      };
+
+      console.log('[Custom Loader] Created image object with size:', image.width, 'x', image.height);
+      resolve(image);
+    } catch (error) {
+      console.error('[Custom Loader] Error in loadAndCacheImage:', error);
+      reject(error);
+    }
+  });
+  
+  const result = { promise };
+  console.log('[Custom Loader] Returning result object:', result);
+  return result;
 }
 
 /**
@@ -259,64 +371,104 @@ export async function render16BitImageGPU(
     }
 
     // Create image object for Cornerstone3D
-    const imageId = `gpu-image://${imageData.sopInstanceUID}`;
+    const imageId = `superbeam://${imageData.sopInstanceUID}`;
     
-    // Register the image with Cornerstone3D's image loader
-    // For now, we'll convert our Float32Array to a format Cornerstone3D expects
-    const scalarArray = imageData.data;
-    const dimensions = [imageData.width, imageData.height, 1];
-    const spacing = [1, 1, 1]; // Will be updated with actual pixel spacing
-    const origin = [0, 0, 0];
-    const direction = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    // Store image data in cache for our custom loader
+    imageDataCache.set(imageData.sopInstanceUID, {
+      data: imageData.data,
+      width: imageData.width,
+      height: imageData.height,
+      metadata: {
+        windowCenter: windowLevel.center,
+        windowWidth: windowLevel.width,
+        pixelSpacing: [1, 1], // Will be updated with actual spacing
+        imagePosition: [0, 0, 0], // Will be updated with actual position
+        imageOrientation: [1, 0, 0, 0, 1, 0], // Will be updated with actual orientation
+      }
+    });
 
-    // Create a volume-like object that Cornerstone3D can understand
-    const imageVolume = {
-      imageId,
-      dimensions,
-      spacing,
-      origin,
-      direction,
-      scalarData: scalarArray,
-      sizeInBytes: scalarArray.byteLength,
-      imageData: {
-        dimensions,
-        spacing,
-        origin,
-        direction,
-        scalarData: scalarArray,
-        metadata: {
-          Modality: 'CT',
-        },
-      },
-    };
-
-    // Apply window/level settings
-    const { width: windowWidth, center: windowCenter } = windowLevel;
-    const voiRange = {
-      lower: windowCenter - windowWidth / 2,
-      upper: windowCenter + windowWidth / 2,
-    };
-    
-    // Cornerstone3D uses different API for setting VOI
-    if ('setVOI' in viewport) {
-      (viewport as any).setVOI(voiRange);
+    // Load the image through Cornerstone3D
+    try {
+      console.log('Attempting to load image with ID:', imageId);
+      console.log('Image data cached:', imageDataCache.has(imageData.sopInstanceUID));
+      
+      // First register the custom loader if not already done
+      registerCustomImageLoader();
+      
+      console.log('About to load image...');
+      
+      // In Cornerstone3D, we need to use the cache module to load images
+      let image;
+      try {
+        // First, try to get from cache
+        image = cornerstone3D.cache.getImage(imageId);
+        
+        if (!image) {
+          console.log('Image not in cache, loading via custom loader...');
+          
+          // Our custom loader returns an object with a promise
+          const loaderResult = loadAndCacheImage(imageId);
+          if (loaderResult && loaderResult.promise) {
+            image = await loaderResult.promise;
+            console.log('Custom loader returned image:', image);
+            
+            // Put the image in Cornerstone3D's cache
+            cornerstone3D.cache.putImageLoadObject(imageId, loaderResult);
+          } else {
+            throw new Error('Custom loader did not return a valid result');
+          }
+        }
+        
+        console.log('Image loaded successfully:', image);
+      } catch (error) {
+        console.error('Error loading image:', error);
+        throw error;
+      }
+      
+      // Set the image on the viewport
+      if ('setStack' in viewport) {
+        const stack = viewport as any;
+        await stack.setStack([imageId], 0);
+        
+        // Apply window/level settings
+        const { width: windowWidth, center: windowCenter } = windowLevel;
+        const properties = {
+          voiRange: {
+            lower: windowCenter - windowWidth / 2,
+            upper: windowCenter + windowWidth / 2,
+          },
+        };
+        stack.setProperties(properties);
+        
+        // Apply zoom and pan from ctTransform
+        const camera = viewport.getCamera();
+        if (camera) {
+          // Cornerstone3D uses a different scale calculation
+          const currentParallelScale = camera.parallelScale || 1;
+          const targetScale = currentParallelScale / ctTransform.scale;
+          camera.parallelScale = targetScale;
+          
+          // Apply pan by adjusting focal point
+          if (camera.focalPoint) {
+            camera.focalPoint[0] = -ctTransform.offsetX;
+            camera.focalPoint[1] = -ctTransform.offsetY;
+          }
+          
+          viewport.setCamera(camera);
+        }
+        
+        // Render the viewport
+        viewport.render();
+        
+        console.log('GPU rendering completed successfully');
+        return;
+      }
+    } catch (error) {
+      console.error('GPU rendering failed, falling back to CPU:', error);
     }
 
-    // Apply zoom and pan from ctTransform
-    const camera = viewport.getCamera();
-    camera.parallelScale = 1 / ctTransform.scale;
-    
-    // Update camera position for pan
-    if (camera.position) {
-      camera.position[0] = -ctTransform.offsetX / ctTransform.scale;
-      camera.position[1] = -ctTransform.offsetY / ctTransform.scale;
-    }
-    
-    viewport.setCamera(camera);
-
-    // For now, fall back to CPU rendering until we complete the GPU pipeline
-    // This ensures the viewer continues to work while we develop the GPU path
-    console.log('GPU rendering pipeline initialized, using CPU fallback for now');
+    // Fall back to CPU rendering if GPU fails
+    console.log('Using CPU fallback for rendering');
     
     // Use the existing CPU rendering as fallback
     const ctx = canvas.getContext('2d');
@@ -333,8 +485,8 @@ export async function render16BitImageGPU(
     const data = imgData.data;
     const pixelArray = imageData.data;
     
-    const min = windowCenter - windowWidth / 2;
-    const max = windowCenter + windowWidth / 2;
+    const min = windowLevel.center - windowLevel.width / 2;
+    const max = windowLevel.center + windowLevel.width / 2;
 
     for (let i = 0; i < pixelArray.length; i++) {
       const pixelValue = pixelArray[i];
@@ -345,7 +497,7 @@ export async function render16BitImageGPU(
       } else if (pixelValue >= max) {
         normalizedValue = 255;
       } else {
-        normalizedValue = ((pixelValue - min) / windowWidth) * 255;
+        normalizedValue = ((pixelValue - min) / windowLevel.width) * 255;
       }
 
       const gray = Math.max(0, Math.min(255, normalizedValue));
