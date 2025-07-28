@@ -1,4 +1,8 @@
 // Cornerstone.js configuration for DICOM rendering
+// Note: Cornerstone3D adapter is available at ./cornerstone3d-adapter.ts
+// Set ENABLE_CORNERSTONE3D to true to gradually migrate to GPU-accelerated rendering
+import { isGPUAccelerationAvailable } from './cornerstone3d-adapter';
+
 declare global {
   interface Window {
     cornerstone: any;

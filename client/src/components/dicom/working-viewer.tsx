@@ -25,6 +25,7 @@ import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { undoRedoManager } from "@/lib/undo-system";
+import { isGPUAccelerationAvailable } from "@/lib/cornerstone3d-adapter";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -1660,6 +1661,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     try {
       setIsLoading(true);
       setError(null);
+
+      // Check GPU acceleration availability for Cornerstone3D migration
+      const gpuAvailable = isGPUAccelerationAvailable();
+      console.log(`🖥️ GPU acceleration available: ${gpuAvailable ? 'YES ✅' : 'NO ❌'}`);
+      if (gpuAvailable) {
+        console.log('GPU acceleration detected - ready for Cornerstone3D migration phase');
+      } else {
+        console.log('No GPU acceleration - will continue using Cornerstone Core');
+      }
 
       // Cancel any existing series load
       if (seriesAbortRef.current) {
