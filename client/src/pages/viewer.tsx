@@ -205,7 +205,7 @@ export default function Viewer() {
   const currentStudy = studyData.studies[0];
 
   return (
-    <div className="min-h-screen bg-dicom-black text-white">
+    <div className="h-screen bg-dicom-black text-white flex flex-col overflow-hidden">
       {/* Enhanced Viewer Header */}
       <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-green-500/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
         <div className="flex items-center justify-between w-full">
@@ -310,7 +310,7 @@ export default function Viewer() {
       </header>
 
       {/* Main Content Area */}
-      <div className="pt-24 pb-8 px-4">
+      <div className="flex-1 pt-24 px-4 overflow-hidden">
         <ViewerInterface 
           studyData={studyData} 
           onContourSettingsChange={setContourSettings}
