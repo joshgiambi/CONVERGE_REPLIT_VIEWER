@@ -33,6 +33,7 @@ interface SeriesSelectorProps {
   onAutoLocalize?: (x: number, y: number, z: number) => void;
   secondarySeriesId?: number | null;
   onSecondarySeriesSelect?: (seriesId: number | null) => void;
+  onAllStructuresVisibilityChange?: (allVisible: boolean) => void;
 }
 
 export function SeriesSelector({
@@ -54,7 +55,8 @@ export function SeriesSelector({
   onAutoZoom,
   onAutoLocalize,
   secondarySeriesId,
-  onSecondarySeriesSelect
+  onSecondarySeriesSelect,
+  onAllStructuresVisibilityChange
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -439,6 +441,11 @@ export function SeriesSelector({
         onStructureVisibilityChange(structure.roiNumber, shouldShow);
       }
     });
+    
+    // Notify parent about all structures visibility change
+    if (onAllStructuresVisibilityChange) {
+      onAllStructuresVisibilityChange(shouldShow);
+    }
   };
 
   const toggleGroupVisibility = (groupStructures: any[]) => {

@@ -51,6 +51,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showFusionPanel, setShowFusionPanel] = useState(false);
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
   const [fusionOpacity, setFusionOpacity] = useState(0.5);
+  
+  // All structures visibility state for syncing between RT button and hide all button
+  const [allStructuresVisible, setAllStructuresVisible] = useState(true);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -307,6 +310,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     });
   };
 
+  const handleAllStructuresVisibilityChange = (allVisible: boolean) => {
+    setAllStructuresVisible(allVisible);
+  };
+
   const handleStructureColorChange = (structureId: number, color: [number, number, number]) => {
     if (rtStructures) {
       const updatedStructures = { ...rtStructures };
@@ -456,6 +463,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }}
             secondarySeriesId={secondarySeriesId}
             onSecondarySeriesSelect={setSecondarySeriesId}
+            onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
           />
         </div>
 
@@ -514,6 +522,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 onFusionOpacityChange={setFusionOpacity}
                 hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
                 onImageMetadataChange={setImageMetadata}
+                allStructuresVisible={allStructuresVisible}
               />
               
               {/* Structure Tags on Right Side */}

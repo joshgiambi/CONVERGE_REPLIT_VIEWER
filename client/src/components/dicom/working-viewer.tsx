@@ -135,6 +135,7 @@ interface WorkingViewerProps {
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
   onImageMetadataChange?: (metadata: any) => void;
+  allStructuresVisible?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -163,6 +164,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onFusionOpacityChange,
     hasSecondarySeriesForFusion,
     onImageMetadataChange,
+    allStructuresVisible = true,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -175,6 +177,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const rtStructures = localRTStructures || externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
   const [showStructures, setShowStructures] = useState(true);
+  
+  // Sync showStructures with allStructuresVisible prop
+  useEffect(() => {
+    setShowStructures(allStructuresVisible);
+  }, [allStructuresVisible]);
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
@@ -2977,16 +2984,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }}
         >
           <div className="flex items-center space-x-2">
-            <Badge className="bg-indigo-900/60 text-indigo-200 border border-indigo-600/30 backdrop-blur-sm">
+            <Badge className="bg-blue-900/60 text-blue-200 border border-blue-600/30 backdrop-blur-sm">
               CT Scan
             </Badge>
             {images.length > 0 && (
-              <Badge
-                variant="outline"
-                className="border-gray-500/50 text-gray-300 bg-gray-800/40 backdrop-blur-sm"
-              >
-                {currentIndex + 1} / {images.length}
-              </Badge>
+              <>
+                <Badge
+                  variant="outline"
+                  className="border-gray-500/50 text-gray-300 bg-gray-800/40 backdrop-blur-sm"
+                >
+                  {currentIndex + 1} / {images.length}
+                </Badge>
+                
+                {/* Window/Level/Z position pills */}
+                <Badge className="bg-cyan-900/40 text-cyan-200 border border-cyan-600/30 backdrop-blur-sm">
+                  W: {Math.round(currentWindowLevel.width)}
+                </Badge>
+                <Badge className="bg-orange-900/40 text-orange-200 border border-orange-600/30 backdrop-blur-sm">
+                  L: {Math.round(currentWindowLevel.center)}
+                </Badge>
+                {images[currentIndex] && (
+                  <Badge className="bg-purple-900/40 text-purple-200 border border-purple-600/30 backdrop-blur-sm">
+                    Z: {images[currentIndex].parsedSliceLocation?.toFixed(1) ||
+                        images[currentIndex].parsedZPosition?.toFixed(1) ||
+                        (currentIndex + 1)}
+                  </Badge>
+                )}
+              </>
             )}
             {secondarySeriesId && secondaryImages.length > 0 && (
               <Badge className={`flex items-center gap-1 border backdrop-blur-sm ${
@@ -3231,26 +3255,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 
-          {/* Current Window/Level and Z position display */}
-          <div className="absolute top-2 right-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
-            <div>
-              W:{Math.round(currentWindowLevel.width)} L:
-              {Math.round(currentWindowLevel.center)}
-            </div>
-            {images.length > 0 && images[currentIndex] && (
-              <div className="mt-1">
-                Z:{" "}
-                {images[currentIndex].parsedSliceLocation?.toFixed(1) ||
-                  images[currentIndex].parsedZPosition?.toFixed(1) ||
-                  currentIndex + 1}
-              </div>
-            )}
-            {rtStructures && showStructures && (
-              <div className="mt-1 text-green-400">
-                RT Structures: {rtStructures?.structures?.length || 0} ROIs
-              </div>
-            )}
-          </div>
+          {/* Removed overlaid text - now in titlebar */}
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
           {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
