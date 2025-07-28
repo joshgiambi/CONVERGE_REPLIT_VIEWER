@@ -3185,6 +3185,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 RT ({rtStructures?.structures?.length || 0})
               </Button>
             )}
+            
+            {/* Background Loading Progress */}
+            {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
+              <div className="flex items-center space-x-2 px-3 py-1.5 bg-gray-800/50 rounded-lg">
+                <div className="w-24 bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-green-500 to-green-400 h-1.5 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${(prefetchProgress.loaded / prefetchProgress.total) * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-300">
+                  {Math.round((prefetchProgress.loaded / prefetchProgress.total) * 100)}% ({prefetchProgress.loaded}/{prefetchProgress.total})
+                </span>
+              </div>
+            )}
+            
             <Button
               size="sm"
               variant={isMeasurementToolActive ? "default" : "ghost"}
@@ -3398,23 +3414,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             />
           )}
 
-          {/* OHIF 3.10-style background prefetch progress */}
-          {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
-            <div className="absolute top-4 right-4 bg-gray-800/90 rounded-lg px-3 py-2 text-white pointer-events-none backdrop-blur-sm">
-              <div className="text-xs mb-1 font-medium flex items-center gap-2">
-                <span className="text-green-400">🚀</span> OHIF Background Loading
-              </div>
-              <div className="w-48 bg-gray-700 rounded-full h-2 overflow-hidden">
-                <div 
-                  className="bg-gradient-to-r from-green-500 to-green-400 h-2 rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${(prefetchProgress.loaded / prefetchProgress.total) * 100}%` }}
-                />
-              </div>
-              <div className="text-xs mt-1 text-gray-300">
-                {prefetchProgress.loaded}/{prefetchProgress.total} images ({Math.round((prefetchProgress.loaded / prefetchProgress.total) * 100)}%)
-              </div>
-            </div>
-          )}
+
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 
