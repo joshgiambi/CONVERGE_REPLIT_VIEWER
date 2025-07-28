@@ -2204,7 +2204,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return images[sliceIndex];
     }
     
-    // For MPR reconstruction, we need all images loaded
+    // For MPR reconstruction, we need all images loaded with pixel data
     // Sort images by Z position
     const sortedImages = [...images].sort((a, b) => {
       const zA = parseFloat(a.parsedZPosition || a.parsedSliceLocation || '0');
@@ -2212,23 +2212,30 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return zA - zB;
     });
     
-    // Get dimensions from first image
-    const firstImage = sortedImages[0];
-    if (!firstImage || !firstImage.pixelData) {
-      return firstImage; // Return as fallback
+    // Get dimensions from first image - need to load pixel data from cache
+    const firstImageData = imageCacheRef.current.get(sortedImages[0].sopInstanceUID);
+    if (!firstImageData) {
+      console.error("First image not in cache for MPR reconstruction");
+      return null;
     }
     
-    const width = firstImage.columns || 512;
-    const height = firstImage.rows || 512;
+    const width = firstImageData.width || 512;
+    const height = firstImageData.height || 512;
     const numSlices = sortedImages.length;
+    
+    console.log(`MPR reconstruction: ${orientation}, slice ${sliceIndex}, volume ${width}x${height}x${numSlices}`);
     
     // Create synthetic image for MPR view
     const mprImage = {
-      ...firstImage,
+      ...sortedImages[0],
       sopInstanceUID: `mpr-${orientation}-${sliceIndex}`,
       pixelData: new Uint16Array(width * height),
+      columns: width,
+      rows: height,
       orientation: orientation
     };
+    
+    let pixelsSet = 0;
     
     // For sagittal: slice through X axis (left-right view)
     // For coronal: slice through Y axis (front-back view)
@@ -2239,11 +2246,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Fill pixel data by sampling from axial slices
       for (let z = 0; z < numSlices && z < height; z++) {
         const axialImage = sortedImages[z];
-        if (axialImage && axialImage.pixelData) {
+        const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
+        
+        if (axialImageData && axialImageData.data) {
           for (let y = 0; y < height; y++) {
             const srcIndex = y * width + x;
             const dstIndex = z * width + y;
-            mprImage.pixelData[dstIndex] = axialImage.pixelData[srcIndex] || 0;
+            const pixelValue = axialImageData.data[srcIndex] || 0;
+            mprImage.pixelData[dstIndex] = pixelValue;
+            if (pixelValue > 0) pixelsSet++;
           }
         }
       }
@@ -2254,15 +2265,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Fill pixel data by sampling from axial slices
       for (let z = 0; z < numSlices && z < height; z++) {
         const axialImage = sortedImages[z];
-        if (axialImage && axialImage.pixelData) {
+        const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
+        
+        if (axialImageData && axialImageData.data) {
           for (let x = 0; x < width; x++) {
             const srcIndex = y * width + x;
             const dstIndex = z * width + x;
-            mprImage.pixelData[dstIndex] = axialImage.pixelData[srcIndex] || 0;
+            const pixelValue = axialImageData.data[srcIndex] || 0;
+            mprImage.pixelData[dstIndex] = pixelValue;
+            if (pixelValue > 0) pixelsSet++;
           }
         }
       }
     }
+    
+    console.log(`MPR ${orientation}: ${pixelsSet} pixels set out of ${width * height}`);
     
     return mprImage;
   };
@@ -2285,20 +2302,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     targetOrientation: 'sagittal' | 'coronal',
     currentSliceIndex: number
   ) => {
-    if (!canvas || images.length === 0 || !images[0]) return;
+    if (!canvas || images.length === 0 || !images[0]) {
+      console.warn(`MPR render skipped - no canvas or images`);
+      return;
+    }
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     try {
+      // Clear canvas first
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      console.log(`Reconstructing ${targetOrientation} slice at index ${currentSliceIndex}`);
       const reconstructedImage = await reconstructMPRSlice(targetOrientation, currentSliceIndex);
       
-      if (!reconstructedImage || !reconstructedImage.pixelData) return;
+      if (!reconstructedImage || !reconstructedImage.pixelData) {
+        console.error(`No reconstructed image or pixel data for ${targetOrientation}`);
+        return;
+      }
       
       // Apply window/level
       const windowWidth = currentWindowLevel.width;
       const windowCenter = currentWindowLevel.center;
       const pixelData = reconstructedImage.pixelData;
+      
+      console.log(`MPR pixel data stats: min=${Math.min(...Array.from(pixelData).slice(0, 1000))}, max=${Math.max(...Array.from(pixelData).slice(0, 1000))}`);
       
       const imageData = ctx.createImageData(192, 192);
       const data = imageData.data;
@@ -2309,14 +2339,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const scaleX = sourceWidth / 192;
       const scaleY = sourceHeight / 192;
       
+      let nonZeroPixels = 0;
+      
       for (let y = 0; y < 192; y++) {
         for (let x = 0; x < 192; x++) {
-          // Sample from the source image with bilinear interpolation
+          // Sample from the source image
           const sourceX = Math.floor(x * scaleX);
           const sourceY = Math.floor(y * scaleY);
           const sourceIndex = sourceY * sourceWidth + sourceX;
           
           const pixelValue = pixelData[sourceIndex] || 0;
+          if (pixelValue > 0) nonZeroPixels++;
           
           // Apply window/level
           let value = ((pixelValue - (windowCenter - windowWidth / 2)) / windowWidth) * 255;
@@ -2330,7 +2363,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
       
+      console.log(`${targetOrientation} MPR: ${nonZeroPixels} non-zero pixels out of ${192*192}`);
+      
       ctx.putImageData(imageData, 0, 0);
+      console.log(`✓ ${targetOrientation} MPR rendered successfully`);
     } catch (error) {
       console.error(`Error rendering ${targetOrientation} MPR:`, error);
     }
