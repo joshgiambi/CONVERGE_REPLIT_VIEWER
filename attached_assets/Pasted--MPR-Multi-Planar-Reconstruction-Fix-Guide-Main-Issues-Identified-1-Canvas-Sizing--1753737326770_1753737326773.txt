@@ -1,0 +1,243 @@
+# MPR (Multi-Planar Reconstruction) Fix Guide
+
+## Main Issues Identified
+
+1. **Canvas Sizing**: Fixed dimensions don't match actual volume dimensions
+2. **Pixel Data Type Mismatch**: Converting Float32 to Uint16 causes data loss
+3. **Missing Images**: MPR reconstruction happens before all images are loaded
+4. **Aspect Ratio**: Not preserving physical dimensions (pixel spacing and slice thickness)
+5. **Performance**: No bilinear interpolation for smooth scaling
+6. **Crosshair Sync**: Not properly synchronized between views
+
+## Implementation Steps
+
+### 1. Replace the existing `reconstructMPRSlice` function with the improved version from the artifact above
+
+### 2. Replace the existing `renderMPRCanvas` function with the improved version
+
+### 3. Add dynamic canvas sizing in the JSX:
+
+```tsx
+{/* Floating MPR windows for sagittal and coronal views */}
+{orientation === 'axial' && images.length > 0 && (
+  <div className="absolute right-4 top-16 flex flex-col gap-3">
+    {/* Sagittal view */}
+    <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800 mpr-window">
+      <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800 flex justify-between items-center">
+        <span>Sagittal</span>
+        <span className="text-cyan-400">{crosshairPos.x}/{images[0]?.columns || 512}</span>
+      </div>
+      <canvas
+        ref={sagittalCanvasRef}
+        className="rounded block"
+        style={{
+          backgroundColor: "black",
+          imageRendering: "auto", // Changed from "pixelated" for smoother rendering
+          userSelect: "none",
+          display: "block",
+          maxWidth: "200px",
+          width: "100%",
+          height: "auto"
+        }}
+      />
+    </div>
+    
+    {/* Coronal view */}
+    <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800 mpr-window">
+      <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800 flex justify-between items-center">
+        <span>Coronal</span>
+        <span className="text-cyan-400">{crosshairPos.y}/{images[0]?.rows || 512}</span>
+      </div>
+      <canvas
+        ref={coronalCanvasRef}
+        className="rounded block"
+        style={{
+          backgroundColor: "black",
+          imageRendering: "auto",
+          userSelect: "none",
+          display: "block",
+          maxWidth: "200px",
+          width: "100%",
+          height: "auto"
+        }}
+      />
+    </div>
+  </div>
+)}
+```
+
+### 4. Add CSS for MPR windows (in your global CSS or styled components):
+
+```css
+.mpr-window canvas {
+  image-rendering: auto;
+  transition: opacity 0.2s ease;
+}
+
+.mpr-window:hover canvas {
+  opacity: 0.9;
+}
+
+/* Add loading indicator for MPR */
+.mpr-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+```
+
+### 5. Add MPR-specific keyboard shortcuts:
+
+```tsx
+useEffect(() => {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // Existing navigation keys...
+    
+    // MPR-specific shortcuts
+    if (e.key === 'c' && !e.ctrlKey && !e.metaKey) {
+      // Toggle crosshair mode
+      setCrosshairMode(!crosshairMode);
+      setIsPanMode(!crosshairMode);
+    }
+    
+    if (crosshairMode) {
+      // Arrow keys move crosshair in crosshair mode
+      const step = e.shiftKey ? 10 : 1; // Shift for faster movement
+      
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCrosshairPos(prev => ({ 
+          x: Math.max(0, prev.x - step), 
+          y: prev.y 
+        }));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCrosshairPos(prev => ({ 
+          x: Math.min((images[0]?.columns || 512) - 1, prev.x + step), 
+          y: prev.y 
+        }));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCrosshairPos(prev => ({ 
+          x: prev.x, 
+          y: Math.max(0, prev.y - step) 
+        }));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCrosshairPos(prev => ({ 
+          x: prev.x, 
+          y: Math.min((images[0]?.rows || 512) - 1, prev.y + step) 
+        }));
+      }
+    }
+  };
+
+  window.addEventListener("keydown", handleKeyDown);
+  return () => window.removeEventListener("keydown", handleKeyDown);
+}, [crosshairMode, images]);
+```
+
+### 6. Add MPR window click navigation:
+
+```tsx
+// Add click handlers to MPR canvases to navigate to that slice
+const handleSagittalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  if (!sagittalCanvasRef.current) return;
+  
+  const rect = sagittalCanvasRef.current.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  // Convert click position to slice index
+  const canvas = sagittalCanvasRef.current;
+  const scaleY = canvas.height / canvas.clientHeight;
+  const clickY = y * scaleY;
+  
+  // Convert Y position to axial slice index (inverted)
+  const sliceIndex = Math.floor(images.length - 1 - (clickY / canvas.height) * images.length);
+  
+  if (sliceIndex >= 0 && sliceIndex < images.length) {
+    setCurrentIndex(sliceIndex);
+  }
+};
+
+const handleCoronalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  if (!coronalCanvasRef.current) return;
+  
+  const rect = coronalCanvasRef.current.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  // Similar logic for coronal view
+  const canvas = coronalCanvasRef.current;
+  const scaleY = canvas.height / canvas.clientHeight;
+  const clickY = y * scaleY;
+  
+  const sliceIndex = Math.floor(images.length - 1 - (clickY / canvas.height) * images.length);
+  
+  if (sliceIndex >= 0 && sliceIndex < images.length) {
+    setCurrentIndex(sliceIndex);
+  }
+};
+```
+
+### 7. Performance Optimizations:
+
+```tsx
+// Debounce MPR rendering for better performance
+const debouncedRenderMPR = useMemo(
+  () => debounce((orientation: 'sagittal' | 'coronal', sliceIndex: number) => {
+    const canvas = orientation === 'sagittal' ? sagittalCanvasRef.current : coronalCanvasRef.current;
+    if (canvas) {
+      renderMPRCanvas(canvas, orientation, sliceIndex, currentWindowLevel.width, currentWindowLevel.center);
+    }
+  }, 16), // ~60fps
+  [currentWindowLevel]
+);
+
+// Use requestAnimationFrame for smooth updates
+const scheduleRenderMPR = useCallback(() => {
+  if (!needsRenderRef.current) {
+    needsRenderRef.current = true;
+    requestAnimationFrame(() => {
+      needsRenderRef.current = false;
+      if (sagittalCanvasRef.current && coronalCanvasRef.current) {
+        Promise.all([
+          renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', crosshairPos.x, currentWindowLevel.width, currentWindowLevel.center),
+          renderMPRCanvas(coronalCanvasRef.current, 'coronal', crosshairPos.y, currentWindowLevel.width, currentWindowLevel.center)
+        ]);
+      }
+    });
+  }
+}, [crosshairPos, currentWindowLevel]);
+```
+
+## Additional Features to Consider
+
+1. **Oblique MPR**: Allow arbitrary plane angles
+2. **Thick Slab MPR**: Average multiple slices for noise reduction
+3. **MIP/MinIP**: Maximum/Minimum Intensity Projection
+4. **3D Cursor**: Show position in all three views simultaneously
+5. **Measurement Tools**: Distance/angle measurements in MPR views
+6. **Export MPR**: Save reconstructed views as DICOM
+
+## Testing the Fix
+
+1. Load a CT series with multiple slices
+2. Verify sagittal and coronal views appear
+3. Test crosshair mode (press 'C' key)
+4. Click on MPR views to navigate
+5. Check that aspect ratios are correct
+6. Verify window/level affects all views
+7. Test with different slice thicknesses
+
+## Common Issues and Solutions
+
+**Black MPR views**: Images not fully loaded - wait for prefetch to complete
+**Incorrect orientation**: Check Z-axis reversal in reconstruction
+**Poor quality**: Enable bilinear interpolation, check pixel spacing
+**Performance issues**: Implement caching and debouncing
+**Aspect ratio wrong**: Use physical dimensions (pixel spacing × slice thickness)

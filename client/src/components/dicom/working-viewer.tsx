@@ -259,6 +259,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
+  const [isLoadingMPR, setIsLoadingMPR] = useState(false);
   
   // Secondary series state for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -2212,16 +2213,35 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const height = firstImageData.height || 512;
     const numSlices = sortedImages.length;
     
-    console.log(`MPR reconstruction: ${orientation}, slice ${sliceIndex}, volume ${width}x${height}x${numSlices}`);
+    // Get pixel spacing and slice thickness for proper aspect ratio
+    const firstImage = sortedImages[0];
+    const pixelSpacing = firstImage.pixelSpacing?.split('\\').map(parseFloat) || [1, 1];
+    const sliceThickness = parseFloat(firstImage.sliceThickness || '2.0');
     
-    // Create synthetic image for MPR view
+    console.log(`MPR reconstruction: ${orientation}, slice ${sliceIndex}, volume ${width}x${height}x${numSlices}`);
+    console.log(`Pixel spacing: ${pixelSpacing[0]}x${pixelSpacing[1]}, slice thickness: ${sliceThickness}`);
+    
+    // Create synthetic image for MPR view with proper dimensions
+    let mprWidth, mprHeight;
+    if (orientation === 'sagittal') {
+      mprWidth = height; // Y dimension of axial
+      mprHeight = numSlices; // Z dimension
+    } else { // coronal
+      mprWidth = width; // X dimension of axial
+      mprHeight = numSlices; // Z dimension
+    }
+    
     const mprImage = {
       ...sortedImages[0],
       sopInstanceUID: `mpr-${orientation}-${sliceIndex}`,
-      pixelData: new Uint16Array(width * height),
-      columns: width,
-      rows: height,
-      orientation: orientation
+      pixelData: new Uint16Array(mprWidth * mprHeight),
+      columns: mprWidth,
+      rows: mprHeight,
+      orientation: orientation,
+      // Update pixel spacing for MPR views
+      pixelSpacing: orientation === 'sagittal' 
+        ? `${pixelSpacing[1]}\\${sliceThickness}` // Y spacing x slice thickness
+        : `${pixelSpacing[0]}\\${sliceThickness}` // X spacing x slice thickness
     };
     
     let pixelsSet = 0;
@@ -2234,7 +2254,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Fill pixel data by sampling from axial slices
       // Reverse Z-axis to fix upside-down orientation (following OHIF convention)
-      for (let z = 0; z < numSlices && z < height; z++) {
+      for (let z = 0; z < numSlices; z++) {
         const axialZ = numSlices - 1 - z; // Reverse Z for proper anatomical orientation
         const axialImage = sortedImages[axialZ];
         const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
@@ -2242,7 +2262,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (axialImageData && axialImageData.data) {
           for (let y = 0; y < height; y++) {
             const srcIndex = y * width + x;
-            const dstIndex = z * width + y;
+            const dstIndex = z * mprWidth + y;
             // Convert Float32 to Uint16, handling negative values properly
             const floatValue = axialImageData.data[srcIndex] || 0;
             const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
@@ -2257,7 +2277,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Fill pixel data by sampling from axial slices
       // Reverse Z-axis to fix upside-down orientation (following OHIF convention)
-      for (let z = 0; z < numSlices && z < height; z++) {
+      for (let z = 0; z < numSlices; z++) {
         const axialZ = numSlices - 1 - z; // Reverse Z for proper anatomical orientation
         const axialImage = sortedImages[axialZ];
         const axialImageData = imageCacheRef.current.get(axialImage.sopInstanceUID);
@@ -2265,7 +2285,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (axialImageData && axialImageData.data) {
           for (let x = 0; x < width; x++) {
             const srcIndex = y * width + x;
-            const dstIndex = z * width + x;
+            const dstIndex = z * mprWidth + x;
             // Convert Float32 to Uint16, handling negative values properly
             const floatValue = axialImageData.data[srcIndex] || 0;
             const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
@@ -2276,7 +2296,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     }
     
-    console.log(`MPR ${orientation}: ${pixelsSet} pixels set out of ${width * height}`);
+    console.log(`MPR ${orientation}: ${pixelsSet} pixels set out of ${mprWidth * mprHeight}`);
     
     // Cache the result for performance
     mprCacheRef.current.set(cacheKey, mprImage);
@@ -2311,7 +2331,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     console.log(`MPR renderMPRCanvas called for ${targetOrientation} at index ${currentSliceIndex}, canvas: ${canvas.width}x${canvas.height}`);
     
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
       console.error(`MPR render failed - no 2D context for ${targetOrientation}`);
       return;
@@ -2321,6 +2341,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Clear canvas first
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Enable smooth scaling for better quality
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       
       console.log(`Reconstructing ${targetOrientation} slice at index ${currentSliceIndex}`);
       const reconstructedImage = await reconstructMPRSlice(targetOrientation, currentSliceIndex);
@@ -3228,6 +3252,63 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // MPR click handlers for navigation
+  const handleSagittalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!sagittalCanvasRef.current || images.length === 0) return;
+    
+    const canvas = sagittalCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Convert click position to slice index
+    const canvasWidth = rect.width;
+    const canvasHeight = rect.height;
+    const volumeHeight = images[0]?.rows || 512;
+    const volumeDepth = images.length;
+    
+    // Click Y position maps to axial Y coordinate
+    const axialY = Math.floor((y / canvasHeight) * volumeHeight);
+    // Click X position maps to axial Z index (slice)
+    const axialZ = Math.floor((x / canvasWidth) * volumeDepth);
+    
+    // Update crosshair position
+    setCrosshairPos(prev => ({ ...prev, y: axialY }));
+    
+    // Navigate to the clicked axial slice
+    if (axialZ >= 0 && axialZ < images.length) {
+      setCurrentIndex(axialZ);
+    }
+  };
+
+  const handleCoronalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!coronalCanvasRef.current || images.length === 0) return;
+    
+    const canvas = coronalCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Convert click position to slice index
+    const canvasWidth = rect.width;
+    const canvasHeight = rect.height;
+    const volumeWidth = images[0]?.columns || 512;
+    const volumeDepth = images.length;
+    
+    // Click X position maps to axial X coordinate
+    const axialX = Math.floor((x / canvasWidth) * volumeWidth);
+    // Click Y position maps to axial Z index (slice)
+    const axialZ = Math.floor((y / canvasHeight) * volumeDepth);
+    
+    // Update crosshair position
+    setCrosshairPos(prev => ({ ...prev, x: axialX }));
+    
+    // Navigate to the clicked axial slice
+    if (axialZ >= 0 && axialZ < images.length) {
+      setCurrentIndex(axialZ);
+    }
+  };
+
   // Notify parent when slice position changes
   useEffect(() => {
     if (images.length > 0 && images[currentIndex] && onSlicePositionChange) {
@@ -3243,6 +3324,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     displayCurrentImageRef.current = displayCurrentImage;
   });
+
+  // Watch for crosshair position changes and update MPR views
+  useEffect(() => {
+    if (orientation === 'axial' && images.length > 0 && sagittalCanvasRef.current && coronalCanvasRef.current) {
+      // Update MPR views when crosshair position changes
+      const updateMPRViews = async () => {
+        try {
+          setIsLoadingMPR(true);
+          
+          // Convert window/level props to width/center terminology used by renderMPRCanvas
+          const windowWidth = props.windowLevel?.window || 350;
+          const windowCenter = props.windowLevel?.level || 40;
+          
+          // Clamp crosshair position to valid range
+          const sagittalSliceIndex = Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1));
+          const coronalSliceIndex = Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1));
+          
+          // Render MPR views with current window/level settings
+          await Promise.all([
+            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, windowWidth, windowCenter),
+            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, windowWidth, windowCenter)
+          ]);
+        } catch (error) {
+          console.error("Error updating MPR views:", error);
+        } finally {
+          setIsLoadingMPR(false);
+        }
+      };
+      
+      updateMPRViews();
+    }
+  }, [crosshairPos, orientation, images.length, props.windowLevel]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Check if any drawing tool or measurement tool is active - if so, skip pan functionality
@@ -3965,45 +4078,67 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
           
           {/* Floating MPR windows for sagittal and coronal views */}
-          <div className="absolute right-4 top-16 flex flex-col gap-3">
-            {/* Sagittal view */}
-            <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800">
-              <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Sagittal</div>
-              <canvas
-                ref={sagittalCanvasRef}
-                width={512}
-                height={Math.min(images.length * 2, 768)}
-                className="rounded block"
-                style={{
-                  backgroundColor: "black",
-                  imageRendering: "pixelated",
-                  userSelect: "none",
-                  display: "block",
-                  width: "200px",
-                  height: `${Math.min(images.length * 0.78, 300)}px`
-                }}
-              />
+          {orientation === 'axial' && images.length > 0 && (
+            <div className="absolute right-4 top-16 flex flex-col gap-3">
+              {/* Sagittal view */}
+              <div className="mpr-window">
+                <div className="mpr-window-header flex justify-between items-center">
+                  <span>Sagittal</span>
+                  <span className="text-cyan-400">{crosshairPos.x}/{images[0]?.columns || 512}</span>
+                </div>
+                <div className="mpr-canvas-container">
+                  <canvas
+                    ref={sagittalCanvasRef}
+                    className="mpr-canvas"
+                    width={384}
+                    height={384}
+                    onClick={handleSagittalClick}
+                  />
+                  {/* Crosshair on sagittal view (horizontal line shows axial Y position) */}
+                  <div 
+                    className="mpr-crosshair-h" 
+                    style={{ 
+                      top: `${(crosshairPos.y / (images[0]?.rows || 512)) * 100}%` 
+                    }} 
+                  />
+                  {isLoadingMPR && (
+                    <div className="mpr-loading">
+                      <div className="mpr-loading-spinner" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Coronal view */}
+              <div className="mpr-window">
+                <div className="mpr-window-header flex justify-between items-center">
+                  <span>Coronal</span>
+                  <span className="text-cyan-400">{crosshairPos.y}/{images[0]?.rows || 512}</span>
+                </div>
+                <div className="mpr-canvas-container">
+                  <canvas
+                    ref={coronalCanvasRef}
+                    className="mpr-canvas"
+                    width={384}
+                    height={384}
+                    onClick={handleCoronalClick}
+                  />
+                  {/* Crosshair on coronal view (vertical line shows axial X position) */}
+                  <div 
+                    className="mpr-crosshair-v" 
+                    style={{ 
+                      left: `${(crosshairPos.x / (images[0]?.columns || 512)) * 100}%` 
+                    }} 
+                  />
+                  {isLoadingMPR && (
+                    <div className="mpr-loading">
+                      <div className="mpr-loading-spinner" />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            
-            {/* Coronal view */}
-            <div className="bg-gray-900/95 rounded-lg shadow-xl border border-gray-800">
-              <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Coronal</div>
-              <canvas
-                ref={coronalCanvasRef}
-                width={512}
-                height={Math.min(images.length * 2, 768)}
-                className="rounded block"
-                style={{
-                  backgroundColor: "black",
-                  imageRendering: "pixelated",
-                  userSelect: "none",
-                  display: "block",
-                  width: "200px",
-                  height: `${Math.min(images.length * 0.78, 300)}px`
-                }}
-              />
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </Card>
