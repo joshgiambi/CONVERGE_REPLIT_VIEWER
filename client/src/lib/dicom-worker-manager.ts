@@ -94,6 +94,23 @@ export class DicomWorkerManager {
     });
   }
 
+  async parseDicomMetadata(arrayBuffer: ArrayBuffer): Promise<any> {
+    await this.initialize();
+
+    const id = `parse-metadata-${Date.now()}-${Math.random()}`;
+    const worker = this.getNextWorker();
+
+    return new Promise((resolve, reject) => {
+      this.taskQueue.set(id, { id, resolve, reject });
+
+      worker.postMessage({
+        type: 'parse-metadata',
+        id,
+        data: arrayBuffer
+      }, [arrayBuffer]); // Transfer ownership for better performance
+    });
+  }
+
   async parseBatch(batch: { id: string; data: ArrayBuffer }[]): Promise<any> {
     await this.initialize();
 

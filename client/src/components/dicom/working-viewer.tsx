@@ -1763,42 +1763,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const seriesImages = await response.json();
 
       // First parse DICOM metadata for proper spatial ordering
+      // Use web worker for metadata parsing to keep UI responsive
+      const workerManager = getDicomWorkerManager();
       const imagesWithMetadata = await Promise.all(
         seriesImages.map(async (img: any) => {
           try {
             const response = await fetch(`/api/images/${img.sopInstanceUID}`, { signal });
             const arrayBuffer = await response.arrayBuffer();
 
-            if (!window.dicomParser) {
-              await loadDicomParser();
-            }
-
-            const byteArray = new Uint8Array(arrayBuffer);
-            const dataSet = window.dicomParser.parseDicom(byteArray);
-
-            // Extract spatial metadata
-            const sliceLocation = dataSet.floatString("x00201041");
-            const imagePosition = dataSet.string("x00200032");
-            const instanceNumber = dataSet.intString("x00200013");
-
-            // Parse image position (z-coordinate is third value)
-            let zPosition = null;
-            if (imagePosition) {
-              const positions = imagePosition
-                .split("\\")
-                .map((p: string) => parseFloat(p));
-              zPosition = positions[2];
-            }
+            // Use web worker for metadata parsing
+            const metadata = await workerManager.parseDicomMetadata(arrayBuffer);
 
             return {
               ...img,
-              parsedSliceLocation: sliceLocation
-                ? parseFloat(sliceLocation)
-                : null,
-              parsedZPosition: zPosition,
-              parsedInstanceNumber: instanceNumber
-                ? parseInt(instanceNumber)
-                : img.instanceNumber,
+              parsedSliceLocation: metadata.parsedSliceLocation,
+              parsedZPosition: metadata.parsedZPosition,
+              parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
             };
           } catch (error) {
             console.warn(

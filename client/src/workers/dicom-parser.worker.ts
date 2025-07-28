@@ -4,7 +4,7 @@
 declare const self: Worker & typeof globalThis;
 
 interface DicomParserMessage {
-  type: 'parse' | 'batch-parse';
+  type: 'parse' | 'batch-parse' | 'parse-metadata';
   id: string;
   data?: ArrayBuffer;
   batch?: { id: string; data: ArrayBuffer }[];
@@ -93,6 +93,41 @@ const parseDicomImage = async (arrayBuffer: ArrayBuffer): Promise<any> => {
   }
 };
 
+// Parse DICOM metadata only (faster than full parsing)
+const parseDicomMetadata = async (arrayBuffer: ArrayBuffer): Promise<any> => {
+  try {
+    if (!dicomParser) {
+      await loadDicomParser();
+    }
+
+    const byteArray = new Uint8Array(arrayBuffer);
+    const dataSet = dicomParser.parseDicom(byteArray);
+
+    // Extract spatial metadata for sorting
+    const sliceLocation = dataSet.floatString("x00201041");
+    const imagePosition = dataSet.string("x00200032");
+    const instanceNumber = dataSet.intString("x00200013");
+
+    // Parse image position (z-coordinate is third value)
+    let zPosition = null;
+    if (imagePosition) {
+      const positions = imagePosition
+        .split("\\")
+        .map((p: string) => parseFloat(p));
+      zPosition = positions[2];
+    }
+
+    return {
+      parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
+      parsedZPosition: zPosition,
+      parsedInstanceNumber: instanceNumber || null,
+    };
+  } catch (error: any) {
+    console.error("Error parsing DICOM metadata in worker:", error);
+    throw error;
+  }
+};
+
 // Handle messages from main thread
 self.addEventListener('message', async (event: MessageEvent<DicomParserMessage>) => {
   const { type, id, data, batch } = event.data;
@@ -106,6 +141,18 @@ self.addEventListener('message', async (event: MessageEvent<DicomParserMessage>)
         type: 'result',
         id,
         result
+      };
+      
+      self.postMessage(response);
+      
+    } else if (type === 'parse-metadata' && data) {
+      // Metadata-only parsing (faster)
+      const metadata = await parseDicomMetadata(data);
+      
+      const response: DicomParserResult = {
+        type: 'result',
+        id,
+        result: metadata
       };
       
       self.postMessage(response);
