@@ -3152,41 +3152,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         brushToolState?.tool === "planar-contour")) ||
       isMeasurementToolActive;
 
-    // Update crosshair position for MPR
-    if (canvasRef.current && orientation === 'axial' && !isDrawingToolActive) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const canvasX = e.clientX - rect.left;
-      const canvasY = e.clientY - rect.top;
-      
-      // Convert canvas coordinates to image pixel coordinates
-      const canvasWidth = canvasRef.current.width;
-      const canvasHeight = canvasRef.current.height;
-      const imageWidth = images[currentIndex]?.columns || 512;
-      const imageHeight = images[currentIndex]?.rows || 512;
-      
-      // Calculate scale with zoom factor (same as render16BitImage)
-      const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-      const totalScale = baseScale * zoom;
-      const scaledWidth = imageWidth * totalScale;
-      const scaledHeight = imageHeight * totalScale;
-      
-      // Center position with pan offset
-      const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-      const imageY = (canvasHeight - scaledHeight) / 2 + panY;
-      
-      // Convert canvas coordinates to image pixel coordinates
-      const pixelX = Math.floor((canvasX - imageX) / totalScale);
-      const pixelY = Math.floor((canvasY - imageY) / totalScale);
-      
-      // Check if within image bounds
-      if (pixelX >= 0 && pixelX < imageWidth && pixelY >= 0 && pixelY < imageHeight) {
-        // Update crosshair position
-        setCrosshairPos({ x: pixelX, y: pixelY });
-        
-        // Schedule render to update MPR views
-        scheduleRender();
-      }
-    }
+    // NOTE: Crosshair position is now only updated on click when in crosshair mode,
+    // not on mouse move. This prevents the crosshair from following the mouse cursor.
 
     // Only handle pan if drawing/measurement tool is NOT active
     if (isDragging && !isDrawingToolActive) {
@@ -3621,14 +3588,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={(e) => {
               handleCanvasMouseMove(e);
-              // Update crosshair position for MPR views when in axial mode
-              if (orientation === 'axial' && canvasRef.current && !brushToolState?.isActive) {
-                const rect = canvasRef.current.getBoundingClientRect();
-                const x = Math.floor((e.clientX - rect.left) / rect.width * 512);
-                const y = Math.floor((e.clientY - rect.top) / rect.height * 512);
-                setCrosshairPos({ x: Math.max(0, Math.min(511, x)), y: Math.max(0, Math.min(511, y)) });
-                scheduleRender(); // Trigger MPR update
-              }
+              // Crosshair position is only updated on click in crosshair mode
+              // Not on mouse move
             }}
             onMouseUp={handleCanvasMouseUp}
             onWheel={(e) => {
@@ -3818,11 +3779,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 ref={sagittalCanvasRef}
                 width={192}
                 height={192}
-                className="rounded"
+                className="rounded block"
                 style={{
                   backgroundColor: "black",
                   imageRendering: "auto",
                   userSelect: "none",
+                  display: "block",
                 }}
               />
             </div>
@@ -3834,11 +3796,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 ref={coronalCanvasRef}
                 width={192}
                 height={192}
-                className="rounded"
+                className="rounded block"
                 style={{
                   backgroundColor: "black",
                   imageRendering: "auto",
                   userSelect: "none",
+                  display: "block",
                 }}
               />
             </div>
