@@ -2309,8 +2309,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
+    console.log(`MPR renderMPRCanvas called for ${targetOrientation} at index ${currentSliceIndex}, canvas: ${canvas.width}x${canvas.height}`);
+    
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.error(`MPR render failed - no 2D context for ${targetOrientation}`);
+      return;
+    }
 
     try {
       // Clear canvas first
@@ -2397,20 +2402,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         physicalHeight = displayHeight;
       }
       
-      // Calculate scale to make both views have same height
-      const targetHeight = canvasHeight * 0.9; // Use 90% of canvas height
-      let scale = targetHeight / displayHeight;
+      // Calculate scale to fill the canvas properly while maintaining aspect ratio
+      const aspectRatio = physicalWidth / physicalHeight;
+      let scaledWidth, scaledHeight, scale;
       
-      // Calculate scaled dimensions maintaining physical aspect ratio
-      let scaledHeight = targetHeight;
-      let scaledWidth = (physicalWidth / physicalHeight) * scaledHeight;
-      
-      // If width exceeds canvas, scale down proportionally
-      if (scaledWidth > canvasWidth * 0.9) {
-        const widthScale = (canvasWidth * 0.9) / scaledWidth;
-        scaledWidth *= widthScale;
-        scaledHeight *= widthScale;
-        scale *= widthScale;
+      // For sagittal/coronal views, prioritize filling the height (superior-inferior dimension)
+      // This makes the body anatomy display properly in a tall, rectangular format
+      if (aspectRatio < (canvasWidth / canvasHeight)) {
+        // Height-constrained (typical for body scans)
+        scaledHeight = canvasHeight;
+        scaledWidth = scaledHeight * aspectRatio;
+        scale = canvasHeight / displayHeight;
+      } else {
+        // Width-constrained
+        scaledWidth = canvasWidth;
+        scaledHeight = scaledWidth / aspectRatio;
+        scale = canvasWidth / displayWidth;
       }
       
       // Center the image
@@ -2425,6 +2432,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const max = windowCenter + windowWidth / 2;
       
       console.log(`MPR ${targetOrientation} using window/level: W=${windowWidth}, C=${windowCenter}`);
+      console.log(`MPR canvas size: ${canvasWidth}x${canvasHeight}, display size: ${displayWidth}x${displayHeight}, scale: ${scale}`);
       
       // Render pixels with proper scaling and aspect ratio
       for (let y = 0; y < canvasHeight; y++) {
@@ -2686,7 +2694,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const sagittalSliceIndex = Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1));
           const coronalSliceIndex = Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1));
           
-          console.log(`Rendering MPR views - Sagittal: ${sagittalSliceIndex}, Coronal: ${coronalSliceIndex}`);
+          console.log(`Rendering MPR views - Sagittal: ${sagittalSliceIndex}, Coronal: ${coronalSliceIndex}, W=${currentWindowLevel.width}, C=${currentWindowLevel.center}`);
           
           // Render MPR views asynchronously with same window/level as axial
           await Promise.all([
@@ -3963,16 +3971,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Sagittal</div>
               <canvas
                 ref={sagittalCanvasRef}
-                width={384}
-                height={384}
+                width={512}
+                height={Math.min(images.length * 2, 768)}
                 className="rounded block"
                 style={{
                   backgroundColor: "black",
                   imageRendering: "pixelated",
                   userSelect: "none",
                   display: "block",
-                  width: "192px",
-                  height: "192px"
+                  width: "200px",
+                  height: `${Math.min(images.length * 0.78, 300)}px`
                 }}
               />
             </div>
@@ -3982,16 +3990,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-800">Coronal</div>
               <canvas
                 ref={coronalCanvasRef}
-                width={384}
-                height={384}
+                width={512}
+                height={Math.min(images.length * 2, 768)}
                 className="rounded block"
                 style={{
                   backgroundColor: "black",
                   imageRendering: "pixelated",
                   userSelect: "none",
                   display: "block",
-                  width: "192px",
-                  height: "192px"
+                  width: "200px",
+                  height: `${Math.min(images.length * 0.78, 300)}px`
                 }}
               />
             </div>
