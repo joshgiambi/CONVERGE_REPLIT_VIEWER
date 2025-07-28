@@ -3097,8 +3097,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         <div className="relative">
           <canvas
             ref={canvasRef}
-            width={1024}
-            height={1024}
+            width={1280}
+            height={1280}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}

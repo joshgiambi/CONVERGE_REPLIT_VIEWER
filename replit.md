@@ -202,6 +202,12 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
 
 ## Changelog
 
+- July 28, 2025: Enlarged DICOM Viewer Canvas ✅
+  - ✅ Increased canvas dimensions from 1024x1024 to 1280x1280 for larger medical image display
+  - ✅ Preserved card size and position - only canvas itself is larger for better image detail
+  - ✅ Drawing functions automatically adapt to new canvas size using dynamic width/height parameters
+  - ✅ Maintains same UI layout while providing 25% more viewing area for medical images
+  - Technical details: Canvas uses max-w-full max-h-full classes to constrain within container
 - July 28, 2025: Fixed Contour Toolbar Animation - Pop-in-Place Effect ✅
   - ✅ Changed contour toolbar animation from slide-in-from-left to pop-in-place effect
   - ✅ Replaced slide-in animation with zoom-in-95 class for smooth scale-up appearance
