@@ -2967,51 +2967,64 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   return (
     <Card className="h-full bg-black border-indigo-800">
-      {/* Header with blue design */}
-      <div className="flex items-center justify-between p-4 border-b border-indigo-700">
-        <div className="flex items-center space-x-2">
-          <Badge className="bg-indigo-900 text-indigo-200">CT Scan</Badge>
-          {images.length > 0 && (
-            <Badge
-              variant="outline"
-              className="border-indigo-600 text-indigo-300"
-            >
-              {currentIndex + 1} / {images.length}
+      {/* Header with modern toolbar styling to match contour editing toolbar */}
+      <div className="p-3 border-b border-gray-700/50">
+        <div 
+          className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-lg flex items-center justify-between"
+          style={{ 
+            backgroundColor: '#1a1a1a95',
+            borderColor: '#4a5568'
+          }}
+        >
+          <div className="flex items-center space-x-2">
+            <Badge className="bg-indigo-900/60 text-indigo-200 border border-indigo-600/30 backdrop-blur-sm">
+              CT Scan
             </Badge>
-          )}
-          {secondarySeriesId && secondaryImages.length > 0 && (
-            <Badge className={`flex items-center gap-1 ${
-              secondaryModality === 'PT' 
-                ? 'bg-yellow-900 text-yellow-200' 
-                : 'bg-purple-900 text-purple-200'
-            }`}>
-              <div className={`w-2 h-2 rounded-full animate-pulse ${
+            {images.length > 0 && (
+              <Badge
+                variant="outline"
+                className="border-gray-500/50 text-gray-300 bg-gray-800/40 backdrop-blur-sm"
+              >
+                {currentIndex + 1} / {images.length}
+              </Badge>
+            )}
+            {secondarySeriesId && secondaryImages.length > 0 && (
+              <Badge className={`flex items-center gap-1 border backdrop-blur-sm ${
                 secondaryModality === 'PT' 
-                  ? 'bg-yellow-400' 
-                  : 'bg-purple-400'
-              }`} />
-              {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
-              <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
-                ({Math.round(fusionOpacity * 100)}%)
-              </span>
-            </Badge>
-          )}
+                  ? 'bg-yellow-900/40 text-yellow-200 border-yellow-600/30' 
+                  : 'bg-purple-900/40 text-purple-200 border-purple-600/30'
+              }`}>
+                <div className={`w-2 h-2 rounded-full animate-pulse ${
+                  secondaryModality === 'PT' 
+                    ? 'bg-yellow-400' 
+                    : 'bg-purple-400'
+                }`} />
+                {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
+                <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
+                  ({Math.round(fusionOpacity * 100)}%)
+                </span>
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center space-x-2">
             {rtStructures && (
               <Button
                 size="sm"
-                variant={showStructures ? "default" : "outline"}
+                variant={showStructures ? "default" : "ghost"}
                 onClick={() => setShowStructures(!showStructures)}
-                className="text-xs bg-green-600 hover:bg-green-700"
+                className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
+                  showStructures 
+                    ? 'bg-green-600/80 hover:bg-green-700/80 text-white border border-green-500/50 shadow-sm backdrop-blur-sm' 
+                    : 'hover:bg-gray-700/50 hover:text-white'
+                }`}
               >
                 RT ({rtStructures?.structures?.length || 0})
               </Button>
             )}
             <Button
               size="sm"
-              variant={isMeasurementToolActive ? "default" : "outline"}
+              variant={isMeasurementToolActive ? "default" : "ghost"}
               onClick={() => {
                 setIsMeasurementToolActive(!isMeasurementToolActive);
                 if (brushToolState?.isActive) {
@@ -3024,31 +3037,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   }
                 }
               }}
-              className={isMeasurementToolActive ? "bg-blue-600 hover:bg-blue-700" : "border-indigo-600 hover:bg-indigo-800"}
+              className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
+                isMeasurementToolActive 
+                  ? 'bg-blue-600/80 hover:bg-blue-700/80 text-white border border-blue-500/50 shadow-sm backdrop-blur-sm' 
+                  : 'hover:bg-gray-700/50 hover:text-white'
+              }`}
               title="Measurement Tool"
             >
               <Ruler className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={goToPrevious}
               disabled={currentIndex === 0}
-              className="border-indigo-600 hover:bg-indigo-800"
+              className="h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent"
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={goToNext}
               disabled={currentIndex === images.length - 1}
-              className="border-indigo-600 hover:bg-indigo-800"
+              className="h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent"
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
+      </div>
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center">
