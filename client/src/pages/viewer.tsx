@@ -310,12 +310,14 @@ export default function Viewer() {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 pt-24 px-4 overflow-hidden">
-        <ViewerInterface 
-          studyData={studyData} 
-          onContourSettingsChange={setContourSettings}
-          contourSettings={contourSettings}
-        />
+      <div className="flex-1 pt-24 px-4 pb-4 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden">
+          <ViewerInterface 
+            studyData={studyData} 
+            onContourSettingsChange={setContourSettings}
+            contourSettings={contourSettings}
+          />
+        </div>
       </div>
 
       {/* Save Dialog */}
