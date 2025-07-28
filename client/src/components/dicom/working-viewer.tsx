@@ -144,6 +144,7 @@ interface WorkingViewerProps {
   onImageMetadataChange?: (metadata: any) => void;
   allStructuresVisible?: boolean;
   imageCache?: React.MutableRefObject<Map<string, { images: any[], metadata: any }>>;
+  orientation?: 'axial' | 'sagittal' | 'coronal';
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -174,6 +175,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onImageMetadataChange,
     allStructuresVisible = true,
     imageCache,
+    orientation = 'axial',
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -1703,7 +1705,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             displayCurrentImage();
           }, 10);
           // Start background prefetching for remaining images
-          backgroundPrefetchImages(cached.images);
+          startBackgroundPrefetch(cached.images);
           return;
         }
       }
@@ -2158,6 +2160,109 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Helper function to create MPR volume from axial slices
+  const createMPRVolume = (images: any[]) => {
+    if (!images || images.length === 0) return null;
+    
+    // For a complete MPR implementation, we would:
+    // 1. Sort images by Z position
+    // 2. Create a 3D volume array
+    // 3. Fill voxels with pixel data from each slice
+    // 4. Handle spacing between slices
+    
+    // For now, return sorted images
+    return images.sort((a, b) => {
+      const zA = parseFloat(a.parsedZPosition || a.parsedSliceLocation || '0');
+      const zB = parseFloat(b.parsedZPosition || b.parsedSliceLocation || '0');
+      return zA - zB;
+    });
+  };
+
+  // Helper function to reconstruct MPR slice from volume
+  const reconstructMPRSlice = async (orientation: string, sliceIndex: number) => {
+    if (!images || images.length === 0) return null;
+    
+    if (orientation === 'axial') {
+      // Standard axial view
+      return images[sliceIndex];
+    }
+    
+    // For MPR reconstruction, we need all images loaded
+    // Sort images by Z position
+    const sortedImages = [...images].sort((a, b) => {
+      const zA = parseFloat(a.parsedZPosition || a.parsedSliceLocation || '0');
+      const zB = parseFloat(b.parsedZPosition || b.parsedSliceLocation || '0');
+      return zA - zB;
+    });
+    
+    // Get dimensions from first image
+    const firstImage = sortedImages[0];
+    if (!firstImage || !firstImage.pixelData) {
+      return firstImage; // Return as fallback
+    }
+    
+    const width = firstImage.columns || 512;
+    const height = firstImage.rows || 512;
+    const numSlices = sortedImages.length;
+    
+    // Create synthetic image for MPR view
+    const mprImage = {
+      ...firstImage,
+      sopInstanceUID: `mpr-${orientation}-${sliceIndex}`,
+      pixelData: new Uint16Array(width * height),
+      orientation: orientation
+    };
+    
+    // For sagittal: slice through X axis (left-right view)
+    // For coronal: slice through Y axis (front-back view)
+    if (orientation === 'sagittal') {
+      // Sagittal view: fix X coordinate, vary Y and Z
+      const x = Math.min(sliceIndex, width - 1);
+      
+      // Fill pixel data by sampling from axial slices
+      for (let z = 0; z < numSlices && z < height; z++) {
+        const axialImage = sortedImages[z];
+        if (axialImage && axialImage.pixelData) {
+          for (let y = 0; y < height; y++) {
+            const srcIndex = y * width + x;
+            const dstIndex = z * width + y;
+            mprImage.pixelData[dstIndex] = axialImage.pixelData[srcIndex] || 0;
+          }
+        }
+      }
+    } else if (orientation === 'coronal') {
+      // Coronal view: fix Y coordinate, vary X and Z
+      const y = Math.min(sliceIndex, height - 1);
+      
+      // Fill pixel data by sampling from axial slices
+      for (let z = 0; z < numSlices && z < height; z++) {
+        const axialImage = sortedImages[z];
+        if (axialImage && axialImage.pixelData) {
+          for (let x = 0; x < width; x++) {
+            const srcIndex = y * width + x;
+            const dstIndex = z * width + x;
+            mprImage.pixelData[dstIndex] = axialImage.pixelData[srcIndex] || 0;
+          }
+        }
+      }
+    }
+    
+    return mprImage;
+  };
+
+  // Helper function to get slice for specific orientation
+  const getMPRSlice = (orientation: string, sliceIndex: number) => {
+    if (!images || images.length === 0) return null;
+    
+    if (orientation === 'axial') {
+      // Standard axial view
+      return images[sliceIndex];
+    }
+    
+    // For sagittal and coronal, return a promise for async reconstruction
+    return reconstructMPRSlice(orientation, sliceIndex);
+  };
+
   const displayCurrentImage = async () => {
     if (!canvasRef.current || images.length === 0) return;
 
@@ -2166,11 +2271,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (!ctx) return;
 
     try {
-      // Ensure currentIndex is valid
-      const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
-      const currentImage = images[safeIndex];
+      // Get the appropriate slice based on orientation
+      let currentImage;
+      if (orientation === 'axial') {
+        // Ensure currentIndex is valid
+        const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
+        currentImage = images[safeIndex];
+      } else {
+        // For sagittal/coronal, use MPR reconstruction
+        const mprSlice = await getMPRSlice(orientation, currentIndex);
+        currentImage = mprSlice;
+      }
+      
       if (!currentImage) {
-        console.error("No image at current index:", safeIndex, "images length:", images.length);
+        console.error("No image available for orientation:", orientation);
         setError("Unable to display image. Please try refreshing.");
         return;
       }
@@ -2752,7 +2866,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const goToNext = () => {
-    if (currentIndex < images.length - 1) {
+    // Get max slices based on orientation
+    let maxSlices = images.length;
+    if (orientation === 'sagittal' && images.length > 0) {
+      // Sagittal slices = width of axial images
+      maxSlices = images[0]?.columns || 512;
+    } else if (orientation === 'coronal' && images.length > 0) {
+      // Coronal slices = height of axial images
+      maxSlices = images[0]?.rows || 512;
+    }
+    
+    if (currentIndex < maxSlices - 1) {
       setCurrentIndex(currentIndex + 1);
     }
   };
@@ -3124,7 +3248,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         >
           <div className="flex items-center space-x-2">
             <Badge className="bg-blue-900/60 text-blue-200 border border-blue-600/30 backdrop-blur-sm">
-              CT Scan
+              CT Scan {orientation !== 'axial' && `- ${orientation.charAt(0).toUpperCase() + orientation.slice(1)}`}
             </Badge>
             {images.length > 0 && (
               <>
@@ -3132,7 +3256,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   variant="outline"
                   className="border-gray-500/50 text-gray-300 bg-gray-800/40 backdrop-blur-sm"
                 >
-                  {currentIndex + 1} / {images.length}
+                  {currentIndex + 1} / {(() => {
+                    let maxSlices = images.length;
+                    if (orientation === 'sagittal' && images.length > 0) {
+                      maxSlices = images[0]?.columns || 512;
+                    } else if (orientation === 'coronal' && images.length > 0) {
+                      maxSlices = images[0]?.rows || 512;
+                    }
+                    return maxSlices;
+                  })()}
                 </Badge>
                 
                 {/* Window/Level/Z position pills */}
@@ -3238,7 +3370,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               size="sm"
               variant="ghost"
               onClick={goToNext}
-              disabled={currentIndex === images.length - 1}
+              disabled={currentIndex === (() => {
+                let maxSlices = images.length;
+                if (orientation === 'sagittal' && images.length > 0) {
+                  maxSlices = images[0]?.columns || 512;
+                } else if (orientation === 'coronal' && images.length > 0) {
+                  maxSlices = images[0]?.rows || 512;
+                }
+                return maxSlices - 1;
+              })()}
               className="h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent"
             >
               <ChevronRight className="w-4 h-4" />

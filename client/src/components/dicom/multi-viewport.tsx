@@ -116,6 +116,11 @@ const MultiViewport: React.FC<MultiViewportProps> = ({
               onContourUpdate={onRTStructureUpdate}
               allStructuresVisible={allStructuresVisible}
               imageCache={imageCache}
+              orientation={
+                viewport.type === 'MPR_SAGITTAL' ? 'sagittal' :
+                viewport.type === 'MPR_CORONAL' ? 'coronal' : 
+                'axial'
+              }
             />
             
             {/* Viewport overlay info */}
