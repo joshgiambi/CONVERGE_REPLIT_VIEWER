@@ -350,23 +350,46 @@ export async function render16BitImageGPU(
     let viewport = renderingEngine.getViewport(viewportId);
     
     if (!viewport) {
-      // For GPU rendering, we need to temporarily hide the original canvas
-      // and let Cornerstone3D manage its own canvas
-      const originalDisplay = canvas.style.display;
-      canvas.style.display = 'none';
+      // Ensure canvas has proper dimensions before initialization
+      if (!canvas.width || !canvas.height) {
+        canvas.width = 1280;
+        canvas.height = 1280;
+      }
       
-      // Create a container element for Cornerstone3D
+      // Ensure canvas is visible and has computed dimensions
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width < 100 || rect.height < 100) {
+        console.warn('Canvas appears too small:', rect.width, 'x', rect.height);
+        // Set minimum size style to ensure proper rendering
+        canvas.style.minWidth = '512px';
+        canvas.style.minHeight = '512px';
+      }
+      
+      // Get the parent container
       const container = canvas.parentElement;
       if (!container) {
-        canvas.style.display = originalDisplay;
         throw new Error('Canvas must have a parent element');
       }
 
-      // Use the canvas directly for Cornerstone3D rendering
+      // Create a div wrapper for Cornerstone3D since it expects a div element
+      let cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
+      if (!cs3dElement) {
+        cs3dElement = document.createElement('div');
+        cs3dElement.className = 'cs3d-viewport-wrapper';
+        cs3dElement.style.width = `${canvas.width}px`;
+        cs3dElement.style.height = `${canvas.height}px`;
+        cs3dElement.style.position = 'relative';
+        
+        // Insert the wrapper next to the canvas
+        canvas.style.display = 'none'; // Hide the original canvas
+        container.insertBefore(cs3dElement, canvas.nextSibling);
+      }
+
+      // Configure viewport for Cornerstone3D
       const viewportInput = {
         viewportId,
         type: cornerstone3D.Enums.ViewportType.STACK,
-        element: canvas as any, // Cast canvas to any since Cornerstone3D expects HTMLDivElement
+        element: cs3dElement,
         defaultOptions: {
           background: [0, 0, 0] as [number, number, number],
         },
@@ -466,15 +489,40 @@ export async function render16BitImageGPU(
         // Render the viewport
         viewport.render();
         
+        // Make the GPU viewport visible and hide the original canvas
+        const container = canvas.parentElement;
+        if (container) {
+          const cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
+          if (cs3dElement) {
+            cs3dElement.style.display = 'block';
+            canvas.style.display = 'none';
+          }
+        }
+        
         console.log('GPU rendering completed successfully');
         return;
       }
     } catch (error) {
       console.error('GPU rendering failed, falling back to CPU:', error);
+      
+      // On error, ensure original canvas is visible
+      canvas.style.display = 'block';
+      
+      // Hide GPU viewport if it exists
+      const container = canvas.parentElement;
+      if (container) {
+        const cs3dElement = container.querySelector('.cs3d-viewport-wrapper') as HTMLDivElement;
+        if (cs3dElement) {
+          cs3dElement.style.display = 'none';
+        }
+      }
     }
 
     // Fall back to CPU rendering if GPU fails
     console.log('Using CPU fallback for rendering');
+    
+    // Ensure canvas is visible for CPU rendering
+    canvas.style.display = 'block';
     
     // Use the existing CPU rendering as fallback
     const ctx = canvas.getContext('2d');
