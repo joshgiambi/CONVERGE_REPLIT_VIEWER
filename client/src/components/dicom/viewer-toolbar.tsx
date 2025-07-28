@@ -16,7 +16,8 @@ import {
   Keyboard,
   Layers,
   Grid3x3,
-  Activity
+  Activity,
+  Crosshair
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -25,9 +26,11 @@ interface ViewerToolbarProps {
   onFitToWindow: () => void;
   onPan: () => void;
   onMeasure: () => void;
+  onCrosshairs?: () => void;
   onContourEdit?: () => void;
   isContourEditActive?: boolean;
   isPanActive?: boolean;
+  isCrosshairsActive?: boolean;
   isToolActive?: boolean;
   currentSlice?: number;
   totalSlices?: number;
@@ -46,9 +49,11 @@ export function ViewerToolbar({
   onFitToWindow,
   onPan,
   onMeasure,
+  onCrosshairs,
   onContourEdit,
   isContourEditActive = false,
   isPanActive = false,
+  isCrosshairsActive = false,
   isToolActive = false,
   currentSlice,
   totalSlices,
@@ -64,7 +69,7 @@ export function ViewerToolbar({
 
   const handleToolSelect = (tool: string, callback: () => void) => {
     // Ensure only one selectable tool is active at a time (except MPR which is a toggle)
-    if (tool === 'pan' || tool === 'measure') {
+    if (tool === 'pan' || tool === 'measure' || tool === 'crosshairs') {
       setActiveTool(tool);
     } else if (tool === 'mpr') {
       // MPR is a toggle button, not an exclusive tool
@@ -80,6 +85,7 @@ export function ViewerToolbar({
     { id: 'fit', icon: Maximize2, label: 'Fit to Window', action: onFitToWindow },
     { id: 'separator' },
     { id: 'pan', icon: Hand, label: 'Pan', action: onPan, selectable: true },
+    { id: 'crosshairs', icon: Crosshair, label: 'Crosshairs', action: onCrosshairs || (() => console.log('Crosshairs not configured')), selectable: true },
     { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasure, selectable: true },
     { id: 'separator' },
     { id: 'mpr', icon: Grid3x3, label: 'MPR View', action: onMPRToggle || (() => console.log('MPR Toggle not configured')), selectable: true },

@@ -212,6 +212,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const handlePanTool = () => setActiveTool('Pan');
   const handleMeasureTool = () => setActiveTool('Length');
   const handleAnnotateTool = () => setActiveTool('ArrowAnnotate');
+  const handleCrosshairsTool = () => {
+    console.log('Crosshairs tool activated');
+    // For now, we'll log it. The actual implementation will be in WorkingViewer
+  };
 
   const handleRotate = () => {
     try {
@@ -585,6 +589,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onFitToWindow={handleResetZoom}
           onPan={handlePanTool}
           onMeasure={handleMeasureTool}
+          onCrosshairs={handleCrosshairsTool}
           onContourEdit={() => {
             if (selectedForEdit) {
               setIsContourEditMode(true);

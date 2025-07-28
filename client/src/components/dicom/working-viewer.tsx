@@ -2294,28 +2294,41 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      let imageData = imageCacheRef.current.get(cacheKey);
+      let imageData;
+      
+      // Check if this is an MPR reconstructed image (synthetic)
+      if (orientation !== 'axial' && currentImage.pixelData) {
+        // For MPR slices, use the reconstructed pixel data directly
+        imageData = {
+          width: currentImage.columns || currentImage.width || 512,
+          height: currentImage.rows || currentImage.height || 512,
+          data: currentImage.pixelData
+        };
+      } else {
+        // For axial slices, use the cache
+        imageData = imageCacheRef.current.get(cacheKey);
 
-      if (!imageData || !imageData.data) {
-        // Try to reload the image if it's not in cache
-        console.warn(
-          "Image not in cache, attempting to reload:",
-          cacheKey,
-        );
-        
-        try {
-          // Use single fetch/parse function to avoid double fetching
-          const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
+        if (!imageData || !imageData.data) {
+          // Try to reload the image if it's not in cache
+          console.warn(
+            "Image not in cache, attempting to reload:",
+            cacheKey,
+          );
           
-          if (reloadedImageData) {
-            imageData = reloadedImageData;
-            console.log("Successfully reloaded image:", cacheKey);
-          } else {
-            throw new Error("Failed to parse reloaded image");
+          try {
+            // Use single fetch/parse function to avoid double fetching
+            const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
+            
+            if (reloadedImageData) {
+              imageData = reloadedImageData;
+              console.log("Successfully reloaded image:", cacheKey);
+            } else {
+              throw new Error("Failed to parse reloaded image");
+            }
+          } catch (reloadError) {
+            console.error("Failed to reload image:", reloadError);
+            throw new Error(`Image not available: ${reloadError instanceof Error ? reloadError.message : 'Unknown error'}`);
           }
-        } catch (reloadError) {
-          console.error("Failed to reload image:", reloadError);
-          throw new Error(`Image not available: ${reloadError instanceof Error ? reloadError.message : 'Unknown error'}`);
         }
       }
 
@@ -3274,7 +3287,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 <Badge className="bg-orange-900/40 text-orange-200 border border-orange-600/30 backdrop-blur-sm">
                   L: {Math.round(currentWindowLevel.center)}
                 </Badge>
-                {images[currentIndex] && (
+                {images[currentIndex] && orientation === 'axial' && (
                   <Badge className="bg-purple-900/40 text-purple-200 border border-purple-600/30 backdrop-blur-sm">
                     Z: {images[currentIndex].parsedSliceLocation?.toFixed(1) ||
                         images[currentIndex].parsedZPosition?.toFixed(1) ||
