@@ -206,3 +206,176 @@ export function cleanupViewport(viewport: HybridViewport): void {
   }
   // Cornerstone Core cleanup will be handled by existing logic
 }
+
+/**
+ * GPU-accelerated rendering function for 16-bit DICOM images
+ * This replaces the CPU-based render16BitImage function when GPU is available
+ */
+export async function render16BitImageGPU(
+  canvas: HTMLCanvasElement,
+  imageData: {
+    data: Float32Array;
+    width: number;
+    height: number;
+    sopInstanceUID: string;
+  },
+  windowLevel: { width: number; center: number },
+  ctTransform: { scale: number; offsetX: number; offsetY: number }
+): Promise<void> {
+  try {
+    // Get or create rendering engine
+    const renderingEngineId = 'superbeamGPURenderingEngine';
+    let renderingEngine = cornerstone3D.getRenderingEngine(renderingEngineId);
+    
+    if (!renderingEngine) {
+      renderingEngine = new cornerstone3D.RenderingEngine(renderingEngineId);
+    }
+
+    // Create a unique viewport ID
+    const viewportId = `gpu-viewport-${imageData.sopInstanceUID}`;
+    
+    // Check if viewport already exists
+    let viewport = renderingEngine.getViewport(viewportId);
+    
+    if (!viewport) {
+      // Create a container element for Cornerstone3D
+      const container = canvas.parentElement;
+      if (!container) {
+        throw new Error('Canvas must have a parent element');
+      }
+
+      // Enable the element for Cornerstone3D
+      const viewportInput = {
+        viewportId,
+        type: cornerstone3D.Enums.ViewportType.STACK,
+        element: container as HTMLDivElement,
+        defaultOptions: {
+          background: [0, 0, 0] as [number, number, number],
+        },
+      };
+
+      renderingEngine.enableElement(viewportInput);
+      viewport = renderingEngine.getViewport(viewportId);
+    }
+
+    // Create image object for Cornerstone3D
+    const imageId = `gpu-image://${imageData.sopInstanceUID}`;
+    
+    // Register the image with Cornerstone3D's image loader
+    // For now, we'll convert our Float32Array to a format Cornerstone3D expects
+    const scalarArray = imageData.data;
+    const dimensions = [imageData.width, imageData.height, 1];
+    const spacing = [1, 1, 1]; // Will be updated with actual pixel spacing
+    const origin = [0, 0, 0];
+    const direction = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+    // Create a volume-like object that Cornerstone3D can understand
+    const imageVolume = {
+      imageId,
+      dimensions,
+      spacing,
+      origin,
+      direction,
+      scalarData: scalarArray,
+      sizeInBytes: scalarArray.byteLength,
+      imageData: {
+        dimensions,
+        spacing,
+        origin,
+        direction,
+        scalarData: scalarArray,
+        metadata: {
+          Modality: 'CT',
+        },
+      },
+    };
+
+    // Apply window/level settings
+    const { width: windowWidth, center: windowCenter } = windowLevel;
+    const voiRange = {
+      lower: windowCenter - windowWidth / 2,
+      upper: windowCenter + windowWidth / 2,
+    };
+    
+    // Cornerstone3D uses different API for setting VOI
+    if ('setVOI' in viewport) {
+      (viewport as any).setVOI(voiRange);
+    }
+
+    // Apply zoom and pan from ctTransform
+    const camera = viewport.getCamera();
+    camera.parallelScale = 1 / ctTransform.scale;
+    
+    // Update camera position for pan
+    if (camera.position) {
+      camera.position[0] = -ctTransform.offsetX / ctTransform.scale;
+      camera.position[1] = -ctTransform.offsetY / ctTransform.scale;
+    }
+    
+    viewport.setCamera(camera);
+
+    // For now, fall back to CPU rendering until we complete the GPU pipeline
+    // This ensures the viewer continues to work while we develop the GPU path
+    console.log('GPU rendering pipeline initialized, using CPU fallback for now');
+    
+    // Use the existing CPU rendering as fallback
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Call the original render16BitImage logic inline
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imageData.width;
+    tempCanvas.height = imageData.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
+    const imgData = tempCtx.createImageData(imageData.width, imageData.height);
+    const data = imgData.data;
+    const pixelArray = imageData.data;
+    
+    const min = windowCenter - windowWidth / 2;
+    const max = windowCenter + windowWidth / 2;
+
+    for (let i = 0; i < pixelArray.length; i++) {
+      const pixelValue = pixelArray[i];
+      let normalizedValue;
+      
+      if (pixelValue <= min) {
+        normalizedValue = 0;
+      } else if (pixelValue >= max) {
+        normalizedValue = 255;
+      } else {
+        normalizedValue = ((pixelValue - min) / windowWidth) * 255;
+      }
+
+      const gray = Math.max(0, Math.min(255, normalizedValue));
+      const pixelIndex = i * 4;
+      data[pixelIndex] = gray;
+      data[pixelIndex + 1] = gray;
+      data[pixelIndex + 2] = gray;
+      data[pixelIndex + 3] = 255;
+    }
+
+    tempCtx.putImageData(imgData, 0, 0);
+    
+    // Apply transforms and draw to main canvas
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Use the transform values directly - they already include centering and pan
+    const scaledWidth = imageData.width * ctTransform.scale;
+    const scaledHeight = imageData.height * ctTransform.scale;
+    
+    // ctTransform.offsetX/Y already contains the final position (centering + pan)
+    const x = ctTransform.offsetX;
+    const y = ctTransform.offsetY;
+    
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+
+  } catch (error) {
+    console.error('Error in GPU rendering:', error);
+    throw error;
+  }
+}

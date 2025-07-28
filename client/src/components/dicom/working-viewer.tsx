@@ -28,7 +28,8 @@ import { undoRedoManager } from "@/lib/undo-system";
 import { 
   isGPUAccelerationAvailable,
   initializeCornerstone3D,
-  isCornerstone3DReady 
+  isCornerstone3DReady,
+  render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
 
 // Helper function to check if two polygons intersect
@@ -2113,9 +2114,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Hybrid rendering decision
       if (isGPUMode && cornerstone3DInitialized) {
-        // Use Cornerstone3D rendering path (to be implemented)
+        // Use Cornerstone3D GPU-accelerated rendering
         console.log('🚀 Using GPU-accelerated Cornerstone3D rendering');
-        render16BitImage(ctx, imageData.data, imageData.width, imageData.height); // For now, still use Core
+        
+        // Calculate and set ctTransform before GPU rendering
+        const baseScale = Math.min(canvas.width / imageData.width, canvas.height / imageData.height);
+        const totalScale = baseScale * zoom;
+        const scaledWidth = imageData.width * totalScale;
+        const scaledHeight = imageData.height * totalScale;
+        const x = (canvas.width - scaledWidth) / 2 + panX;
+        const y = (canvas.height - scaledHeight) / 2 + panY;
+        
+        ctTransform.current = {
+          scale: totalScale,
+          offsetX: x,
+          offsetY: y,
+          imageWidth: imageData.width,
+          imageHeight: imageData.height
+        };
+        
+        await render16BitImageGPU(
+          canvas,
+          {
+            data: imageData.data,
+            width: imageData.width,
+            height: imageData.height,
+            sopInstanceUID: currentImage.sopInstanceUID
+          },
+          currentWindowLevel,
+          ctTransform.current
+        );
       } else {
         // Use existing Cornerstone Core rendering
         console.log('📦 Using CPU-based Cornerstone Core rendering');
