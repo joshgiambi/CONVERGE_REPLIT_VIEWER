@@ -222,25 +222,13 @@ export function BooleanOperationsToolbar({
 
             {/* Main text input field - takes up most space */}
             <div className="flex-1 relative">
-              <div className="relative">
-                <div className="relative">
-                  <Input
-                    ref={inputRef}
-                    value={expression}
-                    onChange={(e) => setExpression(e.target.value)}
-                    placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                    className="w-full h-8 bg-white/10 border-white/30 text-transparent caret-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
-                    style={{ position: 'relative', zIndex: 1 }}
-                  />
-                  
-                  {/* Pills overlay for inline display */}
-                  <div className="absolute inset-0 pointer-events-none flex items-center px-3" style={{ zIndex: 0 }}>
-                    <div className="flex items-center gap-1 text-sm flex-wrap">
-                      {expression ? renderExpressionWithPills() : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <Input
+                ref={inputRef}
+                value={expression}
+                onChange={(e) => setExpression(e.target.value)}
+                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
+                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+              />
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
@@ -260,21 +248,6 @@ export function BooleanOperationsToolbar({
 
             {/* Action buttons */}
             <div className="flex items-center space-x-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (!expression.includes('=')) {
-                    setExpression(expression + ' = ');
-                  }
-                }}
-                disabled={expression.includes('=')}
-                className="h-8 px-3 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 text-xs rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Add output assignment"
-              >
-                = Output
-              </Button>
-              
               <Button
                 variant="outline"
                 size="sm"
@@ -396,6 +369,25 @@ export function BooleanOperationsToolbar({
               >
                 <span className="text-xs font-medium mr-1">( )</span>
                 <span className="text-xs font-medium">Group</span>
+              </Button>
+              
+              {/* Vertical divider */}
+              <div className="h-6 w-px bg-gray-600" />
+              
+              {/* Output related buttons */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (!expression.includes('=')) {
+                    setExpression(expression + ' = ');
+                  }
+                }}
+                disabled={expression.includes('=')}
+                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Add output assignment"
+              >
+                = Output
               </Button>
               
               <Button
