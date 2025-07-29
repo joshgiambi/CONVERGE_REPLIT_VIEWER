@@ -3,7 +3,7 @@
  * Replaces the monolithic 4000+ line WorkingViewer component
  */
 
-import { useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 
 // Services
 import { fetchSeriesImages } from './services/apiService';
@@ -138,17 +138,62 @@ export const RefactoredViewer = forwardRef<RefactoredViewerRef, RefactoredViewer
     keyboardNavigationDisabled
   });
 
-  // Transform state refs for tool integration  
+  // Transform state refs for tool integration - must be synchronized with MainViewport  
   const ctTransform = useRef<any>({ scale: 1, offsetX: 0, offsetY: 0 });
 
-  // Placeholder coordinate transformation functions
-  const worldToCanvas = useCallback((x: number, y: number): [number, number] => {
-    return [x, y]; // Simplified for refactor
-  }, []);
+  // Update ctTransform when viewport state changes
+  useEffect(() => {
+    if (viewportState) {
+      ctTransform.current = {
+        scale: viewportState.zoom,
+        offsetX: viewportState.panX,
+        offsetY: viewportState.panY
+      };
+    }
+  }, [viewportState.zoom, viewportState.panX, viewportState.panY]);
+
+  // Proper coordinate transformation functions
+  const worldToCanvas = useCallback((worldX: number, worldY: number): [number, number] => {
+    if (!imageMetadata) return [0, 0];
+    
+    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    
+    // Parse DICOM metadata
+    const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+    const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+    const [rowSpacing, colSpacing] = pixelSpacing;
+    
+    // Convert world to pixel coordinates
+    const pixelX = (worldX - imagePosition[0]) / colSpacing;
+    const pixelY = (worldY - imagePosition[1]) / rowSpacing;
+    
+    // Apply zoom/pan transform
+    const canvasX = transform.offsetX + (pixelX * transform.scale);
+    const canvasY = transform.offsetY + (pixelY * transform.scale);
+    
+    return [canvasX, canvasY];
+  }, [imageMetadata]);
   
-  const canvasToWorld = useCallback((x: number, y: number): [number, number] => {
-    return [x, y]; // Simplified for refactor
-  }, []);
+  const canvasToWorld = useCallback((canvasX: number, canvasY: number): [number, number] => {
+    if (!imageMetadata) return [0, 0];
+    
+    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    
+    // Parse DICOM metadata
+    const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+    const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+    const [rowSpacing, colSpacing] = pixelSpacing;
+    
+    // Apply inverse CT transform to get raw pixel coordinates
+    const pixelX = (canvasX - transform.offsetX) / transform.scale;
+    const pixelY = (canvasY - transform.offsetY) / transform.scale;
+    
+    // Convert pixel coordinates to world coordinates
+    const worldX = imagePosition[0] + (pixelX * colSpacing);
+    const worldY = imagePosition[1] + (pixelY * rowSpacing);
+    
+    return [worldX, worldY];
+  }, [imageMetadata]);
 
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
@@ -268,18 +313,20 @@ export const RefactoredViewer = forwardRef<RefactoredViewerRef, RefactoredViewer
         )}
 
         {/* Tool overlays integrated with new architecture */}
-        <ToolRenderer
-          selectedTool={selectedTool}
-          canvasRef={mainViewportRef}
-          currentImage={currentImage}
-          selectedForEdit={selectedForEdit}
-          rtStructures={rtStructures}
-          imageMetadata={imageMetadata}
-          ctTransform={ctTransform}
-          onContourUpdate={handleContourUpdate}
-          worldToCanvas={worldToCanvas}
-          canvasToWorld={canvasToWorld}
-        />
+        {selectedTool && mainViewportRef?.current?.canvas && (
+          <ToolRenderer
+            selectedTool={selectedTool}
+            canvasRef={{ current: mainViewportRef.current.canvas }}
+            currentImage={currentImage}
+            selectedForEdit={selectedForEdit}
+            rtStructures={rtStructures}
+            imageMetadata={imageMetadata}
+            ctTransform={ctTransform}
+            onContourUpdate={handleContourUpdate}
+            worldToCanvas={worldToCanvas}
+            canvasToWorld={canvasToWorld}
+          />
+        )}
 
         {/* RT Structure overlay and Fusion controls - integration planned for next phase */}
         {/* TODO: Integrate RTStructureOverlay and FusionControlPanel with modular architecture */}
