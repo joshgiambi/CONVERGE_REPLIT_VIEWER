@@ -207,36 +207,20 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
-        {/* Preview Panel - Above Main Toolbar */}
-        {livePreview && expression && (
-          <div className="backdrop-blur-md border border-blue-900/60 rounded-t-xl px-4 py-2 shadow-lg bg-blue-950/90 w-[900px] mb-[-1px] border-b-0">
-            <div className="text-sm font-mono text-white/90">
-              {expression}
-              <span className="text-yellow-400 mx-2">=</span>
-              <span className="text-green-300">
-                {outputMode === 'new' 
-                  ? (newStructureName || '[New Structure]')
-                  : (outputStructure || '[Select Output]')
-                }
-              </span>
-            </div>
-          </div>
-        )}
-        
-        <div className="backdrop-blur-md border border-blue-900/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/90 w-[900px]">
+        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/80 w-[900px]">
           {/* Header Row */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center space-x-2">
               <div 
                 className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
-                style={{ backgroundColor: 'rgb(29, 78, 216)' }}
+                style={{ backgroundColor: 'rgb(59, 130, 246)' }}
               />
               <span className="text-white text-sm font-medium drop-shadow-sm">Boolean Operations</span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowInstructions(!showInstructions)}
-                className="h-6 w-6 p-0 text-blue-300 hover:text-blue-200 hover:bg-blue-950/40 rounded-lg"
+                className="h-6 w-6 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20 rounded-lg"
                 title="Show instructions"
               >
                 <Info size={12} />
@@ -268,7 +252,7 @@ export function BooleanOperationsToolbar({
                   }
                 }}
                 placeholder="Enter boolean expression (e.g., SpinalCord ∪ SpinalCord_05 - BODY)"
-                className="w-full h-10 bg-blue-950/40 border-blue-800/50 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                className="w-full h-10 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
               />
               
               {/* Auto-complete suggestions */}
@@ -286,6 +270,14 @@ export function BooleanOperationsToolbar({
                 </div>
               )}
             </div>
+            
+            {/* Expression with pills preview */}
+            {expression && availableStructures.length > 0 && (
+              <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
+                <div className="text-xs text-gray-400 mb-1">Preview:</div>
+                {renderExpressionWithPills()}
+              </div>
+            )}
           </div>
 
           {/* Output Row: Where results go */}
@@ -299,7 +291,7 @@ export function BooleanOperationsToolbar({
                 onClick={() => setOutputMode('existing')}
                 className={`h-8 px-3 text-xs rounded-lg ${
                   outputMode === 'existing'
-                    ? 'bg-blue-950/60 border-blue-700 text-blue-200'
+                    ? 'bg-blue-900/40 border-blue-400 text-blue-200'
                     : 'bg-white/5 border-white/20 text-gray-400 hover:text-white'
                 }`}
               >
@@ -311,7 +303,7 @@ export function BooleanOperationsToolbar({
                 onClick={() => setOutputMode('new')}
                 className={`h-8 px-3 text-xs rounded-lg ${
                   outputMode === 'new'
-                    ? 'bg-blue-950/60 border-blue-700 text-blue-200'
+                    ? 'bg-blue-900/40 border-blue-400 text-blue-200'
                     : 'bg-white/5 border-white/20 text-gray-400 hover:text-white'
                 }`}
               >
@@ -324,7 +316,7 @@ export function BooleanOperationsToolbar({
                   <select
                     value={outputStructure}
                     onChange={(e) => setOutputStructure(e.target.value)}
-                    className="w-full h-8 bg-blue-950/40 border border-blue-800/50 text-white text-sm rounded-lg backdrop-blur-sm px-2 [&>option]:bg-blue-950 [&>option]:text-white"
+                    className="w-full h-8 bg-white/10 border border-white/30 text-white text-sm rounded-lg backdrop-blur-sm px-2 [&>option]:bg-gray-900 [&>option]:text-white"
                   >
                     <option value="">Select structure...</option>
                     {availableStructures.map(structure => (
@@ -337,7 +329,7 @@ export function BooleanOperationsToolbar({
                       value={newStructureName}
                       onChange={(e) => setNewStructureName(e.target.value)}
                       placeholder="New structure name"
-                      className="flex-1 h-8 bg-blue-950/40 border-blue-800/50 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                      className="flex-1 h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
                     />
                     <input
                       type="color"
@@ -369,7 +361,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(' ∩ ')}
-                className="h-7 px-2 bg-blue-950/50 border-2 border-blue-700/60 text-blue-200 hover:text-blue-100 hover:bg-blue-900/60 hover:border-blue-600 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 hover:border-blue-300 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Intersection (AND)"
               >
                 ∩
