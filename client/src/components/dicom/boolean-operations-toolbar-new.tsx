@@ -97,7 +97,7 @@ export function BooleanOperationsToolbar({
     const parts = expression.split(regex).filter(part => part && part.trim());
     
     return (
-      <div className="flex items-center flex-wrap gap-1">
+      <span className="flex items-center">
         {parts.map((part, index) => {
           const trimmedPart = part.trim();
           if (!trimmedPart) return null;
@@ -118,12 +118,8 @@ export function BooleanOperationsToolbar({
             return (
               <span
                 key={index}
-                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold underline border"
-                style={{ 
-                  backgroundColor: color + '20',
-                  borderColor: color + '80',
-                  color: color
-                }}
+                className="px-1 text-xs font-bold"
+                style={{ color: color }}
               >
                 {trimmedPart}
               </span>
@@ -132,7 +128,7 @@ export function BooleanOperationsToolbar({
             return (
               <span
                 key={index}
-                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-900/50 text-red-300 border border-red-500/70 animate-pulse"
+                className="px-1 text-xs font-medium text-red-300"
                 title={`Unknown structure: ${trimmedPart}`}
               >
                 {trimmedPart}
@@ -159,10 +155,10 @@ export function BooleanOperationsToolbar({
             );
           } else {
             // Render other text (spaces, etc)
-            return <span key={index} className="text-white">{trimmedPart}</span>;
+            return <span key={index} className="text-white px-1">{trimmedPart}</span>;
           }
         })}
-      </div>
+      </span>
     );
   };
 
@@ -321,16 +317,14 @@ export function BooleanOperationsToolbar({
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder=""
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm caret-white relative z-20"
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20"
                 style={{ caretColor: 'white' }}
               />
               
               {/* Visual overlay with syntax highlighting - positioned behind input */}
-              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-10">
+              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-10 font-sans">
                 {expression ? (
-                  <div className="flex items-center font-mono">
-                    {renderExpressionWithPills()}
-                  </div>
+                  renderExpressionWithPills()
                 ) : (
                   <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
                 )}
