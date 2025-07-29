@@ -362,7 +362,7 @@ export function eraseBrushFromContour(
   brushPoints: number[][],
   brushSize: number
 ): number[] {
-  // Polygon subtraction implemented in clipper-boolean-operations.ts
+  // TODO: Implement proper polygon subtraction
   console.warn('Polygon subtraction not yet implemented');
   return existingContour;
 }
