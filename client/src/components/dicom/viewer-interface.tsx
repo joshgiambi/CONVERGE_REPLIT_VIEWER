@@ -7,7 +7,7 @@ import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
-import { BooleanOperationsToolbar } from './boolean-operations-toolbar';
+import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 

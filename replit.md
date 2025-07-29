@@ -369,6 +369,18 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Grid-based rasterization boundary extraction tends to follow inner edge of pixels
     - Posterior border affected most as it's the polygon closure point
     - 0.1mm resolution makes shrinkage virtually invisible in medical context
+- July 29, 2025: Boolean Operations Toolbar Redesign - COMPLETED ✅
+  - ✅ Redesigned boolean operations toolbar to match contour editing toolbar width (600px)
+  - ✅ Input field now takes up most of the top row with Clear, Preview, and Run buttons beside it
+  - ✅ Added Undo and Redo buttons in bottom row (currently disabled, ready for integration)
+  - ✅ Removed expand/minimize functionality for a cleaner, fixed-size interface
+  - ✅ Maintained all existing functionality: auto-complete, new structure creation, live preview
+  - ✅ Boolean operator buttons moved to bottom row for better layout consistency
+  - Technical details:
+    - Created new boolean-operations-toolbar-new.tsx component with streamlined design
+    - Fixed width matches contour editing toolbar for visual consistency
+    - Input field is flex-1 for maximum space utilization
+    - Undo/Redo buttons positioned in bottom-right corner
 - July 26, 2025: Complete System Integration and Fix - COMPREHENSIVE OVERHAUL COMPLETED ✅
   - ✅ **BRUSH TOOL**: Fixed coordinate system, dragging range, and mouse handling - confirmed working
   - ✅ **PEN TOOL V2**: Complete Eclipse-style pen tool rewrite with boolean operations - integrated and functional
