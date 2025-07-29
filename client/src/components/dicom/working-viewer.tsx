@@ -120,8 +120,32 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
 
   // Viewport interaction state (zoom, pan, window/level)
   const viewportState = useViewportState({
-    keyboardNavigationDisabled
+    keyboardNavigationDisabled,
+    initialWindowLevel: windowLevel,
+    onWindowLevelChange: (newWindowLevel) => {
+      // Update image metadata if callback provided
+      if (onImageMetadataChange) {
+        onImageMetadataChange({ windowLevel: newWindowLevel });
+      }
+    }
   });
+
+  // Override wheel event to handle image scrolling instead of just zoom
+  const handleCanvasWheel = (event: React.WheelEvent) => {
+    event.preventDefault();
+    
+    // If Ctrl/Cmd is held, do zoom behavior
+    if (event.ctrlKey || event.metaKey) {
+      viewportState.handleWheel(event);
+    } else {
+      // Default: scroll through images
+      if (event.deltaY < 0) {
+        goToPrevious();
+      } else {
+        goToNext();
+      }
+    }
+  };
 
   // Secondary images for fusion
   const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
@@ -383,7 +407,7 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
             onMouseDown={viewportState.handleMouseDown}
             onMouseMove={viewportState.handleMouseMove}
             onMouseUp={viewportState.handleMouseUp}
-            onWheel={viewportState.handleWheel}
+            onWheel={handleCanvasWheel}
             keyboardNavigationDisabled={keyboardNavigationDisabled}
           />
         </div>

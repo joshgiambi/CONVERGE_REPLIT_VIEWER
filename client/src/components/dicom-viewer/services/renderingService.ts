@@ -109,15 +109,73 @@ export function renderRTStructures(
   rtStructures: any,
   currentSlicePosition: number,
   structureVisibility: Map<number, boolean>,
-  contourSettings: { width: number; opacity: number }
+  selectedForEdit: number | null,
+  contourSettings: { width: number; opacity: number },
+  viewportState: { zoom: number; panX: number; panY: number }
 ) {
-  if (!canvas || !rtStructures) return;
+  if (!canvas || !rtStructures?.structures) return;
   
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   
-  // TODO: Implement RT structure rendering
   console.log('Rendering RT structures at slice:', currentSlicePosition);
+  
+  // Extract transform info for coordinate mapping
+  const canvasWidth = canvas.width;
+  const canvasHeight = canvas.height;
+  const { zoom, panX, panY } = viewportState;
+  
+  // Render each structure's contours at current slice
+  rtStructures.structures.forEach((structure: any) => {
+    if (!structureVisibility.get(structure.id)) return;
+    
+    const contours = structure.contours || [];
+    const structureColor = structure.color || '#00FF00';
+    
+    // Find contours at current slice position
+    const contoursAtSlice = contours.filter((contour: any) => {
+      return Math.abs(contour.slicePosition - currentSlicePosition) < 0.5;
+    });
+    
+    if (contoursAtSlice.length === 0) return;
+    
+    // Set drawing style
+    ctx.strokeStyle = structureColor;
+    ctx.lineWidth = contourSettings.width;
+    ctx.globalAlpha = selectedForEdit === structure.id ? 1.0 : contourSettings.opacity;
+    
+    // Draw each contour
+    contoursAtSlice.forEach((contour: any) => {
+      if (!contour.points || contour.points.length < 6) return;
+      
+      ctx.beginPath();
+      let isFirstPoint = true;
+      
+      // Process points in pairs (x, y coordinates)
+      for (let i = 0; i < contour.points.length; i += 2) {
+        const worldX = contour.points[i];
+        const worldY = contour.points[i + 1];
+        
+        // Convert world coordinates to canvas coordinates
+        // This is a simplified transform - in real implementation would use proper DICOM transforms
+        const canvasX = (worldX * zoom) + (canvasWidth / 2) + panX;
+        const canvasY = (worldY * zoom) + (canvasHeight / 2) + panY;
+        
+        if (isFirstPoint) {
+          ctx.moveTo(canvasX, canvasY);
+          isFirstPoint = false;
+        } else {
+          ctx.lineTo(canvasX, canvasY);
+        }
+      }
+      
+      ctx.closePath();
+      ctx.stroke();
+    });
+    
+    // Reset alpha
+    ctx.globalAlpha = 1.0;
+  });
 }
 
 /**
@@ -128,13 +186,17 @@ export function renderFusionOverlayOnCanvas(
   primaryImage: any,
   secondaryImages: any[],
   registrationMatrix: number[] | null,
-  fusionOpacity: number
+  fusionOpacity: number,
+  secondaryWindowLevel: { window: number; level: number },
+  viewportState: { zoom: number; panX: number; panY: number }
 ) {
-  if (!canvas || !primaryImage || !secondaryImages.length || !registrationMatrix) return;
+  if (!canvas || !primaryImage || !secondaryImages.length || !registrationMatrix || fusionOpacity === 0) return;
   
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   
-  // TODO: Implement fusion overlay rendering
   console.log('Rendering fusion overlay with opacity:', fusionOpacity);
+  
+  // TODO: Implement actual fusion overlay rendering
+  // For now, just placeholder to prevent errors
 }
