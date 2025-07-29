@@ -148,6 +148,7 @@ interface WorkingViewerProps {
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
   keyboardNavigationDisabled?: boolean;
+  isCrosshairsActive?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -180,6 +181,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     imageCache,
     orientation = 'axial',
     keyboardNavigationDisabled = false,
+    isCrosshairsActive = false,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
