@@ -290,8 +290,8 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="flex items-start space-x-3">
-        {/* Main toolbar panel - even larger */}
-        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[800px]">
+        {/* Main toolbar panel - 20% larger */}
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[960px]">
 
           {/* First Row: Title, Info, Text Field */}
           <div className="flex items-center space-x-3 mb-3">
@@ -428,7 +428,7 @@ export function BooleanOperationsToolbar({
                     }
                   }, 50);
                 }}
-                className="h-7 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-yellow-900/30 border-2 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Parentheses"
               >
                 <span className="text-xs font-medium mr-1">( )</span>
@@ -448,7 +448,7 @@ export function BooleanOperationsToolbar({
                   }
                 }}
                 disabled={expression.includes('=')}
-                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-7 px-2 bg-orange-900/30 border-2 border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-lg backdrop-blur-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Add output assignment"
               >
                 = Output
@@ -558,20 +558,23 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-        {/* Floating action buttons - Preview and Run only, slightly larger */}
+        {/* Floating action buttons - Preview and Run with icons */}
         <div className="flex flex-col space-y-1">
           <Button
             variant="outline"
             size="sm"
             onClick={() => setLivePreview(!livePreview)}
-            className={`h-7 w-14 rounded backdrop-blur-sm shadow-sm border text-[11px] font-medium p-0 ${
+            className={`h-8 w-16 rounded backdrop-blur-sm shadow-sm border text-[10px] font-medium p-1 mb-2 ${
               livePreview 
                 ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             }`}
             title="Toggle preview"
           >
-            Preview
+            <div className="flex flex-col items-center">
+              <Eye className="w-3 h-3 mb-0.5" />
+              <span>Preview</span>
+            </div>
           </Button>
           
           <Button
@@ -579,10 +582,13 @@ export function BooleanOperationsToolbar({
             size="sm"
             onClick={handleExecute}
             disabled={!expression.trim()}
-            className="h-7 w-14 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[11px] font-medium p-0"
+            className="h-8 w-16 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-1"
             title="Execute expression"
           >
-            Run
+            <div className="flex flex-col items-center">
+              <Play className="w-3 h-3 mb-0.5" />
+              <span>Run</span>
+            </div>
           </Button>
         </div>
       </div>
