@@ -390,7 +390,7 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
           <MainViewport
             ref={mainViewportRef}
             currentImage={currentImageWithData || currentImage}
-            rtStructures={rtStructures}
+            rtStructures={showStructures ? rtStructures : null}
             secondaryImages={secondaryImages}
             registrationMatrix={registrationMatrix}
             fusionOpacity={fusionOpacity}
@@ -411,6 +411,24 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
             keyboardNavigationDisabled={keyboardNavigationDisabled}
           />
         </div>
+
+        {/* Tool integration restored from working backup */}
+        {brushToolState?.isActive && brushToolState?.tool && (
+          <div className="absolute inset-0 pointer-events-auto">
+            <ToolRenderer
+              selectedTool={brushToolState.tool}
+              canvasRef={mainViewportRef}
+              currentImage={currentImageWithData || currentImage}
+              selectedForEdit={selectedForEdit}
+              rtStructures={rtStructures}
+              imageMetadata={imageMetadata}
+              ctTransform={ctTransform}
+              onContourUpdate={handleContourUpdate}
+              worldToCanvas={worldToCanvas}
+              canvasToWorld={canvasToWorld}
+            />
+          </div>
+        )}
 
         {/* MPR floating canvases */}
         {isMPRVisible && (

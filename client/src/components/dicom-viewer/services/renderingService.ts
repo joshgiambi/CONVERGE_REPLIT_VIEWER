@@ -17,21 +17,29 @@ export function render16BitImage(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // Handle parsed pixel data from image
+  // Handle image data formats exactly like the working backup
   let pixelArray, width, height;
   
   if (imageData.parsedPixelData) {
-    // Standard image object format
+    // Standard parsed format from DICOM loader
     pixelArray = imageData.parsedPixelData;
     width = imageData.columns || imageData.width || 512;
     height = imageData.rows || imageData.height || 512;
-  } else if (imageData.data) {
+  } else if (imageData.data && Array.isArray(imageData.data)) {
     // Direct pixel data format
     pixelArray = imageData.data;
     width = imageData.width || 512;
     height = imageData.height || 512;
   } else {
-    console.error('Invalid image data format');
+    // Try to extract from image cache or handle missing data
+    console.warn('Image data format not recognized, available keys:', Object.keys(imageData));
+    console.warn('Image data sample:', {
+      hasData: !!imageData.data,
+      dataType: typeof imageData.data,
+      hasPixelData: !!imageData.parsedPixelData,
+      width: imageData.width || imageData.columns,
+      height: imageData.height || imageData.rows
+    });
     return;
   }
 
@@ -118,48 +126,63 @@ export function renderRTStructures(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   
-  console.log('Rendering RT structures at slice:', currentSlicePosition);
+  console.log('Rendering RT structures at slice:', currentSlicePosition, 'Total structures:', rtStructures.structures.length);
   
-  // Extract transform info for coordinate mapping
+  // Use the exact same transform logic as the working backup
   const canvasWidth = canvas.width;
   const canvasHeight = canvas.height;
   const { zoom, panX, panY } = viewportState;
   
+  // Calculate scaling exactly like the working backup
+  const imageWidth = 512;  // Standard DICOM size from backup
+  const imageHeight = 512;
+  const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+  const totalScale = baseScale * zoom;
+  const scaledWidth = imageWidth * totalScale;
+  const scaledHeight = imageHeight * totalScale;
+  
+  // Center position with pan offset (exactly like backup)
+  const imageX = (canvasWidth - scaledWidth) / 2 + panX;
+  const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+  
+  let structuresRendered = 0;
+  
   // Render each structure's contours at current slice
   rtStructures.structures.forEach((structure: any) => {
-    if (!structureVisibility.get(structure.id)) return;
+    // Use structure.roiNumber for visibility check (like backup)
+    const isVisible = structureVisibility.get(structure.roiNumber) !== false;
+    if (!isVisible) return;
     
     const contours = structure.contours || [];
-    const structureColor = structure.color || '#00FF00';
+    const structureColor = `rgb(${structure.color[0]}, ${structure.color[1]}, ${structure.color[2]})`;
     
-    // Find contours at current slice position
+    // Find contours at current slice position (exactly like backup)
     const contoursAtSlice = contours.filter((contour: any) => {
-      return Math.abs(contour.slicePosition - currentSlicePosition) < 0.5;
+      return Math.abs(contour.slicePosition - currentSlicePosition) < 1.0; // Slightly more tolerance
     });
     
     if (contoursAtSlice.length === 0) return;
     
-    // Set drawing style
+    // Set drawing style exactly like backup
     ctx.strokeStyle = structureColor;
     ctx.lineWidth = contourSettings.width;
-    ctx.globalAlpha = selectedForEdit === structure.id ? 1.0 : contourSettings.opacity;
+    ctx.globalAlpha = selectedForEdit === structure.roiNumber ? 1.0 : contourSettings.opacity;
     
-    // Draw each contour
+    // Draw each contour exactly like backup
     contoursAtSlice.forEach((contour: any) => {
       if (!contour.points || contour.points.length < 6) return;
       
       ctx.beginPath();
       let isFirstPoint = true;
       
-      // Process points in pairs (x, y coordinates)
-      for (let i = 0; i < contour.points.length; i += 2) {
+      // Process points in triplets (x, y, z coordinates) - backup used i += 3
+      for (let i = 0; i < contour.points.length; i += 3) {
         const worldX = contour.points[i];
         const worldY = contour.points[i + 1];
         
-        // Convert world coordinates to canvas coordinates
-        // This is a simplified transform - in real implementation would use proper DICOM transforms
-        const canvasX = (worldX * zoom) + (canvasWidth / 2) + panX;
-        const canvasY = (worldY * zoom) + (canvasHeight / 2) + panY;
+        // Apply exact coordinate transformation from backup
+        const canvasX = imageX + (worldX * totalScale);
+        const canvasY = imageY + (worldY * totalScale);
         
         if (isFirstPoint) {
           ctx.moveTo(canvasX, canvasY);
@@ -171,11 +194,14 @@ export function renderRTStructures(
       
       ctx.closePath();
       ctx.stroke();
+      structuresRendered++;
     });
     
     // Reset alpha
     ctx.globalAlpha = 1.0;
   });
+  
+  console.log('✅ RT structures rendered:', structuresRendered, 'contours at slice', currentSlicePosition);
 }
 
 /**
