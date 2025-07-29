@@ -290,8 +290,8 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="flex items-start space-x-3">
-        {/* Main toolbar panel */}
-        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[600px]">
+        {/* Main toolbar panel - 20% larger */}
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[720px]">
 
           {/* First Row: Title, Info, Text Field */}
           <div className="flex items-center space-x-3 mb-3">
@@ -471,8 +471,18 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Prominent Undo/Redo buttons */}
+            {/* Clear, Undo/Redo buttons */}
             <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClear}
+                className="h-7 px-2 bg-red-900/30 border border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm text-xs"
+                title="Clear expression"
+              >
+                Clear
+              </Button>
+              
               <Button
                 variant="outline"
                 size="sm"
@@ -546,30 +556,20 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-        {/* Floating action buttons column - outside main panel, smaller size */}
+        {/* Floating action buttons - Preview and Run only, slightly larger */}
         <div className="flex flex-col space-y-1">
           <Button
             variant="outline"
             size="sm"
-            onClick={handleClear}
-            className="h-6 w-12 bg-red-900/30 border border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-0"
-            title="Clear expression"
-          >
-            Clear
-          </Button>
-          
-          <Button
-            variant="outline"
-            size="sm"
             onClick={() => setLivePreview(!livePreview)}
-            className={`h-6 w-12 rounded backdrop-blur-sm shadow-sm border text-[10px] font-medium p-0 ${
+            className={`h-7 w-14 rounded backdrop-blur-sm shadow-sm border text-[11px] font-medium p-0 ${
               livePreview 
                 ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             }`}
             title="Toggle preview"
           >
-            View
+            Preview
           </Button>
           
           <Button
@@ -577,7 +577,7 @@ export function BooleanOperationsToolbar({
             size="sm"
             onClick={handleExecute}
             disabled={!expression.trim()}
-            className="h-6 w-12 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-0"
+            className="h-7 w-14 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[11px] font-medium p-0"
             title="Execute expression"
           >
             Run
