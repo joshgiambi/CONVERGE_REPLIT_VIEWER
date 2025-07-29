@@ -29,6 +29,10 @@ import { ToolRenderer } from '../dicom-viewer/components/ToolRenderer';
 // Legacy tool imports for compatibility with existing interfaces
 import { RTStructureOverlay } from './rt-structure-overlay';
 import { FusionControlPanel } from './fusion-control-panel';
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export interface WorkingViewerProps {
   seriesId: number;
@@ -125,6 +129,10 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
   
   // MPR visibility state
   const [isMPRVisible, setIsMPRVisible] = useState(false);
+  const [showStructures, setShowStructures] = useState(true);
+  
+  // Canvas reference for direct canvas operations
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Get current image with parsed data for rendering
   const [currentImageWithData, setCurrentImageWithData] = useState<any>(null);
@@ -274,24 +282,87 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
   }
 
   return (
-    <div className={`relative w-full h-full bg-black ${className}`}>
-      {/* Viewer toolbar */}
-      <ViewerToolbar 
-        currentIndex={currentIndex}
-        totalImages={images.length}
-        currentSlicePosition={currentSlicePos}
-        windowLevel={viewportState.windowLevel}
-        orientation={orientation}
-        isLoading={isLoading}
-        onPrevious={goToPrevious}
-        onNext={goToNext}
-        onMPRToggle={() => setIsMPRVisible(!isMPRVisible)}
-        isMPRVisible={isMPRVisible}
-      />
+    <Card className="bg-gradient-to-br from-gray-900 to-black border-gray-700/50 shadow-2xl h-full flex flex-col overflow-hidden">
+      {/* Titlebar with navigation and info */}
+      <div className="bg-gradient-to-r from-gray-800/90 to-gray-900/90 border-b border-gray-700/50 backdrop-blur-sm px-4 py-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <h3 className="text-lg font-semibold text-white tracking-wide">
+              CT Scan - {orientation.charAt(0).toUpperCase() + orientation.slice(1)}
+            </h3>
+            
+            {!isLoading && images.length > 0 && (
+              <>
+                <Badge className="bg-gray-700/60 text-gray-200 border border-gray-600/40 backdrop-blur-sm">
+                  {currentIndex + 1} / {images.length}
+                </Badge>
+                
+                {/* Window/Level/Z position pills */}
+                <Badge className="bg-cyan-900/40 text-cyan-200 border border-cyan-600/30 backdrop-blur-sm">
+                  W: {Math.round(viewportState.windowLevel.window)}
+                </Badge>
+                <Badge className="bg-orange-900/40 text-orange-200 border border-orange-600/30 backdrop-blur-sm">
+                  L: {Math.round(viewportState.windowLevel.level)}
+                </Badge>
+                {imageMetadata && orientation === 'axial' && (
+                  <Badge className="bg-purple-900/40 text-purple-200 border border-purple-600/30 backdrop-blur-sm">
+                    Z: {currentSlicePos?.toFixed(1) || (currentIndex + 1)}
+                  </Badge>
+                )}
+              </>
+            )}
+            {secondarySeriesId && secondaryImages.length > 0 && (
+              <Badge className="flex items-center gap-1 border backdrop-blur-sm bg-purple-900/40 text-purple-200 border-purple-600/30">
+                <div className="w-2 h-2 rounded-full animate-pulse bg-purple-400" />
+                MR Fusion
+                <span className="text-purple-300">
+                  ({Math.round(fusionOpacity * 100)}%)
+                </span>
+              </Badge>
+            )}
+          </div>
 
-      <div className="relative flex-1 overflow-hidden">
-        {/* Main viewport */}
-        <div className="flex justify-center items-center h-full">
+          <div className="flex items-center space-x-2">
+            {rtStructures && (
+              <Button
+                size="sm"
+                variant={showStructures ? "default" : "ghost"}
+                onClick={() => setShowStructures(!showStructures)}
+                className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
+                  showStructures 
+                    ? 'bg-green-600/80 hover:bg-green-700/80 text-white border border-green-500/50 shadow-sm backdrop-blur-sm' 
+                    : 'hover:bg-gray-700/50 hover:text-white'
+                }`}
+              >
+                RT ({rtStructures?.structures?.length || 0})
+              </Button>
+            )}
+            
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={goToPrevious}
+              disabled={currentIndex === 0}
+              className="h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={goToNext}
+              disabled={currentIndex >= images.length - 1}
+              className="h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
+        <div className="relative w-full h-full flex items-center justify-center">
           <MainViewport
             ref={mainViewportRef}
             currentImage={currentImageWithData || currentImage}
@@ -371,7 +442,7 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 });
 
