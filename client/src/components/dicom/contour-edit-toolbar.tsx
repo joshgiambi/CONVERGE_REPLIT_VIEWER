@@ -31,7 +31,8 @@ import {
   Grid3x3,
   Eraser,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  Workflow
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -64,6 +65,7 @@ interface ContourEditToolbarProps {
   onTargetStructureSelect?: (structureId: number | null) => void;
   seriesId?: number;
   imageMetadata?: any;
+  onOpenBooleanOperations?: () => void;
 }
 
 export function ContourEditToolbar({ 
@@ -78,7 +80,8 @@ export function ContourEditToolbar({
   availableStructures = [],
   onTargetStructureSelect,
   seriesId,
-  imageMetadata
+  imageMetadata,
+  onOpenBooleanOperations
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -118,9 +121,17 @@ export function ContourEditToolbar({
   const handleToolActivation = (toolId: string) => {
     console.log('TOOLBAR: Tool activated:', toolId);
     
-    if (toolId === 'grow' || toolId === 'boolean') {
-      // For grow and boolean buttons, just toggle the settings panel directly
+    if (toolId === 'grow') {
+      // For grow button, just toggle the settings panel directly
       setShowSettings(showSettings === toolId ? null : toolId);
+      return;
+    }
+    
+    if (toolId === 'boolean') {
+      // Open boolean operations toolbar instead of being a separate tool
+      if (onOpenBooleanOperations) {
+        onOpenBooleanOperations();
+      }
       return;
     }
     
@@ -456,7 +467,7 @@ export function ContourEditToolbar({
     { id: 'erase', icon: Scissors, label: 'Erase' },
     { id: 'grow', icon: ArrowUpFromLine, label: 'Grow/Shrink' },
     { id: 'margin', icon: Maximize2, label: 'Margin' },
-    { id: 'boolean', icon: Layers, label: 'Boolean' }
+    { id: 'boolean', icon: Workflow, label: 'Boolean' }
   ];
 
   const renderSettingsPanel = () => {

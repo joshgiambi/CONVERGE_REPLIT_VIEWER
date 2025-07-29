@@ -640,6 +640,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}
           isContourEditActive={!!selectedForEdit}
+          isContourOperationsActive={showBooleanOperations}
           className="toolbar-custom"
         />
       )}
@@ -677,6 +678,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           seriesId={selectedSeries?.id}
           imageMetadata={imageMetadata}
+          onOpenBooleanOperations={() => {
+            setIsContourEditMode(false);
+            setShowBooleanOperations(true);
+          }}
         />
       )}
 

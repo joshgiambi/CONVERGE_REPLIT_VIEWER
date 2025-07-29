@@ -17,7 +17,8 @@ import {
   Layers,
   Grid3x3,
   Activity,
-  Crosshair
+  Crosshair,
+  Workflow
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -30,6 +31,7 @@ interface ViewerToolbarProps {
   onContourEdit?: () => void;
   onContourOperations?: () => void;
   isContourEditActive?: boolean;
+  isContourOperationsActive?: boolean;
   isPanActive?: boolean;
   isMeasureActive?: boolean;
   isCrosshairsActive?: boolean;
@@ -55,6 +57,7 @@ export function ViewerToolbar({
   onContourEdit,
   onContourOperations,
   isContourEditActive = false,
+  isContourOperationsActive = false,
   isPanActive = false,
   isMeasureActive = false,
   isCrosshairsActive = false,
@@ -169,11 +172,19 @@ export function ViewerToolbar({
             {/* Contour Edit Button */}
             {onContourEdit && (
               <div className="relative group">
-                <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                  isContourEditActive 
+                    ? 'border-green-400/70 bg-green-600/20 shadow-green-500/20' 
+                    : 'border-green-500/50'
+                }`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
+                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                      isContourEditActive
+                        ? 'text-green-300 hover:text-green-200'
+                        : 'text-green-400 hover:text-green-300 hover:bg-white/20'
+                    }`}
                     onClick={onContourEdit}
                   >
                     <Edit3 className="w-4 h-4" />
@@ -189,14 +200,22 @@ export function ViewerToolbar({
             {/* Contour Operations Button */}
             {onContourOperations && (
               <div className="relative group">
-                <div className="bg-white/10 backdrop-blur-md border border-blue-500/50 rounded-lg shadow-lg">
+                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                  isContourOperationsActive 
+                    ? 'border-blue-400/70 bg-blue-600/20 shadow-blue-500/20' 
+                    : 'border-blue-500/50'
+                }`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-white/20 transition-all duration-200"
+                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                      isContourOperationsActive
+                        ? 'text-blue-300 hover:text-blue-200'
+                        : 'text-blue-400 hover:text-blue-300 hover:bg-white/20'
+                    }`}
                     onClick={onContourOperations}
                   >
-                    <Activity className="w-4 h-4" />
+                    <Workflow className="w-4 h-4" />
                   </Button>
                 </div>
                 {/* Tooltip */}
