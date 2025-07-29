@@ -698,7 +698,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }
           setShowBooleanOperations(false);
         }}
-        activeTool={brushToolState.tool}
       />
 
       {/* Error Modal */}
