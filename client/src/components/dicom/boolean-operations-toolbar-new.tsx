@@ -201,13 +201,14 @@ export function BooleanOperationsToolbar({
       const newValue = expression.slice(0, start) + text + expression.slice(end);
       setExpression(newValue);
       
-      setTimeout(() => {
+      // Use requestAnimationFrame for better synchronization with DOM updates
+      requestAnimationFrame(() => {
         if (inputRef.current) {
           const newPosition = start + text.length;
-          inputRef.current.setSelectionRange(newPosition, newPosition);
           inputRef.current.focus();
+          inputRef.current.setSelectionRange(newPosition, newPosition);
         }
-      }, 0);
+      });
     }
   };
 
@@ -229,13 +230,13 @@ export function BooleanOperationsToolbar({
       setExpression(newExpression);
       
       // Set cursor position after the inserted structure name
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         if (inputRef.current) {
           const newPos = (lastWordMatch.index || 0) + structureName.length;
-          inputRef.current.setSelectionRange(newPos, newPos);
           inputRef.current.focus();
+          inputRef.current.setSelectionRange(newPos, newPos);
         }
-      }, 0);
+      });
     } else {
       // Just insert at cursor position
       insertText(structureName);
@@ -312,24 +313,23 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Main text input field with syntax highlighting overlay */}
+            {/* Main text input field with direct text display */}
             <div className="flex-1 relative">
-              {/* Hidden input for actual text entry */}
               <Input
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50 caret-white"
+                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
                 style={{ caretColor: 'white' }}
               />
               
-              {/* Visual overlay with syntax highlighting */}
-              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm">
-                {expression ? renderExpressionWithPills() : (
-                  <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
-                )}
-              </div>
+              {/* Syntax validation indicator */}
+              {syntaxErrors.length > 0 && (
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400">
+                  <span className="text-xs">⚠</span>
+                </div>
+              )}
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
@@ -414,19 +414,19 @@ export function BooleanOperationsToolbar({
                 size="sm"
                 onClick={() => { 
                   insertText('(');
-                  setTimeout(() => {
+                  requestAnimationFrame(() => {
                     const input = inputRef.current;
                     if (input) {
                       const pos = input.selectionStart || 0;
                       const value = input.value;
                       const newValue = value.slice(0, pos) + ')' + value.slice(pos);
                       setExpression(newValue);
-                      setTimeout(() => {
+                      requestAnimationFrame(() => {
                         input.focus();
                         input.setSelectionRange(pos, pos);
-                      }, 0);
+                      });
                     }
-                  }, 50);
+                  });
                 }}
                 className="h-7 px-2 bg-yellow-900/30 border-2 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Parentheses"
