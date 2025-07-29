@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { X, Play } from 'lucide-react';
 
 interface BooleanOperationsToolbarProps {
@@ -93,32 +94,39 @@ export function BooleanOperationsToolbar({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 animate-in fade-in zoom-in-95 duration-300">
-      <div className="bg-black/90 backdrop-blur-md border border-blue-500/50 rounded-xl shadow-2xl p-4 w-96">
+    <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
+      <div className="relative">
+        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/20">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-semibold text-sm flex items-center">
-            <div className="w-2 h-2 bg-blue-400 rounded-full mr-2"></div>
-            Boolean Operations
-          </h3>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center space-x-3">
+            <div 
+              className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
+              style={{ backgroundColor: 'rgb(59, 130, 246)' }} // Blue color for boolean operations
+            />
+            <span className="text-white text-sm font-medium drop-shadow-sm">Boolean Operations</span>
+          </div>
+          
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
             onClick={onClose}
+            className="text-white/70 hover:text-white hover:bg-white/20 h-7 w-7 p-0 rounded-lg backdrop-blur-sm shadow-sm"
           >
-            <X className="w-3 h-3" />
+            <X size={14} />
           </Button>
         </div>
 
+        <Separator className="my-2 bg-gray-700" />
+
         {/* Expression Input */}
-        <div className="relative mb-4">
+        <div className="relative mb-3">
           <Input
             ref={inputRef}
             value={expression}
             onChange={(e) => setExpression(e.target.value)}
             placeholder="Enter boolean expression (e.g., Parotid_L ∪ Parotid_R)"
-            className="bg-gray-900 border-gray-600 text-white placeholder-gray-400 text-sm"
+            className="w-full h-7 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder-gray-400"
           />
           
           {/* Auto-complete suggestions */}
@@ -138,18 +146,18 @@ export function BooleanOperationsToolbar({
         </div>
 
         {/* Boolean Operation Buttons */}
-        <div className="grid grid-cols-4 gap-2 mb-4">
+        <div className="flex items-center space-x-1 mb-3">
           {booleanButtons.map((btn, index) => (
             <Button
               key={index}
               variant="ghost"
               size="sm"
-              className={`h-8 text-xs ${
+              className={`h-7 px-2 text-xs transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm ${
                 btn.label === 'Clear' 
-                  ? 'text-red-400 hover:text-red-300 hover:bg-red-500/20' 
+                  ? 'bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40' 
                   : btn.label === 'Execute'
-                  ? 'text-green-400 hover:text-green-300 hover:bg-green-500/20'
-                  : 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/20'
+                  ? 'bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40'
+                  : 'bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20'
               }`}
               onClick={() => {
                 if (btn.label === 'Clear') {
@@ -169,9 +177,16 @@ export function BooleanOperationsToolbar({
 
         {/* Instructions */}
         <div className="text-xs text-gray-400 space-y-1">
-          <p>• Type structure names to see suggestions</p>
-          <p>• Use buttons to insert boolean operators</p>
-          <p>• Example: Parotid_L ∪ Parotid_R - SpinalCord</p>
+          <div className="text-xs text-gray-400">
+            • Type structure names to see suggestions
+          </div>
+          <div className="text-xs text-gray-400">
+            • Use buttons to insert boolean operators
+          </div>
+          <div className="text-xs text-gray-400">
+            • Example: Parotid_L ∪ Parotid_R - SpinalCord
+          </div>
+        </div>
         </div>
       </div>
     </div>
