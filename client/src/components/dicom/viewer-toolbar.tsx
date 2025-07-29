@@ -168,24 +168,18 @@ export function ViewerToolbar({
 
         {/* Contour Edit Mode Label */}
         {isContourEditActive && onContourEdit && (
-          <div className="absolute -right-32 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-right-2 duration-300">
+          <div className="absolute -right-40 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-right-2 duration-300">
             <div 
-              className="bg-black/80 backdrop-blur-sm border rounded-lg px-3 py-2 cursor-pointer hover:bg-black/90 transition-all duration-200"
+              className="h-10 rounded-lg px-4 cursor-pointer hover:opacity-90 transition-all duration-200 flex items-center"
               style={{ 
-                borderColor: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'rgba(255,255,255,0.4)'
+                backgroundColor: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white',
+                border: `2px solid ${selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'}`
               }}
               onClick={onContourEdit}
             >
               <div className="flex items-center space-x-2">
-                <Edit3 className="w-4 h-4" style={{ 
-                  color: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'
-                }} />
-                <span 
-                  className="text-sm font-medium whitespace-nowrap"
-                  style={{ 
-                    color: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'
-                  }}
-                >
+                <Edit3 className="w-4 h-4 text-black" />
+                <span className="text-sm font-medium whitespace-nowrap text-black">
                   Contour Edit
                 </span>
               </div>
