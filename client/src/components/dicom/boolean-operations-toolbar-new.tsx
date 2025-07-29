@@ -31,55 +31,145 @@ export function BooleanOperationsToolbar({
   const [newStructureColor, setNewStructureColor] = useState('#3B82F6');
   const inputRef = useRef<HTMLInputElement>(null);
   const [showPillView, setShowPillView] = useState(false);
+  const [syntaxErrors, setSyntaxErrors] = useState<string[]>([]);
+
+  // Get structure color from RT structures (mock for now - should come from RT structures data)
+  const getStructureColor = (structureName: string): string => {
+    // Mock colors for demo - in real implementation, this would come from RT structures
+    const colorMap: { [key: string]: string } = {
+      'BODY': '#80FFFF',
+      'SpinalCord': '#FF0000',
+      'Brain': '#FFB6C1',
+      'BrainStem': '#FF69B4',
+      'Parotid_R': '#00FF00',
+      'Parotid_L': '#00FF00',
+      'Mandible': '#FFFF00',
+      'Larynx': '#FFA500',
+      'Thyroid': '#800080'
+    };
+    return colorMap[structureName] || '#3B82F6';
+  };
+
+  // Validate expression syntax and detect unknown structures
+  const validateExpression = (expr: string) => {
+    const errors: string[] = [];
+    
+    if (!expr.trim()) {
+      setSyntaxErrors([]);
+      return;
+    }
+
+    // Extract potential structure names (letters, numbers, underscores)
+    const potentialStructures = expr.match(/[A-Za-z][A-Za-z0-9_#-]*/g) || [];
+    
+    // Check for unknown structures
+    const unknownStructures = potentialStructures.filter(name => {
+      // Skip operators and keywords
+      if (['and', 'or', 'not', 'true', 'false'].includes(name.toLowerCase())) return false;
+      return !availableStructures.some(s => s.toLowerCase() === name.toLowerCase());
+    });
+
+    if (unknownStructures.length > 0) {
+      errors.push(...unknownStructures);
+    }
+
+    setSyntaxErrors(errors);
+  };
   
-  // Parse expression to identify structure names and operators
+  // Parse expression to identify structure names and operators with syntax highlighting
   const renderExpressionWithPills = () => {
     if (!expression) return null;
     
-    // Create a regex pattern from available structures (escape special characters)
-    const structurePattern = availableStructures
+    // Create a regex pattern that captures both valid structures and potential structure names
+    const allStructurePattern = availableStructures
       .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|');
     
-    if (!structurePattern) return expression;
+    // Pattern for potential structure names (alphanumeric + underscore + dash + hash)
+    const potentialStructurePattern = '[A-Za-z][A-Za-z0-9_#-]*';
     
-    // Split expression by structure names and operators
-    const regex = new RegExp(`(${structurePattern}|[∪∩⊕\\-()]|\\s+)`, 'gi');
-    const parts = expression.split(regex).filter(part => part);
+    // Combine patterns
+    const combinedPattern = allStructurePattern 
+      ? `(${allStructurePattern}|${potentialStructurePattern}|[∪∩⊕\\-()\\s=]+)`
+      : `(${potentialStructurePattern}|[∪∩⊕\\-()\\s=]+)`;
+    
+    const regex = new RegExp(combinedPattern, 'gi');
+    const parts = expression.split(regex).filter(part => part && part.trim());
     
     return (
       <div className="flex items-center flex-wrap gap-1">
         {parts.map((part, index) => {
-          // Check if this part is a structure name
-          const isStructure = availableStructures.some(
-            s => s.toLowerCase() === part.toLowerCase()
+          const trimmedPart = part.trim();
+          if (!trimmedPart) return null;
+          
+          // Check if this part is a valid structure name
+          const isValidStructure = availableStructures.some(
+            s => s.toLowerCase() === trimmedPart.toLowerCase()
           );
           
-          if (isStructure) {
-            // Render as a pill
+          // Check if this looks like a structure name but isn't valid
+          const looksLikeStructure = /^[A-Za-z][A-Za-z0-9_#-]*$/.test(trimmedPart) && 
+                                   !['and', 'or', 'not', 'true', 'false'].includes(trimmedPart.toLowerCase());
+          
+          const isUnknownStructure = looksLikeStructure && !isValidStructure;
+          
+          if (isValidStructure) {
+            const color = getStructureColor(trimmedPart);
             return (
               <span
                 key={index}
-                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-900/50 text-blue-200 border border-blue-500/50"
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold underline border"
+                style={{ 
+                  backgroundColor: color + '20',
+                  borderColor: color + '80',
+                  color: color
+                }}
               >
-                {part}
+                {trimmedPart}
               </span>
             );
-          } else if (['∪', '∩', '⊕', '-'].includes(part.trim())) {
+          } else if (isUnknownStructure) {
+            return (
+              <span
+                key={index}
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-900/50 text-red-300 border border-red-500/70 animate-pulse"
+                title={`Unknown structure: ${trimmedPart}`}
+              >
+                {trimmedPart}
+              </span>
+            );
+          } else if (['∪', '∩', '⊕', '-'].includes(trimmedPart)) {
             // Render operators with styling
             return (
               <span key={index} className="text-yellow-400 font-bold px-1">
-                {part}
+                {trimmedPart}
+              </span>
+            );
+          } else if (trimmedPart === '=') {
+            return (
+              <span key={index} className="text-purple-400 font-bold px-1">
+                {trimmedPart}
+              </span>
+            );
+          } else if (['(', ')'].includes(trimmedPart)) {
+            return (
+              <span key={index} className="text-gray-300 font-medium px-1">
+                {trimmedPart}
               </span>
             );
           } else {
-            // Render other text (spaces, parentheses, etc)
-            return <span key={index} className="text-white">{part}</span>;
+            // Render other text (spaces, etc)
+            return <span key={index} className="text-white">{trimmedPart}</span>;
           }
         })}
       </div>
     );
   };
+
+  // Validate expression whenever it changes
+  useEffect(() => {
+    validateExpression(expression);
+  }, [expression, availableStructures]);
 
   // Auto-complete logic - works within brackets and parentheses
   useEffect(() => {
@@ -268,15 +358,24 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Main text input field - takes up most space */}
+            {/* Main text input field with syntax highlighting overlay */}
             <div className="flex-1 relative">
+              {/* Hidden input for actual text entry */}
               <Input
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50 caret-white"
+                style={{ caretColor: 'white' }}
               />
+              
+              {/* Visual overlay with syntax highlighting */}
+              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm">
+                {expression ? renderExpressionWithPills() : (
+                  <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
+                )}
+              </div>
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
