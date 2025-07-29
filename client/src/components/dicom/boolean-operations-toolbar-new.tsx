@@ -346,6 +346,17 @@ export function BooleanOperationsToolbar({
                 </div>
               )}
             </div>
+
+            {/* Close button - within main toolbar */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCloseWithConfirmation}
+              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg ml-2"
+              title="Close panel"
+            >
+              <X size={14} />
+            </Button>
           </div>
 
           <Separator className="my-2 bg-gray-700" />
@@ -535,13 +546,13 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-        {/* Floating action buttons column - outside main panel */}
-        <div className="flex flex-col space-y-2">
+        {/* Floating action buttons column - outside main panel, smaller size */}
+        <div className="flex flex-col space-y-1">
           <Button
             variant="outline"
             size="sm"
             onClick={handleClear}
-            className="h-10 w-16 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm text-xs font-medium"
+            className="h-6 w-12 bg-red-900/30 border border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-0"
             title="Clear expression"
           >
             Clear
@@ -551,14 +562,14 @@ export function BooleanOperationsToolbar({
             variant="outline"
             size="sm"
             onClick={() => setLivePreview(!livePreview)}
-            className={`h-10 w-16 rounded-lg backdrop-blur-sm shadow-sm border-2 text-xs font-medium ${
+            className={`h-6 w-12 rounded backdrop-blur-sm shadow-sm border text-[10px] font-medium p-0 ${
               livePreview 
                 ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             }`}
             title="Toggle preview"
           >
-            Preview
+            View
           </Button>
           
           <Button
@@ -566,20 +577,10 @@ export function BooleanOperationsToolbar({
             size="sm"
             onClick={handleExecute}
             disabled={!expression.trim()}
-            className="h-10 w-16 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg backdrop-blur-sm shadow-sm text-xs font-medium"
+            className="h-6 w-12 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-0"
             title="Execute expression"
           >
             Run
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCloseWithConfirmation}
-            className="h-10 w-16 text-white/70 hover:text-white hover:bg-white/20 rounded-lg text-xs font-medium"
-            title="Close panel"
-          >
-            Close
           </Button>
         </div>
       </div>
