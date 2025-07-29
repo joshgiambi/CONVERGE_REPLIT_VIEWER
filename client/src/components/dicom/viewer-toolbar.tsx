@@ -163,31 +163,31 @@ export function ViewerToolbar({
           </div>
         </div>
 
-        {/* Contour Edit and Operations Popout Icons */}
-        {isContourEditActive && (
-          <div className="absolute -right-28 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="flex space-x-2">
-              {/* Contour Edit Button */}
-              {onContourEdit && (
-                <div className="relative group">
-                  <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
-                      onClick={onContourEdit}
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                    Edit Contours
-                  </div>
+        {/* Contour Edit and Operations Popout Icons - Always visible */}
+        <div className="absolute -right-28 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+          <div className="flex space-x-2">
+            {/* Contour Edit Button */}
+            {onContourEdit && (
+              <div className="relative group">
+                <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
+                    onClick={onContourEdit}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </Button>
                 </div>
-              )}
-              
-              {/* Contour Operations Button */}
+                {/* Tooltip */}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  Edit Contours
+                </div>
+              </div>
+            )}
+            
+            {/* Contour Operations Button */}
+            {onContourOperations && (
               <div className="relative group">
                 <div className="bg-white/10 backdrop-blur-md border border-blue-500/50 rounded-lg shadow-lg">
                   <Button
@@ -204,9 +204,9 @@ export function ViewerToolbar({
                   Boolean Operations
                 </div>
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Metadata Popup */}
         {showMetadata && (

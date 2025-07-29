@@ -615,11 +615,21 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onMeasure={handleMeasureTool}
           onCrosshairs={handleCrosshairsTool}
           onContourEdit={() => {
-            if (selectedForEdit) {
-              setIsContourEditMode(true);
+            // Close boolean operations toolbar when opening contour edit
+            setShowBooleanOperations(false);
+            
+            // If no structure is selected, select the first one or last loaded
+            if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
+              // Try to get the last loaded structure or default to first
+              const lastStructure = rtStructures.structures[rtStructures.structures.length - 1];
+              setSelectedForEdit(lastStructure.roiNumber);
             }
+            
+            setIsContourEditMode(true);
           }}
           onContourOperations={() => {
+            // Close contour edit toolbar when opening boolean operations
+            setIsContourEditMode(false);
             setShowBooleanOperations(true);
           }}
           onMPRToggle={() => {
@@ -675,9 +685,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         isVisible={showBooleanOperations}
         onClose={() => setShowBooleanOperations(false)}
         availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
-        onExecuteOperation={(expression) => {
-          console.log('Executing boolean operation:', expression);
+        onExecuteOperation={(expression, newStructure) => {
+          console.log('Executing boolean operation:', expression, newStructure);
           // TODO: Implement boolean operation execution
+          if (newStructure?.createNewStructure) {
+            console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
+          }
           setShowBooleanOperations(false);
         }}
       />
