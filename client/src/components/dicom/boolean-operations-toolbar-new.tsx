@@ -200,7 +200,7 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
-        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/80 w-[900px]">
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[900px]">
           {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
           <div className="flex items-center space-x-3 mb-3">
             <div className="flex items-center space-x-2">
@@ -304,6 +304,8 @@ export function BooleanOperationsToolbar({
               <X size={14} />
             </Button>
           </div>
+
+          <Separator className="my-2 bg-gray-700" />
 
           {/* Second Row: Boolean Operators and Prominent Undo/Redo */}
           <div className="flex items-center justify-between">
