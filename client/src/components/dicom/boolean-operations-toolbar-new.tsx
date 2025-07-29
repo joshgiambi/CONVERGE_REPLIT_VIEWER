@@ -13,13 +13,15 @@ interface BooleanOperationsToolbarProps {
     name: string;
     color: string;
   }) => void;
+  activeTool?: string | null;
 }
 
 export function BooleanOperationsToolbar({
   isVisible,
   onClose,
   availableStructures,
-  onExecuteOperation
+  onExecuteOperation,
+  activeTool
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -244,7 +246,11 @@ export function BooleanOperationsToolbar({
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleExecute();
+                  }
+                }}
                 placeholder="Enter boolean expression (e.g., SpinalCord ∪ SpinalCord_05 - BODY)"
                 className="w-full h-10 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
               />
@@ -346,7 +352,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(' ∪ ')}
-                className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 hover:border-green-300 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Union (OR)"
               >
                 ∪
@@ -355,7 +361,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(' ∩ ')}
-                className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 hover:border-blue-300 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Intersection (AND)"
               >
                 ∩
@@ -364,7 +370,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(' - ')}
-                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 hover:border-red-300 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Difference (SUBTRACT)"
               >
                 −
@@ -373,7 +379,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(' ⊕ ')}
-                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 hover:border-purple-300 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
                 title="XOR (Exclusive OR)"
               >
                 ⊕
@@ -382,7 +388,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText('(')}
-                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 hover:border-gray-400 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
               >
                 (
               </Button>
@@ -390,7 +396,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => insertText(')')}
-                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 hover:border-gray-400 transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm"
               >
                 )
               </Button>
@@ -402,7 +408,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleClear}
-                className="h-8 px-3 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-8 px-3 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 hover:border-red-300 transition-all duration-200 text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 <Trash2 size={12} className="mr-1" />
                 Clear
@@ -412,10 +418,10 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => setLivePreview(!livePreview)}
-                className={`h-8 px-3 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 ${
+                className={`h-8 px-3 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 transition-all duration-200 ${
                   livePreview 
-                    ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
-                    : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
+                    ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60 hover:border-yellow-400' 
+                    : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40 hover:border-yellow-300'
                 }`}
               >
                 <Eye size={12} className="mr-1" />
@@ -427,7 +433,7 @@ export function BooleanOperationsToolbar({
                 size="sm"
                 onClick={handleExecute}
                 disabled={!expression.trim() || (outputMode === 'existing' && !outputStructure) || (outputMode === 'new' && !newStructureName)}
-                className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 hover:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-green-600 transition-all duration-200 text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 <Play size={12} className="mr-1" />
                 Run
@@ -440,7 +446,7 @@ export function BooleanOperationsToolbar({
                 size="sm"
                 onClick={handleUndo}
                 disabled={true}
-                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-600 transition-all duration-200 text-xs rounded-lg backdrop-blur-sm shadow-sm"
                 title="Undo"
               >
                 <Undo size={14} />
@@ -451,7 +457,7 @@ export function BooleanOperationsToolbar({
                 size="sm"
                 onClick={handleRedo}
                 disabled={true}
-                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-600 transition-all duration-200 text-xs rounded-lg backdrop-blur-sm shadow-sm"
                 title="Redo"
               >
                 <Redo size={14} />
