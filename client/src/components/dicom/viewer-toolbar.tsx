@@ -166,27 +166,29 @@ export function ViewerToolbar({
           </div>
         </div>
 
-        {/* Contour Edit Popout Button */}
+        {/* Contour Edit Mode Label */}
         {isContourEditActive && onContourEdit && (
-          <div className="absolute -left-32 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+          <div className="absolute -right-32 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-right-2 duration-300">
             <div 
-              className="bg-white/10 backdrop-blur-md border rounded-lg shadow-lg"
+              className="bg-black/80 backdrop-blur-sm border rounded-lg px-3 py-2 cursor-pointer hover:bg-black/90 transition-all duration-200"
               style={{ 
                 borderColor: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'rgba(255,255,255,0.4)'
               }}
+              onClick={onContourEdit}
             >
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-3 py-1 hover:bg-white/20 transition-all duration-200 flex items-center space-x-2"
-                style={{ 
+              <div className="flex items-center space-x-2">
+                <Edit3 className="w-4 h-4" style={{ 
                   color: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'
-                }}
-                onClick={onContourEdit}
-              >
-                <Edit3 className="w-4 h-4" />
-                <span className="text-xs font-medium whitespace-nowrap">Contour Edit</span>
-              </Button>
+                }} />
+                <span 
+                  className="text-sm font-medium whitespace-nowrap"
+                  style={{ 
+                    color: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'
+                  }}
+                >
+                  Contour Edit
+                </span>
+              </div>
             </div>
           </div>
         )}
