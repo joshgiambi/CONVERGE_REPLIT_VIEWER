@@ -126,7 +126,7 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
-        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/20 w-[600px]">
+        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/20 w-[900px]">
           {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
           <div className="flex items-center space-x-3 mb-3">
             <div className="flex items-center space-x-2">
@@ -175,10 +175,10 @@ export function BooleanOperationsToolbar({
             {/* Action buttons */}
             <div className="flex items-center space-x-1">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={handleClear}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-8 px-3 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 Clear
               </Button>
@@ -187,9 +187,9 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={() => setLivePreview(!livePreview)}
-                className={`h-8 px-3 text-xs ${
+                className={`h-8 px-3 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 ${
                   livePreview 
-                    ? 'bg-yellow-600/50 border-yellow-500 text-yellow-200' 
+                    ? 'bg-yellow-600/50 border-yellow-500 text-yellow-200 hover:bg-yellow-500/60' 
                     : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
                 }`}
               >
@@ -198,11 +198,11 @@ export function BooleanOperationsToolbar({
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={handleExecute}
                 disabled={!expression.trim()}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs"
+                className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 <Play size={12} className="mr-1" />
                 Run
@@ -313,25 +313,25 @@ export function BooleanOperationsToolbar({
             {/* Prominent Undo/Redo buttons */}
             <div className="flex items-center space-x-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={handleUndo}
                 disabled={true} // TODO: Enable when undo is implemented
-                className="h-8 w-8 p-0 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
-                title="Undo operation"
+                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Undo (Ctrl+Z)"
               >
-                <Undo size={16} />
+                <Undo className="w-3 h-3" />
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={handleRedo}
                 disabled={true} // TODO: Enable when redo is implemented
-                className="h-8 w-8 p-0 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
-                title="Redo operation"
+                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Redo (Ctrl+Y)"
               >
-                <Redo size={16} />
+                <Redo className="w-3 h-3" />
               </Button>
             </div>
           </div>
