@@ -147,6 +147,7 @@ interface WorkingViewerProps {
   orientation?: 'axial' | 'sagittal' | 'coronal';
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
+  keyboardNavigationDisabled?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -178,6 +179,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     allStructuresVisible = true,
     imageCache,
     orientation = 'axial',
+    keyboardNavigationDisabled = false,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -3538,6 +3540,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip keyboard navigation if input is focused (for boolean operations toolbar)
+      if (keyboardNavigationDisabled) return;
+      
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") goToPrevious();
       if (e.key === "ArrowRight" || e.key === "ArrowDown") goToNext();
     };
@@ -3547,7 +3552,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [currentIndex, images]);
+  }, [currentIndex, images, keyboardNavigationDisabled]);
 
   // Animation loop for dashed borders on predicted contours
   useEffect(() => {

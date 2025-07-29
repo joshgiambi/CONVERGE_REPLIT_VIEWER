@@ -13,13 +13,15 @@ interface BooleanOperationsToolbarProps {
     name: string;
     color: string;
   }) => void;
+  onInputFocusChange?: (isFocused: boolean) => void;
 }
 
 export function BooleanOperationsToolbar({
   isVisible,
   onClose,
   availableStructures,
-  onExecuteOperation
+  onExecuteOperation,
+  onInputFocusChange
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -316,6 +318,8 @@ export function BooleanOperationsToolbar({
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
+                onFocus={() => onInputFocusChange?.(true)}
+                onBlur={() => onInputFocusChange?.(false)}
                 placeholder=""
                 className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20 font-sans"
                 style={{ 
