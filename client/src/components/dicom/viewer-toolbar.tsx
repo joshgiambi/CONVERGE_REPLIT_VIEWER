@@ -101,7 +101,7 @@ export function ViewerToolbar({
     <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
-        <div className="bg-white/10 backdrop-blur-md border-2 border-white/40 rounded-xl px-3 py-2 shadow-2xl">
+        <div className="bg-white/10 backdrop-blur-md border border-white/40 rounded-xl px-3 py-2 shadow-2xl">
           <div className="flex items-center space-x-1">
             {tools.map((tool, index) => {
               if (tool.id === 'separator') {
@@ -161,7 +161,7 @@ export function ViewerToolbar({
         {/* Contour Edit Popout Icon */}
         {isContourEditActive && onContourEdit && (
           <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="bg-white/10 backdrop-blur-md border-2 border-green-500/50 rounded-lg shadow-lg">
+            <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
               <Button
                 variant="ghost"
                 size="sm"
