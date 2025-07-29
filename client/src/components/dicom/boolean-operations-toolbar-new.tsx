@@ -200,9 +200,57 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
-        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[900px]">
-          {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
-          <div className="flex items-center space-x-3 mb-3">
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[900px] relative">
+          {/* Floating action buttons column */}
+          <div className="absolute top-3 right-3 flex flex-col space-y-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClear}
+              className="h-8 w-8 p-0 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              title="Clear expression"
+            >
+              <Trash2 size={12} />
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLivePreview(!livePreview)}
+              className={`h-8 w-8 p-0 rounded-lg backdrop-blur-sm shadow-sm border-2 ${
+                livePreview 
+                  ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
+                  : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
+              }`}
+              title="Toggle preview"
+            >
+              <Eye size={12} />
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExecute}
+              disabled={!expression.trim()}
+              className="h-8 w-8 p-0 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg backdrop-blur-sm shadow-sm"
+              title="Execute expression"
+            >
+              <Play size={12} />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCloseWithConfirmation}
+              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
+              title="Close panel"
+            >
+              <X size={14} />
+            </Button>
+          </div>
+
+          {/* First Row: Title, Info, Text Field */}
+          <div className="flex items-center space-x-3 mb-3 pr-12">
             <div className="flex items-center space-x-2">
               <div 
                 className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
@@ -245,54 +293,6 @@ export function BooleanOperationsToolbar({
                 </div>
               )}
             </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center space-x-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleClear}
-                className="h-8 px-3 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 text-xs rounded-lg backdrop-blur-sm shadow-sm"
-              >
-                <Trash2 size={12} className="mr-1" />
-                Clear
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLivePreview(!livePreview)}
-                className={`h-8 px-3 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 ${
-                  livePreview 
-                    ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
-                    : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
-                }`}
-              >
-                <Eye size={12} className="mr-1" />
-                Preview
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExecute}
-                disabled={!expression.trim()}
-                className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
-              >
-                <Play size={12} className="mr-1" />
-                Run
-              </Button>
-            </div>
-
-            {/* Close button with confirmation */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCloseWithConfirmation}
-              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
-            >
-              <X size={14} />
-            </Button>
           </div>
 
           <Separator className="my-2 bg-gray-700" />
