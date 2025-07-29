@@ -1,6 +1,5 @@
 /**
- * Main viewport component - primary canvas element with tool overlays
- * Extracted from monolithic WorkingViewer component
+ * Main viewport component - primary canvas element with rendering
  */
 
 import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
@@ -37,9 +36,6 @@ interface MainViewportProps {
   className?: string;
 }
 
-/**
- * Main viewport canvas component with integrated rendering
- */
 export const MainViewport = forwardRef<MainViewportRef, MainViewportProps>(({
   currentImage,
   rtStructures,
@@ -74,114 +70,76 @@ export const MainViewport = forwardRef<MainViewportRef, MainViewportProps>(({
    * Render the current frame
    */
   const renderFrame = () => {
+    if (!canvasRef.current || !currentImage) return;
+
     const canvas = canvasRef.current;
-    if (!canvas || !currentImage) return;
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     try {
-      // Clear canvas
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      // Render main DICOM image
+      render16BitImage(
+        canvas,
+        currentImage,
+        windowLevel,
+        viewportState
+      );
 
-      // Render primary image (CT)
-      if (currentImage.parsedPixelData) {
-        render16BitImage(
-          canvas,
-          currentImage.parsedPixelData,
-          windowLevel,
-          viewportState
-        );
-      }
-
-      // Render fusion overlay (MRI)
-      if (fusionOpacity > 0 && secondaryImages.length > 0) {
-        renderFusionOverlayOnCanvas(
-          canvas,
-          currentImage,
-          secondaryImages,
-          registrationMatrix,
-          fusionOpacity,
-          viewportState,
-          secondaryWindowLevel
-        );
-      }
-
-      // Render RT structures
-      if (rtStructures && structureVisibility.size > 0) {
+      // Render RT structures if available
+      if (rtStructures?.structures) {
         renderRTStructures(
           canvas,
           rtStructures,
           currentSlicePosition,
           structureVisibility,
           selectedForEdit,
-          viewportState,
-          currentImage,
           contourSettings,
-          Date.now() // for animation
+          viewportState
+        );
+      }
+
+      // Render fusion overlay if available
+      if (secondaryImages.length > 0 && fusionOpacity > 0 && registrationMatrix) {
+        renderFusionOverlayOnCanvas(
+          canvas,
+          currentImage,
+          secondaryImages,
+          registrationMatrix,
+          fusionOpacity,
+          secondaryWindowLevel || windowLevel,
+          viewportState
         );
       }
 
     } catch (error) {
-      console.error('Error rendering viewport:', error);
+      console.error('Error rendering frame:', error);
     }
   };
 
-  /**
-   * Request animation frame for smooth rendering
-   */
-  const requestRender = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    animationFrameRef.current = requestAnimationFrame(renderFrame);
-  };
-
-  // Re-render when dependencies change
+  // Render when dependencies change
   useEffect(() => {
-    requestRender();
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [
-    currentImage,
-    rtStructures,
-    secondaryImages,
-    fusionOpacity,
-    windowLevel,
-    secondaryWindowLevel,
-    viewportState,
-    structureVisibility,
-    selectedForEdit,
-    contourSettings,
-    currentSlicePosition
-  ]);
-
-  // Handle context menu
-  const handleContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    onContextMenu?.(event);
-  };
+    renderFrame();
+  }, [currentImage, windowLevel, viewportState, rtStructures, currentSlicePosition, structureVisibility, selectedForEdit, contourSettings, secondaryImages, fusionOpacity, registrationMatrix, secondaryWindowLevel]);
 
   return (
     <div className={`relative ${className}`}>
-      <canvas
+      <canvas 
         ref={canvasRef}
         width={1280}
         height={1280}
-        className="border border-gray-700 rounded-lg cursor-crosshair max-w-full max-h-full"
+        className="max-w-full max-h-full object-contain cursor-crosshair"
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onWheel={onWheel}
-        onContextMenu={handleContextMenu}
+        onContextMenu={onContextMenu}
         tabIndex={keyboardNavigationDisabled ? -1 : 0}
-        style={{
-          outline: 'none',
-          userSelect: 'none'
-        }}
+        style={{ imageRendering: 'pixelated' }}
       />
     </div>
   );
