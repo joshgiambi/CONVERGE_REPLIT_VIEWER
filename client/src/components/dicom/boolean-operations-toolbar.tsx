@@ -23,12 +23,15 @@ export function BooleanOperationsToolbar({
 
   // Auto-complete logic
   useEffect(() => {
+    console.log('Auto-complete debug:', { expression, availableStructures: availableStructures.length });
     if (expression.length > 0) {
       const lastWord = expression.split(/[\s\(\)\+\-\*\/\&\|]/).pop() || '';
+      console.log('Last word:', lastWord);
       if (lastWord.length >= 2) {
         const filtered = availableStructures.filter(structure =>
           structure.toLowerCase().includes(lastWord.toLowerCase())
         );
+        console.log('Filtered suggestions:', filtered);
         setSuggestions(filtered.slice(0, 5)); // Show max 5 suggestions
         setShowSuggestions(filtered.length > 0);
       } else {
@@ -90,7 +93,7 @@ export function BooleanOperationsToolbar({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 animate-in fade-in zoom-in-95 duration-300">
+    <div className="fixed bottom-4 left-4 z-50 animate-in fade-in zoom-in-95 duration-300">
       <div className="bg-black/90 backdrop-blur-md border border-blue-500/50 rounded-xl shadow-2xl p-4 w-96">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">

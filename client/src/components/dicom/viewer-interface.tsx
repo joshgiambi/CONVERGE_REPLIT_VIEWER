@@ -637,7 +637,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
 
       {/* Contour Edit Toolbar */}
-      {selectedForEdit && rtStructures && rtStructures.structures && (
+      {selectedForEdit && rtStructures && rtStructures.structures && !showBooleanOperations && (
         <ContourEditToolbar
           selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
           isVisible={isContourEditMode}

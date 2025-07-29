@@ -31,6 +31,7 @@ interface ViewerToolbarProps {
   onContourOperations?: () => void;
   isContourEditActive?: boolean;
   isPanActive?: boolean;
+  isMeasureActive?: boolean;
   isCrosshairsActive?: boolean;
   isToolActive?: boolean;
   currentSlice?: number;
@@ -55,6 +56,7 @@ export function ViewerToolbar({
   onContourOperations,
   isContourEditActive = false,
   isPanActive = false,
+  isMeasureActive = false,
   isCrosshairsActive = false,
   isToolActive = false,
   currentSlice,
