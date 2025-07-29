@@ -290,8 +290,8 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="flex items-start space-x-3">
-        {/* Main toolbar panel - 20% larger */}
-        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[720px]">
+        {/* Main toolbar panel - even larger */}
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[800px]">
 
           {/* First Row: Title, Info, Text Field */}
           <div className="flex items-center space-x-3 mb-3">
@@ -471,8 +471,8 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Clear, Undo/Redo buttons */}
-            <div className="flex items-center space-x-2">
+            {/* Clear, Undo/Redo buttons with more spacing */}
+            <div className="flex items-center space-x-4">
               <Button
                 variant="outline"
                 size="sm"
@@ -483,27 +483,29 @@ export function BooleanOperationsToolbar({
                 Clear
               </Button>
               
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleUndo}
-                disabled={true} // TODO: Enable when undo is implemented
-                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
-                title="Undo (Ctrl+Z)"
-              >
-                <Undo className="w-3 h-3" />
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRedo}
-                disabled={true} // TODO: Enable when redo is implemented
-                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
-                title="Redo (Ctrl+Y)"
-              >
-                <Redo className="w-3 h-3" />
-              </Button>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleUndo}
+                  disabled={true} // TODO: Enable when undo is implemented
+                  className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo className="w-3 h-3" />
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRedo}
+                  disabled={true} // TODO: Enable when redo is implemented
+                  className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+                  title="Redo (Ctrl+Y)"
+                >
+                  <Redo className="w-3 h-3" />
+                </Button>
+              </div>
             </div>
           </div>
 
