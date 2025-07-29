@@ -31,6 +31,8 @@ export function BooleanOperationsToolbar({
   const [newStructureColor, setNewStructureColor] = useState('#3B82F6');
   const inputRef = useRef<HTMLInputElement>(null);
   const [showPillView, setShowPillView] = useState(false);
+  const [outputMode, setOutputMode] = useState<'existing' | 'new'>('existing');
+  const [outputStructure, setOutputStructure] = useState('');
   
   // Parse expression to identify structure names and operators
   const renderExpressionWithPills = () => {
@@ -155,14 +157,16 @@ export function BooleanOperationsToolbar({
 
   const handleExecute = () => {
     if (expression.trim()) {
-      if (showNewStructurePanel && newStructureName.trim()) {
+      if (outputMode === 'new' && newStructureName.trim()) {
         onExecuteOperation(expression, {
           createNewStructure: true,
           name: newStructureName,
           color: newStructureColor
         });
-      } else {
-        onExecuteOperation(expression);
+      } else if (outputMode === 'existing' && outputStructure) {
+        // For existing structure, we'll modify the expression to include assignment
+        const assignmentExpression = `${outputStructure} = ${expression}`;
+        onExecuteOperation(assignmentExpression);
       }
     }
   };
@@ -170,7 +174,8 @@ export function BooleanOperationsToolbar({
   const handleClear = () => {
     setExpression('');
     setNewStructureName('');
-    setShowNewStructurePanel(false);
+    setOutputStructure('');
+    setOutputMode('existing');
   };
 
   const handleCloseWithConfirmation = () => {
@@ -201,8 +206,8 @@ export function BooleanOperationsToolbar({
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
         <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/80 w-[900px]">
-          {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
-          <div className="flex items-center space-x-3 mb-3">
+          {/* Header Row */}
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center space-x-2">
               <div 
                 className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
@@ -219,26 +224,30 @@ export function BooleanOperationsToolbar({
                 <Info size={12} />
               </Button>
             </div>
+            
+            {/* Close button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCloseWithConfirmation}
+              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
+            >
+              <X size={14} />
+            </Button>
+          </div>
 
-            {/* Main text input field - takes up most space */}
-            <div className="flex-1 relative">
-              <div>
-                <Input
-                  ref={inputRef}
-                  value={expression}
-                  onChange={(e) => setExpression(e.target.value)}
-                  placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                  className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
-                />
-                
-                {/* Expression with pills view */}
-                {expression && availableStructures.length > 0 && (
-                  <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
-                    <div className="text-xs text-gray-400 mb-1">Preview:</div>
-                    {renderExpressionWithPills()}
-                  </div>
-                )}
-              </div>
+          {/* Input Row: Expression */}
+          <div className="mb-3">
+            <label className="text-xs text-gray-400 mb-1 block">Input Expression:</label>
+            <div className="relative">
+              <Input
+                ref={inputRef}
+                value={expression}
+                onChange={(e) => setExpression(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Enter boolean expression (e.g., SpinalCord ∪ SpinalCord_05 - BODY)"
+                className="w-full h-10 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+              />
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
@@ -255,9 +264,140 @@ export function BooleanOperationsToolbar({
                 </div>
               )}
             </div>
+            
+            {/* Expression with pills preview */}
+            {expression && availableStructures.length > 0 && (
+              <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
+                <div className="text-xs text-gray-400 mb-1">Preview:</div>
+                {renderExpressionWithPills()}
+              </div>
+            )}
+          </div>
+
+          {/* Output Row: Where results go */}
+          <div className="mb-3">
+            <label className="text-xs text-gray-400 mb-1 block">Output To:</label>
+            <div className="flex items-center space-x-2">
+              {/* Radio buttons for existing vs new */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOutputMode('existing')}
+                className={`h-8 px-3 text-xs rounded-lg ${
+                  outputMode === 'existing'
+                    ? 'bg-blue-900/40 border-blue-400 text-blue-200'
+                    : 'bg-white/5 border-white/20 text-gray-400 hover:text-white'
+                }`}
+              >
+                Existing Structure
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOutputMode('new')}
+                className={`h-8 px-3 text-xs rounded-lg ${
+                  outputMode === 'new'
+                    ? 'bg-blue-900/40 border-blue-400 text-blue-200'
+                    : 'bg-white/5 border-white/20 text-gray-400 hover:text-white'
+                }`}
+              >
+                New Structure
+              </Button>
+              
+              {/* Structure selection/input */}
+              <div className="flex-1">
+                {outputMode === 'existing' ? (
+                  <select
+                    value={outputStructure}
+                    onChange={(e) => setOutputStructure(e.target.value)}
+                    className="w-full h-8 bg-white/10 border border-white/30 text-white text-sm rounded-lg backdrop-blur-sm px-2 [&>option]:bg-gray-900 [&>option]:text-white"
+                  >
+                    <option value="">Select structure...</option>
+                    {availableStructures.map(structure => (
+                      <option key={structure} value={structure}>{structure}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <Input
+                      value={newStructureName}
+                      onChange={(e) => setNewStructureName(e.target.value)}
+                      placeholder="New structure name"
+                      className="flex-1 h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                    />
+                    <input
+                      type="color"
+                      value={newStructureColor}
+                      onChange={(e) => setNewStructureColor(e.target.value)}
+                      className="w-10 h-8 rounded cursor-pointer border border-white/30"
+                      title="Choose color"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons row */}
+          <div className="flex items-center justify-between">
+            {/* Boolean operator buttons */}
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ∪ ')}
+                className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Union (OR)"
+              >
+                ∪
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ∩ ')}
+                className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Intersection (AND)"
+              >
+                ∩
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' - ')}
+                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Difference (SUBTRACT)"
+              >
+                −
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ⊕ ')}
+                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                title="XOR (Exclusive OR)"
+              >
+                ⊕
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText('(')}
+                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                (
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(')')}
+                className="h-7 px-2 bg-gray-700/30 border-2 border-gray-500/60 text-gray-300 hover:text-gray-100 hover:bg-gray-600/40 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                )
+              </Button>
+            </div>
 
             {/* Action buttons */}
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -286,23 +426,37 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleExecute}
-                disabled={!expression.trim()}
+                disabled={!expression.trim() || (outputMode === 'existing' && !outputStructure) || (outputMode === 'new' && !newStructureName)}
                 className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 <Play size={12} className="mr-1" />
                 Run
               </Button>
+              
+              <Separator orientation="vertical" className="h-6 bg-white/20" />
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUndo}
+                disabled={true}
+                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                title="Undo"
+              >
+                <Undo size={14} />
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRedo}
+                disabled={true}
+                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                title="Redo"
+              >
+                <Redo size={14} />
+              </Button>
             </div>
-
-            {/* Close button with confirmation */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCloseWithConfirmation}
-              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
-            >
-              <X size={14} />
-            </Button>
           </div>
 
           {/* Second Row: Boolean Operators and Prominent Undo/Redo */}
