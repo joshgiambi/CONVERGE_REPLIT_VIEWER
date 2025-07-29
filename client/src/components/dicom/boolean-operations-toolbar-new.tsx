@@ -30,12 +30,67 @@ export function BooleanOperationsToolbar({
   const [newStructureName, setNewStructureName] = useState('');
   const [newStructureColor, setNewStructureColor] = useState('#3B82F6');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showPillView, setShowPillView] = useState(false);
+  
+  // Parse expression to identify structure names and operators
+  const renderExpressionWithPills = () => {
+    if (!expression) return null;
+    
+    // Create a regex pattern from available structures (escape special characters)
+    const structurePattern = availableStructures
+      .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    
+    if (!structurePattern) return expression;
+    
+    // Split expression by structure names and operators
+    const regex = new RegExp(`(${structurePattern}|[∪∩⊕\\-()]|\\s+)`, 'gi');
+    const parts = expression.split(regex).filter(part => part);
+    
+    return (
+      <div className="flex items-center flex-wrap gap-1">
+        {parts.map((part, index) => {
+          // Check if this part is a structure name
+          const isStructure = availableStructures.some(
+            s => s.toLowerCase() === part.toLowerCase()
+          );
+          
+          if (isStructure) {
+            // Render as a pill
+            return (
+              <span
+                key={index}
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-900/50 text-blue-200 border border-blue-500/50"
+              >
+                {part}
+              </span>
+            );
+          } else if (['∪', '∩', '⊕', '-'].includes(part.trim())) {
+            // Render operators with styling
+            return (
+              <span key={index} className="text-yellow-400 font-bold px-1">
+                {part}
+              </span>
+            );
+          } else {
+            // Render other text (spaces, parentheses, etc)
+            return <span key={index} className="text-white">{part}</span>;
+          }
+        })}
+      </div>
+    );
+  };
 
-  // Auto-complete logic
+  // Auto-complete logic - works within brackets and parentheses
   useEffect(() => {
-    if (expression.length > 0) {
-      const lastWord = expression.split(/[\s\(\)\+\-\*\/\&\|]/).pop() || '';
-      if (lastWord.length >= 2) {
+    if (expression.length > 0 && inputRef.current) {
+      const cursorPos = inputRef.current.selectionStart || 0;
+      const textBeforeCursor = expression.slice(0, cursorPos);
+      
+      // Find the last word being typed (including within brackets)
+      const lastWord = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_\-]*$/)?.[0] || '';
+      
+      if (lastWord.length >= 1) {
         const filtered = availableStructures.filter(structure =>
           structure.toLowerCase().includes(lastWord.toLowerCase())
         );
@@ -67,13 +122,32 @@ export function BooleanOperationsToolbar({
   };
 
   const insertStructure = (structureName: string) => {
-    const words = expression.split(/(\s+|\(|\)|∪|∩|-|⊕)/);
-    const lastWordIndex = words.findLastIndex(word => word.trim() && !['∪', '∩', '-', '⊕', '(', ')'].includes(word));
+    if (!inputRef.current) return;
     
-    if (lastWordIndex !== -1) {
-      words[lastWordIndex] = structureName;
-      setExpression(words.join(''));
+    const cursorPos = inputRef.current.selectionStart || 0;
+    const textBeforeCursor = expression.slice(0, cursorPos);
+    const textAfterCursor = expression.slice(cursorPos);
+    
+    // Find the last word being typed (including within brackets)
+    const lastWordMatch = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_\-]*$/);
+    
+    if (lastWordMatch) {
+      // Replace the partial word with the selected structure
+      const newExpression = textBeforeCursor.slice(0, lastWordMatch.index) + 
+                           structureName + 
+                           textAfterCursor;
+      setExpression(newExpression);
+      
+      // Set cursor position after the inserted structure name
+      setTimeout(() => {
+        if (inputRef.current) {
+          const newPos = (lastWordMatch.index || 0) + structureName.length;
+          inputRef.current.setSelectionRange(newPos, newPos);
+          inputRef.current.focus();
+        }
+      }, 0);
     } else {
+      // Just insert at cursor position
       insertText(structureName);
     }
     setShowSuggestions(false);
@@ -148,13 +222,23 @@ export function BooleanOperationsToolbar({
 
             {/* Main text input field - takes up most space */}
             <div className="flex-1 relative">
-              <Input
-                ref={inputRef}
-                value={expression}
-                onChange={(e) => setExpression(e.target.value)}
-                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
-              />
+              <div>
+                <Input
+                  ref={inputRef}
+                  value={expression}
+                  onChange={(e) => setExpression(e.target.value)}
+                  placeholder="Enter boolean expression (e.g., A ∪ B - C)"
+                  className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                />
+                
+                {/* Expression with pills view */}
+                {expression && availableStructures.length > 0 && (
+                  <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
+                    <div className="text-xs text-gray-400 mb-1">Preview:</div>
+                    {renderExpressionWithPills()}
+                  </div>
+                )}
+              </div>
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
@@ -225,51 +309,51 @@ export function BooleanOperationsToolbar({
             {/* Boolean operator buttons */}
             <div className="flex items-center space-x-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => insertText(' ∪ ')}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Union"
               >
-                <span className="text-base mr-1">∪</span>
-                Union
+                <span className="text-xs font-medium mr-1">∪</span>
+                <span className="text-xs font-medium">Union</span>
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => insertText(' ∩ ')}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Intersect"
               >
-                <span className="text-base mr-1">∩</span>
-                Intersect
+                <span className="text-xs font-medium mr-1">∩</span>
+                <span className="text-xs font-medium">Intersect</span>
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => insertText(' - ')}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Subtract"
               >
-                <span className="text-base mr-1">−</span>
-                Subtract
+                <span className="text-xs font-medium mr-1">−</span>
+                <span className="text-xs font-medium">Subtract</span>
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => insertText(' ⊕ ')}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="XOR"
               >
-                <span className="text-base mr-1">⊕</span>
-                XOR
+                <span className="text-xs font-medium mr-1">⊕</span>
+                <span className="text-xs font-medium">XOR</span>
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => { 
                   insertText('(');
@@ -287,26 +371,26 @@ export function BooleanOperationsToolbar({
                     }
                   }, 50);
                 }}
-                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                className="h-7 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Parentheses"
               >
-                <span className="text-base mr-1">( )</span>
-                Group
+                <span className="text-xs font-medium mr-1">( )</span>
+                <span className="text-xs font-medium">Group</span>
               </Button>
               
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => setShowNewStructurePanel(!showNewStructurePanel)}
-                className={`h-8 px-3 rounded-lg text-xs ${
+                className={`h-7 px-2 rounded-lg backdrop-blur-sm shadow-sm ${
                   showNewStructurePanel
-                    ? 'bg-purple-600/20 border border-purple-500 text-purple-200'
-                    : 'text-gray-300 hover:bg-gray-700/50 hover:text-white'
+                    ? 'bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40'
+                    : 'bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
                 }`}
                 title="Create new structure"
               >
-                <Plus size={12} className="mr-1" />
-                New
+                <Plus className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">New</span>
               </Button>
             </div>
 
@@ -345,6 +429,15 @@ export function BooleanOperationsToolbar({
                   <Input
                     value={newStructureName}
                     onChange={(e) => setNewStructureName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newStructureName.trim()) {
+                        // Add the new structure name to the expression
+                        insertText(newStructureName.trim());
+                        setNewStructureName('');
+                        setShowNewStructurePanel(false);
+                        inputRef.current?.focus();
+                      }
+                    }}
                     placeholder="e.g. CombinedStructure"
                     className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-gray-400"
                   />
