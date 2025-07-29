@@ -15,7 +15,12 @@ import { useViewportState } from '../dicom-viewer/hooks/useViewportState';
 
 // UI Components
 import { ViewerToolbar } from '../dicom-viewer/components/ViewerToolbar';
-import { MainViewport, MainViewportRef } from '../dicom-viewer/components/MainViewport';
+import { MainViewport } from '../dicom-viewer/components/MainViewport';
+
+export interface MainViewportRef {
+  canvas: HTMLCanvasElement | null;
+  getCanvas: () => HTMLCanvasElement | null;
+}
 import { LoadingSpinner } from '../dicom-viewer/components/LoadingSpinner';
 import { ErrorDisplay } from '../dicom-viewer/components/ErrorDisplay';
 import { MprCanvases } from '../dicom-viewer/components/MprCanvases';
@@ -258,15 +263,14 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
       <ViewerToolbar 
         currentIndex={currentIndex}
         totalImages={images.length}
-        currentImage={currentImage}
+        currentSlicePosition={currentSlicePos}
         windowLevel={viewportState.windowLevel}
-        onWindowLevelChange={viewportState.setWindowLevel}
+        orientation={orientation}
+        isLoading={isLoading}
         onPrevious={goToPrevious}
         onNext={goToNext}
-        onGoToSlice={goToSlice}
+        onMPRToggle={() => setIsMPRVisible(!isMPRVisible)}
         isMPRVisible={isMPRVisible}
-        onToggleMPR={() => setIsMPRVisible(!isMPRVisible)}
-        orientation={orientation}
       />
 
       <div className="relative flex-1 overflow-hidden">
