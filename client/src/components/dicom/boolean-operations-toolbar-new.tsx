@@ -294,7 +294,7 @@ export function BooleanOperationsToolbar({
         {/* Main toolbar panel - 20% larger */}
         <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[960px]">
 
-          {/* First Row: Title, Info, Preview/Run Buttons, Text Field */}
+          {/* First Row: Title, Info, Text Field */}
           <div className="flex items-center space-x-3 mb-3">
             <div className="flex items-center space-x-2">
               <div 
@@ -310,36 +310,6 @@ export function BooleanOperationsToolbar({
                 title="Show instructions"
               >
                 <Info size={12} />
-              </Button>
-            </div>
-
-            {/* Preview and Run buttons - moved to left of text field */}
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLivePreview(!livePreview)}
-                className={`h-8 px-2 rounded backdrop-blur-sm shadow-sm border text-xs font-medium ${
-                  livePreview 
-                    ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
-                    : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
-                }`}
-                title="Toggle preview"
-              >
-                <Eye className="w-3 h-3 mr-1" />
-                <span>Preview</span>
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExecute}
-                disabled={!expression.trim()}
-                className="h-8 px-2 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-xs font-medium"
-                title="Execute expression"
-              >
-                <Play className="w-3 h-3 mr-1" />
-                <span>Run</span>
               </Button>
             </div>
 
@@ -588,7 +558,39 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-
+        {/* Floating action buttons - Preview and Run with icons */}
+        <div className="flex flex-col space-y-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLivePreview(!livePreview)}
+            className={`h-8 w-16 rounded backdrop-blur-sm shadow-sm border text-[10px] font-medium p-1 mb-2 ${
+              livePreview 
+                ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
+                : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
+            }`}
+            title="Toggle preview"
+          >
+            <div className="flex flex-col items-center">
+              <Eye className="w-3 h-3 mb-0.5" />
+              <span>Preview</span>
+            </div>
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExecute}
+            disabled={!expression.trim()}
+            className="h-8 w-16 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-1"
+            title="Execute expression"
+          >
+            <div className="flex flex-col items-center">
+              <Play className="w-3 h-3 mb-0.5" />
+              <span>Run</span>
+            </div>
+          </Button>
+        </div>
       </div>
     </div>
   );
