@@ -313,20 +313,28 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Main text input field with direct text display */}
+            {/* Main text input field with syntax highlighting overlay */}
             <div className="flex-1 relative">
+              {/* Input field with transparent text for cursor positioning */}
               <Input
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50 caret-white relative z-10"
                 style={{ caretColor: 'white' }}
               />
               
+              {/* Visual overlay with syntax highlighting - positioned behind input */}
+              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-0">
+                {expression ? renderExpressionWithPills() : (
+                  <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
+                )}
+              </div>
+              
               {/* Syntax validation indicator */}
               {syntaxErrors.length > 0 && (
-                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400">
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400 z-20">
                   <span className="text-xs">⚠</span>
                 </div>
               )}
@@ -558,21 +566,21 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-        {/* Floating action buttons - Preview and Run with icons */}
+        {/* Floating action buttons - Preview and Run with horizontal icons */}
         <div className="flex flex-col space-y-1">
           <Button
             variant="outline"
             size="sm"
             onClick={() => setLivePreview(!livePreview)}
-            className={`h-8 w-16 rounded backdrop-blur-sm shadow-sm border text-[10px] font-medium p-1 mb-2 ${
+            className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 mb-2 ${
               livePreview 
                 ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             }`}
             title="Toggle preview"
           >
-            <div className="flex flex-col items-center">
-              <Eye className="w-3 h-3 mb-0.5" />
+            <div className="flex items-center space-x-1">
+              <Eye className="w-3 h-3" />
               <span>Preview</span>
             </div>
           </Button>
@@ -582,11 +590,11 @@ export function BooleanOperationsToolbar({
             size="sm"
             onClick={handleExecute}
             disabled={!expression.trim()}
-            className="h-8 w-16 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-[10px] font-medium p-1"
+            className="h-8 w-20 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-xs font-medium px-2"
             title="Execute expression"
           >
-            <div className="flex flex-col items-center">
-              <Play className="w-3 h-3 mb-0.5" />
+            <div className="flex items-center space-x-1">
+              <Play className="w-3 h-3" />
               <span>Run</span>
             </div>
           </Button>

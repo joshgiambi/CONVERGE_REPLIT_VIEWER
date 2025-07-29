@@ -381,6 +381,19 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
     - Fixed width matches contour editing toolbar for visual consistency
     - Input field is flex-1 for maximum space utilization
     - Undo/Redo buttons positioned in bottom-right corner
+
+- July 29, 2025: Boolean Operations UI Enhancement - Cursor Fix and Preview Restoration - COMPLETED ✅
+  - ✅ Fixed cursor positioning lag issue by restoring syntax highlighting overlay system
+  - ✅ Input field cursor now accurately follows text entry without delay using requestAnimationFrame
+  - ✅ Restored colorful structure names and syntax highlighting in text input preview
+  - ✅ Fixed Preview and Run button icon layout - icons now appear beside text horizontally instead of stacked vertically
+  - ✅ Improved button dimensions and spacing for better visual appearance
+  - ✅ Maintained all cursor synchronization improvements with better DOM update timing
+  - Technical details:
+    - Restored transparent input overlay with z-index layering for proper cursor positioning
+    - Used requestAnimationFrame for all cursor position updates instead of setTimeout
+    - Changed button layout from flex-col to flex with horizontal spacing
+    - Updated button widths to w-20 for proper text and icon accommodation
 - July 26, 2025: Complete System Integration and Fix - COMPREHENSIVE OVERHAUL COMPLETED ✅
   - ✅ **BRUSH TOOL**: Fixed coordinate system, dragging range, and mouse handling - confirmed working
   - ✅ **PEN TOOL V2**: Complete Eclipse-style pen tool rewrite with boolean operations - integrated and functional
