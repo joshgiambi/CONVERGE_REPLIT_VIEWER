@@ -22,17 +22,14 @@ export function BooleanOperationsToolbar({
   onExecuteOperation
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
-  const [outputStructure, setOutputStructure] = useState('');
-  const [createNewOutput, setCreateNewOutput] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [outputSuggestions, setOutputSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showOutputSuggestions, setShowOutputSuggestions] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
   const [livePreview, setLivePreview] = useState(false);
+  const [showNewStructurePanel, setShowNewStructurePanel] = useState(false);
+  const [newStructureName, setNewStructureName] = useState('');
   const [newStructureColor, setNewStructureColor] = useState('#3B82F6');
   const inputRef = useRef<HTMLInputElement>(null);
-  const outputRef = useRef<HTMLInputElement>(null);
   const [showPillView, setShowPillView] = useState(false);
   
   // Parse expression to identify structure names and operators
@@ -107,19 +104,6 @@ export function BooleanOperationsToolbar({
     }
   }, [expression, availableStructures]);
 
-  // Output structure auto-complete logic
-  useEffect(() => {
-    if (outputStructure.length > 0) {
-      const filtered = availableStructures.filter(structure =>
-        structure.toLowerCase().includes(outputStructure.toLowerCase())
-      );
-      setOutputSuggestions(filtered.slice(0, 5));
-      setShowOutputSuggestions(filtered.length > 0 && !createNewOutput);
-    } else {
-      setShowOutputSuggestions(false);
-    }
-  }, [outputStructure, availableStructures, createNewOutput]);
-
   const insertText = (text: string) => {
     if (inputRef.current) {
       const start = inputRef.current.selectionStart || 0;
@@ -169,22 +153,12 @@ export function BooleanOperationsToolbar({
     setShowSuggestions(false);
   };
 
-  const insertOutputStructure = (structureName: string) => {
-    setOutputStructure(structureName);
-    setShowOutputSuggestions(false);
-    setTimeout(() => {
-      if (outputRef.current) {
-        outputRef.current.focus();
-      }
-    }, 0);
-  };
-
   const handleExecute = () => {
-    if (expression.trim() && outputStructure.trim()) {
-      if (createNewOutput) {
+    if (expression.trim()) {
+      if (showNewStructurePanel && newStructureName.trim()) {
         onExecuteOperation(expression, {
           createNewStructure: true,
-          name: outputStructure,
+          name: newStructureName,
           color: newStructureColor
         });
       } else {
@@ -195,8 +169,8 @@ export function BooleanOperationsToolbar({
 
   const handleClear = () => {
     setExpression('');
-    setOutputStructure('');
-    setCreateNewOutput(false);
+    setNewStructureName('');
+    setShowNewStructurePanel(false);
   };
 
   const handleCloseWithConfirmation = () => {
@@ -227,8 +201,8 @@ export function BooleanOperationsToolbar({
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
         <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/80 w-[900px]">
-          {/* Header Row: Title, Info, Close */}
-          <div className="flex items-center justify-between mb-3">
+          {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
+          <div className="flex items-center space-x-3 mb-3">
             <div className="flex items-center space-x-2">
               <div 
                 className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
@@ -246,38 +220,25 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Close button with confirmation */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCloseWithConfirmation}
-              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
-            >
-              <X size={14} />
-            </Button>
-          </div>
-
-          {/* Expression Input Row */}
-          <div className="mb-3">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-white/80 text-xs font-medium min-w-[80px]">Expression:</span>
-            </div>
-            <div className="relative">
-              <Input
-                ref={inputRef}
-                value={expression}
-                onChange={(e) => setExpression(e.target.value)}
-                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
-              />
-              
-              {/* Expression with pills view */}
-              {expression && availableStructures.length > 0 && (
-                <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
-                  <div className="text-xs text-gray-400 mb-1">Preview:</div>
-                  {renderExpressionWithPills()}
-                </div>
-              )}
+            {/* Main text input field - takes up most space */}
+            <div className="flex-1 relative">
+              <div>
+                <Input
+                  ref={inputRef}
+                  value={expression}
+                  onChange={(e) => setExpression(e.target.value)}
+                  placeholder="Enter boolean expression (e.g., A ∪ B - C)"
+                  className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+                />
+                
+                {/* Expression with pills view */}
+                {expression && availableStructures.length > 0 && (
+                  <div className="mt-2 p-2 bg-black/30 rounded-lg border border-white/20">
+                    <div className="text-xs text-gray-400 mb-1">Preview:</div>
+                    {renderExpressionWithPills()}
+                  </div>
+                )}
+              </div>
               
               {/* Auto-complete suggestions */}
               {showSuggestions && suggestions.length > 0 && (
@@ -294,70 +255,8 @@ export function BooleanOperationsToolbar({
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Output Structure Row */}
-          <div className="mb-3">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-white/80 text-xs font-medium min-w-[80px]">Output to:</span>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCreateNewOutput(false)}
-                  className={`h-6 px-2 text-xs rounded-lg backdrop-blur-sm shadow-sm border ${
-                    !createNewOutput 
-                      ? 'bg-blue-700/50 border-blue-500 text-blue-200' 
-                      : 'bg-gray-700/30 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50'
-                  }`}
-                >
-                  Existing
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCreateNewOutput(true)}
-                  className={`h-6 px-2 text-xs rounded-lg backdrop-blur-sm shadow-sm border ${
-                    createNewOutput 
-                      ? 'bg-blue-700/50 border-blue-500 text-blue-200' 
-                      : 'bg-gray-700/30 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-600/50'
-                  }`}
-                >
-                  New
-                </Button>
-              </div>
-            </div>
-            <div className="relative">
-              <Input
-                ref={outputRef}
-                value={outputStructure}
-                onChange={(e) => setOutputStructure(e.target.value)}
-                placeholder={createNewOutput ? "Enter new structure name" : "Select existing structure"}
-                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
-              />
-              
-              {/* Output structure auto-complete suggestions */}
-              {showOutputSuggestions && outputSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl z-50 w-full max-h-32 overflow-y-auto">
-                  {outputSuggestions.map((suggestion, index) => (
-                    <button
-                      key={index}
-                      onClick={() => {
-                        setOutputStructure(suggestion);
-                        setShowOutputSuggestions(false);
-                      }}
-                      className="w-full text-left px-3 py-1 text-sm text-white hover:bg-blue-900/30 first:rounded-t-lg last:rounded-b-lg"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Action Row */}
-          <div className="flex items-center justify-between">
+            {/* Action buttons */}
             <div className="flex items-center space-x-1">
               <Button
                 variant="outline"
@@ -387,7 +286,7 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleExecute}
-                disabled={!expression.trim() || !outputStructure.trim()}
+                disabled={!expression.trim()}
                 className="h-8 px-3 bg-green-700/50 border-2 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
                 <Play size={12} className="mr-1" />
@@ -395,28 +294,15 @@ export function BooleanOperationsToolbar({
               </Button>
             </div>
 
-            {/* Undo/Redo buttons on the right */}
-            <div className="flex items-center space-x-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleUndo}
-                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs rounded-lg backdrop-blur-sm shadow-sm"
-                title="Undo"
-              >
-                <Undo size={12} />
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRedo}
-                className="h-8 px-2 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs rounded-lg backdrop-blur-sm shadow-sm"
-                title="Redo"
-              >
-                <Redo size={12} />
-              </Button>
-            </div>
+            {/* Close button with confirmation */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCloseWithConfirmation}
+              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
+            >
+              <X size={14} />
+            </Button>
           </div>
 
           {/* Second Row: Boolean Operators and Prominent Undo/Redo */}
@@ -493,7 +379,20 @@ export function BooleanOperationsToolbar({
                 <span className="text-xs font-medium">Group</span>
               </Button>
               
-
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewStructurePanel(!showNewStructurePanel)}
+                className={`h-7 px-2 rounded-lg backdrop-blur-sm shadow-sm ${
+                  showNewStructurePanel
+                    ? 'bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40'
+                    : 'bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
+                }`}
+                title="Create new structure"
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">New</span>
+              </Button>
             </div>
 
             {/* Prominent Undo/Redo buttons */}
@@ -522,7 +421,42 @@ export function BooleanOperationsToolbar({
             </div>
           </div>
 
-
+          {/* New Structure Panel */}
+          {showNewStructurePanel && (
+            <div className="mt-2 p-3 bg-purple-900/20 border border-purple-400/40 rounded-lg">
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">New Structure Name</label>
+                  <Input
+                    value={newStructureName}
+                    onChange={(e) => setNewStructureName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newStructureName.trim()) {
+                        // Add the new structure name to the expression
+                        insertText(newStructureName.trim());
+                        setNewStructureName('');
+                        setShowNewStructurePanel(false);
+                        inputRef.current?.focus();
+                      }
+                    }}
+                    placeholder="e.g. CombinedStructure"
+                    className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-gray-400"
+                  />
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <label className="text-xs text-gray-400">Color:</label>
+                  <input
+                    type="color"
+                    value={newStructureColor}
+                    onChange={(e) => setNewStructureColor(e.target.value)}
+                    className="h-8 w-16 rounded cursor-pointer bg-black/30 border border-white/30"
+                  />
+                  <span className="text-xs text-gray-400">{newStructureColor}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Instructions Panel */}
           {showInstructions && (
