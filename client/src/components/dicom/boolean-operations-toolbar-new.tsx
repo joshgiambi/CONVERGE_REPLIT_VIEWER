@@ -175,10 +175,10 @@ export function BooleanOperationsToolbar({
             {/* Action buttons */}
             <div className="flex items-center space-x-1">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={handleClear}
-                className="h-8 px-3 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
               >
                 Clear
               </Button>
@@ -189,7 +189,7 @@ export function BooleanOperationsToolbar({
                 onClick={() => setLivePreview(!livePreview)}
                 className={`h-8 px-3 text-xs ${
                   livePreview 
-                    ? 'bg-blue-600/50 border-blue-500 text-blue-200' 
+                    ? 'bg-yellow-600/50 border-yellow-500 text-yellow-200' 
                     : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
                 }`}
               >
@@ -198,11 +198,11 @@ export function BooleanOperationsToolbar({
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={handleExecute}
                 disabled={!expression.trim()}
-                className="h-8 px-3 bg-green-700/50 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs"
               >
                 <Play size={12} className="mr-1" />
                 Run
@@ -225,53 +225,83 @@ export function BooleanOperationsToolbar({
             {/* Boolean operator buttons */}
             <div className="flex items-center space-x-2">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => insertText(' ∪ ')}
-                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
                 title="Union"
               >
-                ∪
+                <span className="text-base mr-1">∪</span>
+                Union
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => insertText(' ∩ ')}
-                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
                 title="Intersect"
               >
-                ∩
+                <span className="text-base mr-1">∩</span>
+                Intersect
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => insertText(' - ')}
-                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
                 title="Subtract"
               >
-                −
+                <span className="text-base mr-1">−</span>
+                Subtract
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => insertText(' ⊕ ')}
-                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
                 title="XOR"
               >
-                ⊕
+                <span className="text-base mr-1">⊕</span>
+                XOR
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
+                size="sm"
+                onClick={() => { 
+                  insertText('(');
+                  setTimeout(() => {
+                    const input = inputRef.current;
+                    if (input) {
+                      const pos = input.selectionStart || 0;
+                      const value = input.value;
+                      const newValue = value.slice(0, pos) + ')' + value.slice(pos);
+                      setExpression(newValue);
+                      setTimeout(() => {
+                        input.focus();
+                        input.setSelectionRange(pos, pos);
+                      }, 0);
+                    }
+                  }, 50);
+                }}
+                className="h-8 px-3 text-gray-300 hover:bg-gray-700/50 hover:text-white rounded-lg text-xs"
+                title="Parentheses"
+              >
+                <span className="text-base mr-1">( )</span>
+                Group
+              </Button>
+              
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => setShowNewStructurePanel(!showNewStructurePanel)}
-                className={`h-7 px-2 text-xs ${
+                className={`h-8 px-3 rounded-lg text-xs ${
                   showNewStructurePanel
-                    ? 'bg-purple-600/50 border-purple-500 text-purple-200'
-                    : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
+                    ? 'bg-purple-600/20 border border-purple-500 text-purple-200'
+                    : 'text-gray-300 hover:bg-gray-700/50 hover:text-white'
                 }`}
                 title="Create new structure"
               >
@@ -283,27 +313,25 @@ export function BooleanOperationsToolbar({
             {/* Prominent Undo/Redo buttons */}
             <div className="flex items-center space-x-2">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={handleUndo}
                 disabled={true} // TODO: Enable when undo is implemented
-                className="h-8 px-4 bg-blue-700/50 border-blue-600 text-blue-300 hover:text-blue-200 hover:bg-blue-600/50 disabled:opacity-50 text-sm font-medium"
+                className="h-8 w-8 p-0 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
                 title="Undo operation"
               >
-                <Undo size={14} className="mr-1" />
-                Undo
+                <Undo size={16} />
               </Button>
               
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={handleRedo}
                 disabled={true} // TODO: Enable when redo is implemented
-                className="h-8 px-4 bg-blue-700/50 border-blue-600 text-blue-300 hover:text-blue-200 hover:bg-blue-600/50 disabled:opacity-50 text-sm font-medium"
+                className="h-8 w-8 p-0 text-gray-300 hover:bg-gray-700/50 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
                 title="Redo operation"
               >
-                <Redo size={14} className="mr-1" />
-                Redo
+                <Redo size={16} />
               </Button>
             </div>
           </div>
