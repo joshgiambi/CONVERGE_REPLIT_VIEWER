@@ -99,6 +99,18 @@ export function BooleanOperationsToolbar({
     setShowNewStructurePanel(false);
   };
 
+  const handleCloseWithConfirmation = () => {
+    if (expression.trim()) {
+      // Show confirmation modal when there's active text
+      const shouldClose = window.confirm('You have an active operation. Are you sure you want to close?');
+      if (shouldClose) {
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
   const handleUndo = () => {
     // TODO: Implement undo functionality
     console.log('Undo clicked');
@@ -115,57 +127,190 @@ export function BooleanOperationsToolbar({
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
         <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/20 w-[600px]">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center space-x-3">
+          {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
+          <div className="flex items-center space-x-3 mb-3">
+            <div className="flex items-center space-x-2">
               <div 
                 className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
                 style={{ backgroundColor: 'rgb(59, 130, 246)' }}
               />
               <span className="text-white text-sm font-medium drop-shadow-sm">Boolean Operations</span>
-            </div>
-            
-            <div className="flex items-center space-x-1">
-              {/* Info Button */}
-              <div className="relative">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onMouseEnter={() => setShowInstructions(true)}
-                  onMouseLeave={() => setShowInstructions(false)}
-                  className="text-white/70 hover:text-white hover:bg-white/20 h-7 w-7 p-0 rounded-lg backdrop-blur-sm shadow-sm"
-                >
-                  <Info size={14} />
-                </Button>
-                
-                {showInstructions && (
-                  <div className="absolute top-full right-0 mt-2 p-3 bg-black/90 rounded-lg shadow-xl z-50 w-64 text-xs text-gray-300">
-                    <div className="space-y-1">
-                      <div>• Type structure names to see suggestions</div>
-                      <div>• Use boolean operators: ∪ (union), ∩ (intersect), - (subtract), ⊕ (XOR)</div>
-                      <div>• Example: Parotid_L ∪ Parotid_R - SpinalCord</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Close Button */}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={onClose}
-                className="text-white/70 hover:text-white hover:bg-white/20 h-7 w-7 p-0 rounded-lg backdrop-blur-sm shadow-sm"
+                onClick={() => setShowInstructions(!showInstructions)}
+                className="h-6 w-6 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20 rounded-lg"
+                title="Show instructions"
               >
-                <X size={14} />
+                <Info size={12} />
+              </Button>
+            </div>
+
+            {/* Main text input field - takes up most space */}
+            <div className="flex-1 relative">
+              <Input
+                ref={inputRef}
+                value={expression}
+                onChange={(e) => setExpression(e.target.value)}
+                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
+                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50"
+              />
+              
+              {/* Auto-complete suggestions */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl z-50 w-full max-h-32 overflow-y-auto">
+                  {suggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      onClick={() => insertStructure(suggestion)}
+                      className="w-full text-left px-3 py-1 text-sm text-white hover:bg-blue-900/30 first:rounded-t-lg last:rounded-b-lg"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center space-x-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClear}
+                className="h-8 px-3 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+              >
+                Clear
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLivePreview(!livePreview)}
+                className={`h-8 px-3 text-xs ${
+                  livePreview 
+                    ? 'bg-blue-600/50 border-blue-500 text-blue-200' 
+                    : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
+                }`}
+              >
+                <Eye size={12} className="mr-1" />
+                Preview
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExecute}
+                disabled={!expression.trim()}
+                className="h-8 px-3 bg-green-700/50 border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 text-xs"
+              >
+                <Play size={12} className="mr-1" />
+                Run
+              </Button>
+            </div>
+
+            {/* Close button with confirmation */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCloseWithConfirmation}
+              className="h-8 w-8 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg"
+            >
+              <X size={14} />
+            </Button>
+          </div>
+
+          {/* Second Row: Boolean Operators and Prominent Undo/Redo */}
+          <div className="flex items-center justify-between">
+            {/* Boolean operator buttons */}
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ∪ ')}
+                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                title="Union"
+              >
+                ∪
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ∩ ')}
+                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                title="Intersect"
+              >
+                ∩
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' - ')}
+                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                title="Subtract"
+              >
+                −
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => insertText(' ⊕ ')}
+                className="h-7 px-2 bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs"
+                title="XOR"
+              >
+                ⊕
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewStructurePanel(!showNewStructurePanel)}
+                className={`h-7 px-2 text-xs ${
+                  showNewStructurePanel
+                    ? 'bg-purple-600/50 border-purple-500 text-purple-200'
+                    : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
+                }`}
+                title="Create new structure"
+              >
+                <Plus size={12} className="mr-1" />
+                New
+              </Button>
+            </div>
+
+            {/* Prominent Undo/Redo buttons */}
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUndo}
+                disabled={true} // TODO: Enable when undo is implemented
+                className="h-8 px-4 bg-blue-700/50 border-blue-600 text-blue-300 hover:text-blue-200 hover:bg-blue-600/50 disabled:opacity-50 text-sm font-medium"
+                title="Undo operation"
+              >
+                <Undo size={14} className="mr-1" />
+                Undo
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRedo}
+                disabled={true} // TODO: Enable when redo is implemented
+                className="h-8 px-4 bg-blue-700/50 border-blue-600 text-blue-300 hover:text-blue-200 hover:bg-blue-600/50 disabled:opacity-50 text-sm font-medium"
+                title="Redo operation"
+              >
+                <Redo size={14} className="mr-1" />
+                Redo
               </Button>
             </div>
           </div>
 
-          <Separator className="my-2 bg-gray-700" />
-
           {/* New Structure Panel */}
           {showNewStructurePanel && (
-            <div className="mb-3 p-3 bg-purple-900/20 border border-purple-400/40 rounded-lg">
+            <div className="mt-2 p-3 bg-purple-900/20 border border-purple-400/40 rounded-lg">
               <div className="space-y-2">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">New Structure Name</label>
@@ -173,7 +318,7 @@ export function BooleanOperationsToolbar({
                     value={newStructureName}
                     onChange={(e) => setNewStructureName(e.target.value)}
                     placeholder="e.g. CombinedStructure"
-                    className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder-gray-400"
+                    className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder:text-gray-400"
                   />
                 </div>
                 
@@ -191,155 +336,16 @@ export function BooleanOperationsToolbar({
             </div>
           )}
 
-          {/* Main Input Row */}
-          <div className="flex items-center space-x-2">
-            {/* Expression Input */}
-            <div className="relative flex-1">
-              <Input
-                ref={inputRef}
-                value={expression}
-                onChange={(e) => setExpression(e.target.value)}
-                placeholder="Enter boolean expression (e.g., Parotid_L ∪ Parotid_R)"
-                className="w-full h-9 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm placeholder-gray-400"
-              />
-              
-              {/* Auto-complete suggestions */}
-              {showSuggestions && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-10 max-h-32 overflow-y-auto">
-                  {suggestions.map((structure, index) => (
-                    <button
-                      key={index}
-                      className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                      onClick={() => insertStructure(structure)}
-                    >
-                      {structure}
-                    </button>
-                  ))}
-                </div>
-              )}
+          {/* Instructions Panel */}
+          {showInstructions && (
+            <div className="mt-2 p-3 bg-black/90 border border-gray-600 rounded-lg text-xs text-gray-300">
+              <div className="space-y-1">
+                <div>• Type structure names to see suggestions</div>
+                <div>• Use boolean operators: ∪ (union), ∩ (intersect), - (subtract), ⊕ (XOR)</div>
+                <div>• Example: Parotid_L ∪ Parotid_R - SpinalCord</div>
+              </div>
             </div>
-
-            {/* Clear Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 px-3 text-xs transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40"
-              onClick={handleClear}
-              title="Clear expression"
-            >
-              <Eraser className="w-4 h-4" />
-              Clear
-            </Button>
-
-            {/* Preview Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`h-9 px-3 text-xs transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm ${
-                livePreview 
-                  ? 'bg-yellow-900/30 border-2 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40' 
-                  : 'bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20'
-              }`}
-              onClick={() => setLivePreview(!livePreview)}
-              title="Toggle live preview"
-            >
-              <Eye className="w-4 h-4" />
-              Preview
-            </Button>
-
-            {/* Run Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 px-3 text-xs transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40"
-              onClick={handleExecute}
-              title="Execute boolean operation"
-            >
-              <Play className="w-4 h-4" />
-              Run
-            </Button>
-          </div>
-
-          {/* Bottom Row: Boolean Operators, Undo/Redo */}
-          <div className="flex items-center justify-between mt-3">
-            {/* Boolean Operator Buttons */}
-            <div className="flex items-center space-x-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs bg-white/10 border border-white/30 text-white hover:bg-white/20"
-                onClick={() => insertText(' ∪ ')}
-                title="Union (A + B)"
-              >
-                Union
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs bg-white/10 border border-white/30 text-white hover:bg-white/20"
-                onClick={() => insertText(' ∩ ')}
-                title="Intersection (A & B)"
-              >
-                Intersect
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs bg-white/10 border border-white/30 text-white hover:bg-white/20"
-                onClick={() => insertText(' - ')}
-                title="Subtraction (A - B)"
-              >
-                Subtract
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs bg-white/10 border border-white/30 text-white hover:bg-white/20"
-                onClick={() => insertText(' ⊕ ')}
-                title="Exclusive OR (A ⊕ B)"
-              >
-                XOR
-              </Button>
-              
-              <div className="w-px h-5 bg-white/30 mx-1" />
-              
-              {/* New Structure Button */}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs transition-all duration-200 rounded-lg backdrop-blur-sm shadow-sm bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40"
-                onClick={() => setShowNewStructurePanel(!showNewStructurePanel)}
-                title="Create new structure"
-              >
-                <Plus className="w-3 h-3" />
-                New
-              </Button>
-            </div>
-
-            {/* Undo/Redo Buttons */}
-            <div className="flex items-center space-x-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-white/50 hover:text-white hover:bg-white/20 disabled:opacity-50"
-                onClick={handleUndo}
-                disabled={true} // TODO: Enable when undo stack has items
-                title="Undo"
-              >
-                <Undo className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-white/50 hover:text-white hover:bg-white/20 disabled:opacity-50"
-                onClick={handleRedo}
-                disabled={true} // TODO: Enable when redo stack has items
-                title="Redo"
-              >
-                <Redo className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
