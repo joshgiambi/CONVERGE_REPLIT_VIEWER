@@ -123,25 +123,39 @@ export const MainViewport = forwardRef<MainViewportRef, MainViewportProps>(({
 
   // Render when dependencies change
   useEffect(() => {
-    renderFrame();
-  }, [currentImage, windowLevel, viewportState, rtStructures, currentSlicePosition, structureVisibility, selectedForEdit, contourSettings, secondaryImages, fusionOpacity, registrationMatrix, secondaryWindowLevel]);
+    // Use requestAnimationFrame for smooth rendering
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(renderFrame);
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [currentImage, windowLevel, viewportState, rtStructures, structureVisibility, 
+      selectedForEdit, contourSettings, currentSlicePosition, fusionOpacity, 
+      secondaryImages, registrationMatrix, secondaryWindowLevel]);
 
   return (
-    <div className={`relative ${className}`}>
-      <canvas 
-        ref={canvasRef}
-        width={1280}
-        height={1280}
-        className="max-w-full max-h-full object-contain cursor-crosshair"
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onWheel={onWheel}
-        onContextMenu={onContextMenu}
-        tabIndex={keyboardNavigationDisabled ? -1 : 0}
-        style={{ imageRendering: 'pixelated' }}
-      />
-    </div>
+    <canvas
+      ref={canvasRef}
+      width={1280}
+      height={1280}
+      className={`max-w-full max-h-full ${className}`}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onWheel={onWheel}
+      onContextMenu={onContextMenu}
+      tabIndex={keyboardNavigationDisabled ? -1 : 0}
+      style={{
+        imageRendering: 'auto',
+        cursor: 'crosshair'
+      }}
+    />
   );
 });
 

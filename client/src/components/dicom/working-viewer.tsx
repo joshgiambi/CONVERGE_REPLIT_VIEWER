@@ -102,7 +102,9 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
     error, 
     goToNext, 
     goToPrevious, 
-    goToSlice 
+    goToSlice,
+    getCurrentImageWithData,
+    imageCacheRef
   } = useDicomLoader(seriesId, orientation);
 
   // Contour operations state
@@ -123,6 +125,20 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
   
   // MPR visibility state
   const [isMPRVisible, setIsMPRVisible] = useState(false);
+  
+  // Get current image with parsed data for rendering
+  const [currentImageWithData, setCurrentImageWithData] = useState<any>(null);
+  
+  useEffect(() => {
+    if (currentImage && getCurrentImageWithData) {
+      getCurrentImageWithData().then(imageData => {
+        setCurrentImageWithData(imageData);
+      }).catch(err => {
+        console.error('Error loading image data:', err);
+        setCurrentImageWithData(currentImage);
+      });
+    }
+  }, [currentImage, getCurrentImageWithData]);
   
   // Selected tool state
   const [selectedTool, setSelectedTool] = useState<string | null>(brushToolState?.tool);
@@ -278,7 +294,7 @@ export const WorkingViewer = forwardRef<WorkingViewerRef, WorkingViewerProps>(({
         <div className="flex justify-center items-center h-full">
           <MainViewport
             ref={mainViewportRef}
-            currentImage={currentImage}
+            currentImage={currentImageWithData || currentImage}
             rtStructures={rtStructures}
             secondaryImages={secondaryImages}
             registrationMatrix={registrationMatrix}
