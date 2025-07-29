@@ -7,6 +7,7 @@ import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
+import { BooleanOperationsToolbar } from './boolean-operations-toolbar';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -63,6 +64,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
+  
+  // Boolean operations state
+  const [showBooleanOperations, setShowBooleanOperations] = useState(false);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -615,6 +619,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               setIsContourEditMode(true);
             }
           }}
+          onContourOperations={() => {
+            setShowBooleanOperations(true);
+          }}
           onMPRToggle={() => {
             setMprVisible(!mprVisible);
           }}
@@ -663,7 +670,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-
+      {/* Boolean Operations Toolbar */}
+      <BooleanOperationsToolbar
+        isVisible={showBooleanOperations}
+        onClose={() => setShowBooleanOperations(false)}
+        availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
+        onExecuteOperation={(expression) => {
+          console.log('Executing boolean operation:', expression);
+          // TODO: Implement boolean operation execution
+          setShowBooleanOperations(false);
+        }}
+      />
 
       {/* Error Modal */}
       <ErrorModal

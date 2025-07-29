@@ -28,6 +28,7 @@ interface ViewerToolbarProps {
   onMeasure: () => void;
   onCrosshairs?: () => void;
   onContourEdit?: () => void;
+  onContourOperations?: () => void;
   isContourEditActive?: boolean;
   isPanActive?: boolean;
   isCrosshairsActive?: boolean;
@@ -51,6 +52,7 @@ export function ViewerToolbar({
   onMeasure,
   onCrosshairs,
   onContourEdit,
+  onContourOperations,
   isContourEditActive = false,
   isPanActive = false,
   isCrosshairsActive = false,
@@ -66,6 +68,7 @@ export function ViewerToolbar({
   const [showMetadata, setShowMetadata] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
+  const [showContourOperations, setShowContourOperations] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
     // Ensure only one selectable tool is active at a time (except MPR which is a toggle)
@@ -158,22 +161,47 @@ export function ViewerToolbar({
           </div>
         </div>
 
-        {/* Contour Edit Popout Icon */}
-        {isContourEditActive && onContourEdit && (
-          <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
-                onClick={onContourEdit}
-              >
-                <Edit3 className="w-4 h-4" />
-              </Button>
-            </div>
-            {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
-              Edit Contours
+        {/* Contour Edit and Operations Popout Icons */}
+        {isContourEditActive && (
+          <div className="absolute -right-28 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+            <div className="flex space-x-2">
+              {/* Contour Edit Button */}
+              {onContourEdit && (
+                <div className="relative group">
+                  <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
+                      onClick={onContourEdit}
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    Edit Contours
+                  </div>
+                </div>
+              )}
+              
+              {/* Contour Operations Button */}
+              <div className="relative group">
+                <div className="bg-white/10 backdrop-blur-md border border-blue-500/50 rounded-lg shadow-lg">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-white/20 transition-all duration-200"
+                    onClick={onContourOperations}
+                  >
+                    <Activity className="w-4 h-4" />
+                  </Button>
+                </div>
+                {/* Tooltip */}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  Boolean Operations
+                </div>
+              </div>
             </div>
           </div>
         )}
