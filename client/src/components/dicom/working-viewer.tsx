@@ -1981,9 +1981,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
 
-    console.log(`🚀 OHIF-style background prefetch starting for ${imageList.length} images`);
+    // Background prefetch logging removed per user request
+    // console.log(`🚀 OHIF-style background prefetch starting for ${imageList.length} images`);
     
-    setPrefetchProgress({ loaded: imageCacheRef.current.size, total: imageList.length });
+    // setPrefetchProgress({ loaded: imageCacheRef.current.size, total: imageList.length });
     
     const BATCH_SIZE = 50; // Match server batch size
     const PREFETCH_RADIUS = 10; // Images to prioritize around current position
@@ -1993,14 +1994,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     let failedCount = 0;
     const startTime = Date.now();
     
-    // Auto-hide progress after timeout
-    setTimeout(() => {
-      if (!prefetchCompleteRef.current) {
-        console.log('⏱️ Background prefetch timeout - hiding progress indicator');
-        prefetchCompleteRef.current = true;
-        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
-      }
-    }, MAX_PREFETCH_TIME);
+    // Auto-hide progress after timeout - removed per user request
+    // setTimeout(() => {
+    //   if (!prefetchCompleteRef.current) {
+    //     console.log('⏱️ Background prefetch timeout - hiding progress indicator');
+    //     prefetchCompleteRef.current = true;
+    //     setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
+    //   }
+    // }, MAX_PREFETCH_TIME);
     
     // Create priority queue based on viewing position
     const getPriority = (index: number) => {
@@ -2022,16 +2023,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const loadedPercentage = loadedCount / imageList.length;
       if (loadedPercentage >= COMPLETION_THRESHOLD) {
         prefetchCompleteRef.current = true;
-        console.log(`✅ Background prefetch sufficient: ${loadedCount}/${imageList.length} images (${Math.round(loadedPercentage * 100)}%)`);
-        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
+        // Background prefetch logging removed per user request
+        // console.log(`✅ Background prefetch sufficient: ${loadedCount}/${imageList.length} images (${Math.round(loadedPercentage * 100)}%)`);
+        // setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
         return;
       }
       
       const batchIndices = prioritizedIndices.slice(startIdx, startIdx + BATCH_SIZE);
       if (batchIndices.length === 0) {
         prefetchCompleteRef.current = true;
-        console.log(`✅ Background prefetch complete: ${loadedCount}/${imageList.length} images, ${failedCount} failed`);
-        setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
+        // Background prefetch logging removed per user request
+        // console.log(`✅ Background prefetch complete: ${loadedCount}/${imageList.length} images, ${failedCount} failed`);
+        // setPrefetchProgress({ loaded: 0, total: 0 }); // Hide progress
         return;
       }
       
@@ -2048,9 +2051,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           loadedCount += batchResults.size;
           failedCount += (batchUIDs.length - batchResults.size);
           
-          const progress = Math.round((loadedCount / imageList.length) * 100);
-          console.log(`📊 Prefetch progress: ${loadedCount}/${imageList.length} (${progress}%)`);
-          setPrefetchProgress({ loaded: loadedCount, total: imageList.length });
+          // Progress tracking removed per user request
+          // const progress = Math.round((loadedCount / imageList.length) * 100);
+          // console.log(`📊 Prefetch progress: ${loadedCount}/${imageList.length} (${progress}%)`);
+          // setPrefetchProgress({ loaded: loadedCount, total: imageList.length });
           
         } catch (error: any) {
           if (error.name === 'AbortError') {
@@ -2669,8 +2673,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
       
-      // Draw crosshairs if in axial view
-      if (orientation === 'axial') {
+      // Draw crosshairs if in axial view and crosshair tool is selected
+      // Crosshairs disabled by default per user request - only show when crosshair tool is active
+      if (false && orientation === 'axial') {
         // Convert crosshair pixel coordinates to canvas coordinates
         const imageWidth = currentImage.columns || currentImage.width || 512;
         const imageHeight = currentImage.rows || currentImage.height || 512;
@@ -3825,20 +3830,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               </Button>
             )}
             
-            {/* Background Loading Progress */}
-            {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
-              <div className="flex items-center space-x-2 px-3 py-1.5 bg-gray-800/50 rounded-lg">
-                <div className="w-24 bg-gray-700 rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="bg-gradient-to-r from-green-500 to-green-400 h-1.5 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${(prefetchProgress.loaded / prefetchProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs text-gray-300">
-                  {Math.round((prefetchProgress.loaded / prefetchProgress.total) * 100)}% ({prefetchProgress.loaded}/{prefetchProgress.total})
-                </span>
-              </div>
-            )}
+            {/* Background Loading Progress - Removed per user request */}
             
             <Button
               size="sm"
@@ -4103,13 +4095,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     height={384}
                     onClick={handleSagittalClick}
                   />
-                  {/* Crosshair on sagittal view (horizontal line shows axial Y position) */}
-                  <div 
-                    className="mpr-crosshair-h" 
-                    style={{ 
-                      top: `${(crosshairPos.y / (images[0]?.rows || 512)) * 100}%` 
-                    }} 
-                  />
+                  {/* Crosshair on sagittal view disabled by default per user request */}
                   {isLoadingMPR && (
                     <div className="mpr-loading">
                       <div className="mpr-loading-spinner" />
@@ -4132,13 +4118,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     height={384}
                     onClick={handleCoronalClick}
                   />
-                  {/* Crosshair on coronal view (vertical line shows axial X position) */}
-                  <div 
-                    className="mpr-crosshair-v" 
-                    style={{ 
-                      left: `${(crosshairPos.x / (images[0]?.columns || 512)) * 100}%` 
-                    }} 
-                  />
+                  {/* Crosshair on coronal view disabled by default per user request */}
                   {isLoadingMPR && (
                     <div className="mpr-loading">
                       <div className="mpr-loading-spinner" />
