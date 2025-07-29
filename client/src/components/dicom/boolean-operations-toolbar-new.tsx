@@ -317,12 +317,22 @@ export function BooleanOperationsToolbar({
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder=""
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20"
-                style={{ caretColor: 'white' }}
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20 font-sans"
+                style={{ 
+                  caretColor: 'white',
+                  letterSpacing: 'normal',
+                  lineHeight: '1.25rem'
+                }}
               />
               
               {/* Visual overlay with syntax highlighting - positioned behind input */}
-              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-10 font-sans">
+              <div 
+                className="absolute inset-0 pointer-events-none flex items-center text-sm z-10 font-sans px-3"
+                style={{ 
+                  letterSpacing: 'normal',
+                  lineHeight: '1.25rem'
+                }}
+              >
                 {expression ? (
                   renderExpressionWithPills()
                 ) : (
