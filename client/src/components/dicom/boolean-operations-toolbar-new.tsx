@@ -320,21 +320,25 @@ export function BooleanOperationsToolbar({
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
-                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm placeholder:text-white/50 caret-white relative z-10"
+                placeholder=""
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg backdrop-blur-sm caret-white relative z-20"
                 style={{ caretColor: 'white' }}
               />
               
               {/* Visual overlay with syntax highlighting - positioned behind input */}
-              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-0">
-                {expression ? renderExpressionWithPills() : (
+              <div className="absolute inset-0 pointer-events-none px-3 py-1 flex items-center text-sm z-10">
+                {expression ? (
+                  <div className="flex items-center font-mono">
+                    {renderExpressionWithPills()}
+                  </div>
+                ) : (
                   <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
                 )}
               </div>
               
               {/* Syntax validation indicator */}
               {syntaxErrors.length > 0 && (
-                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400 z-20">
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400 z-30">
                   <span className="text-xs">⚠</span>
                 </div>
               )}
