@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { X, Play, Info, Plus, Eye, Undo, Redo, Eraser } from 'lucide-react';
+import { X, Play, Info, Plus, Eye, Undo, Redo, Eraser, Trash2 } from 'lucide-react';
 
 interface BooleanOperationsToolbarProps {
   isVisible: boolean;
@@ -200,7 +200,7 @@ export function BooleanOperationsToolbar({
   return (
     <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
-        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/20 w-[900px]">
+        <div className="backdrop-blur-md border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-blue-950/80 w-[900px]">
           {/* First Row: Title, Info, Text Field, Clear, Preview, Run, Close */}
           <div className="flex items-center space-x-3 mb-3">
             <div className="flex items-center space-x-2">
@@ -262,8 +262,9 @@ export function BooleanOperationsToolbar({
                 variant="outline"
                 size="sm"
                 onClick={handleClear}
-                className="h-8 px-3 bg-gray-700/50 border-2 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50 text-xs rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-8 px-3 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 text-xs rounded-lg backdrop-blur-sm shadow-sm"
               >
+                <Trash2 size={12} className="mr-1" />
                 Clear
               </Button>
               
@@ -273,8 +274,8 @@ export function BooleanOperationsToolbar({
                 onClick={() => setLivePreview(!livePreview)}
                 className={`h-8 px-3 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 ${
                   livePreview 
-                    ? 'bg-yellow-600/50 border-yellow-500 text-yellow-200 hover:bg-yellow-500/60' 
-                    : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:text-white hover:bg-gray-600/50'
+                    ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
+                    : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
                 }`}
               >
                 <Eye size={12} className="mr-1" />
