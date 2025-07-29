@@ -31,6 +31,7 @@ interface ViewerToolbarProps {
   isContourEditActive?: boolean;
   isPanActive?: boolean;
   isCrosshairsActive?: boolean;
+  isMeasureActive?: boolean;
   isToolActive?: boolean;
   currentSlice?: number;
   totalSlices?: number;
@@ -41,6 +42,11 @@ interface ViewerToolbarProps {
   className?: string;
   onMPRToggle?: () => void;
   isMPRActive?: boolean;
+  selectedStructure?: {
+    roiNumber: number;
+    structureName: string;
+    color: number[];
+  } | null;
 }
 
 export function ViewerToolbar({
@@ -54,13 +60,15 @@ export function ViewerToolbar({
   isContourEditActive = false,
   isPanActive = false,
   isCrosshairsActive = false,
+  isMeasureActive = false,
   isToolActive = false,
   currentSlice,
   totalSlices,
   windowLevel,
   className,
   onMPRToggle,
-  isMPRActive = false
+  isMPRActive = false,
+  selectedStructure = null
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
@@ -158,22 +166,27 @@ export function ViewerToolbar({
           </div>
         </div>
 
-        {/* Contour Edit Popout Icon */}
+        {/* Contour Edit Popout Button */}
         {isContourEditActive && onContourEdit && (
-          <div className="absolute -right-14 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
-            <div className="bg-white/10 backdrop-blur-md border border-green-500/50 rounded-lg shadow-lg">
+          <div className="absolute -left-32 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+            <div 
+              className="bg-white/10 backdrop-blur-md border rounded-lg shadow-lg"
+              style={{ 
+                borderColor: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'rgba(255,255,255,0.4)'
+              }}
+            >
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-white/20 transition-all duration-200"
+                className="h-8 px-3 py-1 hover:bg-white/20 transition-all duration-200 flex items-center space-x-2"
+                style={{ 
+                  color: selectedStructure ? `rgb(${selectedStructure.color.join(',')})` : 'white'
+                }}
                 onClick={onContourEdit}
               >
                 <Edit3 className="w-4 h-4" />
+                <span className="text-xs font-medium whitespace-nowrap">Contour Edit</span>
               </Button>
-            </div>
-            {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
-              Edit Contours
             </div>
           </div>
         )}

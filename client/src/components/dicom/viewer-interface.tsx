@@ -623,6 +623,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}
           isContourEditActive={!!selectedForEdit}
+          selectedStructure={selectedForEdit && rtStructures?.structures ? 
+            rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit) : null}
           className="toolbar-custom"
         />
       )}
