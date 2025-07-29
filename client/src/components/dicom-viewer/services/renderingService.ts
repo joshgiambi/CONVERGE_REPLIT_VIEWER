@@ -10,21 +10,94 @@ export function render16BitImage(
   canvas: HTMLCanvasElement,
   imageData: any,
   windowLevel: { window: number; level: number },
-  transform?: { scale: number; offsetX: number; offsetY: number }
+  viewportState?: { zoom: number; panX: number; panY: number }
 ) {
   if (!canvas || !imageData) return;
   
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+
+  // Handle parsed pixel data from image
+  let pixelArray, width, height;
   
-  // Clear canvas
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (imageData.parsedPixelData) {
+    // Standard image object format
+    pixelArray = imageData.parsedPixelData;
+    width = imageData.columns || imageData.width || 512;
+    height = imageData.rows || imageData.height || 512;
+  } else if (imageData.data) {
+    // Direct pixel data format
+    pixelArray = imageData.data;
+    width = imageData.width || 512;
+    height = imageData.height || 512;
+  } else {
+    console.error('Invalid image data format');
+    return;
+  }
+
+  // Create image data at original size
+  const canvasImageData = ctx.createImageData(width, height);
+  const data = canvasImageData.data;
+
+  // Apply window/level settings
+  const { window: windowWidth, level: windowCenter } = windowLevel;
+  const min = windowCenter - windowWidth / 2;
+  const max = windowCenter + windowWidth / 2;
+
+  for (let i = 0; i < pixelArray.length; i++) {
+    const pixelValue = pixelArray[i];
+
+    // Apply windowing
+    let normalizedValue;
+    if (pixelValue <= min) {
+      normalizedValue = 0;
+    } else if (pixelValue >= max) {
+      normalizedValue = 255;
+    } else {
+      normalizedValue = ((pixelValue - min) / windowWidth) * 255;
+    }
+
+    const gray = Math.max(0, Math.min(255, normalizedValue));
+
+    const pixelIndex = i * 4;
+    data[pixelIndex] = gray; // R
+    data[pixelIndex + 1] = gray; // G
+    data[pixelIndex + 2] = gray; // B
+    data[pixelIndex + 3] = 255; // A
+  }
+
+  // Create a temporary canvas for the original image
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const tempCtx = tempCanvas.getContext("2d");
+  if (!tempCtx) return;
+
+  tempCtx.putImageData(canvasImageData, 0, 0);
+
+  // Scale and draw to the main canvas with zoom and pan
+  const canvasWidth = ctx.canvas.width;
+  const canvasHeight = ctx.canvas.height;
+
+  // Calculate scale with zoom factor (default to 1 if no viewport state)
+  const zoom = viewportState?.zoom || 1;
+  const panX = viewportState?.panX || 0;
+  const panY = viewportState?.panY || 0;
   
-  // Simplified rendering - placeholder for complex DICOM rendering
-  ctx.fillStyle = '#333';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  // TODO: Implement proper 16-bit DICOM rendering
+  const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
+  const totalScale = baseScale * zoom;
+  const scaledWidth = width * totalScale;
+  const scaledHeight = height * totalScale;
+
+  // Center the image on canvas with pan offset
+  const x = (canvasWidth - scaledWidth) / 2 + panX;
+  const y = (canvasHeight - scaledHeight) / 2 + panY;
+
+  // Enable smooth scaling for better zoom quality while preserving medical image integrity
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+
   console.log('Rendering DICOM image with window/level:', windowLevel);
 }
 
