@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Ruler } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
 import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
-import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
-import { PenTool } from "./pen-tool";
+// Legacy pen tool imports removed during refactor - now managed by ToolRenderer in modular architecture  
 import PenToolV2 from "./pen-tool-v2";
 import { RTStructureOverlay } from "./rt-structure-overlay";
 import { FusionControlPanel } from "./fusion-control-panel";
