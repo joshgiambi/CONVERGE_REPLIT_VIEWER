@@ -1,0 +1,168 @@
+Of course. Cleaning up a large component like this involves separating concerns, managing state effectively, and abstracting logic. This process will make your codebase more maintainable, performant, and easier to debug.
+
+Here’s a step-by-step guide to refactor your `WorkingViewer` component.
+
+-----
+
+### 1\. Decompose the Monolithic Component
+
+The primary issue is that this component does too much. It handles data fetching, complex business logic, state management, and all rendering. The first step is to break it down.
+
+#### Create Custom Hooks for Logic and State
+
+Custom hooks are perfect for extracting stateful logic, making the main component cleaner and the logic reusable.
+
+  * **`useDicomLoader(seriesId, secondarySeriesId)`:** This hook will manage fetching and parsing all image data (primary, secondary, and registration matrix). It will handle loading states, errors, caching, and return the final image sets.
+  * **`useContourState(initialStructures)`:** This hook will encapsulate all the logic related to RT Structures. It will manage the state of the contours and expose methods to update them (`handleContourUpdate`, `handleGrowContour`, etc.).
+  * **`useViewportState()`:** This hook will manage viewport-related state like `zoom`, `pan`, `windowLevel`, and user interaction modes (e.g., `isPanMode`, `isCrosshairMode`).
+  * **`useMpr()`:** If the Multi-Planar Reconstruction (MPR) logic gets more complex, a dedicated hook can manage the state and rendering logic for the sagittal and coronal views.
+
+#### Create Smaller, Focused UI Components
+
+Break the JSX into smaller components that receive data and callbacks as props.
+
+  * **`ViewerToolbar.tsx`:** The header section with slice navigation, window/level info, and action buttons.
+  * **`MainViewport.tsx`:** The primary canvas element and its associated event handlers (`onMouseDown`, `onWheel`, etc.). This component would also host the various tool overlays (`SimpleBrushTool`, `PenToolV2`, etc.).
+  * **`MprCanvases.tsx`:** The container for the floating sagittal and coronal viewports.
+  * **`LoadingSpinner.tsx` / `ErrorDisplay.tsx`:** The UI for loading and error states.
+
+-----
+
+### 2\. Abstract Logic into Services & Utilities
+
+Many functions inside `WorkingViewer` are pure business logic and don't need to be part of a React component. Move them into separate utility or service files.
+
+  * **`services/apiService.ts`**: Centralize all `fetch` calls. For example, `fetchSeriesImages(seriesId)`, `saveContourUpdates(seriesId, payload)`, and `fetchRegistrationMatrix(studyId)`.
+
+  * **`services/contourService.ts`**: Move all contour manipulation logic here. The massive `handleContourUpdate` function should be broken down. Instead of a giant `if/else if` block, use a function map or a switch statement.
+
+    **Example: Refactoring `handleContourUpdate`**
+
+    ```typescript
+    // services/contourService.ts
+
+    const actionHandlers = {
+      brush_stroke: handleBrushStroke,
+      add_pen_stroke: handlePenStroke,
+      boolean_operation: handleBooleanOperation,
+      delete_slice: handleDeleteSlice,
+      // ... more actions
+    };
+
+    export function updateContours(payload, currentStructures) {
+      const handler = actionHandlers[payload.action];
+      if (handler) {
+        return handler(payload, currentStructures);
+      }
+      console.warn(`No handler for action: ${payload.action}`);
+      return currentStructures;
+    }
+
+    // ...implement handleBrushStroke, handlePenStroke, etc. as separate functions
+    ```
+
+  * **`utils/rendering.ts`**: Move all canvas drawing functions (`render16BitImage`, `renderRTStructures`, `drawContour`, `renderFusionOverlayNew`). These functions can take a `CanvasRenderingContext2D` and the necessary data as arguments.
+
+  * **`utils/dicomUtils.ts`**: Place DICOM-specific logic here, like `parseDicomImage` and functions for sorting images by spatial position.
+
+-----
+
+### 3\. Implement Centralized State Management
+
+The component suffers from excessive `useState` hooks and prop drilling. A state management library will centralize your state, simplify data flow, and make the app easier to reason about.
+
+**Zustand** is a great minimalist choice that requires very little boilerplate.
+
+#### Example: `viewerStore.ts`
+
+```typescript
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer'; // Use Immer for easy immutable updates
+
+export const useViewerStore = create(immer((set) => ({
+  // Viewport State
+  zoom: 1,
+  pan: { x: 0, y: 0 },
+  windowLevel: { width: 400, center: 40 },
+  
+  // Data State
+  seriesId: null,
+  images: [],
+  rtStructures: null,
+  isLoading: true,
+  error: null,
+
+  // Actions
+  setZoom: (newZoom) => set({ zoom: newZoom }),
+  setPan: (newPan) => set({ pan: newPan }),
+  
+  // Action to update structures using the service
+  updateRtStructures: (payload) => set((state) => {
+    state.rtStructures = updateContours(payload, state.rtStructures);
+  }),
+  
+  // ... other state and actions
+})));
+```
+
+Using this store, you can call `useViewerStore()` in any component to access state and actions without passing props down the tree. Using `immer` also lets you avoid expensive `JSON.parse(JSON.stringify(...))` calls for deep copies.
+
+-----
+
+### 4\. Refactor Data Fetching
+
+Manually managing fetching, caching, and state with `useEffect` is complex. A library like **React Query (TanStack Query)** can drastically simplify this. It automates caching, background refetching, and manages loading/error states.
+
+#### Example: Using React Query in `useDicomLoader`
+
+```typescript
+import { useQuery } from '@tanstack/react-query';
+import { fetchSeriesImages } from '@/services/apiService';
+
+export function useDicomImages(seriesId) {
+  return useQuery({
+    queryKey: ['dicomImages', seriesId],
+    queryFn: () => fetchSeriesImages(seriesId),
+    enabled: !!seriesId, // Only run the query if seriesId exists
+    // ... other options like staleTime for caching
+  });
+}
+```
+
+Now, in your component, you can just do:
+
+```typescript
+const { data: images, isLoading, error } = useDicomImages(seriesId);
+```
+
+This replaces dozens of lines of `useState` and `useEffect` logic for fetching and managing the state of your primary images.
+
+-----
+
+### 5\. Final Proposed Directory Structure
+
+After refactoring, your project structure might look like this, promoting better organization and separation of concerns.
+
+```
+/components
++-- /WorkingViewer
+    +-- /components         # Small, local UI components
+    ¦   +-- ViewerToolbar.tsx
+    ¦   +-- MainViewport.tsx
+    ¦   +-- MprCanvases.tsx
+    +-- /hooks              # Custom hooks
+    ¦   +-- useDicomLoader.ts
+    ¦   +-- useContourState.ts
+    ¦   +-- useViewportState.ts
+    +-- /services           # Business logic and API calls
+    ¦   +-- apiService.ts
+    ¦   +-- contourService.ts
+    ¦   +-- renderingService.ts
+    +-- /state              # State management (e.g., Zustand store)
+    ¦   +-- viewerStore.ts
+    +-- /utils              # Helper functions
+    ¦   +-- dicomUtils.ts
+    +-- index.tsx           # The main, cleaned-up WorkingViewer component
+```
+
+By following these steps, you'll transform the large, unwieldy component into a modular, scalable, and highly maintainable feature.
