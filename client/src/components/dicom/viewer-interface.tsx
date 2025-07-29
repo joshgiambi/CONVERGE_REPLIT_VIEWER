@@ -622,6 +622,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}
+          isContourEditActive={!!selectedForEdit}
           className="toolbar-custom"
         />
       )}
