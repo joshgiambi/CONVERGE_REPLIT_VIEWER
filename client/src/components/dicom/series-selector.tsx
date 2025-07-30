@@ -1197,11 +1197,15 @@ export function SeriesSelector({
                                   
                                   {/* Special Group Nested Items */}
                                   {expandedGroups.get(groupName) && (
-                                    <div className="mt-1 space-y-1">
-                                      {groupStructures.map((structure: any) => (
-                                        <div 
-                                          key={structure.roiNumber}
-                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                    <div className="mt-1 ml-4 space-y-1 relative">
+                                      {/* Vertical connection line */}
+                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-600/50 -ml-2"></div>
+                                      {groupStructures.map((structure: any, index: number) => (
+                                        <div className="relative" key={`wrapper-${structure.roiNumber}`}>
+                                          {/* Horizontal connection line */}
+                                          <div className="absolute left-0 top-1/2 w-2 h-px bg-gray-600/50 -ml-2"></div>
+                                          <div 
+                                            className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
                                             selectedForEdit === structure.roiNumber
                                               ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
                                               : selectedStructures.has(structure.roiNumber) 
@@ -1244,6 +1248,7 @@ export function SeriesSelector({
                                           >
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
+                                        </div>
                                         </div>
                                       ))}
                                     </div>
@@ -1304,11 +1309,15 @@ export function SeriesSelector({
                                   
                                   {/* Nested structures directly under this group */}
                                   {expandedGroups.get(groupName) && (
-                                    <div className="mt-1 space-y-1">
+                                    <div className="mt-1 ml-4 space-y-1 relative">
+                                      {/* Vertical connection line */}
+                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-600/50 -ml-2"></div>
                                       {groupStructures.map((structure: any, index: number) => (
-                                        <div 
-                                          key={`nested-${structure.roiNumber}`}
-                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                        <div className="relative" key={`wrapper-nested-${structure.roiNumber}`}>
+                                          {/* Horizontal connection line */}
+                                          <div className="absolute left-0 top-1/2 w-2 h-px bg-gray-600/50 -ml-2"></div>
+                                          <div 
+                                            className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
                                             selectedForEdit === structure.roiNumber
                                               ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
                                               : selectedStructures.has(structure.roiNumber) 
@@ -1351,6 +1360,7 @@ export function SeriesSelector({
                                           >
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
+                                        </div>
                                         </div>
                                       ))}
                                     </div>
