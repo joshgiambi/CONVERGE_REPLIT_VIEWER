@@ -24,6 +24,7 @@ import { naiveCombineContours as combineContours, naiveSubtractContours as subtr
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
+import { doPolygonsIntersectSimple, unionMultipleContoursSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
 import { 
   isGPUAccelerationAvailable,
@@ -770,7 +771,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       for (const contour of existingOnSlice) {
         if (contour.points && contour.points.length >= 9) {
           // Check if brush polygon intersects with this contour
-          const intersects = doPolygonsIntersect(brushPolygon, contour.points);
+          const intersects = doPolygonsIntersectSimple(brushPolygon, contour.points);
           if (intersects) {
             intersectsWithExisting = true;
             intersectingContours.push(contour);
@@ -797,8 +798,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Add the new brush polygon
         polygonsToUnion.push(brushPolygon);
 
-        // Perform union of intersecting polygons
-        const unionResult = polygonUnion(polygonsToUnion);
+        // Perform union of intersecting polygons using simple operations
+        const unionResults = unionMultipleContoursSimple(polygonsToUnion);
+        const unionResult = unionResults.length > 0 ? unionResults[0] : [];
         
         // Add the unified contour
         if (unionResult.length >= 9) {

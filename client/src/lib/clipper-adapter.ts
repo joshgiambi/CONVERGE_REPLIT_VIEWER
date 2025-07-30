@@ -77,7 +77,7 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
 // Helper to create a new Clipper instance with IoManager
 export async function createClipperInstance() {
   const api = await getClipper();
-  return new api.Clipper();
+  return new api.Clipper(0); // 0 = default initialization options
 }
 
 // Helper to create new Path

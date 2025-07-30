@@ -721,11 +721,109 @@ export async function testPenToolDeleteScenario(): Promise<{
   }
 }
 
+/**
+ * Debug function specifically for pen tool delete operations
+ */
+export async function debugPenToolDelete(
+  originalContour: number[],
+  deletePolygon: number[]
+): Promise<{
+  success: boolean;
+  originalPoints: number;
+  deletePoints: number;
+  intersects: boolean;
+  result: number[][];
+  error?: string;
+}> {
+  console.log('🔍 DEBUG: Pen tool delete operation starting...');
+  console.log('🔍 Original contour points:', originalContour.length / 3);
+  console.log('🔍 Delete polygon points:', deletePolygon.length / 3);
+  
+  try {
+    // Test intersection first
+    const intersects = await testPolygonIntersection(originalContour, deletePolygon);
+    console.log('🔍 Polygons intersect:', intersects);
+    
+    if (!intersects) {
+      return {
+        success: false,
+        originalPoints: originalContour.length / 3,
+        deletePoints: deletePolygon.length / 3,
+        intersects: false,
+        result: [],
+        error: 'Polygons do not intersect'
+      };
+    }
+    
+    // Perform subtraction
+    console.log('🔍 Performing subtraction...');
+    const result = await subtractContours(originalContour, deletePolygon);
+    console.log('🔍 Subtraction completed, result contours:', result.length);
+    
+    result.forEach((contour, index) => {
+      console.log(`🔍 Result contour ${index + 1}: ${contour.length / 3} points`);
+    });
+    
+    return {
+      success: true,
+      originalPoints: originalContour.length / 3,
+      deletePoints: deletePolygon.length / 3,
+      intersects: true,
+      result: result
+    };
+    
+  } catch (error) {
+    console.error('🔍 DEBUG: Error during subtraction:', error);
+    return {
+      success: false,
+      originalPoints: originalContour.length / 3,
+      deletePoints: deletePolygon.length / 3,
+      intersects: false,
+      result: [],
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Simple intersection test
+ */
+async function testPolygonIntersection(poly1: number[], poly2: number[]): Promise<boolean> {
+  // Basic bounding box check first
+  let minX1 = Infinity, maxX1 = -Infinity, minY1 = Infinity, maxY1 = -Infinity;
+  let minX2 = Infinity, maxX2 = -Infinity, minY2 = Infinity, maxY2 = -Infinity;
+  
+  for (let i = 0; i < poly1.length; i += 3) {
+    minX1 = Math.min(minX1, poly1[i]);
+    maxX1 = Math.max(maxX1, poly1[i]);
+    minY1 = Math.min(minY1, poly1[i + 1]);
+    maxY1 = Math.max(maxY1, poly1[i + 1]);
+  }
+  
+  for (let i = 0; i < poly2.length; i += 3) {
+    minX2 = Math.min(minX2, poly2[i]);
+    maxX2 = Math.max(maxX2, poly2[i]);
+    minY2 = Math.min(minY2, poly2[i + 1]);
+    maxY2 = Math.max(maxY2, poly2[i + 1]);
+  }
+  
+  // Check if bounding boxes overlap
+  const bboxIntersects = !(maxX1 < minX2 || maxX2 < minX1 || maxY1 < minY2 || maxY2 < minY1);
+  console.log('🔍 Bounding box intersection:', bboxIntersects);
+  
+  if (!bboxIntersects) return false;
+  
+  // More detailed intersection check would go here
+  // For now, assume they intersect if bounding boxes do
+  return true;
+}
+
 // Global debugging functions for browser console
 declare global {
   interface Window {
     testClipperOps: () => Promise<any>;
     testPenDelete: () => Promise<any>;
+    debugPenDelete: (original: number[], deletePolygon: number[]) => Promise<any>;
   }
 }
 
@@ -733,4 +831,5 @@ declare global {
 if (typeof window !== 'undefined') {
   window.testClipperOps = testClipperOperations;
   window.testPenDelete = testPenToolDeleteScenario;
+  window.debugPenDelete = debugPenToolDelete;
 }

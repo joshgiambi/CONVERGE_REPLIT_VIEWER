@@ -38,7 +38,7 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
 import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
-import { previewOffsetContour, growContourWithPreview } from '@/lib/clipper-boolean-operations';
+import { growContourSimple } from '@/lib/simple-polygon-operations';
 import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {

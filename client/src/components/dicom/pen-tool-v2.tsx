@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { combineContours, subtractContours, offsetContour, offsetOpenPath } from '../../lib/clipper-boolean-operations';
+import { combineContours, subtractContours, offsetContour, offsetOpenPath, debugPenToolDelete } from '../../lib/clipper-boolean-operations';
+import { subtractContourSimple, doPolygonsIntersectSimple } from '../../lib/simple-polygon-operations';
 import { polygonUnion } from '../../lib/polygon-union';
 
 interface PenToolV2Props {
@@ -632,7 +633,8 @@ export default function PenToolV2({
       console.log('🔷 Applied union operation using polygonUnion');
       
     } else if (currentMode === 'subtract' && existingOnSlice.length > 0) {
-      console.log('🔷 Performing SUBTRACT operation');
+      console.log('🔷 ===== PERFORMING SUBTRACT OPERATION =====');
+      console.log('🔷 Existing contours on slice:', existingOnSlice.length);
       const newContours: any[] = [];
       
       // Create closed polygon from vertices (close the polygon for proper subtraction)
@@ -641,6 +643,7 @@ export default function PenToolV2({
         // Convert canvas coordinates to world coordinates
         const world = canvasToWorld(vertex.x, vertex.y);
         closedWorldPoints.push(world.x, world.y, world.z);
+        console.log('🔷 Vertex:', vertex.x, vertex.y, '-> World:', world.x, world.y, world.z);
       }
       
       // Close the polygon by adding the first point at the end if not already closed
@@ -654,28 +657,64 @@ export default function PenToolV2({
         // Only close if not already closed
         if (firstX !== lastX || firstY !== lastY) {
           closedWorldPoints.push(firstX, firstY, firstZ);
+          console.log('🔷 Closed polygon by adding first point');
+        } else {
+          console.log('🔷 Polygon already closed');
         }
       }
       
       console.log('🔷 Created closed polygon with', closedWorldPoints.length / 3, 'points');
+      console.log('🔷 Delete polygon points:', closedWorldPoints);
       
       // Process each existing contour
-      for (const contour of existingOnSlice) {
+      for (let contourIndex = 0; contourIndex < existingOnSlice.length; contourIndex++) {
+        const contour = existingOnSlice[contourIndex];
+        console.log(`🔷 Processing contour ${contourIndex + 1}/${existingOnSlice.length}`);
+        
         if (contour.points && contour.points.length >= 9) {
-          console.log('🔷 Processing contour with', contour.points.length / 3, 'points');
+          console.log('🔷 Contour has', contour.points.length / 3, 'points');
+          console.log('🔷 Contour points:', contour.points.slice(0, 12), '... (showing first 4 points)');
           
-          // Check if the polygons intersect
-          const intersects = doPolygonsIntersect(closedWorldPoints, contour.points);
-          console.log('🔷 Polygons intersect:', intersects);
+          // Check if the polygons intersect using simple method first
+          const intersectsSimple = doPolygonsIntersectSimple(closedWorldPoints, contour.points);
+          console.log('🔷 Polygons intersect (simple check):', intersectsSimple);
           
-          if (intersects) {
+          if (intersectsSimple) {
             try {
-              // Perform direct subtraction of the closed polygon
-              console.log('🔷 Calling subtractContours...');
-              const subtracted = await subtractContours(contour.points, closedWorldPoints);
-              console.log('🔷 Subtraction result:', subtracted.length, 'contours');
+              // Try simple subtraction first - much more reliable!
+              console.log('🔷 Attempting SIMPLE subtraction (polygon-clipping library)...');
+              console.log('🔷   - Original contour:', contour.points.length / 3, 'points');
+              console.log('🔷   - Delete polygon:', closedWorldPoints.length / 3, 'points');
+              
+              let subtracted = subtractContourSimple(contour.points, closedWorldPoints);
+              console.log('🔷 Simple subtraction result:', subtracted.length, 'contours');
+              
+              // If simple method fails or returns unchanged contour, try complex method as fallback
+              const isUnchanged = subtracted.length === 1 && subtracted[0].length === contour.points.length;
+              
+              if (subtracted.length === 0 || isUnchanged) {
+                console.log('🔷 ⚠️ Simple method failed/unchanged, trying complex clipper method as fallback...');
+                
+                // Optional debug mode for complex method
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('🔷 Running debug analysis...');
+                  const debugResult = await debugPenToolDelete(contour.points, closedWorldPoints);
+                  console.log('🔷 Debug result:', debugResult);
+                }
+                
+                subtracted = await subtractContours(contour.points, closedWorldPoints);
+                console.log('🔷 Complex fallback result:', subtracted.length, 'contours');
+              } else {
+                console.log('🔷 ✅ Simple subtraction succeeded!');
+              }
+              console.log('🔷 Final subtraction result:', subtracted.length, 'contours');
+              
+              if (subtracted.length === 0) {
+                console.log('🔷 ⚠️  Subtraction returned empty result!');
+              }
               
               // Add valid results
+              let validResults = 0;
               for (const res of subtracted) {
                 if (res.length >= 9) { // Valid contour with at least 3 points
                   newContours.push({
@@ -683,31 +722,51 @@ export default function PenToolV2({
                     points: res,
                     numberOfPoints: res.length / 3
                   });
-                  console.log('🔷 Added subtracted contour with', res.length / 3, 'points');
+                  validResults++;
+                  console.log('🔷 ✅ Added subtracted contour with', res.length / 3, 'points');
+                } else {
+                  console.log('🔷 ❌ Rejected subtracted contour with', res.length / 3, 'points (too small)');
                 }
               }
+              
+              if (validResults === 0) {
+                console.log('🔷 ⚠️  No valid results from subtraction, contour completely removed');
+              }
+              
             } catch (error) {
-              console.error('🔷 Subtraction failed:', error);
+              console.error('🔷 ❌ Subtraction failed with error:', error);
+              console.error('🔷 ❌ Error details:', error instanceof Error ? error.message : String(error));
               // Keep original contour if subtraction fails
               newContours.push(contour);
+              console.log('🔷 ↩️  Kept original contour due to error');
             }
           } else {
             // No intersection, keep original contour
-            console.log('🔷 No intersection, keeping original contour');
+            console.log('🔷 ➡️  No intersection, keeping original contour');
             newContours.push(contour);
           }
         } else {
-          console.log('🔷 Invalid contour, skipping');
+          console.log('🔷 ❌ Invalid contour, skipping (length:', contour.points?.length || 0, ')');
         }
       }
       
+      console.log('🔷 ===== SUBTRACT OPERATION SUMMARY =====');
+      console.log('🔷 Original contours:', existingOnSlice.length);
+      console.log('🔷 Result contours:', newContours.length);
+      console.log('🔷 Contours removed:', existingOnSlice.length - newContours.length);
+      
       // Remove old contours and add new
+      const originalCount = structure.contours.length;
       structure.contours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - currentSlicePosition) > tolerance
       );
-      structure.contours.push(...newContours);
+      const afterFilterCount = structure.contours.length;
+      console.log('🔷 Filtered out', originalCount - afterFilterCount, 'contours from other slices');
       
-      console.log('🔷 Applied subtract operation - Original:', existingOnSlice.length, 'Final:', newContours.length);
+      structure.contours.push(...newContours);
+      console.log('🔷 Final structure has', structure.contours.length, 'total contours');
+      
+      console.log('🔷 ========================================');
     }
     
     // Verify we're not creating overlapping contours
