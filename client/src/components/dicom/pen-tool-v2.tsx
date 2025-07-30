@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { combineContours, subtractContours, offsetContour } from '../../lib/clipper-boolean-operations';
+import { combineContours, subtractContours, offsetContour, offsetOpenPath } from '../../lib/clipper-boolean-operations';
 import { polygonUnion } from '../../lib/polygon-union';
 
 interface PenToolV2Props {
@@ -635,55 +635,69 @@ export default function PenToolV2({
       console.log('🔷 Performing SUBTRACT operation');
       const newContours: any[] = [];
       
-      // Create open world points (without closing)
-      const openWorldPoints: number[] = [];
+      // Create closed polygon from vertices (close the polygon for proper subtraction)
+      const closedWorldPoints: number[] = [];
       for (const vertex of vertices as Point[]) {
-        openWorldPoints.push(vertex.x, vertex.y, currentSlicePosition);
+        // Convert canvas coordinates to world coordinates
+        const world = canvasToWorld(vertex.x, vertex.y);
+        closedWorldPoints.push(world.x, world.y, world.z);
       }
       
-      // Offset the open path to create thick stroke (2mm brush size)
-      const brushSize = 2.0; // mm
-      const offsetShapes = await offsetContour(openWorldPoints, brushSize);
+      // Close the polygon by adding the first point at the end if not already closed
+      if (closedWorldPoints.length >= 9) {
+        const firstX = closedWorldPoints[0];
+        const firstY = closedWorldPoints[1]; 
+        const firstZ = closedWorldPoints[2];
+        const lastX = closedWorldPoints[closedWorldPoints.length - 3];
+        const lastY = closedWorldPoints[closedWorldPoints.length - 2];
+        
+        // Only close if not already closed
+        if (firstX !== lastX || firstY !== lastY) {
+          closedWorldPoints.push(firstX, firstY, firstZ);
+        }
+      }
       
-      console.log('🔷 Offset result:', offsetShapes.length);
+      console.log('🔷 Created closed polygon with', closedWorldPoints.length / 3, 'points');
       
       // Process each existing contour
       for (const contour of existingOnSlice) {
         if (contour.points && contour.points.length >= 9) {
-          // Check intersection with offset shapes
-          let intersects = false;
-          for (const offsetShape of offsetShapes) {
-            if (doPolygonsIntersect(offsetShape, contour.points)) {
-              intersects = true;
-              break;
-            }
-          }
+          console.log('🔷 Processing contour with', contour.points.length / 3, 'points');
+          
+          // Check if the polygons intersect
+          const intersects = doPolygonsIntersect(closedWorldPoints, contour.points);
+          console.log('🔷 Polygons intersect:', intersects);
           
           if (intersects) {
-            // Subtract each offset shape sequentially
-            let currentResult = [contour.points];
-            for (const offsetShape of offsetShapes) {
-              const newResult = [];
-              for (const res of currentResult) {
-                const subtracted = await subtractContours(res, offsetShape);
-                newResult.push(...subtracted);
+            try {
+              // Perform direct subtraction of the closed polygon
+              console.log('🔷 Calling subtractContours...');
+              const subtracted = await subtractContours(contour.points, closedWorldPoints);
+              console.log('🔷 Subtraction result:', subtracted.length, 'contours');
+              
+              // Add valid results
+              for (const res of subtracted) {
+                if (res.length >= 9) { // Valid contour with at least 3 points
+                  newContours.push({
+                    slicePosition: currentSlicePosition,
+                    points: res,
+                    numberOfPoints: res.length / 3
+                  });
+                  console.log('🔷 Added subtracted contour with', res.length / 3, 'points');
+                }
               }
-              currentResult = newResult;
-            }
-            
-            // Add results
-            for (const res of currentResult) {
-              if (res.length >= 9) {
-                newContours.push({
-                  slicePosition: currentSlicePosition,
-                  points: res,
-                  numberOfPoints: res.length / 3
-                });
-              }
+            } catch (error) {
+              console.error('🔷 Subtraction failed:', error);
+              // Keep original contour if subtraction fails
+              newContours.push(contour);
             }
           } else {
+            // No intersection, keep original contour
+            console.log('🔷 No intersection, keeping original contour');
             newContours.push(contour);
           }
+        } else {
+          console.log('🔷 Invalid contour, skipping');
         }
       }
       
@@ -693,7 +707,7 @@ export default function PenToolV2({
       );
       structure.contours.push(...newContours);
       
-      console.log('🔷 Applied subtract with offset');
+      console.log('🔷 Applied subtract operation - Original:', existingOnSlice.length, 'Final:', newContours.length);
     }
     
     // Verify we're not creating overlapping contours

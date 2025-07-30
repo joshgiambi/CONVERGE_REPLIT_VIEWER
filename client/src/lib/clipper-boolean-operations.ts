@@ -617,3 +617,120 @@ export async function growContourWithPreview(
     error: response.error
   };
 }
+
+/**
+ * Offset an open path (for pen tool strokes and open curves)
+ */
+export async function offsetOpenPath(
+  path: number[],
+  delta: number,
+  joinType?: any,
+  endType?: any
+): Promise<number[][]> {
+  if (path.length < 6) { // Need at least 2 points for an open path
+    console.warn('Path must have at least 2 points for offset operation');
+    return [];
+  }
+
+  try {
+    const api = await getClipper();
+    joinType = joinType ?? api.JoinType.jtRound;
+    endType = endType ?? api.EndType.etOpenRound; // Use etOpenRound for open paths
+    
+    const co = await createClipperOffset();
+    const clipperPath = await contourToClipperPath(path);
+    
+    console.log('Open path offset - Delta:', delta, 'JoinType:', joinType, 'EndType:', endType);
+    
+    co.AddPath(clipperPath, joinType, endType);
+    const solution = await createPaths();
+    
+    const scaledDelta = delta * SCALE;
+    console.log('Executing open path offset with scaled delta:', scaledDelta);
+    
+    co.Execute(solution, scaledDelta);
+    
+    const result = clipperPathsToContours(solution, path[2]);
+    console.log('Open path offset completed, result paths:', result.length);
+    
+    return result;
+  } catch (error) {
+    console.error('Open path offset operation failed:', error);
+    // Return empty array for open paths since there's no meaningful fallback
+    return [];
+  }
+}
+
+/**
+ * Test pen tool delete scenario: outside->inside->outside polygon subtraction
+ */
+export async function testPenToolDeleteScenario(): Promise<{
+  success: boolean;
+  result: number[][];
+  error?: string;
+}> {
+  try {
+    console.log('🖊️ Testing pen tool delete scenario...');
+    
+    // Create a base contour (like an existing structure)
+    const baseContour = [
+      10, 10, 0,   // bottom-left
+      40, 10, 0,   // bottom-right  
+      40, 40, 0,   // top-right
+      10, 40, 0    // top-left
+    ];
+    
+    // Create a delete polygon that starts outside, goes inside, ends outside
+    const deletePolygon = [
+      5, 25, 0,    // start outside (left)
+      20, 25, 0,   // go inside
+      25, 20, 0,   // inside
+      25, 30, 0,   // inside
+      45, 25, 0    // end outside (right)
+    ];
+    
+    console.log('🖊️ Base contour:', baseContour.length / 3, 'points');
+    console.log('🖊️ Delete polygon:', deletePolygon.length / 3, 'points');
+    
+    // Perform subtraction
+    const result = await subtractContours(baseContour, deletePolygon);
+    
+    console.log('🖊️ Subtraction result:', result.length, 'contours');
+    
+    if (result.length > 0) {
+      console.log('✅ Pen tool delete test passed');
+      return {
+        success: true,
+        result
+      };
+    } else {
+      console.log('⚠️ Pen tool delete returned empty result');
+      return {
+        success: false,
+        result: [],
+        error: 'Subtraction returned empty result'
+      };
+    }
+  } catch (error) {
+    console.error('❌ Pen tool delete test failed:', error);
+    return {
+      success: false,
+      result: [],
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+// Global debugging functions for browser console
+declare global {
+  interface Window {
+    testClipperOps: () => Promise<any>;
+    testPenDelete: () => Promise<any>;
+  }
+}
+
+// Make test functions available globally for debugging
+if (typeof window !== 'undefined') {
+  window.testClipperOps = testClipperOperations;
+  window.testPenDelete = testPenToolDeleteScenario;
+}
