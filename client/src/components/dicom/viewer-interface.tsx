@@ -67,7 +67,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
-  const [booleanInputFocused, setBooleanInputFocused] = useState(false);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -557,7 +556,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   imageCache={imageCache}
                   onMPRToggle={() => setMprVisible(!mprVisible)}
                   isMPRVisible={mprVisible}
-                  keyboardNavigationDisabled={booleanInputFocused}
                 />
               ) : (
                 <MultiViewport
@@ -700,7 +698,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }
           setShowBooleanOperations(false);
         }}
-        onInputFocusChange={setBooleanInputFocused}
       />
 
       {/* Error Modal */}
