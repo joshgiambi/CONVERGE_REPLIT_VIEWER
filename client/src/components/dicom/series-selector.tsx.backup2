@@ -1201,12 +1201,14 @@ export function SeriesSelector({
                                       {groupStructures.map((structure: any) => (
                                         <div 
                                           key={structure.roiNumber}
-                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                            selectedForEdit === structure.roiNumber
-                                              ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                              : selectedStructures.has(structure.roiNumber) 
+                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 ${
+                                            selectedStructures.has(structure.roiNumber) 
                                               ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                              : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
+                                              : 'border-gray-700/30 bg-gray-800/20'
+                                          } ${
+                                            selectedForEdit === structure.roiNumber
+                                              ? 'border-blue-500/60 bg-blue-500/10'
+                                              : 'hover:bg-gray-700/30'
                                           }`}
                                         >
                                           <Checkbox
@@ -1308,12 +1310,14 @@ export function SeriesSelector({
                                       {groupStructures.map((structure: any, index: number) => (
                                         <div 
                                           key={`nested-${structure.roiNumber}`}
-                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                            selectedForEdit === structure.roiNumber
-                                              ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                              : selectedStructures.has(structure.roiNumber) 
+                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 ${
+                                            selectedStructures.has(structure.roiNumber) 
                                               ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                              : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
+                                              : 'border-gray-700/30 bg-gray-800/20'
+                                          } ${
+                                            selectedForEdit === structure.roiNumber
+                                              ? 'border-blue-500/60 bg-blue-500/10'
+                                              : 'hover:bg-gray-700/30'
                                           }`}
                                         >
                                           <Checkbox
@@ -1363,12 +1367,14 @@ export function SeriesSelector({
                             {ungrouped.map((structure: any) => (
                               <div 
                                 key={structure.roiNumber}
-                                className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                  selectedForEdit === structure.roiNumber
-                                    ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                    : selectedStructures.has(structure.roiNumber) 
+                                className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 backdrop-blur-sm ${
+                                  selectedStructures.has(structure.roiNumber) 
                                     ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                    : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/50'
+                                    : 'border-gray-700/50 bg-gray-800/30'
+                                } ${
+                                  selectedForEdit === structure.roiNumber
+                                    ? 'border-blue-500/60 bg-blue-500/10'
+                                    : 'hover:bg-gray-700/50'
                                 }`}
                               >
                                 <Checkbox
