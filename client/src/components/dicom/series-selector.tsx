@@ -1148,135 +1148,111 @@ export function SeriesSelector({
                         return (
                           <>
                             {/* Special Groups (GTV, CTV, PTV, Planning) */}
-                            {Array.from(specialGroups.entries()).map(([groupName, groupStructures]) => {
-                              // Create gradient background from structure colors
-                              const colors = groupStructures.map(s => `rgb(${s.color.join(',')})`);
-                              const gradientStyle = colors.length > 1 
-                                ? { background: `linear-gradient(90deg, ${colors.join(', ')})` }
-                                : { backgroundColor: colors[0] };
-                              
-                              return (
-                                <div key={groupName} className="space-y-1">
-                                  {/* Special Group Header */}
-                                  <div className="backdrop-blur-sm bg-gray-900/50 border border-gray-700/50 rounded-lg shadow-lg">
-                                    <div 
-                                      className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-800/50"
-                                      onClick={() => toggleGroupExpansion(groupName)}
-                                    >
-                                      <div className="flex items-center space-x-2">
-                                        {expandedGroups.get(groupName) ? (
-                                          <ChevronDown className="w-3 h-3 text-gray-400" />
+                            {Array.from(specialGroups.entries()).map(([groupName, groupStructures]) => (
+                              <div key={groupName} className="mb-3">
+                                {/* Special Group Header */}
+                                <div className="backdrop-blur-sm bg-gray-900/50 border border-gray-700/50 rounded-lg shadow-lg">
+                                  <div 
+                                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-800/50"
+                                    onClick={() => toggleGroupExpansion(groupName)}
+                                  >
+                                    <div className="flex items-center space-x-2">
+                                      {expandedGroups.get(groupName) ? (
+                                        <ChevronDown className="w-3 h-3 text-gray-400" />
+                                      ) : (
+                                        <ChevronRight className="w-3 h-3 text-gray-400" />
+                                      )}
+                                      <span className="text-xs font-medium text-white">
+                                        {groupName}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleGroupVisibility(groupStructures);
+                                        }}
+                                        className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded-lg"
+                                      >
+                                        {groupStructures.every(structure => 
+                                          structureVisibility.get(structure.roiNumber) ?? true
+                                        ) ? (
+                                          <Eye className="w-3 h-3 text-blue-400" />
                                         ) : (
-                                          <ChevronRight className="w-3 h-3 text-gray-400" />
+                                          <EyeOff className="w-3 h-3 text-gray-500" />
                                         )}
-                                        <div 
-                                          className="w-3 h-3 rounded opacity-80 border border-gray-600/50"
-                                          style={gradientStyle}
-                                        />
-                                        <span className="text-xs font-medium text-white">
-                                          {groupName}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center space-x-2">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleGroupVisibility(groupStructures);
-                                          }}
-                                          className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded-lg"
-                                        >
-                                          {groupStructures.every(structure => 
-                                            structureVisibility.get(structure.roiNumber) ?? true
-                                          ) ? (
-                                            <Eye className="w-3 h-3 text-blue-400" />
-                                          ) : (
-                                            <EyeOff className="w-3 h-3 text-gray-500" />
-                                          )}
-                                        </Button>
-                                        <Badge variant="outline" className={`text-xs border ${
-                                          groupName === 'GTV' ? 'border-red-500/60 text-red-400' :
-                                          groupName === 'CTV' ? 'border-orange-500/60 text-orange-400' :
-                                          groupName === 'PTV' ? 'border-yellow-500/60 text-yellow-400' :
-                                          'border-purple-500/60 text-purple-400'
-                                        }`}>
-                                          {groupStructures.length}
-                                        </Badge>
-                                      </div>
+                                      </Button>
+                                      <Badge variant="outline" className={`text-xs border ${
+                                        groupName === 'GTV' ? 'border-red-500/60 text-red-400' :
+                                        groupName === 'CTV' ? 'border-orange-500/60 text-orange-400' :
+                                        groupName === 'PTV' ? 'border-yellow-500/60 text-yellow-400' :
+                                        'border-purple-500/60 text-purple-400'
+                                      }`}>
+                                        {groupStructures.length}
+                                      </Badge>
                                     </div>
                                   </div>
                                   
-                                  {/* Special Group Nested Items - Outside parent panel */}
-                                  {expandedGroups.get(groupName) && groupStructures.map((structure: any) => {
-                                    const structureColor = `rgb(${structure.color.join(',')})`;
-                                    const isSelected = selectedStructures.has(structure.roiNumber);
-                                    const isSelectedForEdit = selectedForEdit === structure.roiNumber;
-                                    
-                                    return (
-                                      <div 
-                                        key={structure.roiNumber}
-                                        className={`flex items-center space-x-2 px-3 py-2 ml-4 rounded-lg border-2 transition-all duration-200 ${
-                                          isSelected 
-                                            ? 'border-yellow-400/80 bg-yellow-500/20 shadow-lg shadow-yellow-500/20' 
-                                            : 'border-gray-700/40 bg-gray-800/30'
-                                        } ${
-                                          isSelectedForEdit
-                                            ? 'border-blue-400/80 bg-blue-500/20 shadow-lg shadow-blue-500/20'
-                                            : 'hover:bg-gray-700/40 hover:border-gray-600/60'
-                                        }`}
-                                        style={isSelectedForEdit ? {
-                                          borderColor: structureColor,
-                                          backgroundColor: `${structureColor}20`,
-                                          boxShadow: `0 0 20px ${structureColor}30`
-                                        } : {}}
-                                      >
-                                        <Checkbox
-                                          checked={isSelected}
-                                          onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
-                                          className="h-3 w-3 border-yellow-500/60 data-[state=checked]:bg-yellow-500"
-                                        />
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                          className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
-                                        >
-                                          {structureVisibility.get(structure.roiNumber) ?? true ? (
-                                            <Eye className="w-3 h-3 text-blue-400" />
-                                          ) : (
-                                            <EyeOff className="w-3 h-3 text-gray-500" />
-                                          )}
-                                        </Button>
+                                  {/* Special Group Nested Items */}
+                                  {expandedGroups.get(groupName) && (
+                                    <div className="px-2 pb-2 space-y-1">
+                                      {groupStructures.map((structure: any) => (
                                         <div 
-                                          className="w-3 h-3 rounded border"
-                                          style={{ 
-                                            backgroundColor: structureColor,
-                                            borderColor: structureColor 
-                                          }}
-                                        />
-                                        <span 
-                                          className={`text-xs font-medium flex-1 truncate cursor-pointer transition-colors ${
-                                            isSelectedForEdit ? 'text-white' : 'text-gray-100 hover:text-green-400'
+                                          key={structure.roiNumber}
+                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 ${
+                                            selectedStructures.has(structure.roiNumber) 
+                                              ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                              : 'border-gray-700/30 bg-gray-800/20'
+                                          } ${
+                                            selectedForEdit === structure.roiNumber
+                                              ? 'border-blue-500/60 bg-blue-500/10'
+                                              : 'hover:bg-gray-700/30'
                                           }`}
-                                          onClick={() => handleStructureEditSelection(structure.roiNumber)}
                                         >
-                                          {structure.structureName}
-                                        </span>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                          className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
-                                        >
-                                          <Trash2 className="w-3 h-3 text-red-400" />
-                                        </Button>
-                                      </div>
-                                    );
-                                  })}
+                                          <Checkbox
+                                            checked={selectedStructures.has(structure.roiNumber)}
+                                            onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
+                                            className="h-3 w-3 border-yellow-500/60 data-[state=checked]:bg-yellow-500"
+                                          />
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
+                                            className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
+                                          >
+                                            {structureVisibility.get(structure.roiNumber) ?? true ? (
+                                              <Eye className="w-3 h-3 text-blue-400" />
+                                            ) : (
+                                              <EyeOff className="w-3 h-3 text-gray-500" />
+                                            )}
+                                          </Button>
+                                          <div 
+                                            className="w-3 h-3 rounded border-2 border-gray-600/50"
+                                            style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                                          />
+                                          <span 
+                                            className="text-xs text-gray-100 font-medium flex-1 truncate cursor-pointer hover:text-green-400 transition-colors"
+                                            onClick={() => handleStructureEditSelection(structure.roiNumber)}
+                                          >
+                                            {structure.structureName}
+                                          </span>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDeleteStructure(structure.roiNumber)}
+                                            className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
+                                          >
+                                            <Trash2 className="w-3 h-3 text-red-400" />
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                              );
-                            })}
+                              </div>
+                            ))}
 
                             {/* Regular Grouped Structures with Nested Items */}
                             {Array.from(groups.entries()).map(([groupName, groupStructures]) => (
