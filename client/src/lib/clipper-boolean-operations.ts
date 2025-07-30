@@ -3,7 +3,7 @@
  * Provides union, subtract, intersection, XOR, and complex operations
  */
 
-import { getClipper, createClipperInstance, createPath, createPaths } from './clipper-adapter';
+import { getClipper, createClipperInstance, createPath, createPaths, createClipperOffset } from './clipper-adapter';
 
 const SCALE = 10000; // Scale factor for ClipperLib (1e4 is safer than 1e6)
 const CLEAN_TOLERANCE = 0.1; // mm tolerance for polygon cleaning
@@ -371,4 +371,24 @@ export async function simplifyContour(contour: number[], tolerance: number = 0.5
   }
   
   return result;
+}
+
+/**
+ * Offset a contour (for brush strokes)
+ */
+export async function offsetContour(
+  contour: number[],
+  delta: number,
+  joinType?: any,
+  endType?: any
+): Promise<number[][]> {
+  const api = await getClipper();
+  joinType = joinType ?? api.JoinType.jtRound;
+  endType = endType ?? api.EndType.etOpenRound;
+  const co = await createClipperOffset();
+  const path = await contourToClipperPath(contour);
+  co.AddPath(path, joinType, endType);
+  const solution = await createPaths();
+  co.Execute(solution, delta * SCALE);
+  return clipperPathsToContours(solution, contour[2]);
 }

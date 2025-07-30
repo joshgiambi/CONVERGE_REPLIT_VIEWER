@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { combineContours, subtractContours } from '../../lib/clipper-boolean-operations';
+import { combineContours, subtractContours, offsetContour } from '../../lib/clipper-boolean-operations';
 import { polygonUnion } from '../../lib/polygon-union';
 
 interface PenToolV2Props {
@@ -438,7 +438,7 @@ export default function PenToolV2({
       }
       
       // Add vertex
-      setVertices(prev => [...prev, canvasPoint]);
+      setVertices((prev: Point[]) => [...prev, canvasPoint]);
       
       // Start continuous drawing if holding down
       setIsDrawingContinuous(true);
@@ -497,7 +497,7 @@ export default function PenToolV2({
       
       // Add point if moved enough distance (smoother drawing with larger threshold)
       if (distance > 15) {
-        setVertices(prev => [...prev, canvasPoint]);
+        setVertices((prev: Point[]) => [...prev, canvasPoint]);
       }
     }
   }, [isActive, isDrawingContinuous, vertices, isNearFirstVertex]);
@@ -632,74 +632,68 @@ export default function PenToolV2({
       console.log('🔷 Applied union operation using polygonUnion');
       
     } else if (currentMode === 'subtract' && existingOnSlice.length > 0) {
-      // Handle subtraction for all contours on slice
       console.log('🔷 Performing SUBTRACT operation');
       const newContours: any[] = [];
+      
+      // Create open world points (without closing)
+      const openWorldPoints: number[] = [];
+      for (const vertex of vertices as Point[]) {
+        openWorldPoints.push(vertex.x, vertex.y, currentSlicePosition);
+      }
+      
+      // Offset the open path to create thick stroke (2mm brush size)
+      const brushSize = 2.0; // mm
+      const offsetShapes = await offsetContour(openWorldPoints, brushSize);
+      
+      console.log('🔷 Offset result:', offsetShapes.length);
       
       // Process each existing contour
       for (const contour of existingOnSlice) {
         if (contour.points && contour.points.length >= 9) {
-          // Check if pen polygon intersects with this contour
-          const intersects = doPolygonsIntersect(worldPoints, contour.points);
+          // Check intersection with offset shapes
+          let intersects = false;
+          for (const offsetShape of offsetShapes) {
+            if (doPolygonsIntersect(offsetShape, contour.points)) {
+              intersects = true;
+              break;
+            }
+          }
           
           if (intersects) {
-            // Subtract pen polygon from this contour
-            console.log('🔷 Subtracting pen from contour:', {
-              contourSize: contour.points.length / 3,
-              penSize: worldPoints.length / 3
-            });
-            
-            // Convert contour to 2D for subtraction (x,y pairs)
-            const contour2D: number[] = [];
-            for (let i = 0; i < contour.points.length; i += 3) {
-              contour2D.push(contour.points[i], contour.points[i + 1]);
+            // Subtract each offset shape sequentially
+            let currentResult = [contour.points];
+            for (const offsetShape of offsetShapes) {
+              const newResult = [];
+              for (const res of currentResult) {
+                const subtracted = await subtractContours(res, offsetShape);
+                newResult.push(...subtracted);
+              }
+              currentResult = newResult;
             }
             
-            const subtractedContours = await subtractContours(contour.points, worldPoints);
-            
-            console.log('🔷 Subtraction result:', {
-              resultCount: subtractedContours.length,
-              resultSizes: subtractedContours.map(c => c.length / 2)
-            });
-            
-            // Add all resulting contours (might be multiple if pen splits the contour)
-            if (subtractedContours.length > 0) {
-              for (const subtracted of subtractedContours) {
-                // subtractContours returns 2D arrays, need to convert back to 3D
-                const points: number[] = [];
-                for (let i = 0; i < subtracted.length; i += 2) {
-                  points.push(subtracted[i], subtracted[i + 1], currentSlicePosition);
-                }
-                if (points.length >= 9) {
-                  newContours.push({
-                    slicePosition: currentSlicePosition,
-                    points: points,
-                    numberOfPoints: points.length / 3
-                  });
-                }
+            // Add results
+            for (const res of currentResult) {
+              if (res.length >= 9) {
+                newContours.push({
+                  slicePosition: currentSlicePosition,
+                  points: res,
+                  numberOfPoints: res.length / 3
+                });
               }
-            } else {
-              console.log('🔷 WARNING: Subtraction resulted in empty contour - pen completely covers structure!');
             }
           } else {
-            // No intersection - keep contour unchanged
             newContours.push(contour);
           }
         }
       }
       
-      // Remove all existing contours at this slice
+      // Remove old contours and add new
       structure.contours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - currentSlicePosition) > tolerance
       );
+      structure.contours.push(...newContours);
       
-      // Add all new contours
-      for (const contour of newContours) {
-        structure.contours.push(contour);
-      }
-      
-      console.log('🔷 Applied subtract operation to all intersecting contours');
-      console.log(`🔷 Final contour count after subtract: ${newContours.length}`);
+      console.log('🔷 Applied subtract with offset');
     }
     
     // Verify we're not creating overlapping contours
@@ -714,7 +708,7 @@ export default function PenToolV2({
     }
     
     // Reset state
-    setVertices([]);
+    setVertices((prev: Point[]) => []);
     setIsDrawingContinuous(false);
     setFirstPointMode(null);
     setHasCrossedBoundary(false);
@@ -726,7 +720,7 @@ export default function PenToolV2({
 
   // Reset state on slice change
   useEffect(() => {
-    setVertices([]);
+    setVertices((prev: Point[]) => []);
     setIsDrawingContinuous(false);
     setFirstPointMode(null);
     setHasCrossedBoundary(false);
@@ -782,7 +776,7 @@ export default function PenToolV2({
       
       // Draw polygon edges
       ctx.beginPath();
-      vertices.forEach((vertex, index) => {
+      vertices.forEach((vertex: Point, index: number) => {
         if (index === 0) {
           ctx.moveTo(vertex.x, vertex.y);
         } else {
@@ -845,7 +839,7 @@ export default function PenToolV2({
   // Reset when switching structures or becoming inactive
   useEffect(() => {
     if (!isActive) {
-      setVertices([]);
+      setVertices((prev: Point[]) => []);
       setIsDrawingContinuous(false);
       setFirstPointMode(null);
       setHasCrossedBoundary(false);

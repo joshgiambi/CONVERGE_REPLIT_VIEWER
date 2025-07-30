@@ -3,6 +3,7 @@
  * Ensures consistent WASM instance usage across all boolean operations
  */
 
+// @ts-ignore
 import * as Clipper from 'js-angusj-clipper';
 
 export type ClipperAPI = {
@@ -20,7 +21,7 @@ export type ClipperAPI = {
   SimplifyPolygon: (path: any, fillType: any) => any;
   SimplifyPolygons: (paths: any, fillType: any) => any;
   ClipperOffset?: any;
-  IoManager: any;
+  PointInPolygon: (pt: any, path: any) => number;
 };
 
 let cached: ClipperAPI | null = null;
@@ -61,7 +62,7 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
       SimplifyPolygon: lib.instance.SimplifyPolygon,
       SimplifyPolygons: lib.instance.SimplifyPolygons,
       ClipperOffset: lib.instance.ClipperOffset,
-      IoManager: lib.instance.IoManager,
+      PointInPolygon: lib.instance.PointInPolygon,
     };
     
     return api;
@@ -74,7 +75,7 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
 // Helper to create a new Clipper instance with IoManager
 export async function createClipperInstance() {
   const api = await getClipper();
-  return new api.Clipper(new api.IoManager());
+  return new api.Clipper();
 }
 
 // Helper to create new Path
@@ -87,4 +88,10 @@ export async function createPath() {
 export async function createPaths() {
   const api = await getClipper();
   return new api.Paths();
+}
+
+// Helper to create new ClipperOffset
+export async function createClipperOffset(miterLimit = 2.0, arcTolerance = 0.25) {
+  const api = await getClipper();
+  return new api.ClipperOffset(miterLimit, arcTolerance);
 }
