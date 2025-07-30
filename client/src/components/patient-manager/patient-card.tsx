@@ -171,9 +171,8 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   };
 
   return (
-    <Card className="bg-gray-900/80 border border-gray-700/50 hover:border-indigo-500/50 
-                     transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10
-                     backdrop-blur-sm w-full">
+    <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 shadow-2xl shadow-black/50
+                     hover:border-indigo-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10 w-full">
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
           <div className="flex-1">

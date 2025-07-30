@@ -542,7 +542,7 @@ export default function PatientManager() {
     <div className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 pt-24 pb-8">
         {/* Header matching viewer interface */}
-        <header className="fixed top-4 left-4 right-4 bg-gray-900/80 backdrop-blur-md border border-pink-500/50 rounded-2xl px-6 py-3 z-50 shadow-xl">
+        <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center space-x-4">
               <div>
@@ -609,8 +609,8 @@ export default function PatientManager() {
               placeholder="Search patients, studies, or modalities..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-12 bg-gray-900/80 border border-gray-700/50 text-white placeholder:text-gray-500 
-                       focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl
+              className="pl-10 h-12 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder:text-gray-500 
+                       focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl shadow-2xl shadow-black/20
                        transition-all duration-200"
             />
           </div>
@@ -655,7 +655,7 @@ export default function PatientManager() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 bg-gray-900/60 border border-gray-700/50 rounded-xl p-1">
+          <TabsList className="grid w-full grid-cols-5 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl p-1 shadow-2xl shadow-black/50">
             <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <User className="h-4 w-4" />
               Patients
@@ -689,7 +689,7 @@ export default function PatientManager() {
           <TabsContent value="patients" className="space-y-4">
             {/* Selection Actions Bar */}
             {selectedPatients.size > 0 && (
-              <div className="flex items-center justify-between p-4 bg-gray-900/80 border border-gray-700/50 rounded-xl backdrop-blur-sm animate-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between p-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl shadow-2xl shadow-black/50 animate-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-2">
                   <CheckSquare className="h-5 w-5 text-indigo-400" />
                   <span className="text-white font-medium">

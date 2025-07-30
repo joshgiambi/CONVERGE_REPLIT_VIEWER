@@ -207,7 +207,7 @@ export default function Viewer() {
   return (
     <div className="min-h-screen bg-dicom-black text-white">
       {/* Enhanced Viewer Header */}
-      <header className="fixed top-4 left-4 right-4 bg-dicom-dark/80 backdrop-blur-md border border-green-500/30 rounded-2xl px-6 py-3 z-50 shadow-xl animate-slide-up">
+      <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50 animate-slide-up">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-4">
             <div>
