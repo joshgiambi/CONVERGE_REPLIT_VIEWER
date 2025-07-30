@@ -837,12 +837,12 @@ export function SeriesSelector({
                   <div className="space-y-3 flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)', overflowY: 'auto' }}>
                     {/* Search Bar */}
                     <div className="relative mb-4">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                       <Input
                         placeholder="Search structures..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 bg-gray-900/50 border-gray-700/50 text-white placeholder-gray-400 focus:border-gray-500/50 rounded-full backdrop-blur-sm"
+                        className="pl-10 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder-gray-400 focus:border-gray-500/50 rounded-lg"
                       />
                     </div>
 
@@ -852,7 +852,7 @@ export function SeriesSelector({
                         variant="ghost"
                         size="sm"
                         onClick={toggleAllVisibility}
-                        className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
+                        className="bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title={allVisible ? 'Hide all structures' : 'Show all structures'}
                       >
                         {allVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -862,7 +862,7 @@ export function SeriesSelector({
                         variant="ghost"
                         size="sm"
                         onClick={toggleGrouping}
-                        className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
+                        className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
                       >
                         <FolderTree className="w-4 h-4" />
@@ -873,7 +873,7 @@ export function SeriesSelector({
                           variant="ghost"
                           size="sm"
                           onClick={toggleAllExpansion}
-                          className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
+                          className="bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                           title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
                         >
                           {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -884,7 +884,7 @@ export function SeriesSelector({
                         variant="ghost"
                         size="sm"
                         onClick={() => setShowNewStructureDialog(true)}
-                        className="bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 rounded-full backdrop-blur-sm transition-all duration-200 ml-auto"
+                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-lg backdrop-blur-sm transition-all duration-200 ml-auto"
                         title="Create new structure"
                       >
                         <Plus className="w-4 h-4" />
@@ -894,17 +894,17 @@ export function SeriesSelector({
                         variant="ghost"
                         size="sm"
                         onClick={() => setShowContourOperations(!showContourOperations)}
-                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-full backdrop-blur-sm transition-all duration-200"
+                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title="Contour Operations"
                       >
                         <Edit3 className="w-4 h-4" />
                       </Button>
                       
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={() => setShowStructureSettings(!showStructureSettings)}
-                        className="bg-purple-600/80 border-purple-500 text-white hover:bg-purple-700"
+                        className="bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title="Structure Settings"
                       >
                         <Settings className="w-4 h-4" />
@@ -1102,7 +1102,7 @@ export function SeriesSelector({
                                   : 'border-gray-700/50 bg-gray-800/30'
                               } ${
                                 selectedForEdit === structure.roiNumber
-                                  ? 'bg-blue-500/20 border-l-4 border-blue-400 shadow-lg shadow-blue-500/20'
+                                  ? 'border-blue-500/60 bg-blue-500/10'
                                   : 'hover:bg-gray-700/50'
                               }`}
                             >
@@ -1115,7 +1115,7 @@ export function SeriesSelector({
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded"
+                                className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
                               >
                                 {structureVisibility.get(structure.roiNumber) ?? true ? (
                                   <Eye className="w-3 h-3 text-blue-400" />
@@ -1124,7 +1124,7 @@ export function SeriesSelector({
                                 )}
                               </Button>
                               <div 
-                                className="w-3 h-3 rounded-sm border border-gray-600/50"
+                                className="w-3 h-3 rounded border-2 border-gray-600/50"
                                 style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                               />
                               <span 
@@ -1137,7 +1137,7 @@ export function SeriesSelector({
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded opacity-70 hover:opacity-100"
+                                className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
                               >
                                 <Trash2 className="w-3 h-3 text-red-400" />
                               </Button>
@@ -1174,7 +1174,7 @@ export function SeriesSelector({
                                           e.stopPropagation();
                                           toggleGroupVisibility(groupStructures);
                                         }}
-                                        className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded"
+                                        className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded-lg"
                                       >
                                         {groupStructures.every(structure => 
                                           structureVisibility.get(structure.roiNumber) ?? true
@@ -1201,13 +1201,13 @@ export function SeriesSelector({
                                       {groupStructures.map((structure: any) => (
                                         <div 
                                           key={structure.roiNumber}
-                                          className={`flex items-center space-x-2 px-2 py-1 rounded-md border transition-all duration-200 ${
+                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 ${
                                             selectedStructures.has(structure.roiNumber) 
                                               ? 'border-yellow-500/60 bg-yellow-500/10' 
                                               : 'border-gray-700/30 bg-gray-800/20'
                                           } ${
                                             selectedForEdit === structure.roiNumber
-                                              ? 'bg-blue-500/20 border-l-4 border-blue-400 shadow-lg shadow-blue-500/20'
+                                              ? 'border-blue-500/60 bg-blue-500/10'
                                               : 'hover:bg-gray-700/30'
                                           }`}
                                         >
@@ -1220,7 +1220,7 @@ export function SeriesSelector({
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                            className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded"
+                                            className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
                                           >
                                             {structureVisibility.get(structure.roiNumber) ?? true ? (
                                               <Eye className="w-3 h-3 text-blue-400" />
@@ -1229,7 +1229,7 @@ export function SeriesSelector({
                                             )}
                                           </Button>
                                           <div 
-                                            className="w-3 h-3 rounded-sm border border-gray-600/50"
+                                            className="w-3 h-3 rounded border-2 border-gray-600/50"
                                             style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                           />
                                           <span 
@@ -1242,7 +1242,7 @@ export function SeriesSelector({
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                            className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded opacity-70 hover:opacity-100"
+                                            className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
                                           >
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
@@ -1273,7 +1273,7 @@ export function SeriesSelector({
                                         {groupStructures.map((structure, index) => (
                                           <div 
                                             key={index}
-                                            className="w-2.5 h-2.5 rounded-full border border-gray-600/50"
+                                            className="w-2.5 h-2.5 rounded border border-gray-600/50"
                                             style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                           />
                                         ))}
@@ -1310,13 +1310,13 @@ export function SeriesSelector({
                                       {groupStructures.map((structure: any, index: number) => (
                                         <div 
                                           key={`nested-${structure.roiNumber}`}
-                                          className={`flex items-center space-x-2 px-2 py-1 rounded-md border transition-all duration-200 ${
+                                          className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 ${
                                             selectedStructures.has(structure.roiNumber) 
                                               ? 'border-yellow-500/60 bg-yellow-500/10' 
                                               : 'border-gray-700/30 bg-gray-800/20'
                                           } ${
                                             selectedForEdit === structure.roiNumber
-                                              ? 'bg-gradient-to-r from-gray-800/70 to-gray-800/30 border-l-2 border-white/20 shadow-xl shadow-black/30 backdrop-blur-xl'
+                                              ? 'border-blue-500/60 bg-blue-500/10'
                                               : 'hover:bg-gray-700/30'
                                           }`}
                                         >
@@ -1329,7 +1329,7 @@ export function SeriesSelector({
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                            className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded"
+                                            className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
                                           >
                                             {structureVisibility.get(structure.roiNumber) ?? true ? (
                                               <Eye className="w-3 h-3 text-blue-400" />
@@ -1338,7 +1338,7 @@ export function SeriesSelector({
                                             )}
                                           </Button>
                                           <div 
-                                            className="w-3 h-3 rounded-sm border border-gray-600/50"
+                                            className="w-3 h-3 rounded border-2 border-gray-600/50"
                                             style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                           />
                                           <span 
@@ -1351,7 +1351,7 @@ export function SeriesSelector({
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                            className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded opacity-70 hover:opacity-100"
+                                            className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
                                           >
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
@@ -1373,7 +1373,7 @@ export function SeriesSelector({
                                     : 'border-gray-700/50 bg-gray-800/30'
                                 } ${
                                   selectedForEdit === structure.roiNumber
-                                    ? 'bg-gradient-to-r from-gray-800/70 to-gray-800/30 border-l-2 border-white/20 shadow-xl shadow-black/30 backdrop-blur-xl'
+                                    ? 'border-blue-500/60 bg-blue-500/10'
                                     : 'hover:bg-gray-700/50'
                                 }`}
                               >
@@ -1386,7 +1386,7 @@ export function SeriesSelector({
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                  className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded"
+                                  className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
                                 >
                                   {structureVisibility.get(structure.roiNumber) ?? true ? (
                                     <Eye className="w-3 h-3 text-blue-400" />
@@ -1395,7 +1395,7 @@ export function SeriesSelector({
                                   )}
                                 </Button>
                                 <div 
-                                  className="w-3 h-3 rounded-sm border border-gray-600/50"
+                                  className="w-3 h-3 rounded border-2 border-gray-600/50"
                                   style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
                                 />
                                 <span 
@@ -1408,7 +1408,7 @@ export function SeriesSelector({
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                  className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded opacity-70 hover:opacity-100"
+                                  className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
                                 >
                                   <Trash2 className="w-3 h-3 text-red-400" />
                                 </Button>
