@@ -4,3 +4,54 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Environment variables and local config
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Local development databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Patient data and uploads
+storage/
+uploads/
+attached_assets/
+*.dcm
+
+# Local development scripts
+populate-from-storage.js
+*-local.js
+*-dev.js
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
