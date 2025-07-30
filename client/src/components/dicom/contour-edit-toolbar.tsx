@@ -32,11 +32,13 @@ import {
   Eraser,
   ChevronDown,
   Sparkles,
-  Workflow
+  Workflow,
+  Eye
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
 import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
+import { previewOffsetContour, growContourWithPreview } from '@/lib/clipper-boolean-operations';
 import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {
@@ -100,6 +102,8 @@ export function ContourEditToolbar({
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
+  const [isPreviewEnabled, setIsPreviewEnabled] = useState(true); // Preview mode for grow/shrink operations
+  const [previewContours, setPreviewContours] = useState<number[][] | null>(null);
 
   // Keyboard shortcut handling
   useEffect(() => {
@@ -371,6 +375,33 @@ export function ContourEditToolbar({
     setShowClearMenu(false);
   };
 
+  // Preview grow/shrink operation
+  const handlePreviewGrowContour = async () => {
+    if (!selectedStructure || !growDistance || !currentSlicePosition) return;
+    
+    const distanceCm = parseFloat(growDistance);
+    if (isNaN(distanceCm) || distanceCm <= 0) {
+      toast({ title: "Please enter a valid positive distance in cm", variant: "destructive" });
+      return;
+    }
+    
+    // Convert cm to mm for the grow function
+    let distanceMm = distanceCm * 10;
+    
+    // If shrink mode, make distance negative
+    if (growMode === 'shrink') {
+      distanceMm = -distanceMm;
+    }
+    
+    // TODO: Get the actual contour data from the current structure and slice
+    // For now, this is a placeholder - in a real implementation, you'd need to:
+    // 1. Get the current contour points for the selected structure at the current slice
+    // 2. Pass them to the preview function
+    console.log(`Previewing ${growMode === 'grow' ? 'grow' : 'shrink'} operation: ${distanceMm}mm`);
+    
+    toast({ title: `Preview: ${growMode === 'grow' ? 'Growing' : 'Shrinking'} by ${distanceCm}cm` });
+  };
+
   // Grow/Shrink contour function
   const handleGrowContour = () => {
     if (!selectedStructure || !growDistance || !currentSlicePosition) return;
@@ -602,24 +633,54 @@ export function ContourEditToolbar({
               </div>
             </div>
             
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleGrowContour}
-              className={`w-full h-9 ${
-                growMode === 'grow' 
-                  ? 'bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300' 
-                  : 'bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300'
-              }`}
-              disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
-            >
-              {growMode === 'grow' ? (
-                <ArrowUpFromLine className="w-4 h-4 mr-2" />
-              ) : (
-                <ArrowDownFromLine className="w-4 h-4 mr-2" />
+            {/* Preview Toggle */}
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="preview-toggle"
+                checked={isPreviewEnabled}
+                onChange={(e) => setIsPreviewEnabled(e.target.checked)}
+                className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+              />
+              <Label htmlFor="preview-toggle" className="text-xs text-gray-300">
+                Enable Preview
+              </Label>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              {isPreviewEnabled && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePreviewGrowContour}
+                  className="flex-1 h-9 bg-blue-900/20 hover:bg-blue-900/30 border-blue-600/50 text-blue-400 hover:text-blue-300"
+                  disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  Preview
+                </Button>
               )}
-              Run {growMode === 'grow' ? 'Grow' : 'Shrink'}
-            </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGrowContour}
+                className={`${isPreviewEnabled ? 'flex-1' : 'w-full'} h-9 ${
+                  growMode === 'grow' 
+                    ? 'bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300' 
+                    : 'bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300'
+                }`}
+                disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
+              >
+                {growMode === 'grow' ? (
+                  <ArrowUpFromLine className="w-4 h-4 mr-2" />
+                ) : (
+                  <ArrowDownFromLine className="w-4 h-4 mr-2" />
+                )}
+                Run {growMode === 'grow' ? 'Grow' : 'Shrink'}
+              </Button>
+            </div>
 
           </div>
         ) : showSettings === 'margin' ? (

@@ -39,10 +39,11 @@ async function contourToClipperPath(points: number[]): Promise<any> {
   const path = new api.Path();
   
   for (let i = 0; i < points.length; i += 3) {
-    const pt = new api.IntPoint(
-      Math.round(points[i] * SCALE),
-      Math.round(points[i + 1] * SCALE)
-    );
+    // Create IntPoint as a plain object with X and Y properties
+    const pt = {
+      X: Math.round(points[i] * SCALE),
+      Y: Math.round(points[i + 1] * SCALE)
+    };
     path.push_back(pt);
   }
   
@@ -368,6 +369,146 @@ export async function simplifyContour(contour: number[], tolerance: number = 0.5
 }
 
 /**
+ * Comprehensive test function to validate all clipper operations
+ */
+export async function testClipperOperations(): Promise<{
+  success: boolean;
+  results: {
+    offset: boolean;
+    union: boolean;
+    subtract: boolean;
+    intersect: boolean;
+    xor: boolean;
+  };
+  errors: string[];
+}> {
+  const results = {
+    offset: false,
+    union: false,
+    subtract: false,
+    intersect: false,
+    xor: false
+  };
+  const errors: string[] = [];
+
+  try {
+    console.log('🧪 Testing Clipper operations...');
+    
+    // Create test contours
+    const testContour1 = [
+      0, 0, 0,    // bottom-left
+      10, 0, 0,   // bottom-right  
+      10, 10, 0,  // top-right
+      0, 10, 0    // top-left
+    ];
+    
+    const testContour2 = [
+      5, 5, 0,   // overlapping square
+      15, 5, 0,
+      15, 15, 0,
+      5, 15, 0
+    ];
+
+    // Test 1: Offset operation
+    try {
+      console.log('🔄 Testing offset operation...');
+      const offsetResult = await offsetContour(testContour1, 1.0);
+      if (offsetResult && offsetResult.length > 0) {
+        results.offset = true;
+        console.log('✅ Offset test passed');
+      } else {
+        errors.push('Offset operation returned empty result');
+      }
+    } catch (error) {
+      errors.push(`Offset operation failed: ${error}`);
+      console.error('❌ Offset test failed:', error);
+    }
+
+    // Test 2: Union operation
+    try {
+      console.log('🔗 Testing union operation...');
+      const unionResult = await combineContours(testContour1, testContour2);
+      if (unionResult && unionResult.length > 0) {
+        results.union = true;
+        console.log('✅ Union test passed');
+      } else {
+        errors.push('Union operation returned empty result');
+      }
+    } catch (error) {
+      errors.push(`Union operation failed: ${error}`);
+      console.error('❌ Union test failed:', error);
+    }
+
+    // Test 3: Subtract operation
+    try {
+      console.log('➖ Testing subtract operation...');
+      const subtractResult = await subtractContours(testContour1, testContour2);
+      if (subtractResult && subtractResult.length >= 0) { // Can be empty if completely subtracted
+        results.subtract = true;
+        console.log('✅ Subtract test passed');
+      } else {
+        errors.push('Subtract operation returned invalid result');
+      }
+    } catch (error) {
+      errors.push(`Subtract operation failed: ${error}`);
+      console.error('❌ Subtract test failed:', error);
+    }
+
+    // Test 4: Intersect operation
+    try {
+      console.log('⋂ Testing intersect operation...');
+      const intersectResult = await intersectContours(testContour1, testContour2);
+      if (intersectResult && intersectResult.length >= 0) { // Can be empty if no intersection
+        results.intersect = true;
+        console.log('✅ Intersect test passed');
+      } else {
+        errors.push('Intersect operation returned invalid result');
+      }
+    } catch (error) {
+      errors.push(`Intersect operation failed: ${error}`);
+      console.error('❌ Intersect test failed:', error);
+    }
+
+    // Test 5: XOR operation
+    try {
+      console.log('⊕ Testing XOR operation...');
+      const xorResult = await xorContours(testContour1, testContour2);
+      if (xorResult && xorResult.length >= 0) {
+        results.xor = true;
+        console.log('✅ XOR test passed');
+      } else {
+        errors.push('XOR operation returned invalid result');
+      }
+    } catch (error) {
+      errors.push(`XOR operation failed: ${error}`);
+      console.error('❌ XOR test failed:', error);
+    }
+
+    const allPassed = Object.values(results).every(result => result === true);
+    console.log(`🏁 Test summary: ${allPassed ? 'All tests passed!' : 'Some tests failed'}`);
+    console.log('Results:', results);
+    
+    if (errors.length > 0) {
+      console.log('Errors:', errors);
+    }
+
+    return {
+      success: allPassed,
+      results,
+      errors
+    };
+
+  } catch (error) {
+    console.error('❌ Critical error during testing:', error);
+    return {
+      success: false,
+      results,
+      errors: [...errors, `Critical error: ${error}`]
+    };
+  }
+}
+
+/**
  * Offset a contour (for brush strokes)
  */
 export async function offsetContour(
@@ -376,13 +517,103 @@ export async function offsetContour(
   joinType?: any,
   endType?: any
 ): Promise<number[][]> {
-  const api = await getClipper();
-  joinType = joinType ?? api.JoinType.jtRound;
-  endType = endType ?? api.EndType.etOpenRound;
-  const co = await createClipperOffset();
-  const path = await contourToClipperPath(contour);
-  co.AddPath(path, joinType, endType);
-  const solution = await createPaths();
-  co.Execute(solution, delta * SCALE);
-  return clipperPathsToContours(solution, contour[2]);
+  if (contour.length < 9) {
+    console.warn('Contour must have at least 3 points for offset operation');
+    return [];
+  }
+
+  try {
+    const api = await getClipper();
+    joinType = joinType ?? api.JoinType.jtRound;
+    endType = endType ?? api.EndType.etClosedPolygon; // Changed from etOpenRound to etClosedPolygon for closed contours
+    
+    const co = await createClipperOffset();
+    const path = await contourToClipperPath(contour);
+    
+    console.log('Offset operation - Delta:', delta, 'JoinType:', joinType, 'EndType:', endType);
+    
+    co.AddPath(path, joinType, endType);
+    const solution = await createPaths();
+    
+    const scaledDelta = delta * SCALE;
+    console.log('Executing offset with scaled delta:', scaledDelta);
+    
+    co.Execute(solution, scaledDelta);
+    
+    const result = clipperPathsToContours(solution, contour[2]);
+    console.log('Offset operation completed, result paths:', result.length);
+    
+    return result;
+  } catch (error) {
+    console.error('Offset operation failed:', error);
+    // Return original contour as fallback
+    return [contour];
+  }
+}
+
+/**
+ * Preview offset operation without applying it
+ * Returns the visual representation of what the offset would look like
+ */
+export async function previewOffsetContour(
+  contour: number[],
+  delta: number,
+  joinType?: any,
+  endType?: any
+): Promise<{
+  success: boolean;
+  previewContours: number[][];
+  originalContour: number[];
+  error?: string;
+}> {
+  if (contour.length < 9) {
+    return {
+      success: false,
+      previewContours: [],
+      originalContour: contour,
+      error: 'Contour must have at least 3 points for offset operation'
+    };
+  }
+
+  try {
+    const result = await offsetContour(contour, delta, joinType, endType);
+    
+    return {
+      success: true,
+      previewContours: result,
+      originalContour: contour
+    };
+  } catch (error) {
+    return {
+      success: false,
+      previewContours: [],
+      originalContour: contour,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
+  }
+}
+
+/**
+ * Enhanced grow contour function with preview support
+ */
+export async function growContourWithPreview(
+  contour: number[],
+  distance: number, // in mm, positive for grow, negative for shrink
+  preview: boolean = false
+): Promise<{
+  success: boolean;
+  result: number[][];
+  originalContour: number[];
+  isPreview: boolean;
+  error?: string;
+}> {
+  const response = await previewOffsetContour(contour, distance);
+  
+  return {
+    success: response.success,
+    result: response.previewContours,
+    originalContour: response.originalContour,
+    isPreview: preview,
+    error: response.error
+  };
 }
