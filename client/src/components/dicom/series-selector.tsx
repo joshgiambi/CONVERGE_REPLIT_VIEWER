@@ -1316,7 +1316,7 @@ export function SeriesSelector({
                                               : 'border-gray-700/30 bg-gray-800/20'
                                           } ${
                                             selectedForEdit === structure.roiNumber
-                                              ? 'bg-blue-500/20 border-l-4 border-blue-400 shadow-lg shadow-blue-500/20'
+                                              ? 'bg-gradient-to-r from-gray-800/70 to-gray-800/30 border-l-2 border-white/20 shadow-xl shadow-black/30 backdrop-blur-xl'
                                               : 'hover:bg-gray-700/30'
                                           }`}
                                         >
@@ -1373,7 +1373,7 @@ export function SeriesSelector({
                                     : 'border-gray-700/50 bg-gray-800/30'
                                 } ${
                                   selectedForEdit === structure.roiNumber
-                                    ? 'bg-blue-500/20 border-l-4 border-blue-400 shadow-lg shadow-blue-500/20'
+                                    ? 'bg-gradient-to-r from-gray-800/70 to-gray-800/30 border-l-2 border-white/20 shadow-xl shadow-black/30 backdrop-blur-xl'
                                     : 'hover:bg-gray-700/50'
                                 }`}
                               >
