@@ -842,27 +842,27 @@ export function SeriesSelector({
                         placeholder="Search structures..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 bg-black/20 border-gray-600 text-white placeholder-gray-400 focus:border-green-500"
+                        className="pl-10 bg-gray-900/50 border-gray-700/50 text-white placeholder-gray-400 focus:border-gray-500/50 rounded-full backdrop-blur-sm"
                       />
                     </div>
 
                     {/* Control Buttons Row */}
                     <div className="flex space-x-2 mb-4">
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={toggleAllVisibility}
-                        className="bg-green-600/80 border-green-500 text-white hover:bg-green-700"
+                        className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
                         title={allVisible ? 'Hide all structures' : 'Show all structures'}
                       >
                         {allVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </Button>
                       
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={toggleGrouping}
-                        className="bg-black/20 border-gray-600 text-gray-300 hover:bg-gray-700"
+                        className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
                         title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
                       >
                         <FolderTree className="w-4 h-4" />
@@ -870,10 +870,10 @@ export function SeriesSelector({
                       
                       {groupingEnabled && (
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
                           onClick={toggleAllExpansion}
-                          className="bg-yellow-600/80 border-yellow-500 text-white hover:bg-yellow-700"
+                          className="bg-gray-800/50 border border-gray-700/50 text-gray-300 hover:bg-gray-700/50 rounded-full backdrop-blur-sm transition-all duration-200"
                           title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
                         >
                           {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -881,20 +881,20 @@ export function SeriesSelector({
                       )}
                       
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={() => setShowNewStructureDialog(true)}
-                        className="bg-blue-600/80 border-blue-500 text-white hover:bg-blue-700 ml-auto"
+                        className="bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 rounded-full backdrop-blur-sm transition-all duration-200 ml-auto"
                         title="Create new structure"
                       >
                         <Plus className="w-4 h-4" />
                       </Button>
                       
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={() => setShowContourOperations(!showContourOperations)}
-                        className="bg-orange-600/80 border-orange-500 text-white hover:bg-orange-700"
+                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-full backdrop-blur-sm transition-all duration-200"
                         title="Contour Operations"
                       >
                         <Edit3 className="w-4 h-4" />
