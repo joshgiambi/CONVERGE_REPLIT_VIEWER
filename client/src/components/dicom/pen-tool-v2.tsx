@@ -140,8 +140,13 @@ export default function PenToolV2({
     if (!overlay) {
       overlay = document.createElement('canvas');
       overlay.style.position = 'absolute';
-      overlay.style.top = '0';
-      overlay.style.left = '0';
+      
+      // Position the overlay canvas exactly on top of the main canvas
+      const mainRect = mainCanvas.getBoundingClientRect();
+      const parentRect = mainCanvas.parentElement!.getBoundingClientRect();
+      overlay.style.top = `${mainRect.top - parentRect.top}px`;
+      overlay.style.left = `${mainRect.left - parentRect.left}px`;
+      
       overlay.style.pointerEvents = 'none';
       overlay.style.zIndex = '10';
       overlay.className = 'pen-tool-overlay';
@@ -152,6 +157,12 @@ export default function PenToolV2({
     
     overlay.width = mainCanvas.width;
     overlay.height = mainCanvas.height;
+    
+    // Update position in case main canvas moved
+    const mainRect = mainCanvas.getBoundingClientRect();
+    const parentRect = mainCanvas.parentElement!.getBoundingClientRect();
+    overlay.style.top = `${mainRect.top - parentRect.top}px`;
+    overlay.style.left = `${mainRect.left - parentRect.left}px`;
 
     return () => {
       const overlayElement = document.querySelector('.pen-tool-overlay');

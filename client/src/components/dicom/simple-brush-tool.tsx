@@ -89,8 +89,13 @@ export function SimpleBrushTool({
       console.log('Creating overlay canvas');
       const overlayCanvas = document.createElement("canvas");
       overlayCanvas.style.position = "absolute";
-      overlayCanvas.style.top = "0";
-      overlayCanvas.style.left = "0";
+      
+      // Position the overlay canvas exactly on top of the main canvas
+      const mainRect = mainCanvas.getBoundingClientRect();
+      const parentRect = mainCanvas.parentElement!.getBoundingClientRect();
+      overlayCanvas.style.top = `${mainRect.top - parentRect.top}px`;
+      overlayCanvas.style.left = `${mainRect.left - parentRect.left}px`;
+      
       overlayCanvas.style.pointerEvents = "none"; // Allow events to pass through for scrolling
       overlayCanvas.style.zIndex = "10";
       overlayCanvas.width = mainCanvas.width;
@@ -106,13 +111,19 @@ export function SimpleBrushTool({
       overlayCanvasRef.current = overlayCanvas;
     }
 
-    // Update overlay canvas size if main canvas size changes
+    // Update overlay canvas size and position if main canvas size changes
     if (
       overlayCanvasRef.current.width !== mainCanvas.width ||
       overlayCanvasRef.current.height !== mainCanvas.height
     ) {
       overlayCanvasRef.current.width = mainCanvas.width;
       overlayCanvasRef.current.height = mainCanvas.height;
+      
+      // Also update position in case main canvas moved
+      const mainRect = mainCanvas.getBoundingClientRect();
+      const parentRect = mainCanvas.parentElement!.getBoundingClientRect();
+      overlayCanvasRef.current.style.top = `${mainRect.top - parentRect.top}px`;
+      overlayCanvasRef.current.style.left = `${mainRect.left - parentRect.left}px`;
     }
 
     return () => {
