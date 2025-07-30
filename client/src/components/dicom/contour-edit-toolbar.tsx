@@ -103,7 +103,8 @@ export function ContourEditToolbar({
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [isPreviewEnabled, setIsPreviewEnabled] = useState(true); // Preview mode for grow/shrink operations
-  const [previewContours, setPreviewContours] = useState<number[][] | null>(null);
+  const [previewContours, setPreviewContours] = useState<number[][] | null>(null); // Store preview contours for rendering
+  const [isShowingPreview, setIsShowingPreview] = useState(false); // Track if preview is currently shown
 
   // Keyboard shortcut handling
   useEffect(() => {
@@ -158,7 +159,7 @@ export function ContourEditToolbar({
     }
     
     // Auto-expand settings for the active tool  
-    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original')) {
+    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original' || newTool === 'erase')) {
       setShowSettings(newTool);
     } else if (!newTool) {
       setShowSettings(null);
@@ -385,7 +386,7 @@ export function ContourEditToolbar({
       return;
     }
     
-    // Convert cm to mm for the grow function
+    // Convert cm to mm for the grow function  
     let distanceMm = distanceCm * 10;
     
     // If shrink mode, make distance negative
@@ -393,16 +394,33 @@ export function ContourEditToolbar({
       distanceMm = -distanceMm;
     }
     
-    // TODO: Get the actual contour data from the current structure and slice
-    // For now, this is a placeholder - in a real implementation, you'd need to:
-    // 1. Get the current contour points for the selected structure at the current slice
-    // 2. Pass them to the preview function
-    console.log(`Previewing ${growMode === 'grow' ? 'grow' : 'shrink'} operation: ${distanceMm}mm`);
+    console.log(`🔹 Previewing ${growMode === 'grow' ? 'grow' : 'shrink'} operation: ${distanceMm}mm`);
+    
+    // Trigger preview request through the callback mechanism
+    if (onContourUpdate) {
+      const previewPayload = {
+        action: 'preview_grow_contour',
+        structureId: selectedStructure.roiNumber,
+        slicePosition: currentSlicePosition,
+        distance: distanceMm,
+        direction: growDirection
+      };
+      onContourUpdate(previewPayload);
+    }
     
     toast({ title: `Preview: ${growMode === 'grow' ? 'Growing' : 'Shrinking'} by ${distanceCm}cm` });
   };
 
-  // Grow/Shrink contour function
+  // Clear preview contours
+  const clearPreview = () => {
+    setPreviewContours(null);
+    setIsShowingPreview(false);
+    if (onContourUpdate) {
+      onContourUpdate({ action: 'clear_preview' });
+    }
+  };
+
+  // Grow/Shrink contour function - apply the previewed operation
   const handleGrowContour = () => {
     if (!selectedStructure || !growDistance || !currentSlicePosition) return;
     
@@ -424,14 +442,18 @@ export function ContourEditToolbar({
     
     if (onContourUpdate) {
       const updatePayload = {
-        action: 'grow_contour',
+        action: 'apply_grow_contour',
         structureId: selectedStructure.roiNumber,
         slicePosition: currentSlicePosition,
         distance: distanceMm, // in millimeters (negative for shrink)
-        direction: growDirection // 'all', 'anterior', 'posterior', 'left', 'right', 'superior', 'inferior'
+        direction: growDirection, // 'all', 'anterior', 'posterior', 'left', 'right', 'superior', 'inferior'
+        usePreview: isShowingPreview // Use preview data if available
       };
       onContourUpdate(updatePayload);
     }
+
+    // Clear preview after applying
+    clearPreview();
     
     toast({ title: `${growMode === 'grow' ? 'Growing' : 'Shrinking'} contour by ${distanceCm}cm (${growDirection}) on current slice` });
   };
@@ -505,7 +527,7 @@ export function ContourEditToolbar({
     if (!showSettings) return null;
 
     return (
-      <div className="absolute left-full bottom-0 ml-2 bg-black/80 backdrop-blur-sm border border-gray-600/50 rounded-lg p-3 w-80 shadow-2xl">
+      <div className="absolute bottom-full left-0 mb-2 bg-black/90 backdrop-blur-sm border border-gray-600/50 rounded-lg p-4 w-96 shadow-2xl z-50">
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-white capitalize">{showSettings} Settings</h4>
           <Button
@@ -654,7 +676,7 @@ export function ContourEditToolbar({
                   variant="outline"
                   size="sm"
                   onClick={handlePreviewGrowContour}
-                  className="flex-1 h-9 bg-blue-900/20 hover:bg-blue-900/30 border-blue-600/50 text-blue-400 hover:text-blue-300"
+                  className="flex-1 h-9 bg-yellow-900/20 hover:bg-yellow-900/30 border-yellow-600/50 text-yellow-400 hover:text-yellow-300"
                   disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
                 >
                   <Eye className="w-4 h-4 mr-2" />
@@ -662,11 +684,23 @@ export function ContourEditToolbar({
                 </Button>
               )}
               
+              {isShowingPreview && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearPreview}
+                  className="h-9 px-3 bg-gray-900/20 hover:bg-gray-900/30 border-gray-600/50 text-gray-400 hover:text-gray-300"
+                  title="Clear Preview"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              )}
+              
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleGrowContour}
-                className={`${isPreviewEnabled ? 'flex-1' : 'w-full'} h-9 ${
+                className={`${isPreviewEnabled || isShowingPreview ? 'flex-1' : 'w-full'} h-9 ${
                   growMode === 'grow' 
                     ? 'bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300' 
                     : 'bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300'
@@ -678,10 +712,76 @@ export function ContourEditToolbar({
                 ) : (
                   <ArrowDownFromLine className="w-4 h-4 mr-2" />
                 )}
-                Run {growMode === 'grow' ? 'Grow' : 'Shrink'}
+                {isShowingPreview ? 'Apply' : 'Run'} {growMode === 'grow' ? 'Grow' : 'Shrink'}
               </Button>
             </div>
+            
+            {/* Preview Status */}
+            {isShowingPreview && (
+              <div className="mt-3 p-3 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
+                <div className="flex items-center text-xs text-yellow-400">
+                  <Eye className="w-3 h-3 mr-2" />
+                  <span className="font-medium">Preview Active</span>
+                  <span className="ml-2 text-yellow-500">• Dashed yellow contour shows result</span>
+                </div>
+              </div>
+            )}
 
+          </div>
+        ) : showSettings === 'erase' ? (
+          <div className="space-y-3 w-full">
+            {/* Erase Tool Settings */}
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">Erase Tool</Label>
+              <div className="text-xs text-gray-400 mb-3">
+                Click and drag to erase contour areas. Hold Shift while using brush tool for quick erase mode.
+              </div>
+            </div>
+
+            {/* Brush Size for Erase */}
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">
+                Erase Brush Size: {brushThickness[0]}px
+              </Label>
+              <Slider
+                value={brushThickness}
+                onValueChange={setBrushThickness}
+                max={50}
+                min={5}
+                step={1}
+                className="w-full"
+              />
+            </div>
+
+            {/* Erase Mode Options */}
+            <div>
+              <Label className="text-xs text-gray-300 mb-2 block">Erase Mode</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
+                >
+                  <Scissors className="w-3 h-3 mr-1" />
+                  Precise Erase
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs bg-orange-900/20 hover:bg-orange-900/30 border-orange-600/50 text-orange-400 hover:text-orange-300"
+                >
+                                     <Trash2 className="w-3 h-3 mr-1" />
+                  Area Erase
+                </Button>
+              </div>
+            </div>
+
+            {/* Quick Help */}
+            <div className="mt-3 p-2 bg-blue-900/20 border border-blue-600/30 rounded-lg">
+              <div className="text-xs text-blue-400">
+                <strong>Tip:</strong> While using brush tool, hold Shift to temporarily switch to erase mode
+              </div>
+            </div>
           </div>
         ) : showSettings === 'margin' ? (
           <div className="space-y-3 w-full">

@@ -24,7 +24,7 @@ import { naiveCombineContours as combineContours, naiveSubtractContours as subtr
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
-import { doPolygonsIntersectSimple, unionMultipleContoursSimple } from "@/lib/simple-polygon-operations";
+import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
 import { 
   isGPUAccelerationAvailable,
@@ -201,6 +201,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
+  const [previewContours, setPreviewContours] = useState<number[][]>([]);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -521,6 +522,65 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Handle preview grow contour operation
+  const handlePreviewGrowOperation = async (payload: any) => {
+    if (!localRTStructures) {
+      console.error("RT structures not available for preview");
+      return;
+    }
+
+    const { structureId, slicePosition, distance, direction = 'all' } = payload;
+    console.log(`🔹 Generating preview for structure ${structureId} by ${distance}mm at slice ${slicePosition}`);
+
+    // Find the target structure
+    const structure = localRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
+    if (!structure) {
+      console.error(`Structure ${structureId} not found`);
+      return;
+    }
+
+    // Find the contour for the specified slice
+    const contour = structure.contours?.find(
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+    );
+
+    if (!contour || !contour.points || contour.points.length < 9) {
+      console.error(`No contour found for structure ${structureId} at slice ${slicePosition}`);
+      return;
+    }
+
+    try {
+      // Use the simple grow operation for preview
+      let previewPoints: number[];
+      
+      if (distance > 0) {
+        // Growing - use simple operations
+        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+        previewPoints = growContourSimple(contour.points, distance);
+      } else {
+        // For shrinking, use the original algorithm for now
+        const grownContour = growContour(
+          {
+            points: contour.points,
+            slicePosition: slicePosition,
+          },
+          distance,
+        );
+        previewPoints = grownContour.points;
+      }
+
+      // Set preview contours for rendering
+      setPreviewContours([previewPoints]);
+      
+      console.log(`🔹 ✅ Generated preview with ${previewPoints.length / 3} points`);
+      
+    } catch (error) {
+      console.error(`🔹 ❌ Error generating preview:`, error);
+    }
+  };
+
   // Handle grow contour operation using medical imaging algorithms
   const handleGrowContour = (payload: any) => {
     if (!localRTStructures) {
@@ -562,18 +622,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       let updatedPoints: number[];
       
       if (direction === 'all') {
-        // Use existing radial grow/shrink algorithm
-        const grownContour = growContour(
-          {
-            points: contour.points,
-            slicePosition: slicePosition,
-          },
-          distance,
-        );
-        
-        // Apply smoothing for medical-grade quality
-        const smoothedContour = smoothContour(grownContour, 0.15);
-        updatedPoints = smoothedContour.points;
+        // Use new simple polygon grow/shrink algorithm for better results
+        updatedPoints = growContourSimple(contour.points, distance);
       } else {
         // Use directional grow/shrink
         updatedPoints = applyDirectionalGrow(
@@ -627,6 +677,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (onContourUpdate) {
         onContourUpdate(payload.rtStructures);
       }
+      return;
+    }
+
+    // Handle preview operations
+    if (payload && payload.action === "preview_grow_contour") {
+      console.log("🔹 Preview grow contour request:", payload);
+      await handlePreviewGrowOperation(payload);
+      return;
+    }
+
+    if (payload && payload.action === "clear_preview") {
+      console.log("🔹 Clearing preview contours");
+      setPreviewContours([]);
       return;
     }
     
@@ -919,6 +982,85 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
+    } else if (payload.action === "erase_stroke") {
+      // Handle erase stroke - subtract points from contour
+      console.log("🔹 Processing erase stroke:", payload);
+      
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) {
+        console.error(`Structure ${payload.structureId} not found`);
+        return;
+      }
+
+      // Convert erase stroke to polygon for subtraction
+      const erasePolygon = addBrushToContour(
+        [], // Empty array to get just the erase polygon
+        payload.points,
+        payload.brushSize,
+      );
+      
+      console.log(`Erase polygon created with ${erasePolygon.length / 3} points`);
+
+      // Collect all contours on this slice
+      const tol = 0.5;
+      const existingOnSlice = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
+      );
+
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
+      );
+
+      // Process each existing contour - subtract the erase area
+      for (const contour of existingOnSlice) {
+        if (contour.points && contour.points.length >= 9) {
+          // Check if erase polygon intersects with this contour
+          const intersects = doPolygonsIntersectSimple(erasePolygon, contour.points);
+          
+          if (intersects) {
+            // Subtract erase area from this contour
+            const { subtractContourSimple } = await import('@/lib/simple-polygon-operations');
+            const subtractResults = subtractContourSimple(contour.points, erasePolygon);
+            
+            // Add resulting contours (there may be multiple after subtraction)
+            for (const resultContour of subtractResults) {
+              if (resultContour.length >= 9) {
+                structure.contours.push({
+                  slicePosition: payload.slicePosition,
+                  points: resultContour,
+                  numberOfPoints: resultContour.length / 3,
+                });
+              }
+            }
+          } else {
+            // No intersection - keep original contour
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contour.points,
+              numberOfPoints: contour.numberOfPoints,
+            });
+          }
+        }
+      }
+
+      console.log(`Erase completed - structure now has ${structure.contours.length} contours`);
+
+      // Update state
+      setLocalRTStructures(updatedStructures);
+
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+
+      // Save state to undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'erase_brush_stroke', payload.structureId, updatedStructures);
+      }
+      saveContourUpdates(updatedStructures, 'erase_brush_stroke');
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
@@ -1226,6 +1368,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
+    } else if (payload.action === "apply_grow_contour") {
+      // Handle applying previewed grow/shrink operation
+      console.log("🔹 Applying grow/shrink operation:", payload);
+      handleGrowContour(payload);
+      // Clear preview after applying
+      setPreviewContours([]);
     } else if (payload.action === "apply_margin") {
       // Handle margin operation (Eclipse TPS style)
       handleMarginOperation(payload);
@@ -3105,6 +3253,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     });
     }
 
+    // Render preview contours with dashed yellow styling
+    if (previewContours && previewContours.length > 0) {
+      console.log('🔹 Rendering', previewContours.length, 'preview contours');
+      
+      // Set preview contour styling - bright yellow and dashed
+      ctx.strokeStyle = '#FFFF00'; // Bright yellow
+      ctx.fillStyle = 'rgba(255, 255, 0, 0.15)'; // Semi-transparent yellow fill
+      ctx.lineWidth = 3;
+      
+      // Set dashed line pattern
+      ctx.setLineDash([8, 4]); // 8px dash, 4px gap
+      ctx.lineDashOffset = animationTime * 0.1; // Animated dashes
+      
+      previewContours.forEach((contourPoints: number[]) => {
+        drawContour(ctx, { points: contourPoints }, canvas.width, canvas.height, currentImage, animationTime);
+      });
+      
+      // Reset line dash for other elements
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+
     // Restore context state
     ctx.restore();
   };
@@ -3324,6 +3494,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         currentIndex;
       onSlicePositionChange(slicePosition);
     }
+    
+    // Clear preview contours when slice changes to prevent showing same preview on different slices
+    setPreviewContours([]);
   }, [currentIndex, images, onSlicePositionChange]);
   
   // Set the displayCurrentImageRef to point to displayCurrentImage
@@ -3961,8 +4134,59 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   console.log("Brush mode changed:", mode);
                 }}
                 onBrushSizeChange={(newSize: number) => {
-                  if (onBrushSizeChange) {
-                    onBrushSizeChange(newSize);
+                  if (onBrushToolChange) {
+                    onBrushToolChange({
+                      ...brushToolState,
+                      brushSize: newSize
+                    });
+                  }
+                }}
+              />
+            )}
+
+          {/* Erase Tool overlay - works like brush but erases */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "erase" &&
+            selectedForEdit && (
+              <SimpleBrushTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                brushSize={brushToolState.brushSize}
+                selectedStructure={selectedForEdit}
+                rtStructures={rtStructures}
+                currentSlicePosition={
+                  images.length > 0 && images[currentIndex]
+                    ? (images[currentIndex].parsedSliceLocation ??
+                      images[currentIndex].parsedZPosition ??
+                      currentIndex)
+                    : 0
+                }
+                onContourUpdate={(payload: any) => {
+                  // Handle different types of contour updates
+                  if (payload.action === "grow_contour") {
+                    handleGrowContour(payload);
+                  } else {
+                    handleContourUpdate(payload);
+                  }
+                }}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+                smoothingEnabled={true}
+                enableSmartMode={true}
+                predictionEnabled={false} // No prediction for erase tool
+                ctTransform={ctTransform}
+                isEraseMode={true} // Pass erase mode flag
+                onBrushModeChange={(mode: BrushOperation) => {
+                  console.log("Erase mode changed:", mode);
+                }}
+                onBrushSizeChange={(newSize: number) => {
+                  if (onBrushToolChange) {
+                    onBrushToolChange({
+                      ...brushToolState,
+                      brushSize: newSize
+                    });
                   }
                 }}
               />

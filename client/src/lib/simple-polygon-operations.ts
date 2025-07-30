@@ -194,29 +194,57 @@ export function doPolygonsIntersectSimple(polygon1: number[], polygon2: number[]
 }
 
 /**
- * Grow/expand contour by specified distance (margin operation)
+ * Grow/expand or shrink contour by specified distance (margin operation)
  * This replaces the complex clipper offsetting with simpler buffering
  */
 export function growContourSimple(contour: number[], distance: number): number[] {
   try {
-    console.log('🔹 Growing contour by', distance, 'units');
+    console.log('🔹 Processing contour by', distance, 'mm');
     
     const z = contour[2] || 0;
     const polygon = contourToPolygon(contour);
     
-    // For negative distance (shrinking), we need to use a different approach
-    if (distance < 0) {
-      // For shrinking, we can use polygon-clipping's buffer if available
-      // or fall back to the original grow algorithm
-      console.log('🔹 Shrinking operation - falling back to original algorithm');
-      return contour; // Fallback to original for now
+    // Use absolute distance for buffering operations
+    const absDistance = Math.abs(distance);
+    const isGrowing = distance > 0;
+    
+    console.log(`🔹 ${isGrowing ? 'Growing' : 'Shrinking'} by ${absDistance}mm`);
+    
+    // For very small distances, just return original
+    if (absDistance < 0.1) {
+      console.log('🔹 Distance too small, returning original');
+      return contour;
     }
     
-    // For positive distance (growing), we can create an expanded polygon
-    // by creating a buffered version using multiple offset points
-    const bufferedPolygon = bufferPolygon(polygon, distance);
+    // Create multiple offset layers for smoother results
+    const layers = Math.max(3, Math.ceil(absDistance / 1.5)); // More layers for smoother results
+    const stepDistance = absDistance / layers;
     
-    return polygonToContour(bufferedPolygon, z);
+    let currentPolygon = polygon;
+    
+    // Apply buffering in small steps for smoother results
+    for (let i = 0; i < layers; i++) {
+      const layerDistance = isGrowing ? stepDistance : -stepDistance;
+      const newPolygon = bufferPolygon(currentPolygon, layerDistance);
+      
+      // Check if buffering produced a valid result
+      if (newPolygon.length >= 3) {
+        currentPolygon = newPolygon;
+        
+        // Apply smoothing every few layers
+        if (i % 2 === 1) {
+          currentPolygon = smoothPolygon(currentPolygon);
+        }
+      }
+    }
+    
+    // Final smoothing pass
+    currentPolygon = smoothPolygon(currentPolygon);
+    
+    const result = polygonToContour(currentPolygon, z);
+    console.log(`🔹 ✅ Contour ${isGrowing ? 'grown' : 'shrunk'} from ${contour.length/3} to ${result.length/3} points`);
+    
+    return result;
     
   } catch (error) {
     console.error('🔹 ❌ Grow operation failed:', error);
@@ -272,6 +300,32 @@ function getNormal(p1: [number, number], p2: [number, number]): [number, number]
   
   // Perpendicular vector (rotated 90 degrees)
   return [-dy / length, dx / length];
+}
+
+/**
+ * Simple polygon smoothing using moving average
+ */
+function smoothPolygon(polygon: [number, number][]): [number, number][] {
+  if (polygon.length < 4) return polygon;
+  
+  const smoothed: [number, number][] = [];
+  const smoothingRadius = 1; // Number of points to average
+  
+  for (let i = 0; i < polygon.length; i++) {
+    let sumX = 0, sumY = 0, count = 0;
+    
+    // Average with neighboring points
+    for (let j = -smoothingRadius; j <= smoothingRadius; j++) {
+      const idx = (i + j + polygon.length) % polygon.length;
+      sumX += polygon[idx][0];
+      sumY += polygon[idx][1];
+      count++;
+    }
+    
+    smoothed.push([sumX / count, sumY / count]);
+  }
+  
+  return smoothed;
 }
 
 /**

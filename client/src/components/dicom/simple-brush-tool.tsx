@@ -19,6 +19,7 @@ interface SimpleBrushToolProps {
   predictionEnabled?: boolean;
   onBrushSizeChange?: (size: number) => void;
   ctTransform: React.RefObject<{ scale: number; offsetX: number; offsetY: number }>;
+  isEraseMode?: boolean; // New prop for erase mode
 }
 
 export function SimpleBrushTool({
@@ -36,8 +37,9 @@ export function SimpleBrushTool({
   predictionEnabled = false,
   onBrushSizeChange,
   ctTransform,
+  isEraseMode = false,
 }: SimpleBrushToolProps) {
-  console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current });
+  console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current, isEraseMode });
   const [isDrawing, setIsDrawing] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<{
     x: number;
@@ -46,6 +48,10 @@ export function SimpleBrushTool({
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
   const animationFrameRef = useRef<number | null>(null);
+  
+  // Shift key detection for temporary erase mode in brush tool
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
+  const [isTemporaryEraseMode, setIsTemporaryEraseMode] = useState(false);
   
   // Right-click diameter adjustment state
   const [isAdjustingSize, setIsAdjustingSize] = useState(false);
@@ -61,6 +67,35 @@ export function SimpleBrushTool({
   useEffect(() => {
     setAdjustedBrushSize(brushSize);
   }, [brushSize]);
+
+  // Handle shift key for temporary erase mode (only for brush tool, not erase tool)
+  useEffect(() => {
+    if (!isActive || isEraseMode) return; // Only work for brush tool, not erase tool
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift' && !isShiftPressed) {
+        setIsShiftPressed(true);
+        setIsTemporaryEraseMode(true);
+        console.log('🔹 Temporary erase mode activated (Shift held)');
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift' && isShiftPressed) {
+        setIsShiftPressed(false);
+        setIsTemporaryEraseMode(false);
+        console.log('🔹 Temporary erase mode deactivated (Shift released)');
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isActive, isEraseMode, isShiftPressed]);
 
   // Create overlay canvas for cursor and brush strokes
   useEffect(() => {
@@ -133,8 +168,15 @@ export function SimpleBrushTool({
     };
   }, [isActive, canvasRef]);
 
-  // Get structure color
+  // Get structure color - red for erase modes, structure color for normal mode
   const getStructureColor = () => {
+    // Determine if we're in any erase mode
+    const isInEraseMode = isEraseMode || isTemporaryEraseMode;
+    
+    if (isInEraseMode) {
+      return "#ff4444"; // Bright red for erase mode
+    }
+    
     if (!selectedStructure || !rtStructures?.structures) return "#00ff00";
     const structure = rtStructures.structures.find(
       (s: any) => s.roiNumber === selectedStructure,
@@ -244,6 +286,8 @@ export function SimpleBrushTool({
     isDrawing,
     isAdjustingSize,
     adjustedBrushSize,
+    isEraseMode,
+    isTemporaryEraseMode,
   ]);
 
   // Handle mouse events
@@ -487,23 +531,26 @@ export function SimpleBrushTool({
         return [worldX, worldY, worldZ];
       });
 
-      // Create a simplified polygon from the brush stroke
-      // For now, just log the data
+      // Determine if we're in erase mode (either dedicated erase tool or shift+brush)
+      const isInEraseMode = isEraseMode || isTemporaryEraseMode;
+      const actionType = isInEraseMode ? "erase_stroke" : "brush_stroke";
+      
       console.log(
-        `Brush stroke completed: ${worldPoints.length} points added to structure ${selectedStructure} at slice ${currentSlicePosition}mm`,
+        `${isInEraseMode ? 'Erase' : 'Brush'} stroke completed: ${worldPoints.length} points ${isInEraseMode ? 'removed from' : 'added to'} structure ${selectedStructure} at slice ${currentSlicePosition}mm`,
       );
       console.log("First 3 world points:", worldPoints.slice(0, 3));
 
-      // Notify parent component with the brush stroke data
+      // Notify parent component with the brush/erase stroke data
       if (onContourUpdate) {
         onContourUpdate({
-          action: "brush_stroke",
+          action: actionType,
           structureId: selectedStructure,
           slicePosition: currentSlicePosition,
           pointCount: worldPoints.length,
           points: worldPoints,
           brushSize: brushSize,
           predictionEnabled: predictionEnabled,
+          isEraseMode: isInEraseMode,
         });
       }
     } catch (error) {
