@@ -3,7 +3,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { useViewportGrid, Viewport } from '@/lib/viewport-grid-service';
-import { WorkingViewer } from './working-viewer';
+import WorkingViewer from './working-viewer';
 import { Button } from '@/components/ui/button';
 import { 
   Maximize2, 

@@ -5,11 +5,21 @@ import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;
 
-if (!process.env.DATABASE_URL) {
+// Allow preview mode without database
+const isDevelopment = process.env.NODE_ENV === 'development';
+const isPreviewMode = !process.env.DATABASE_URL && isDevelopment;
+
+if (!process.env.DATABASE_URL && !isPreviewMode) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Use a dummy URL for preview mode
+const databaseUrl = process.env.DATABASE_URL || 'postgresql://preview:preview@localhost/preview';
+
+export const pool = new Pool({ connectionString: databaseUrl });
 export const db = drizzle({ client: pool, schema });
+
+// Export preview mode flag
+export const isPreview = isPreviewMode;

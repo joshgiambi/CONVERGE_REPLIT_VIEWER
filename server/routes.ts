@@ -3,15 +3,15 @@ import multer from "multer";
 import * as fs from "fs";
 import * as path from "path";
 import { storage } from "./storage";
-import { Server } from "http";
+import { Server, createServer } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
 import { db } from "./db";
 import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
+import express from 'express';
 
 // Helper function to check if two polygons overlap
 function polygonOverlaps(poly1: number[][], poly2: number[][]): boolean {
@@ -369,7 +369,22 @@ function generateUID(): string {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+  const server = createServer(app);
+
+  // Check if in preview mode
+  const { isPreview } = await import('./db');
+  if (isPreview) {
+    console.log('🔸 Running in PREVIEW MODE - Database operations will be simulated');
+    
+    // Add a preview mode banner to all API responses
+    app.use((req, res, next) => {
+      res.setHeader('X-Preview-Mode', 'true');
+      next();
+    });
+  }
+
+
+
   // Create demo data
   app.post("/api/create-test-data", async (req, res) => {
     try {
@@ -2187,7 +2202,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let gifBuffer;
       
       try {
-        gifBuffer = await generateSeriesGIF(seriesId, storage);
+        // GIF generation disabled - canvas package removed
+        // gifBuffer = await generateSeriesGIF(seriesId, storage);
+        throw new Error('GIF generation temporarily disabled');
       } catch (error) {
         console.error('GIF generation failed, using minimal GIF:', error);
         // Use a minimal 1x1 GIF as fallback

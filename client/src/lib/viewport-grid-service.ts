@@ -1,7 +1,44 @@
 // ViewportGridService - Foundation for multi-viewport and MPR support
 // Based on OHIF 3.10 architecture for managing multiple viewports
 
-import { BehaviorSubject } from 'rxjs';
+// Simple BehaviorSubject replacement
+class SimpleBehaviorSubject<T> {
+  private value: T;
+  private subscribers: ((value: T) => void)[] = [];
+
+  constructor(initialValue: T) {
+    this.value = initialValue;
+  }
+
+  getValue(): T {
+    return this.value;
+  }
+
+  next(value: T): void {
+    this.value = value;
+    this.subscribers.forEach(subscriber => subscriber(value));
+  }
+
+  subscribe(callback: (value: T) => void): { unsubscribe: () => void } {
+    callback(this.value); // Emit current value immediately
+    this.subscribers.push(callback);
+    
+    return {
+      unsubscribe: () => {
+        const index = this.subscribers.indexOf(callback);
+        if (index > -1) {
+          this.subscribers.splice(index, 1);
+        }
+      }
+    };
+  }
+
+  asObservable() {
+    return {
+      subscribe: (callback: (value: T) => void) => this.subscribe(callback)
+    };
+  }
+}
 
 export interface Viewport {
   id: string;
@@ -44,7 +81,7 @@ const DEFAULT_LAYOUTS: Record<GridLayout, { rows: number; cols: number }> = {
 };
 
 class ViewportGridService {
-  private gridSubject = new BehaviorSubject<ViewportGrid>({
+  private gridSubject = new SimpleBehaviorSubject<ViewportGrid>({
     rows: 1,
     cols: 1,
     viewports: [],
@@ -59,7 +96,7 @@ class ViewportGridService {
   }
 
   getGrid(): ViewportGrid {
-    return this.gridSubject.value;
+    return this.gridSubject.getValue();
   }
 
   setLayout(layout: GridLayout, seriesInstanceUID?: string) {
