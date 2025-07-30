@@ -217,7 +217,7 @@ export function growContourSimple(contour: number[], distance: number): number[]
     }
     
     // Create multiple offset layers for smoother results
-    const layers = Math.max(3, Math.ceil(absDistance / 1.5)); // More layers for smoother results
+    const layers = Math.max(5, Math.ceil(absDistance / 1.0)); // More layers for much smoother results
     const stepDistance = absDistance / layers;
     
     let currentPolygon = polygon;
@@ -231,14 +231,14 @@ export function growContourSimple(contour: number[], distance: number): number[]
       if (newPolygon.length >= 3) {
         currentPolygon = newPolygon;
         
-        // Apply smoothing every few layers
-        if (i % 2 === 1) {
-          currentPolygon = smoothPolygon(currentPolygon);
-        }
+        // Apply smoothing every layer for better results
+        currentPolygon = smoothPolygon(currentPolygon);
       }
     }
     
-    // Final smoothing pass
+    // Multiple final smoothing passes for preview contours
+    currentPolygon = smoothPolygon(currentPolygon);
+    currentPolygon = smoothPolygon(currentPolygon);
     currentPolygon = smoothPolygon(currentPolygon);
     
     const result = polygonToContour(currentPolygon, z);

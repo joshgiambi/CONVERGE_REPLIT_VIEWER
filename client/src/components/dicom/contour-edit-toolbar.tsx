@@ -39,6 +39,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
 import { MarginOperationPanel, type MarginParameters } from './margin-operation-panel';
 import { growContourSimple } from '@/lib/simple-polygon-operations';
+import { SimpleGrowOperations } from './simple-grow-operations';
 import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {
@@ -541,193 +542,18 @@ export function ContourEditToolbar({
         </div>
         
         {showSettings === 'grow' ? (
-          <div className="space-y-3 w-full">
-            {/* Grow/Shrink Toggle */}
-            <div className="flex gap-2">
-              <Button
-                variant={growMode === 'grow' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setGrowMode('grow')}
-                className={`flex-1 h-8 ${growMode === 'grow' ? 'bg-green-600 hover:bg-green-700' : ''}`}
-              >
-                <ArrowUpFromLine className="w-4 h-4 mr-1" />
-                Grow
-              </Button>
-              <Button
-                variant={growMode === 'shrink' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setGrowMode('shrink')}
-                className={`flex-1 h-8 ${growMode === 'shrink' ? 'bg-red-600 hover:bg-red-700' : ''}`}
-              >
-                <ArrowDownFromLine className="w-4 h-4 mr-1" />
-                Shrink
-              </Button>
-            </div>
-
-            {/* Distance Slider */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Distance (cm)</Label>
-              <Slider
-                value={[parseFloat(growDistance) || 0]}
-                onValueChange={(value) => setGrowDistance(value[0].toString())}
-                max={2.0}
-                min={0}
-                step={0.1}
-                className="w-full"
-              />
-              <div className="text-xs text-gray-400 mt-1">
-                {parseFloat(growDistance) || 0} cm ({((parseFloat(growDistance) || 0) * 10).toFixed(1)} mm)
-              </div>
-            </div>
-
-            {/* Direction Selection */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Direction</Label>
-              <div className="grid grid-cols-4 gap-1">
-                <Button
-                  variant={growDirection === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('all')}
-                  className="h-8 text-xs col-span-4"
-                >
-                  All Directions
-                </Button>
-                <Button
-                  variant={growDirection === 'anterior' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('anterior')}
-                  className="h-8 text-xs"
-                  title="Anterior (Front)"
-                >
-                  <ArrowUp className="w-3 h-3" />
-                  Ant
-                </Button>
-                <Button
-                  variant={growDirection === 'posterior' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('posterior')}
-                  className="h-8 text-xs"
-                  title="Posterior (Back)"
-                >
-                  <ArrowDown className="w-3 h-3" />
-                  Post
-                </Button>
-                <Button
-                  variant={growDirection === 'left' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('left')}
-                  className="h-8 text-xs"
-                  title="Left"
-                >
-                  <ArrowLeft className="w-3 h-3" />
-                  Left
-                </Button>
-                <Button
-                  variant={growDirection === 'right' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('right')}
-                  className="h-8 text-xs"
-                  title="Right"
-                >
-                  <ArrowRight className="w-3 h-3" />
-                  Right
-                </Button>
-                <Button
-                  variant={growDirection === 'superior' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('superior')}
-                  className="h-8 text-xs col-span-2"
-                  title="Superior (Up)"
-                >
-                  <Maximize2 className="w-3 h-3 mr-1" />
-                  Superior
-                </Button>
-                <Button
-                  variant={growDirection === 'inferior' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setGrowDirection('inferior')}
-                  className="h-8 text-xs col-span-2"
-                  title="Inferior (Down)"
-                >
-                  <Minimize2 className="w-3 h-3 mr-1" />
-                  Inferior
-                </Button>
-              </div>
-            </div>
-            
-            {/* Preview Toggle */}
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="preview-toggle"
-                checked={isPreviewEnabled}
-                onChange={(e) => setIsPreviewEnabled(e.target.checked)}
-                className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
-              />
-              <Label htmlFor="preview-toggle" className="text-xs text-gray-300">
-                Enable Preview
-              </Label>
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex gap-2">
-              {isPreviewEnabled && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePreviewGrowContour}
-                  className="flex-1 h-9 bg-yellow-900/20 hover:bg-yellow-900/30 border-yellow-600/50 text-yellow-400 hover:text-yellow-300"
-                  disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  Preview
-                </Button>
-              )}
-              
-              {isShowingPreview && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearPreview}
-                  className="h-9 px-3 bg-gray-900/20 hover:bg-gray-900/30 border-gray-600/50 text-gray-400 hover:text-gray-300"
-                  title="Clear Preview"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              )}
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleGrowContour}
-                className={`${isPreviewEnabled || isShowingPreview ? 'flex-1' : 'w-full'} h-9 ${
-                  growMode === 'grow' 
-                    ? 'bg-green-900/20 hover:bg-green-900/30 border-green-600/50 text-green-400 hover:text-green-300' 
-                    : 'bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300'
-                }`}
-                disabled={!growDistance || parseFloat(growDistance) <= 0 || currentSlicePosition === undefined || currentSlicePosition === null}
-              >
-                {growMode === 'grow' ? (
-                  <ArrowUpFromLine className="w-4 h-4 mr-2" />
-                ) : (
-                  <ArrowDownFromLine className="w-4 h-4 mr-2" />
-                )}
-                {isShowingPreview ? 'Apply' : 'Run'} {growMode === 'grow' ? 'Grow' : 'Shrink'}
-              </Button>
-            </div>
-            
-            {/* Preview Status */}
-            {isShowingPreview && (
-              <div className="mt-3 p-3 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
-                <div className="flex items-center text-xs text-yellow-400">
-                  <Eye className="w-3 h-3 mr-2" />
-                  <span className="font-medium">Preview Active</span>
-                  <span className="ml-2 text-yellow-500">• Dashed yellow contour shows result</span>
-                </div>
-              </div>
-            )}
-
-          </div>
+          <SimpleGrowOperations
+            selectedStructure={selectedStructure?.roiNumber || null}
+            currentSlicePosition={currentSlicePosition}
+            onContourUpdate={(action: string, payload: any) => {
+              onContourUpdate({
+                action,
+                ...payload
+              });
+            }}
+            onClose={() => setShowSettings(null)}
+            structureColor={selectedStructure?.color ? `rgb(${selectedStructure.color.join(',')})` : '#00ff00'}
+          />
         ) : showSettings === 'erase' ? (
           <div className="space-y-3 w-full">
             {/* Erase Tool Settings */}

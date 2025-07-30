@@ -201,7 +201,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
-  const [previewContours, setPreviewContours] = useState<number[][]>([]);
+  const [previewContours, setPreviewContours] = useState<Array<{points: number[], slicePosition: number} | number[]>>([]);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -662,6 +662,177 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.error(`Error ${isGrowing ? 'growing' : 'shrinking'} contour:`, error);
     }
   };
+
+  // Handle preview grow structure operation - works on ALL slices
+  const handlePreviewGrowStructure = async (payload: any) => {
+    console.log('🔹 🚀 handlePreviewGrowStructure called with payload:', payload);
+    
+    if (!localRTStructures) {
+      console.error("🔹 ❌ RT structures not available for structure preview");
+      console.log('🔹 localRTStructures is:', localRTStructures);
+      return;
+    }
+
+    console.log('🔹 ✅ localRTStructures available:', localRTStructures);
+    console.log('🔹 Available structures:', localRTStructures.structures?.map((s: any) => ({
+      roiNumber: s.roiNumber,
+      structureName: s.structureName,
+      contourCount: s.contours?.length || 0
+    })));
+
+    const { structureId, distance, direction = 'all' } = payload;
+    console.log(`🔹 Generating structure preview for ${structureId} by ${distance}mm on ALL slices`);
+
+    // Find the target structure
+    const structure = localRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
+    if (!structure) {
+      console.error(`🔹 ❌ Structure ${structureId} not found`);
+      return;
+    }
+
+    console.log(`🔹 ✅ Found structure:`, {
+      roiNumber: structure.roiNumber,
+      structureName: structure.structureName,
+      contourCount: structure.contours?.length || 0
+    });
+
+    // Get all contours for this structure
+    const allContours = structure.contours || [];
+    if (allContours.length === 0) {
+      console.error(`🔹 ❌ No contours found for structure ${structureId}`);
+      return;
+    }
+
+    console.log(`🔹 ✅ Found ${allContours.length} contours for processing`);
+
+    try {
+      const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
+      
+      for (const contour of allContours) {
+        if (!contour.points || contour.points.length < 9) {
+          console.log('🔹 ⚠️ Skipping contour with insufficient points:', contour.points?.length);
+          continue;
+        }
+        
+        console.log(`🔹 Processing contour with ${contour.points.length / 3} points on slice ${contour.slicePosition}`);
+        
+        let previewPoints: number[];
+        
+        if (distance > 0) {
+          // Growing - use simple operations with enhanced smoothing
+          const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+          previewPoints = growContourSimple(contour.points, distance);
+        } else {
+          // For shrinking, also use growContourSimple for consistency
+          const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+          previewPoints = growContourSimple(contour.points, distance);
+        }
+        
+        // Store preview contour with slice position metadata
+        previewContoursWithSlices.push({
+          points: previewPoints,
+          slicePosition: contour.slicePosition
+        });
+        console.log(`🔹 ✅ Generated preview contour with ${previewPoints.length / 3} points for slice ${contour.slicePosition}`);
+      }
+
+      // Convert to the format expected by the renderer
+      setPreviewContours(previewContoursWithSlices as any);
+      console.log(`🔹 ✅ Set ${previewContoursWithSlices.length} preview contours for rendering`);
+      
+      console.log(`🔹 ✅ Generated structure preview with ${previewContoursWithSlices.length} slices`);
+      
+    } catch (error) {
+      console.error(`🔹 ❌ Error generating structure preview:`, error);
+    }
+  };
+
+  // Handle grow structure operation - works on ALL slices
+  const handleGrowStructure = (payload: any) => {
+    if (!localRTStructures) {
+      console.error("RT structures not available for structure growing");
+      return;
+    }
+
+    const { structureId, distance, direction = 'all' } = payload;
+    const isGrowing = distance > 0;
+    console.log(
+      `🔹 ${isGrowing ? 'Growing' : 'Shrinking'} ENTIRE STRUCTURE ${structureId} by ${Math.abs(distance)}mm on ALL slices`,
+    );
+
+    // Create a deep copy of RT structures to avoid mutation
+    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+
+    // Find the target structure
+    const structure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
+    if (!structure) {
+      console.error(`Structure ${structureId} not found`);
+      return;
+    }
+
+    // Get all contours for this structure
+    const allContours = structure.contours || [];
+    if (allContours.length === 0) {
+      console.error(`No contours found for structure ${structureId}`);
+      return;
+    }
+
+    try {
+      let processedSlices = 0;
+      
+      for (const contour of allContours) {
+        if (!contour.points || contour.points.length < 9) continue;
+        
+        let updatedPoints: number[];
+        
+        if (direction === 'all') {
+          // Use new simple polygon grow/shrink algorithm for better results
+          updatedPoints = growContourSimple(contour.points, distance);
+        } else {
+          // Use directional grow/shrink
+          updatedPoints = applyDirectionalGrow(
+            contour.points,
+            distance,
+            direction,
+            imageMetadata?.imageOrientation
+          );
+          
+          // Apply smoothing
+          const smoothedContour = smoothContour(
+            {
+              points: updatedPoints,
+              slicePosition: contour.slicePosition,
+            },
+            0.15
+          );
+          updatedPoints = smoothedContour.points;
+        }
+
+        // Update the contour with grown/shrunk points
+        contour.points = updatedPoints;
+        contour.numberOfPoints = updatedPoints.length / 3;
+        processedSlices++;
+      }
+
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'grow_structure');
+      
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      console.log(`🔹 ✅ Successfully ${isGrowing ? 'grew' : 'shrunk'} structure ${structureId} on ${processedSlices} slices by ${Math.abs(distance)}mm`);
+    } catch (error) {
+      console.error(`🔹 ❌ Error ${isGrowing ? 'growing' : 'shrinking'} structure:`, error);
+    }
+  };
+
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastPanX, setLastPanX] = useState(0);
@@ -684,6 +855,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (payload && payload.action === "preview_grow_contour") {
       console.log("🔹 Preview grow contour request:", payload);
       await handlePreviewGrowOperation(payload);
+      return;
+    }
+
+    if (payload && payload.action === "preview_grow_structure") {
+      console.log("🔹 Preview grow STRUCTURE request:", payload);
+      await handlePreviewGrowStructure(payload);
       return;
     }
 
@@ -1071,8 +1248,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       if (!structure) return;
 
-      // Find contour on current slice
-      const tolerance = 1.5;
+      // Find contour on current slice - use very tight tolerance to avoid affecting adjacent slices
+      const tolerance = 0.1; // 0.1mm tolerance - much tighter to prevent multi-slice issues
       const sliceContour = structure.contours.find(
         (c: any) =>
           Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
@@ -1112,8 +1289,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       if (!structure) return;
 
-      // Find contour on current slice
-      const tolerance = 1.5;
+      // Find contour on current slice - use tight tolerance to prevent multi-slice operations
+      const tolerance = 0.1;
       const contourIndex = structure.contours.findIndex(
         (c: any) =>
           Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
@@ -1369,9 +1546,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Handle contour growing
       handleGrowContour(payload);
     } else if (payload.action === "apply_grow_contour") {
-      // Handle applying previewed grow/shrink operation
+      // Handle applying previewed grow/shrink operation (single slice - legacy)
       console.log("🔹 Applying grow/shrink operation:", payload);
       handleGrowContour(payload);
+      // Clear preview after applying
+      setPreviewContours([]);
+    } else if (payload.action === "apply_grow_structure") {
+      // Handle applying grow/shrink to entire structure
+      console.log("🔹 Applying grow/shrink to ENTIRE STRUCTURE:", payload);
+      handleGrowStructure(payload);
       // Clear preview after applying
       setPreviewContours([]);
     } else if (payload.action === "apply_margin") {
@@ -1393,8 +1576,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Log current state before deletion
       console.log(`Before delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
       
-      // Remove contour at specified slice position for this structure only
-      const tolerance = 1.5;
+      // Remove contour at specified slice position for this structure only - tight tolerance
+      const tolerance = 0.1;
       const originalLength = structure.contours.length;
       structure.contours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
@@ -3253,9 +3436,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     });
     }
 
-    // Render preview contours with dashed yellow styling
+    // Render preview contours with dashed yellow styling (only for current slice)
     if (previewContours && previewContours.length > 0) {
-      console.log('🔹 Rendering', previewContours.length, 'preview contours');
+      const tolerance = 0.5; // Same tolerance as regular contours
+      let renderedPreviewCount = 0;
       
       // Set preview contour styling - bright yellow and dashed
       ctx.strokeStyle = '#FFFF00'; // Bright yellow
@@ -3266,9 +3450,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.setLineDash([8, 4]); // 8px dash, 4px gap
       ctx.lineDashOffset = animationTime * 0.1; // Animated dashes
       
-      previewContours.forEach((contourPoints: number[]) => {
-        drawContour(ctx, { points: contourPoints }, canvas.width, canvas.height, currentImage, animationTime);
+      previewContours.forEach((contour: any) => {
+        // Check if this is the new format with slice position
+        if (contour.slicePosition !== undefined) {
+          const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
+          if (positionDiff <= tolerance) {
+            drawContour(ctx, { points: contour.points }, canvas.width, canvas.height, currentImage, animationTime);
+            renderedPreviewCount++;
+          }
+        } else {
+          // Fallback for old format (array of points)
+          drawContour(ctx, { points: contour }, canvas.width, canvas.height, currentImage, animationTime);
+          renderedPreviewCount++;
+        }
       });
+      
+      console.log(`🔹 Rendered ${renderedPreviewCount} preview contours for slice ${currentSlicePosition.toFixed(1)}`);
       
       // Reset line dash for other elements
       ctx.setLineDash([]);
