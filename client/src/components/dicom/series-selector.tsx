@@ -1433,11 +1433,11 @@ export function SeriesSelector({
       </Card>
 
       {/* Window/Level Controls - Separate collapsible panel */}
-      <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+      <Card className="bg-gray-950/90 backdrop-blur-xl border border-orange-500/30 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0">
           <Accordion type="single" collapsible defaultValue="window-level">
             <AccordionItem value="window-level" className="border-gray-800/50">
-              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10 backdrop-blur-sm border-l-2 border-orange-500/30">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10 backdrop-blur-sm">
                 <div className="flex items-center text-gray-100 font-medium text-sm">
                   <Settings className="w-4 h-4 mr-2 text-orange-400" />
                   Window/Level
