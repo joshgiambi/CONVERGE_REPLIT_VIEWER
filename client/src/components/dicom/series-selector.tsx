@@ -512,7 +512,7 @@ export function SeriesSelector({
   return (
     <div className="h-full flex flex-col space-y-4">
       {/* Main Series and Structures Panel */}
-      <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+      <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0 h-full flex flex-col">
           <div className="flex-1 overflow-hidden flex flex-col">
             <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
@@ -1433,11 +1433,11 @@ export function SeriesSelector({
       </Card>
 
       {/* Window/Level Controls - Separate collapsible panel */}
-      <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+      <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0">
           <Accordion type="single" collapsible defaultValue="window-level">
             <AccordionItem value="window-level" className="border-gray-800/50">
-              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10 backdrop-blur-sm border-l-2 border-orange-500/30">
                 <div className="flex items-center text-gray-100 font-medium text-sm">
                   <Settings className="w-4 h-4 mr-2 text-orange-400" />
                   Window/Level
@@ -1483,7 +1483,7 @@ export function SeriesSelector({
                         key={name}
                         variant="outline"
                         size="sm"
-                        className="text-xs py-1 px-2 h-auto bg-gray-800/30 border-gray-700/50 text-gray-300 hover:bg-gray-700/50 hover:text-gray-100 backdrop-blur-sm"
+                        className="text-xs py-1 px-2 h-auto bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 hover:text-orange-300 backdrop-blur-sm transition-all duration-200"
                         onClick={() => applyPreset(preset as WindowLevel)}
                       >
                         {name.charAt(0).toUpperCase() + name.slice(1)}
