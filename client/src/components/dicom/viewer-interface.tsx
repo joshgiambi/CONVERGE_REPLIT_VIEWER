@@ -9,7 +9,7 @@ import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
-import { cornerstoneConfig } from '@/lib/cornerstone-config';
+import { CornerstoneConfig } from '@/lib/cornerstone-config';
 
 // TypeScript declaration for cornerstone
 declare global {
@@ -204,7 +204,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   const setActiveTool = (toolName: string) => {
     try {
-      const cornerstoneTools = cornerstoneConfig.getCornerstoneTools();
+      const cornerstoneTools = CornerstoneConfig.getInstance().getCornerstoneTools();
       const elements = document.querySelectorAll('.cornerstone-viewport');
       
       elements.forEach((element: any) => {
