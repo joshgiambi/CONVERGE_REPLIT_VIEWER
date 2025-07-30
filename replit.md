@@ -220,11 +220,14 @@ if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryIma
   - ✅ Applied structure colors to borders and backgrounds in glassy way (20% opacity borders, 5% opacity backgrounds)
   - ✅ Enhanced selected structure appearance for consistency across all categories with shadow effects
   - ✅ Maintained square icons for structures while restoring circular search bar design
+  - ✅ Added hierarchical indentation for nested structures with visual connection lines
+  - ✅ Implemented vertical-only connection lines in light blue (bg-blue-400/30) for parent-child relationships
   - Technical details:
     - Structure borders use `rgba(${structure.color.join(',')}, 0.2)` for subtle color integration
     - Structure backgrounds use `rgba(${structure.color.join(',')}, 0.05)` for glassy appearance
     - Enhanced visual hierarchy with backdrop-blur-sm and shadow-lg effects for depth
     - Selective theming system ensures UI consistency while highlighting important panels
+    - Nested structures indented with ml-4 and connected with light blue vertical lines
 
 - July 28, 2025: Phase 1 GPU Acceleration Foundation - COMPLETED ✅
   - ✅ Implemented GPU availability detection using WebGL2/WebGL context check
