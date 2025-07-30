@@ -1151,9 +1151,9 @@ export function SeriesSelector({
                             {Array.from(specialGroups.entries()).map(([groupName, groupStructures]) => (
                               <div key={groupName} className="mb-1">
                                 {/* Special Group Header */}
-                                <div className="backdrop-blur-sm bg-gray-900/50 border border-gray-700/50 rounded-lg shadow-lg">
+                                <div>
                                   <div 
-                                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-800/50"
+                                    className="backdrop-blur-sm bg-gray-900/50 border border-gray-700/50 rounded-lg shadow-lg flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-800/50"
                                     onClick={() => toggleGroupExpansion(groupName)}
                                   >
                                     <div className="flex items-center space-x-2">
@@ -1197,7 +1197,7 @@ export function SeriesSelector({
                                   
                                   {/* Special Group Nested Items */}
                                   {expandedGroups.get(groupName) && (
-                                    <div className="px-2 pb-2 space-y-1">
+                                    <div className="mt-1 space-y-1">
                                       {groupStructures.map((structure: any) => (
                                         <div 
                                           key={structure.roiNumber}
@@ -1256,9 +1256,9 @@ export function SeriesSelector({
                             {Array.from(groups.entries()).map(([groupName, groupStructures]) => (
                               <div key={groupName} className="mb-2">
                                 {/* Group Header */}
-                                <div className="backdrop-blur-sm bg-gray-800/30 border border-gray-700/50 rounded-lg">
+                                <div>
                                   <div 
-                                    className="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-800/50"
+                                    className="backdrop-blur-sm bg-gray-800/30 border border-gray-700/50 rounded-lg flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-800/50"
                                     onClick={() => toggleGroupExpansion(groupName)}
                                   >
                                     <div className="flex items-center space-x-2">
@@ -1304,7 +1304,7 @@ export function SeriesSelector({
                                   
                                   {/* Nested structures directly under this group */}
                                   {expandedGroups.get(groupName) && (
-                                    <div className="px-2 pb-2 space-y-1">
+                                    <div className="mt-1 space-y-1">
                                       {groupStructures.map((structure: any, index: number) => (
                                         <div 
                                           key={`nested-${structure.roiNumber}`}
