@@ -4151,7 +4151,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
 WorkingViewer.displayName = 'WorkingViewer';
 
-export { WorkingViewer };
+// Export memoized component for better performance
+export default React.memo(WorkingViewer);
 
 declare global {
   interface Window {

@@ -267,6 +267,23 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(patients).orderBy(desc(patients.createdAt));
   }
 
+  async getAllPatientsWithLimit(limit = 50, offset = 0): Promise<Patient[]> {
+    return await db.select()
+      .from(patients)
+      .orderBy(desc(patients.createdAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async updatePatient(id: number, patient: Partial<InsertPatient>): Promise<Patient> {
+    const [updated] = await db
+      .update(patients)
+      .set(patient)
+      .where(eq(patients.id, id))
+      .returning();
+    return updated;
+  }
+
   async deletePatient(id: number): Promise<void> {
     await db.delete(patients).where(eq(patients.id, id));
   }

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, jsonb, boolean, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, jsonb, boolean, doublePrecision, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 import { z } from "zod";
@@ -7,27 +7,28 @@ export const patients = pgTable("patients", {
   id: serial("id").primaryKey(),
   patientID: text("patient_id").notNull().unique(),
   patientName: text("patient_name").notNull(),
+  dateOfBirth: text("date_of_birth"),
   patientSex: text("patient_sex"),
   patientAge: text("patient_age"),
-  dateOfBirth: text("date_of_birth"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+  createdAt: timestamp("created_at").defaultNow()
+}, (table) => ({
+  patientIDIdx: index("idx_patient_id").on(table.patientID),
+  createdAtIdx: index("idx_patient_created_at").on(table.createdAt)
+}));
 
 export const studies = pgTable("studies", {
   id: serial("id").primaryKey(),
+  patientId: integer("patient_id").references(() => patients.id).notNull(),
   studyInstanceUID: text("study_instance_uid").notNull().unique(),
-  patientId: integer("patient_id"),
-  patientName: text("patient_name"),
-  patientID: text("patient_id_dicom"),
-  studyDate: text("study_date"),
-  studyDescription: text("study_description"),
+  studyDate: timestamp("study_date"),
+  studyTime: text("study_time"),
   accessionNumber: text("accession_number"),
-  modality: text("modality"),
-  numberOfSeries: integer("number_of_series").default(0),
-  numberOfImages: integer("number_of_images").default(0),
-  isDemo: boolean("is_demo").default(false),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+  studyDescription: text("study_description"),
+  createdAt: timestamp("created_at").defaultNow()
+}, (table) => ({
+  patientIdIdx: index("idx_study_patient_id").on(table.patientId),
+  studyUIDIdx: index("idx_study_instance_uid").on(table.studyInstanceUID)
+}));
 
 export const patientsRelations = relations(patients, ({ many }) => ({
   studies: many(studies),
@@ -45,14 +46,17 @@ export const series = pgTable("series", {
   id: serial("id").primaryKey(),
   studyId: integer("study_id").references(() => studies.id).notNull(),
   seriesInstanceUID: text("series_instance_uid").notNull().unique(),
-  seriesDescription: text("series_description"),
-  modality: text("modality").notNull(),
   seriesNumber: integer("series_number"),
-  imageCount: integer("image_count").default(0),
-  sliceThickness: text("slice_thickness"),
-  metadata: jsonb("metadata"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+  modality: text("modality"),
+  seriesDescription: text("series_description"),
+  seriesDate: timestamp("series_date"),
+  seriesTime: text("series_time"),
+  createdAt: timestamp("created_at").defaultNow()
+}, (table) => ({
+  studyIdIdx: index("idx_series_study_id").on(table.studyId),
+  seriesUIDIdx: index("idx_series_instance_uid").on(table.seriesInstanceUID),
+  modalityIdx: index("idx_series_modality").on(table.modality)
+}));
 
 export const images = pgTable("images", {
   id: serial("id").primaryKey(),
