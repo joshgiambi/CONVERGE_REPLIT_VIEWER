@@ -512,21 +512,21 @@ export function SeriesSelector({
   return (
     <div className="h-full flex flex-col space-y-4">
       {/* Main Series and Structures Panel */}
-      <Card className="flex-1 bg-dicom-dark/60 backdrop-blur-md border border-dicom-indigo/30 rounded-2xl overflow-hidden animate-slide-up">
+      <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0 h-full flex flex-col">
           <div className="flex-1 overflow-hidden flex flex-col">
             <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
-            <AccordionItem value="series" className="border-dicom-indigo/30">
-              <AccordionTrigger className="px-6 py-3 hover:no-underline hover:bg-blue-500/10">
-                <div className="flex items-center text-blue-400 font-medium text-sm">
+            <AccordionItem value="series" className="border-gray-800/50">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
+                <div className="flex items-center text-gray-100 font-medium text-sm">
                   <Layers3 className="w-4 h-4 mr-2 text-blue-400" />
                   Series
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-6 pb-4">
-                <div className="space-y-2">
+              <AccordionContent className="px-3 pb-3">
+                <div className="space-y-1">
                   {/* Organize series hierarchically with CT as primary */}
                   {(() => {
                     const ctSeries = series.filter(s => s.modality === 'CT');
@@ -545,12 +545,12 @@ export function SeriesSelector({
                           <div key={seriesItem.id}>
                             <div
                               className={`
-                                p-2 rounded-lg border cursor-pointer transition-all duration-200
+                                p-2 rounded-lg border cursor-pointer transition-all duration-200 backdrop-blur-sm
                                 ${selectedSeries?.id === seriesItem.id
-                                  ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                                  ? 'bg-blue-500/20 border-blue-400/50 shadow-lg shadow-blue-500/20'
                                   : hoveredRegSeries && (ctSeries.length > 0 || mrSeries.length > 0 || ptSeries.length > 0)
-                                  ? 'bg-green-500/10 border-green-500/50 shadow-md'
-                                  : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
+                                  ? 'bg-green-500/10 border-green-400/50 shadow-md shadow-green-500/20'
+                                  : 'bg-gray-800/30 border-gray-700/30 hover:border-gray-600/50 hover:bg-gray-700/40'
                                 }
                               `}
                               onClick={() => onSeriesSelect(seriesItem)}
@@ -825,9 +825,9 @@ export function SeriesSelector({
             </AccordionItem>
 
             {/* Structures Section */}
-            <AccordionItem value="structures" className="border-dicom-indigo/30">
-              <AccordionTrigger className="px-6 py-3 hover:no-underline hover:bg-green-500/10">
-                <div className="flex items-center text-green-400 font-medium text-sm">
+            <AccordionItem value="structures" className="border-gray-800/50">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
+                <div className="flex items-center text-gray-100 font-medium text-sm">
                   <Palette className="w-4 h-4 mr-2 text-green-400" />
                   Structures
                 </div>
@@ -1162,9 +1162,28 @@ export function SeriesSelector({
                                       ) : (
                                         <ChevronRight className="w-3 h-3 text-gray-400" />
                                       )}
-                                      <span className="text-sm font-semibold text-white">
+                                      <span className="text-xs font-medium text-white">
                                         {groupName}
                                       </span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleGroupVisibility(groupStructures);
+                                        }}
+                                        className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded"
+                                      >
+                                        {groupStructures.every(structure => 
+                                          structureVisibility.get(structure.roiNumber) ?? true
+                                        ) ? (
+                                          <Eye className="w-3 h-3 text-blue-400" />
+                                        ) : (
+                                          <EyeOff className="w-3 h-3 text-gray-500" />
+                                        )}
+                                      </Button>
                                       <Badge variant="outline" className={`text-xs border ${
                                         groupName === 'GTV' ? 'border-red-500/60 text-red-400' :
                                         groupName === 'CTV' ? 'border-orange-500/60 text-orange-400' :
@@ -1174,23 +1193,6 @@ export function SeriesSelector({
                                         {groupStructures.length}
                                       </Badge>
                                     </div>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        toggleGroupVisibility(groupStructures);
-                                      }}
-                                      className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded"
-                                    >
-                                      {groupStructures.every(structure => 
-                                        structureVisibility.get(structure.roiNumber) ?? true
-                                      ) ? (
-                                        <Eye className="w-3 h-3 text-blue-400" />
-                                      ) : (
-                                        <EyeOff className="w-3 h-3 text-gray-500" />
-                                      )}
-                                    </Button>
                                   </div>
                                   
                                   {/* Special Group Nested Items */}
@@ -1431,17 +1433,17 @@ export function SeriesSelector({
       </Card>
 
       {/* Window/Level Controls - Separate collapsible panel */}
-      <Card className="bg-dicom-dark/60 backdrop-blur-md border border-orange-500/30 rounded-2xl overflow-hidden">
+      <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0">
           <Accordion type="single" collapsible defaultValue="window-level">
-            <AccordionItem value="window-level" className="border-orange-500/30">
-              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10">
-                <div className="flex items-center text-orange-400 font-medium text-sm">
+            <AccordionItem value="window-level" className="border-gray-800/50">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
+                <div className="flex items-center text-gray-100 font-medium text-sm">
                   <Settings className="w-4 h-4 mr-2 text-orange-400" />
                   Window/Level
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
+              <AccordionContent className="px-3 pb-3">
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-gray-400 block mb-1">
@@ -1481,7 +1483,7 @@ export function SeriesSelector({
                         key={name}
                         variant="outline"
                         size="sm"
-                        className="text-xs py-1 px-2 h-auto border-orange-500/50 text-orange-300 hover:bg-orange-500/20"
+                        className="text-xs py-1 px-2 h-auto bg-gray-800/30 border-gray-700/50 text-gray-300 hover:bg-gray-700/50 hover:text-gray-100 backdrop-blur-sm"
                         onClick={() => applyPreset(preset as WindowLevel)}
                       >
                         {name.charAt(0).toUpperCase() + name.slice(1)}
