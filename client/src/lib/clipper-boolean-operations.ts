@@ -38,17 +38,11 @@ async function contourToClipperPath(points: number[]): Promise<any> {
   const api = await getClipper();
   const path = new api.Path();
   
-  // Create an array of points first
-  const clipperPoints = [];
   for (let i = 0; i < points.length; i += 3) {
-    clipperPoints.push({
-      X: Math.round(points[i] * SCALE),
-      Y: Math.round(points[i + 1] * SCALE)
-    });
-  }
-  
-  // Use push_back which is the actual method available
-  for (const pt of clipperPoints) {
+    const pt = new api.IntPoint(
+      Math.round(points[i] * SCALE),
+      Math.round(points[i + 1] * SCALE)
+    );
     path.push_back(pt);
   }
   

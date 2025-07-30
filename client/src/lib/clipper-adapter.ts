@@ -22,6 +22,7 @@ export type ClipperAPI = {
   SimplifyPolygons: (paths: any, fillType: any) => any;
   ClipperOffset?: any;
   PointInPolygon: (pt: any, path: any) => number;
+  IntPoint: any;
 };
 
 let cached: ClipperAPI | null = null;
@@ -63,6 +64,7 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
       SimplifyPolygons: lib.instance.SimplifyPolygons,
       ClipperOffset: lib.instance.ClipperOffset,
       PointInPolygon: lib.instance.PointInPolygon,
+      IntPoint: lib.instance.IntPoint,
     };
     
     return api;
