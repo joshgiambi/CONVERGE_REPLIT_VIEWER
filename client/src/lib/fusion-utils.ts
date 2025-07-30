@@ -32,10 +32,17 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
   ];
 
   const transformed = secondaryImages.map(img => {
-    // Parse imagePosition into [x,y,z]
-    const pos = Array.isArray(img.imagePosition)
-      ? img.imagePosition.map(Number)
-      : img.imagePosition.split('\\').map(Number);
+    // Parse imagePosition into [x,y,z] with null safety
+    let pos;
+    if (Array.isArray(img.imagePosition)) {
+      pos = img.imagePosition.map(Number);
+    } else if (img.imagePosition && typeof img.imagePosition === 'string') {
+      pos = img.imagePosition.split('\\').map(Number);
+    } else {
+      // Fallback for null/undefined imagePosition - use slice index as Z position
+      console.warn('Missing imagePosition for image, using fallback position');
+      pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
+    }
     const hom = [pos[0], pos[1], pos[2], 1];
     const [xInCT, yInCT, zInCT] = multiplyMatrixVector(M, hom).slice(0, 3);
     return { xInCT, yInCT, zInCT, image: img };

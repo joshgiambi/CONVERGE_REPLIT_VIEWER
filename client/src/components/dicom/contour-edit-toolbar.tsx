@@ -69,6 +69,7 @@ interface ContourEditToolbarProps {
   seriesId?: number;
   imageMetadata?: any;
   onOpenBooleanOperations?: () => void;
+  onOpenGrowMarginOperations?: () => void;
 }
 
 export function ContourEditToolbar({ 
@@ -84,7 +85,8 @@ export function ContourEditToolbar({
   onTargetStructureSelect,
   seriesId,
   imageMetadata,
-  onOpenBooleanOperations
+  onOpenBooleanOperations,
+  onOpenGrowMarginOperations
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -546,7 +548,7 @@ export function ContourEditToolbar({
             selectedStructure={selectedStructure?.roiNumber || null}
             currentSlicePosition={currentSlicePosition}
             onContourUpdate={(action: string, payload: any) => {
-              onContourUpdate({
+              onContourUpdate?.({
                 action,
                 ...payload
               });
@@ -921,7 +923,8 @@ export function ContourEditToolbar({
             <Input
               value={selectedStructure.structureName || ''}
               onChange={(e) => handleNameChange(e.target.value)}
-              className="w-32 h-7 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm"
+              className="w-32 h-7 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
+              style={{ WebkitTapHighlightColor: 'transparent' }}
               disabled={updateNameMutation.isPending}
             />
             <span className="text-white/90 text-sm drop-shadow-sm">Color:</span>
@@ -957,6 +960,22 @@ export function ContourEditToolbar({
             >
               <Redo className="w-3 h-3" />
             </Button>
+            
+            {/* Separator */}
+            <div className="w-px h-6 bg-white/30 mx-2" />
+            
+            {/* Grow/Margin Operations Button */}
+            <div className="bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 border-yellow-400/70 bg-yellow-600/20 shadow-yellow-500/20">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onOpenGrowMarginOperations?.()}
+                className="h-8 w-8 p-0 transition-all duration-200 text-yellow-300 hover:text-yellow-200"
+                title="Grow/Margin Operations"
+              >
+                <ArrowUpFromLine className="w-4 h-4" />
+              </Button>
+            </div>
             
             {/* Separator */}
             <div className="w-px h-6 bg-white/30 mx-2" />
@@ -1116,11 +1135,19 @@ export function ContourEditToolbar({
                       ? 'text-white border shadow-sm' 
                       : 'hover:bg-gray-700/50 hover:text-white'
                   }`}
-                  style={isActive ? { 
-                    borderColor: `${structureColorRgb}`,
-                    backgroundColor: `${structureColorRgb}20`,
-                    color: 'white'
-                  } : {}}
+                  style={isActive ? (
+                    tool.id === 'grow' 
+                      ? { 
+                          borderColor: 'rgb(234, 179, 8)',
+                          backgroundColor: 'rgb(234, 179, 8, 0.2)',
+                          color: 'white'
+                        }
+                      : { 
+                          borderColor: `${structureColorRgb}`,
+                          backgroundColor: `${structureColorRgb}20`,
+                          color: 'white'
+                        }
+                  ) : {}}
                 >
                   <IconComponent className="w-4 h-4 mr-2" />
                   <span className="text-sm">{tool.label}</span>

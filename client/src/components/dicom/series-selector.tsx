@@ -34,6 +34,7 @@ interface SeriesSelectorProps {
   secondarySeriesId?: number | null;
   onSecondarySeriesSelect?: (seriesId: number | null) => void;
   onAllStructuresVisibilityChange?: (allVisible: boolean) => void;
+  preventRTLoading?: boolean;
 }
 
 export function SeriesSelector({
@@ -56,7 +57,8 @@ export function SeriesSelector({
   onAutoLocalize,
   secondarySeriesId,
   onSecondarySeriesSelect,
-  onAllStructuresVisibilityChange
+  onAllStructuresVisibilityChange,
+  preventRTLoading = false
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -188,17 +190,34 @@ export function SeriesSelector({
     }
   };
 
-  // Load RT structure series for all studies
+  // Load RT structure series for all studies (memoized to prevent excessive API calls)
   useEffect(() => {
+    if (preventRTLoading) {
+      console.log('Skipping RT structure loading - handled by parent component');
+      return;
+    }
+    
     const studyIdsToLoad = studyIds || (studyId ? [studyId] : []);
     if (studyIdsToLoad.length === 0) return;
+    
+    // Skip loading if we already have RT series for these studies
+    const studyIdsKey = studyIdsToLoad.sort().join(',');
+    const currentRTSeriesKey = rtSeries.map(s => s.studyId).sort().join(',');
+    if (studyIdsKey === currentRTSeriesKey && rtSeries.length > 0) {
+      console.log('RT series already loaded for studies:', studyIdsToLoad);
+      return;
+    }
+    
+    let isCancelled = false;
     
     const loadRTSeries = async () => {
       try {
         const allRTSeries: any[] = [];
         
-        // Load RT structures for each study
+        // Load RT structures for each study (only once per study)
         for (const id of studyIdsToLoad) {
+          if (isCancelled) break;
+          
           const response = await fetch(`/api/studies/${id}/rt-structures`);
           if (response.ok) {
             const rtSeriesData = await response.json();
@@ -206,15 +225,23 @@ export function SeriesSelector({
           }
         }
         
-        console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
-        setRTSeries(allRTSeries);
+        if (!isCancelled) {
+          console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
+          setRTSeries(allRTSeries);
+        }
       } catch (error) {
-        console.error('Error loading RT series:', error);
+        if (!isCancelled) {
+          console.error('Error loading RT series:', error);
+        }
       }
     };
     
     loadRTSeries();
-  }, [studyId, studyIds]);
+    
+    return () => {
+      isCancelled = true;
+    };
+  }, [studyId, studyIds, preventRTLoading]);
 
   // Initialize structure visibility when RT structures are loaded
   useEffect(() => {
@@ -659,7 +686,7 @@ export function SeriesSelector({
                                         </span>
                                         {secondarySeriesId === mrS.id ? (
                                           <Badge className="ml-auto bg-purple-500 text-white text-xs animate-pulse">
-                                            Fusion Active
+                                            Fusion
                                           </Badge>
                                         ) : (
                                           <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
@@ -837,12 +864,13 @@ export function SeriesSelector({
                   <div className="space-y-3 flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)', overflowY: 'auto' }}>
                     {/* Search Bar */}
                     <div className="relative mb-4">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
                       <Input
                         placeholder="Search structures..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder-gray-400 focus:border-gray-500/50 rounded-full"
+                        className="pl-10 pr-4 py-2 bg-gray-900/80 backdrop-blur-sm border border-gray-600/40 text-white placeholder-gray-400 rounded-lg transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus:bg-gray-800/90 hover:border-gray-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                        style={{ WebkitTapHighlightColor: 'transparent' }}
                       />
                     </div>
 
@@ -1149,7 +1177,7 @@ export function SeriesSelector({
                           <>
                             {/* Special Groups (GTV, CTV, PTV, Planning) */}
                             {Array.from(specialGroups.entries()).map(([groupName, groupStructures]) => (
-                              <div key={groupName} className="mb-1">
+                              <div key={groupName}>
                                 {/* Special Group Header */}
                                 <div>
                                   <div 
@@ -1259,7 +1287,7 @@ export function SeriesSelector({
 
                             {/* Regular Grouped Structures with Nested Items */}
                             {Array.from(groups.entries()).map(([groupName, groupStructures]) => (
-                              <div key={groupName} className="mb-2">
+                              <div key={groupName}>
                                 {/* Group Header */}
                                 <div>
                                   <div 

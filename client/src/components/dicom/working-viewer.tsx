@@ -8,7 +8,7 @@ import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
-import { RTStructureOverlay } from "./rt-structure-overlay";
+
 import { FusionControlPanel } from "./fusion-control-panel";
 import { MeasurementTool } from "./measurement-tool";
 import { BrushOperation } from "@shared/schema";

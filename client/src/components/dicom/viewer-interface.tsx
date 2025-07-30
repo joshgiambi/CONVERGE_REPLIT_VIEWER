@@ -8,6 +8,7 @@ import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
+import { GrowMarginToolbar } from './grow-margin-toolbar';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -67,6 +68,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
+  const [showGrowMarginOperations, setShowGrowMarginOperations] = useState(false);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -492,6 +494,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }}
             secondarySeriesId={secondarySeriesId}
             onSecondarySeriesSelect={setSecondarySeriesId}
+            preventRTLoading={true}
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
           />
         </div>
@@ -682,6 +685,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setIsContourEditMode(false);
             setShowBooleanOperations(true);
           }}
+          onOpenGrowMarginOperations={() => {
+            setIsContourEditMode(false);
+            setShowGrowMarginOperations(true);
+          }}
         />
       )}
 
@@ -699,6 +706,29 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           setShowBooleanOperations(false);
         }}
       />
+
+      {/* Grow Margin Operations Toolbar */}
+      <GrowMarginToolbar
+        isVisible={showGrowMarginOperations}
+        onClose={() => setShowGrowMarginOperations(false)}
+        selectedStructure={selectedForEdit ? rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit) : undefined}
+        onExecuteOperation={(operation) => {
+          console.log('Executing grow/margin operation:', operation);
+          // TODO: Implement grow/margin operation execution
+          setShowGrowMarginOperations(false);
+        }}
+      />
+
+      {/* Temporary Test Button for Grow-Margin Toolbar */}
+      {rtStructures?.structures && (
+        <button
+          onClick={() => setShowGrowMarginOperations(true)}
+          className="fixed top-4 right-4 z-50 bg-yellow-500 text-black px-4 py-2 rounded-lg hover:bg-yellow-400 transition-colors"
+          title="Test Grow-Margin Toolbar"
+        >
+          Test Grow-Margin Toolbar
+        </button>
+      )}
 
       {/* Error Modal */}
       <ErrorModal

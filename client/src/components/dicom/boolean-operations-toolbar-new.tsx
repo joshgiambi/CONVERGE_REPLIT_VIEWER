@@ -317,11 +317,12 @@ export function BooleanOperationsToolbar({
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 placeholder=""
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20 font-sans"
+                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20 font-sans transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
                 style={{ 
                   caretColor: 'white',
                   letterSpacing: 'normal',
-                  lineHeight: '1.25rem'
+                  lineHeight: '1.25rem',
+                  WebkitTapHighlightColor: 'transparent'
                 }}
               />
               

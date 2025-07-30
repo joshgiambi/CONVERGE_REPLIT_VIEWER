@@ -468,6 +468,16 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async deleteRegistrationByStudyId(studyId: number): Promise<void> {
+    try {
+      await db.delete(registrations).where(eq(registrations.studyId, studyId));
+      console.log('Deleted registration for study:', studyId);
+    } catch (error) {
+      console.error('Error deleting registration:', error);
+      throw error;
+    }
+  }
+
   // Patient metadata editing
   async updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null> {
     try {

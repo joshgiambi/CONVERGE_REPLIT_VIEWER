@@ -2227,17 +2227,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // First, check if we have a registration in the database
       const registration = await storage.getRegistrationByStudyId(studyId);
       if (registration) {
+        // Parse the transformation matrix to ensure it's a flat 16-element array
+        let matrix = registration.transformationMatrix;
+        if (typeof matrix === 'string') {
+          try {
+            // Handle PostgreSQL array format: {{"1","0",...},{"0","1",...},...}
+            let cleanMatrix = matrix;
+            
+            // Remove outer braces and split by },{ to get rows
+            if (matrix.startsWith('{{') && matrix.endsWith('}}')) {
+              cleanMatrix = matrix.slice(2, -2); // Remove outer {{}}
+              const rows = cleanMatrix.split('},{');
+              
+              // Parse each row and flatten
+              const parsedRows = rows.map(row => {
+                const elements = row.split(',').map(el => parseFloat(el.replace(/"/g, '')));
+                return elements;
+              });
+              
+              matrix = parsedRows.flat();
+            } else {
+              // Try standard JSON parsing
+              const parsed = JSON.parse(matrix);
+              if (Array.isArray(parsed) && Array.isArray(parsed[0])) {
+                matrix = parsed.flat();
+              } else if (Array.isArray(parsed)) {
+                matrix = parsed;
+              }
+            }
+          } catch (e) {
+            console.error('Failed to parse registration matrix:', e);
+            console.log('Raw matrix string:', matrix);
+            matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; // Identity matrix fallback
+          }
+        } else if (Array.isArray(matrix)) {
+          // Already an array, check if nested or flat
+          if (Array.isArray(matrix[0])) {
+            matrix = matrix.flat();
+          }
+        } else {
+          // Not a string or array, use identity matrix
+          matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        }
+        
         res.json({
-          transformationMatrix: registration.transformationMatrix,
+          transformationMatrix: matrix,
           matrixType: registration.matrixType || 'RIGID'
         });
         return;
       }
       
-      // For now, return hardcoded registration for study 7 (fusion dataset)
+      // For now, return hardcoded registration for specific studies
       if (studyId === 7) {
         res.json({
           transformationMatrix: [0.99933547159219, -0.0077344424307, -0.0356201293921, -11.334524593996, 0.00427828866787, 0.99536240009279, -0.0961009298998, -192.87910608354, 0.03619822459314, 0.09588467490592, 0.99473404367926, 643.420715526161, 0, 0, 0, 1],
+          matrixType: 'RIGID'
+        });
+      } else if (studyId === 5) {
+        // Registration matrix for LIMBIC_57 fusion study
+        res.json({
+          transformationMatrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0, 0, 0, 1],
           matrixType: 'RIGID'
         });
       } else {
@@ -2246,6 +2295,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching registration:", error);
       res.status(500).json({ error: "Failed to fetch registration" });
+    }
+  });
+
+  // Delete registration for a study
+  app.delete("/api/registrations/:studyId", async (req, res) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      await storage.deleteRegistrationByStudyId(studyId);
+      res.json({ success: true, message: 'Registration deleted' });
+    } catch (error: any) {
+      console.error('Error deleting registration:', error);
+      res.status(500).json({ error: 'Failed to delete registration', details: error.message });
     }
   });
 
@@ -2291,23 +2352,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sourceFrameOfRef = dataSet.string('x00200052'); // Frame of Reference UID
       console.log('Source Frame of Reference:', sourceFrameOfRef);
       
-      // For ESOPHAGUS_31, use a default transformation matrix
-      // In a real implementation, we would parse the registration sequence
-      const transformationMatrix = [
+      // Extract actual transformation matrix from DICOM registration data
+      let transformationMatrix = [
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [0, 0, 0, 1]
       ];
       
-      // Check if registration already exists
+      try {
+        // Check for Registration Sequence (0070,0308)
+        const registrationSequence = dataSet.elements['x00700308'];
+        if (registrationSequence && registrationSequence.items && registrationSequence.items.length > 0) {
+          console.log('📊 Found Registration Sequence with', registrationSequence.items.length, 'items');
+          
+          const regItem = registrationSequence.items[0];
+          
+          // Look for Matrix Registration Sequence (0070,0309)
+          const matrixRegSeq = regItem.dataSet.elements['x00700309'];
+          if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
+            console.log('📊 Found Matrix Registration Sequence');
+            
+            const matrixItem = matrixRegSeq.items[0];
+            
+            // Get the transformation matrix (0070,030C)
+            const matrixData = matrixItem.dataSet.elements['x0070030c'];
+            if (matrixData) {
+              console.log('📊 Found Transformation Matrix data');
+              
+              // Parse the matrix values (should be 16 float values)
+              const matrixValues = [];
+              for (let i = 0; i < matrixData.length && matrixValues.length < 16; i += 8) {
+                const view = new DataView(matrixData.buffer, matrixData.byteOffset + i, 8);
+                const value = view.getFloat64(0, true); // little endian
+                matrixValues.push(value);
+              }
+              
+              if (matrixValues.length === 16) {
+                // Convert flat array to 4x4 matrix
+                transformationMatrix = [
+                  matrixValues.slice(0, 4),
+                  matrixValues.slice(4, 8),
+                  matrixValues.slice(8, 12),
+                  matrixValues.slice(12, 16)
+                ];
+                console.log('✅ Extracted transformation matrix:', transformationMatrix);
+              }
+            }
+          }
+        }
+        
+        // Alternative: Check for Pre-/Post-concatenation matrix (0018,5210, 0018,5212)
+        if (transformationMatrix[0][0] === 1 && transformationMatrix[0][1] === 0) {
+          const preMatrix = dataSet.string('x00185210');
+          const postMatrix = dataSet.string('x00185212');
+          
+          if (preMatrix || postMatrix) {
+            console.log('📊 Found Pre/Post concatenation matrix data');
+            const matrixString = preMatrix || postMatrix;
+            const values = matrixString.split('\\').map(v => parseFloat(v));
+            
+            if (values.length === 16) {
+              transformationMatrix = [
+                values.slice(0, 4),
+                values.slice(4, 8),
+                values.slice(8, 12),
+                values.slice(12, 16)
+              ];
+              console.log('✅ Extracted matrix from Pre/Post concatenation:', transformationMatrix);
+            }
+          }
+        }
+        
+      } catch (parseError) {
+        console.warn('⚠️ Could not parse transformation matrix from REG file:', parseError);
+        console.log('Using identity matrix as fallback');
+      }
+      
+      // Check if registration already exists and delete it to force reparse
       const existing = await storage.getRegistrationByStudyId(studyId);
       if (existing) {
-        console.log('⚠️ Registration already exists for this study');
-        return res.json({ 
-          message: 'Registration already exists',
-          registration: existing
-        });
+        console.log('⚠️ Registration already exists for this study - deleting to reparse with new logic');
+        await storage.deleteRegistrationByStudyId(studyId);
       }
       
       // Create registration entry
