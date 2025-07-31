@@ -430,6 +430,8 @@ export function SimpleBrushTool({
               grayscaleData[i] = pixelData[i * 4];
             }
             
+
+            
             // Create adaptive preview shape
             const previewPoints = createAdaptivePreview(
               grayscaleData,
@@ -452,7 +454,8 @@ export function SimpleBrushTool({
             }
           }
         } catch (error) {
-          console.error("Error creating adaptive preview:", error);
+          console.error("Error creating adaptive preview:", error instanceof Error ? error.message : error);
+          console.error("Stack:", error instanceof Error ? error.stack : "No stack");
           setAdaptivePreviewPoints(null);
         }
       } else {

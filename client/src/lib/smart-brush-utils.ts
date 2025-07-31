@@ -57,7 +57,8 @@ export function createAdaptivePreview(
   }
   
   const avgGradient = gradientCount > 0 ? gradientSum / gradientCount : 10;
-  const adaptiveThreshold = Math.max(5, Math.min(15, avgGradient * 0.5));
+  // Lower threshold for more sensitivity
+  const adaptiveThreshold = Math.max(3, Math.min(10, avgGradient * 0.3));
   
   // Sample more rays for smoother shape
   const numRays = 128; // Even more rays for smoother shape
@@ -91,17 +92,26 @@ export function createAdaptivePreview(
         const gradient = Math.abs(recent[recent.length - 1] - recent[0]) / 3;
         
         if (gradient > adaptiveThreshold) {
-          distance = Math.max(1, d - step * 2);
+          // Contract more dramatically at boundaries
+          distance = Math.max(radius * 0.3, d - step * 4);
           break;
         }
       }
     }
     
-    // Add point at this distance with slight variation reduction
-    const smoothedDistance = distance * 0.95 + radius * 0.05;
+    // Adjust distance based on whether we hit a boundary or not
+    let adjustedDistance = distance;
+    if (distance >= radius * 0.9) {
+      // In homogeneous area - expand slightly
+      adjustedDistance = Math.min(radius * 1.1, distance * 1.05);
+    } else {
+      // Hit a boundary - keep contracted
+      adjustedDistance = distance * 0.9;
+    }
+    
     shapePoints.push({
-      x: centerX + dx * smoothedDistance,
-      y: centerY + dy * smoothedDistance
+      x: centerX + dx * adjustedDistance,
+      y: centerY + dy * adjustedDistance
     });
   }
   
