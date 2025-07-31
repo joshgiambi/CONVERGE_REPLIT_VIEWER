@@ -229,6 +229,7 @@ export function SeriesSelector({
         
         if (!isCancelled) {
           console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
+          console.log('RT series details:', allRTSeries);
           setRTSeries(allRTSeries);
         }
       } catch (error) {
@@ -613,6 +614,8 @@ export function SeriesSelector({
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
                               {/* RT Structure Series nested under CT - only show those that reference this CT */}
+                              {console.log('RT Series available:', rtSeries.length, 'for CT series:', seriesItem.id)}
+                              {console.log('RT Series details:', rtSeries)}
                               {rtSeries.filter((rtS: any) => 
                                 // Show RT structures that reference this CT series, or those without a reference (backward compatibility)
                                 rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
