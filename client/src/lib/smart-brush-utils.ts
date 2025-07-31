@@ -20,12 +20,6 @@ export function createAdaptivePreview(
   centerY: number,
   radius: number
 ): Point[] {
-  // Temporarily use a simple circle for debugging
-  if (true) {
-    return createCirclePoints(centerX, centerY, radius);
-  }
-  
-  // Re-enable adaptive preview with smoother, more sensitive algorithm
   const cx = Math.round(centerX);
   const cy = Math.round(centerY);
   
@@ -34,11 +28,39 @@ export function createAdaptivePreview(
     return createCirclePoints(centerX, centerY, radius);
   }
   
-  // Get intensity at center
+  // Get intensity at center and calculate local statistics
   const centerIntensity = pixelData[cy * width + cx];
   
+  // Calculate local gradient to adapt threshold
+  let gradientSum = 0;
+  let gradientCount = 0;
+  const sampleRadius = 5;
+  
+  for (let dy = -sampleRadius; dy <= sampleRadius; dy++) {
+    for (let dx = -sampleRadius; dx <= sampleRadius; dx++) {
+      const x1 = cx + dx;
+      const y1 = cy + dy;
+      const x2 = cx + dx + 1;
+      const y2 = cy + dy + 1;
+      
+      if (x1 >= 0 && x2 < width && y1 >= 0 && y2 < height) {
+        const i1 = pixelData[y1 * width + x1];
+        const i2 = pixelData[y1 * width + x2];
+        const i3 = pixelData[y2 * width + x1];
+        
+        const gx = Math.abs(i2 - i1);
+        const gy = Math.abs(i3 - i1);
+        gradientSum += Math.sqrt(gx * gx + gy * gy);
+        gradientCount++;
+      }
+    }
+  }
+  
+  const avgGradient = gradientCount > 0 ? gradientSum / gradientCount : 10;
+  const adaptiveThreshold = Math.max(5, Math.min(15, avgGradient * 0.5));
+  
   // Sample more rays for smoother shape
-  const numRays = 64; // Double the rays for smoother shape
+  const numRays = 128; // Even more rays for smoother shape
   const shapePoints: Point[] = [];
   
   for (let i = 0; i < numRays; i++) {
@@ -46,51 +68,63 @@ export function createAdaptivePreview(
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
     
-    // Find edge with more sensitive detection
+    // Find edge with gradient-based detection
     let distance = radius;
-    const step = 0.5; // Smaller steps for smoother edge detection
-    let prevIntensity = centerIntensity;
+    const step = 0.25; // Even smaller steps
+    let intensityBuffer: number[] = [];
     
-    for (let d = 1; d <= radius; d += step) {
+    for (let d = 0; d <= radius; d += step) {
       const x = Math.round(cx + dx * d);
       const y = Math.round(cy + dy * d);
       
       if (x < 0 || x >= width || y < 0 || y >= height) {
-        distance = d - step;
+        distance = Math.max(1, d - step * 3);
         break;
       }
       
       const pixelIntensity = pixelData[y * width + x];
-      const gradientMagnitude = Math.abs(pixelIntensity - prevIntensity);
+      intensityBuffer.push(pixelIntensity);
       
-      // More sensitive threshold - detect smaller changes
-      const threshold = 20; // Much lower threshold for higher sensitivity
-      if (gradientMagnitude > threshold) {
-        distance = d - step;
-        break;
+      // Use gradient over last few samples
+      if (intensityBuffer.length >= 4) {
+        const recent = intensityBuffer.slice(-4);
+        const gradient = Math.abs(recent[recent.length - 1] - recent[0]) / 3;
+        
+        if (gradient > adaptiveThreshold) {
+          distance = Math.max(1, d - step * 2);
+          break;
+        }
       }
-      
-      prevIntensity = pixelIntensity;
     }
     
-    // Add point at this distance
+    // Add point at this distance with slight variation reduction
+    const smoothedDistance = distance * 0.95 + radius * 0.05;
     shapePoints.push({
-      x: centerX + dx * distance,
-      y: centerY + dy * distance
+      x: centerX + dx * smoothedDistance,
+      y: centerY + dy * smoothedDistance
     });
   }
   
-  // Smooth the shape by averaging neighboring points
-  const smoothedPoints: Point[] = [];
-  for (let i = 0; i < shapePoints.length; i++) {
-    const prev = shapePoints[(i - 1 + shapePoints.length) % shapePoints.length];
-    const curr = shapePoints[i];
-    const next = shapePoints[(i + 1) % shapePoints.length];
-    
-    smoothedPoints.push({
-      x: (prev.x + curr.x * 2 + next.x) / 4,
-      y: (prev.y + curr.y * 2 + next.y) / 4
-    });
+  // Apply multiple passes of smoothing for a very smooth shape
+  let smoothedPoints = [...shapePoints];
+  
+  // First pass - aggressive smoothing
+  for (let pass = 0; pass < 3; pass++) {
+    const newPoints: Point[] = [];
+    for (let i = 0; i < smoothedPoints.length; i++) {
+      const prev2 = smoothedPoints[(i - 2 + smoothedPoints.length) % smoothedPoints.length];
+      const prev = smoothedPoints[(i - 1 + smoothedPoints.length) % smoothedPoints.length];
+      const curr = smoothedPoints[i];
+      const next = smoothedPoints[(i + 1) % smoothedPoints.length];
+      const next2 = smoothedPoints[(i + 2) % smoothedPoints.length];
+      
+      // 5-point weighted average for smoother result
+      newPoints.push({
+        x: (prev2.x * 0.1 + prev.x * 0.2 + curr.x * 0.4 + next.x * 0.2 + next2.x * 0.1),
+        y: (prev2.y * 0.1 + prev.y * 0.2 + curr.y * 0.4 + next.y * 0.2 + next2.y * 0.1)
+      });
+    }
+    smoothedPoints = newPoints;
   }
   
   return smoothedPoints;

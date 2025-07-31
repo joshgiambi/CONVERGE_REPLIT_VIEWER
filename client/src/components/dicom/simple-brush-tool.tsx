@@ -243,16 +243,16 @@ export function SimpleBrushTool({
         });
         ctx.closePath();
         
-        // Use bright yellow for high visibility
-        ctx.fillStyle = "#ffff00";
-        ctx.globalAlpha = 0.3; // Higher opacity for better visibility
+        // Fill with structure color
+        ctx.fillStyle = structureColor;
+        ctx.globalAlpha = 0.2; // Semi-transparent fill
         ctx.fill();
         
-        // Draw the outline with bright color
+        // Draw the outline with structure color
         ctx.globalAlpha = 1.0;
-        ctx.strokeStyle = "#00ff00"; // Bright green outline
-        ctx.lineWidth = 4; // Extra thick line
-        ctx.setLineDash([10, 5]); // Larger dashes for better visibility
+        ctx.strokeStyle = structureColor;
+        ctx.lineWidth = 2; // Normal thickness
+        ctx.setLineDash([5, 3]); // Dashed line to indicate preview
         ctx.stroke();
         
         ctx.restore();
