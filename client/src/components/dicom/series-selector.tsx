@@ -1229,11 +1229,9 @@ export function SeriesSelector({
                                   {expandedGroups.get(groupName) && (
                                     <div className="mt-1 ml-4 space-y-1 relative">
                                       {/* Vertical connection line */}
-                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-600/50 -ml-2"></div>
+                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-blue-400/30 -ml-2"></div>
                                       {groupStructures.map((structure: any, index: number) => (
                                         <div className="relative" key={`wrapper-${structure.roiNumber}`}>
-                                          {/* Horizontal connection line */}
-                                          <div className="absolute left-0 top-1/2 w-2 h-px bg-gray-600/50 -ml-2"></div>
                                           <div 
                                             className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
                                             selectedForEdit === structure.roiNumber
@@ -1341,11 +1339,9 @@ export function SeriesSelector({
                                   {expandedGroups.get(groupName) && (
                                     <div className="mt-1 ml-4 space-y-1 relative">
                                       {/* Vertical connection line */}
-                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-600/50 -ml-2"></div>
+                                      <div className="absolute left-0 top-0 bottom-0 w-px bg-blue-400/30 -ml-2"></div>
                                       {groupStructures.map((structure: any, index: number) => (
                                         <div className="relative" key={`wrapper-nested-${structure.roiNumber}`}>
-                                          {/* Horizontal connection line */}
-                                          <div className="absolute left-0 top-1/2 w-2 h-px bg-gray-600/50 -ml-2"></div>
                                           <div 
                                             className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
                                             selectedForEdit === structure.roiNumber
