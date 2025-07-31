@@ -801,7 +801,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             setShowAdvancedMarginTool(true);
           }}
-          brushToolState={brushToolState}
+
         />
       )}
 
