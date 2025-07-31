@@ -228,8 +228,16 @@ export function SimpleBrushTool({
       const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
 
       // For smart brush, show adaptive preview shape if available
-      if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 0 && !isEraseMode && !isTemporaryEraseMode) {
+      if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
+        // Debug log to check points
+        if (adaptivePreviewPoints.length > 0) {
+          console.log('Drawing adaptive preview with', adaptivePreviewPoints.length, 'points');
+          console.log('First point:', adaptivePreviewPoints[0]);
+          console.log('Last point:', adaptivePreviewPoints[adaptivePreviewPoints.length - 1]);
+        }
+        
         // Draw adaptive preview shape
+        ctx.save();
         ctx.beginPath();
         adaptivePreviewPoints.forEach((point, index) => {
           if (index === 0) {
@@ -239,17 +247,20 @@ export function SimpleBrushTool({
           }
         });
         ctx.closePath();
+        
+        // Draw the shape
         ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 3;
-        ctx.setLineDash([6, 3]); // Dashed line to indicate preview
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]); // Dashed line to indicate preview
         ctx.stroke();
-        ctx.setLineDash([]); // Reset dash
         
         // Fill with low opacity
         ctx.fillStyle = structureColor;
-        ctx.globalAlpha = 0.2;
+        ctx.globalAlpha = 0.15;
         ctx.fill();
-        ctx.globalAlpha = 1.0;
+        
+        ctx.restore();
+        ctx.setLineDash([]); // Reset dash
       } else {
         // Regular brush cursor
         ctx.beginPath();
@@ -414,16 +425,31 @@ export function SimpleBrushTool({
             
             // Get pixel data from canvas
             const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+            const pixelData = imageData.data;
+            
+            // Convert RGBA to grayscale
+            const grayscaleData = new Float32Array(imageCols * imageRows);
+            for (let i = 0; i < grayscaleData.length; i++) {
+              // Use the red channel as grayscale (since it's a grayscale DICOM image)
+              grayscaleData[i] = pixelData[i * 4];
+            }
             
             // Create adaptive preview shape
             const previewPoints = createAdaptivePreview(
-              imageData.data,
+              grayscaleData,
               imageCols,
               imageRows,
               pixelX,
               pixelY,
               brushSize
             );
+            
+            console.log('Adaptive preview:', {
+              centerPixel: { x: pixelX, y: pixelY },
+              brushSize,
+              numPoints: previewPoints.length,
+              firstFewPoints: previewPoints.slice(0, 5)
+            });
             
             // Convert preview points to canvas coordinates
             const canvasPreviewPoints = previewPoints.map(p => ({

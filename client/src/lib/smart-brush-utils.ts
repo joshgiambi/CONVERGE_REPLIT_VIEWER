@@ -20,6 +20,10 @@ export function createAdaptivePreview(
   centerY: number,
   radius: number
 ): Point[] {
+  // For now, just return a simple circle to debug rendering
+  return createCirclePoints(centerX, centerY, radius);
+  
+  /* Adaptive code disabled for debugging
   const cx = Math.round(centerX);
   const cy = Math.round(centerY);
   
@@ -71,6 +75,7 @@ export function createAdaptivePreview(
   }
   
   return shapePoints;
+  */
 }
 
 /**
