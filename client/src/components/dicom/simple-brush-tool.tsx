@@ -1,6 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
-import { adaptiveRegionGrow, smoothContourMask, maskToContourPoints } from "@/lib/smart-brush-utils";
+import { 
+  adaptiveRegionGrow, 
+  smoothContourMask, 
+  maskToContourPoints,
+  polygonToMask,
+  mergeWithExistingMask,
+  createAdaptivePreview
+} from "@/lib/smart-brush-utils";
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -63,6 +70,12 @@ export function SimpleBrushTool({
   const [sizeAdjustStart, setSizeAdjustStart] = useState<{ x: number; y: number; size: number } | null>(null);
   const [adjustedBrushSize, setAdjustedBrushSize] = useState(brushSize);
   const sliderOverlayRef = useRef<HTMLDivElement | null>(null);
+  
+  // Smart brush preview state
+  const [adaptivePreview, setAdaptivePreview] = useState<{
+    mask: Uint8Array;
+    bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  } | null>(null);
   
   // Performance optimization: throttle mouse move events
   const lastUpdateTime = useRef(0);
@@ -214,7 +227,6 @@ export function SimpleBrushTool({
 
     // Draw brush cursor - match actual world coordinate output size
     if (cursorPosition && !isDrawing) {
-      ctx.beginPath();
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
       
       // Convert brush size from pixels to world coordinates to match actual output
@@ -224,11 +236,70 @@ export function SimpleBrushTool({
       // Convert world size back to screen pixels for cursor display
       const zoomScale = ctTransform?.current?.scale || 1;
       const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
-      
-      ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
-      ctx.strokeStyle = structureColor;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+
+      // Draw adaptive preview for smart brush
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && adaptivePreview) {
+        const { mask, bounds } = adaptivePreview;
+        
+        // Draw the adaptive region preview
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        
+        // Draw each pixel of the mask within bounds
+        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+        const imageRows = dicomImage?.rows || 512;
+        const imageCols = dicomImage?.columns || 512;
+        
+        ctx.fillStyle = structureColor;
+        for (let y = bounds.minY; y <= bounds.maxY; y++) {
+          for (let x = bounds.minX; x <= bounds.maxX; x++) {
+            if (mask[y * imageCols + x]) {
+              const screenX = x * transform.scale + transform.offsetX;
+              const screenY = y * transform.scale + transform.offsetY;
+              ctx.fillRect(screenX, screenY, transform.scale, transform.scale);
+            }
+          }
+        }
+        
+        ctx.restore();
+        
+        // Draw morphing outline around the adaptive region
+        ctx.strokeStyle = structureColor;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        
+        // Simple boundary tracing for preview outline
+        const visited = new Set<string>();
+        for (let y = bounds.minY; y <= bounds.maxY; y++) {
+          for (let x = bounds.minX; x <= bounds.maxX; x++) {
+            if (mask[y * imageCols + x] && !visited.has(`${x},${y}`)) {
+              // Check if this is a boundary pixel
+              const isBoundary = 
+                (x === 0 || !mask[y * imageCols + (x - 1)]) ||
+                (x === imageCols - 1 || !mask[y * imageCols + (x + 1)]) ||
+                (y === 0 || !mask[(y - 1) * imageCols + x]) ||
+                (y === imageRows - 1 || !mask[(y + 1) * imageCols + x]);
+              
+              if (isBoundary) {
+                const screenX = x * transform.scale + transform.offsetX;
+                const screenY = y * transform.scale + transform.offsetY;
+                ctx.moveTo(screenX + transform.scale / 2, screenY + transform.scale / 2);
+                ctx.arc(screenX + transform.scale / 2, screenY + transform.scale / 2, 1, 0, 2 * Math.PI);
+              }
+            }
+          }
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Regular brush cursor
+        ctx.beginPath();
+        ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
+        ctx.strokeStyle = structureColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       // Draw center dot
       ctx.beginPath();
@@ -293,6 +364,9 @@ export function SimpleBrushTool({
     adjustedBrushSize,
     isEraseMode,
     isTemporaryEraseMode,
+    adaptivePreview,
+    smartBrushEnabled,
+    dicomImage,
   ]);
 
   // Handle mouse events
@@ -362,6 +436,43 @@ export function SimpleBrushTool({
 
       const coords = getCanvasCoords(e);
       setCursorPosition(coords);
+
+      // Generate adaptive preview for smart brush
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && !isDrawing && dicomImage?.pixelData) {
+        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+        const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
+        const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
+        
+        const imageRows = dicomImage.rows || 512;
+        const imageCols = dicomImage.columns || 512;
+        
+        if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
+          // Get pixel data
+          let pixelData: Float32Array | Uint16Array | Uint8Array;
+          if (dicomImage.pixelData instanceof Float32Array || 
+              dicomImage.pixelData instanceof Uint16Array || 
+              dicomImage.pixelData instanceof Uint8Array) {
+            pixelData = dicomImage.pixelData;
+          } else {
+            pixelData = new Float32Array(dicomImage.pixelData);
+          }
+          
+          // Generate preview
+          const preview = createAdaptivePreview(
+            pixelData,
+            imageCols,
+            imageRows,
+            pixelX,
+            pixelY,
+            brushSize / transform.scale, // Convert to pixel units
+            30 // Gradient threshold
+          );
+          
+          setAdaptivePreview(preview);
+        }
+      } else {
+        setAdaptivePreview(null);
+      }
 
       if (isDrawing && selectedStructure) {
         e.preventDefault();
@@ -536,9 +647,9 @@ export function SimpleBrushTool({
           const imageCols = dicomImage.columns || 512;
           const pixelData = dicomImage.pixelData;
           
-          // Convert pixel data to Float32Array if needed
-          let floatPixelData: Float32Array;
-          if (pixelData instanceof Float32Array) {
+          // Convert pixel data to appropriate format
+          let floatPixelData: Float32Array | Uint16Array | Uint8Array;
+          if (pixelData instanceof Float32Array || pixelData instanceof Uint16Array || pixelData instanceof Uint8Array) {
             floatPixelData = pixelData;
           } else {
             floatPixelData = new Float32Array(pixelData);
@@ -551,41 +662,84 @@ export function SimpleBrushTool({
             return { x: pixelX, y: pixelY };
           });
           
-          // Apply gradient-sensitive region growing
-          const smartMask = adaptiveRegionGrow(
-            floatPixelData,
-            imageRows,
-            imageCols,
-            seedPoints,
-            brushSize, // Use brush size as growth radius
-            20,        // Gradient threshold - adjust for sensitivity
-            300,       // Max iterations
-            1000       // Hounsfield window for CT
-          );
+          // Get existing contours on this slice to merge with
+          const existingContours = rtStructures?.structures
+            ?.find((s: any) => s.roiNumber === selectedStructure)
+            ?.contours?.filter((c: any) => Math.abs(c.slicePosition - currentSlicePosition) < 0.5) || [];
+          
+          let finalMask: Uint8Array;
+          
+          if (existingContours.length > 0) {
+            // Convert existing contours to mask
+            const existingMask = new Uint8Array(imageRows * imageCols);
+            for (const contour of existingContours) {
+              if (contour.points && contour.points.length >= 9) {
+                const contourMask = polygonToMask(
+                  contour.points,
+                  imageCols,
+                  imageRows,
+                  imagePosition,
+                  pixelSpacing
+                );
+                // Union with existing mask
+                for (let i = 0; i < existingMask.length; i++) {
+                  existingMask[i] = existingMask[i] || contourMask[i];
+                }
+              }
+            }
+            
+            // Apply adaptive region growing
+            const smartMask = adaptiveRegionGrow(
+              floatPixelData,
+              imageCols,
+              imageRows,
+              seedPoints,
+              brushSize / transform.scale, // Convert brush size to pixel units
+              30,        // Gradient threshold
+              1000,      // Max iterations
+              300        // Hounsfield window for CT
+            );
+            
+            // Merge with existing mask
+            finalMask = mergeWithExistingMask(smartMask, existingMask, imageCols, imageRows, false);
+          } else {
+            // No existing contours, just use adaptive region
+            finalMask = adaptiveRegionGrow(
+              floatPixelData,
+              imageCols,
+              imageRows,
+              seedPoints,
+              brushSize / transform.scale,
+              30,
+              1000,
+              300
+            );
+          }
           
           // Smooth the resulting mask
-          const smoothedMask = smoothContourMask(smartMask, imageRows, imageCols, 2);
+          const smoothedMask = smoothContourMask(finalMask, imageCols, imageRows, 2);
           
           // Convert mask to contour points
-          const contourPixelPoints = maskToContourPoints(smoothedMask, imageRows, imageCols);
+          const contourPixelPoints = maskToContourPoints(smoothedMask, imageCols, imageRows, 1.5);
           
           // Convert pixel points to world coordinates
-          const worldPoints = contourPixelPoints.map(point => {
+          const worldPoints: number[] = [];
+          for (const point of contourPixelPoints) {
             const worldX = imagePosition[0] + (point.x * colSpacing);
             const worldY = imagePosition[1] + (point.y * rowSpacing);
             const worldZ = currentSlicePosition;
-            return [worldX, worldY, worldZ];
-          });
+            worldPoints.push(worldX, worldY, worldZ);
+          }
           
-          console.log(`✅ Smart brush generated ${worldPoints.length} contour points`);
+          console.log(`✅ Smart brush generated ${worldPoints.length / 3} contour points`);
           
           // Send smart brush contour update
-          if (onContourUpdate) {
+          if (onContourUpdate && worldPoints.length >= 9) {
             onContourUpdate({
               action: "smart_brush_stroke",
               structureId: selectedStructure,
               slicePosition: currentSlicePosition,
-              pointCount: worldPoints.length,
+              pointCount: worldPoints.length / 3,
               points: worldPoints,
               brushSize: brushSize,
               smartBrushEnabled: true,
@@ -594,6 +748,7 @@ export function SimpleBrushTool({
           }
           
           brushPointsRef.current = [];
+          setAdaptivePreview(null);
           return;
         } catch (error) {
           console.error("Smart brush error, falling back to regular brush:", error);

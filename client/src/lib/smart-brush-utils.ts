@@ -1,6 +1,6 @@
 /**
- * Smart Brush Utilities - Gradient-Sensitive Region Growing
- * Implements Eclipse-style adaptive brush behavior with edge detection
+ * Smart Brush Utilities - Eclipse Adaptive Brush Tool
+ * Implements gradient-guided, topology-aware region growing with edge detection
  */
 
 interface Point {
@@ -8,19 +8,11 @@ interface Point {
   y: number;
 }
 
-interface ImageData {
-  pixels: Uint16Array | Uint8Array;
-  width: number;
-  height: number;
-  windowCenter: number;
-  windowWidth: number;
-}
-
 /**
  * Compute gradient magnitude at a pixel using Sobel operator
  */
 function computeGradientMagnitude(
-  pixels: Uint16Array | Uint8Array,
+  pixels: Float32Array | Uint16Array | Uint8Array,
   x: number,
   y: number,
   width: number,
@@ -47,56 +39,106 @@ function computeGradientMagnitude(
 }
 
 /**
- * Adaptive region growing from seed points
- * Grows until hitting strong gradients (edges)
+ * Convert world-space polygon to binary mask
  */
-export function adaptiveRegionGrow(
-  imageData: ImageData,
-  seedPoints: Point[],
-  brushRadius: number,
-  isEraseMode: boolean,
-  existingMask?: Uint8Array
+export function polygonToMask(
+  polygonPoints: number[],
+  width: number,
+  height: number,
+  imagePosition: number[],
+  pixelSpacing: number[]
 ): Uint8Array {
-  const { pixels, width, height } = imageData;
   const mask = new Uint8Array(width * height);
   
-  // Copy existing mask if provided
-  if (existingMask) {
-    mask.set(existingMask);
+  // Convert world points to pixel points
+  const pixelPoints: Point[] = [];
+  for (let i = 0; i < polygonPoints.length; i += 3) {
+    const worldX = polygonPoints[i];
+    const worldY = polygonPoints[i + 1];
+    
+    const pixelX = Math.round((worldX - imagePosition[0]) / pixelSpacing[1]);
+    const pixelY = Math.round((worldY - imagePosition[1]) / pixelSpacing[0]);
+    
+    pixelPoints.push({ x: pixelX, y: pixelY });
   }
+  
+  // Fill polygon using scanline algorithm
+  if (pixelPoints.length < 3) return mask;
+  
+  // Find bounds
+  let minY = height, maxY = 0;
+  for (const p of pixelPoints) {
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  
+  // Scanline fill
+  for (let y = Math.max(0, minY); y <= Math.min(height - 1, maxY); y++) {
+    const intersections: number[] = [];
+    
+    // Find intersections with horizontal scanline
+    for (let i = 0; i < pixelPoints.length; i++) {
+      const p1 = pixelPoints[i];
+      const p2 = pixelPoints[(i + 1) % pixelPoints.length];
+      
+      if ((p1.y <= y && p2.y > y) || (p2.y <= y && p1.y > y)) {
+        const t = (y - p1.y) / (p2.y - p1.y);
+        const x = p1.x + t * (p2.x - p1.x);
+        intersections.push(x);
+      }
+    }
+    
+    // Sort intersections and fill between pairs
+    intersections.sort((a, b) => a - b);
+    for (let i = 0; i < intersections.length; i += 2) {
+      if (i + 1 < intersections.length) {
+        const x1 = Math.max(0, Math.floor(intersections[i]));
+        const x2 = Math.min(width - 1, Math.ceil(intersections[i + 1]));
+        for (let x = x1; x <= x2; x++) {
+          mask[y * width + x] = 255;
+        }
+      }
+    }
+  }
+  
+  return mask;
+}
+
+/**
+ * Adaptive region growing from seed points - Eclipse-style
+ * Grows until hitting strong gradients (edges) within brush ROI
+ */
+export function adaptiveRegionGrow(
+  pixelData: Float32Array | Uint16Array | Uint8Array,
+  width: number,
+  height: number,
+  seedPoints: Point[],
+  brushRadius: number,
+  gradientThreshold: number,
+  maxIterations: number,
+  hounsFieldWindow: number
+): Uint8Array {
+  const mask = new Uint8Array(width * height);
   
   // Compute gradient map
   const gradientMap = new Float32Array(width * height);
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
-      gradientMap[y * width + x] = computeGradientMagnitude(pixels, x, y, width, height);
+      gradientMap[y * width + x] = computeGradientMagnitude(pixelData, x, y, width, height);
     }
   }
   
-  // Find gradient threshold (adaptive based on local statistics)
-  const getLocalGradientThreshold = (cx: number, cy: number, radius: number): number => {
-    let sum = 0;
-    let count = 0;
-    const r2 = radius * radius;
-    
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (dx * dx + dy * dy > r2) continue;
-        
-        const x = cx + dx;
-        const y = cy + dy;
-        
-        if (x >= 0 && x < width && y >= 0 && y < height) {
-          sum += gradientMap[y * width + x];
-          count++;
-        }
-      }
+  // Normalize gradient map
+  let maxGradient = 0;
+  for (let i = 0; i < gradientMap.length; i++) {
+    maxGradient = Math.max(maxGradient, gradientMap[i]);
+  }
+  
+  if (maxGradient > 0) {
+    for (let i = 0; i < gradientMap.length; i++) {
+      gradientMap[i] = (gradientMap[i] / maxGradient) * 255;
     }
-    
-    const mean = sum / count;
-    // Use 1.5x mean as threshold for edge detection
-    return mean * 1.5;
-  };
+  }
   
   // Process each seed point
   for (const seed of seedPoints) {
@@ -105,14 +147,36 @@ export function adaptiveRegionGrow(
     
     if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
     
-    const gradientThreshold = getLocalGradientThreshold(cx, cy, brushRadius);
-    const centerIntensity = pixels[cy * width + cx];
+    // Get adaptive threshold based on local gradient statistics
+    let localMean = 0;
+    let localCount = 0;
+    const searchRadius = Math.min(brushRadius, 20);
     
-    // Flood fill with gradient stopping
+    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          localMean += gradientMap[y * width + x];
+          localCount++;
+        }
+      }
+    }
+    
+    localMean /= localCount;
+    const adaptiveThreshold = Math.max(gradientThreshold, localMean * 1.5);
+    
+    // Get center pixel intensity for similarity comparison
+    const centerIntensity = pixelData[cy * width + cx];
+    const intensityTolerance = hounsFieldWindow / 2;
+    
+    // Flood fill with gradient and intensity constraints
     const queue: Point[] = [{ x: cx, y: cy }];
     const visited = new Set<number>();
+    let iterations = 0;
     
-    while (queue.length > 0) {
+    while (queue.length > 0 && iterations < maxIterations) {
+      iterations++;
       const { x, y } = queue.shift()!;
       const idx = y * width + x;
       
@@ -122,26 +186,21 @@ export function adaptiveRegionGrow(
       // Check if within brush radius
       const dx = x - cx;
       const dy = y - cy;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 > brushRadius * brushRadius) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > brushRadius) continue;
       
       // Check gradient (stop at edges)
       const gradient = gradientMap[idx];
-      if (gradient > gradientThreshold) continue;
+      if (gradient > adaptiveThreshold) continue;
       
       // Check intensity similarity (for homogeneous regions)
-      const intensity = pixels[idx];
+      const intensity = pixelData[idx];
       const intensityDiff = Math.abs(intensity - centerIntensity);
-      const maxIntensityDiff = 50; // Adjust based on CT window
       
-      if (intensityDiff > maxIntensityDiff) continue;
+      if (intensityDiff > intensityTolerance) continue;
       
-      // Apply operation
-      if (isEraseMode) {
-        mask[idx] = 0;
-      } else {
-        mask[idx] = 1;
-      }
+      // Mark pixel as part of the region
+      mask[idx] = 255;
       
       // Add neighbors to queue
       const neighbors = [
@@ -154,7 +213,10 @@ export function adaptiveRegionGrow(
       for (const neighbor of neighbors) {
         if (neighbor.x >= 0 && neighbor.x < width && 
             neighbor.y >= 0 && neighbor.y < height) {
-          queue.push(neighbor);
+          const nIdx = neighbor.y * width + neighbor.x;
+          if (!visited.has(nIdx)) {
+            queue.push(neighbor);
+          }
         }
       }
     }
@@ -359,4 +421,72 @@ function perpendicularDistance(point: Point, lineStart: Point, lineEnd: Point): 
   if (norm === 0) return Math.sqrt((point.x - lineStart.x) ** 2 + (point.y - lineStart.y) ** 2);
   
   return Math.abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x) / norm;
+}
+
+/**
+ * Merge adaptive brush region with existing mask
+ */
+export function mergeWithExistingMask(
+  adaptiveMask: Uint8Array,
+  existingMask: Uint8Array,
+  width: number,
+  height: number,
+  isSubtract: boolean = false
+): Uint8Array {
+  const result = new Uint8Array(width * height);
+  
+  for (let i = 0; i < result.length; i++) {
+    if (isSubtract) {
+      // Subtract operation
+      result[i] = existingMask[i] && !adaptiveMask[i] ? 255 : 0;
+    } else {
+      // Union operation
+      result[i] = existingMask[i] || adaptiveMask[i] ? 255 : 0;
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Create real-time preview of adaptive brush region
+ */
+export function createAdaptivePreview(
+  pixelData: Float32Array | Uint16Array | Uint8Array,
+  width: number,
+  height: number,
+  brushX: number,
+  brushY: number,
+  brushRadius: number,
+  gradientThreshold: number
+): { mask: Uint8Array; bounds: { minX: number; minY: number; maxX: number; maxY: number } } {
+  // Quick region grow for preview
+  const previewMask = adaptiveRegionGrow(
+    pixelData,
+    width,
+    height,
+    [{ x: brushX, y: brushY }],
+    brushRadius,
+    gradientThreshold,
+    500, // Fewer iterations for preview
+    200  // Smaller HU window for preview
+  );
+  
+  // Find bounds for efficient rendering
+  let minX = width, minY = height, maxX = 0, maxY = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (previewMask[y * width + x]) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  
+  return {
+    mask: previewMask,
+    bounds: { minX, minY, maxX, maxY }
+  };
 }
