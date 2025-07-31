@@ -71,6 +71,12 @@ interface ContourEditToolbarProps {
   imageMetadata?: any;
   onOpenBooleanOperations?: () => void;
   onOpenAdvancedMarginTool?: () => void;
+  brushToolState?: {
+    tool: string | null;
+    brushSize: number;
+    isActive: boolean;
+    predictionEnabled: boolean;
+  };
 }
 
 export function ContourEditToolbar({ 
@@ -87,7 +93,8 @@ export function ContourEditToolbar({
   seriesId,
   imageMetadata,
   onOpenBooleanOperations,
-  onOpenAdvancedMarginTool
+  onOpenAdvancedMarginTool,
+  brushToolState
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -130,8 +137,6 @@ export function ContourEditToolbar({
   const handleToolActivation = (toolId: string) => {
     console.log('TOOLBAR: Tool activated:', toolId);
     
-    
-    
     const isActive = activeTool === toolId;
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
@@ -157,6 +162,28 @@ export function ContourEditToolbar({
       setShowSettings(null);
     }
   };
+  
+  // Update brush thickness when it changes (including from right-click drag)
+  useEffect(() => {
+    if (onToolChange && (activeTool === 'brush' || activeTool === 'erase')) {
+      onToolChange({
+        tool: activeTool,
+        brushSize: brushThickness[0],
+        isActive: true,
+        predictionEnabled: isPredictionEnabled
+      });
+    }
+  }, [brushThickness, activeTool, isPredictionEnabled, onToolChange]);
+
+  // Sync brush thickness with external state (e.g., from right-click drag in SimpleBrushTool)
+  useEffect(() => {
+    if (brushToolState && (brushToolState.tool === 'brush' || brushToolState.tool === 'erase')) {
+      // Only update if the brush size is different
+      if (brushToolState.brushSize !== brushThickness[0]) {
+        setBrushThickness([brushToolState.brushSize]);
+      }
+    }
+  }, [brushToolState?.brushSize]);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -893,42 +920,42 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
+    <div className="fixed top-[100px] left-4 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative">
         <div 
-          className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl"
+          className="backdrop-blur-md border rounded-xl px-3 py-2 shadow-2xl"
           style={{ 
             backgroundColor: `hsla(${backgroundHue}, 20%, 10%, 0.75)`,
             borderColor: `${structureColorRgb}60` 
           }}
         >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-3">
+        {/* Header - More compact */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
             {/* Structure info and controls */}
             <div 
-              className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
+              className="w-3 h-3 rounded border border-white/60 shadow-sm"
               style={{ backgroundColor: structureColorRgb }}
             />
-            <span className="text-white text-sm font-medium drop-shadow-sm">Editing:</span>
+            <span className="text-white text-xs font-medium">Editing:</span>
             <Input
               value={selectedStructure.structureName || ''}
               onChange={(e) => handleNameChange(e.target.value)}
-              className="w-32 h-7 bg-white/10 border-white/30 text-white text-sm rounded-lg backdrop-blur-sm transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
+              className="w-28 h-6 bg-white/10 border-white/30 text-white text-xs rounded-md backdrop-blur-sm transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
               style={{ WebkitTapHighlightColor: 'transparent' }}
               disabled={updateNameMutation.isPending}
             />
-            <span className="text-white/90 text-sm drop-shadow-sm">Color:</span>
+            <span className="text-white/90 text-xs">Color:</span>
             <input
               type="color"
               value={currentColor}
               onChange={(e) => handleColorChange(e.target.value)}
-              className="w-7 h-7 rounded border-2 border-white/30 bg-white/10 cursor-pointer backdrop-blur-sm"
+              className="w-6 h-6 rounded border border-white/30 bg-white/10 cursor-pointer backdrop-blur-sm"
               disabled={updateColorMutation.isPending}
             />
             
             {/* Separator */}
-            <div className="w-px h-6 bg-white/30 mx-2" />
+            <div className="w-px h-5 bg-white/30 mx-1" />
             
             {/* Undo/Redo buttons */}
             <Button
@@ -936,7 +963,7 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleUndo}
               disabled={!canUndo}
-              className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+              className="h-6 w-6 p-0 bg-white/10 border border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-md backdrop-blur-sm"
               title="Undo (Ctrl+Z)"
             >
               <Undo className="w-3 h-3" />
@@ -946,25 +973,25 @@ export function ContourEditToolbar({
               size="sm"
               onClick={handleRedo}
               disabled={!canRedo}
-              className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-lg backdrop-blur-sm shadow-sm"
+              className="h-6 w-6 p-0 bg-white/10 border border-white/30 text-white hover:text-white hover:bg-white/20 disabled:opacity-50 rounded-md backdrop-blur-sm"
               title="Redo (Ctrl+Y)"
             >
               <Redo className="w-3 h-3" />
             </Button>
             
             {/* Separator */}
-            <div className="w-px h-6 bg-white/30 mx-2" />
+            <div className="w-px h-5 bg-white/30 mx-1" />
             
             {/* Delete button */}
             <Button
               variant="outline"
               size="sm"
               onClick={handleDeleteCurrentSlice}
-              className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              className="h-6 px-2 bg-red-900/30 border border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-md backdrop-blur-sm"
               title="Delete Current Slice (Del)"
             >
               <Trash2 className="w-3 h-3 mr-1" />
-              <span className="text-xs font-medium">Del Slice</span>
+              <span className="text-xs">Del Slice</span>
             </Button>
             
             {/* Interpolate button */}
@@ -972,11 +999,11 @@ export function ContourEditToolbar({
               variant="outline"
               size="sm"
               onClick={handleInterpolate}
-              className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              className="h-6 px-2 bg-blue-900/30 border border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-md backdrop-blur-sm"
               title="Interpolate missing slices"
             >
               <GitBranch className="w-3 h-3 mr-1" />
-              <span className="text-xs font-medium">Interpolate</span>
+              <span className="text-xs">Interpolate</span>
             </Button>
             
             {/* Nth Slice Delete button with hover menu */}
@@ -985,11 +1012,11 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onMouseEnter={() => setShowNthSliceMenu(true)}
-                className="h-7 px-2 bg-orange-900/30 border-2 border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-6 px-2 bg-orange-900/30 border border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-md backdrop-blur-sm"
                 title="Delete every nth slice"
               >
                 <Grid3x3 className="w-3 h-3 mr-1" />
-                <span className="text-xs font-medium">Nth Slice</span>
+                <span className="text-xs">Nth Slice</span>
                 <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
               
@@ -1028,11 +1055,11 @@ export function ContourEditToolbar({
               variant="outline"
               size="sm"
               onClick={() => {/* TODO: Implement smoothing */}}
-              className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              className="h-6 px-2 bg-green-900/30 border border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-md backdrop-blur-sm"
               title="Smooth contours"
             >
               <Sparkles className="w-3 h-3 mr-1" />
-              <span className="text-xs font-medium">Smooth</span>
+              <span className="text-xs">Smooth</span>
             </Button>
 
             {/* Clear button with hover menu */}
@@ -1041,11 +1068,11 @@ export function ContourEditToolbar({
                 variant="outline"
                 size="sm"
                 onMouseEnter={() => setShowClearMenu(true)}
-                className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                className="h-6 px-2 bg-red-900/30 border border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-md backdrop-blur-sm"
                 title="Clear contours"
               >
                 <Eraser className="w-3 h-3 mr-1" />
-                <span className="text-xs font-medium">Clear</span>
+                <span className="text-xs">Clear</span>
                 <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
               
@@ -1084,13 +1111,13 @@ export function ContourEditToolbar({
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-white/70 hover:text-white hover:bg-white/20 h-7 w-7 p-0 rounded-lg backdrop-blur-sm shadow-sm"
+            className="text-white/70 hover:text-white hover:bg-white/20 h-6 w-6 p-0 rounded-md backdrop-blur-sm"
           >
-            <X size={14} />
+            <X size={12} />
           </Button>
         </div>
 
-        <Separator className="my-2 bg-gray-700" />
+        <Separator className="my-1 bg-gray-700" />
 
         {/* Tool Buttons */}
         <div className="flex items-center space-x-1">
@@ -1105,7 +1132,7 @@ export function ContourEditToolbar({
                   variant="ghost"
                   size="sm"
                   onClick={() => handleToolActivation(tool.id)}
-                  className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
+                  className={`h-7 px-2 transition-all duration-200 rounded-md text-gray-300 ${
                     isActive 
                       ? 'text-white border shadow-sm' 
                       : 'hover:bg-gray-700/50 hover:text-white'
@@ -1124,8 +1151,8 @@ export function ContourEditToolbar({
                         }
                   ) : {}}
                 >
-                  <IconComponent className="w-4 h-4 mr-2" />
-                  <span className="text-sm">{tool.label}</span>
+                  <IconComponent className="w-3 h-3 mr-1" />
+                  <span className="text-xs">{tool.label}</span>
                 </Button>
                 
                 {/* Settings expand button */}
