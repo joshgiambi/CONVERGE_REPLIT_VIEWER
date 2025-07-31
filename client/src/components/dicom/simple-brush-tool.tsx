@@ -1,14 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
-import { 
-  adaptiveRegionGrow,
-  adaptiveBrushStroke,
-  smoothContourMask, 
-  maskToContourPoints,
-  polygonToMask,
-  mergeWithExistingMask,
-  createAdaptivePreview
-} from "@/lib/smart-brush-utils";
+import { createAdaptivePreview } from "@/lib/smart-brush-utils";
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -72,11 +64,8 @@ export function SimpleBrushTool({
   const [adjustedBrushSize, setAdjustedBrushSize] = useState(brushSize);
   const sliderOverlayRef = useRef<HTMLDivElement | null>(null);
   
-  // Smart brush preview state
-  const [adaptivePreview, setAdaptivePreview] = useState<{
-    mask: Uint8Array;
-    bounds: { minX: number; minY: number; maxX: number; maxY: number };
-  } | null>(null);
+  // Smart brush preview state - just the morphing shape points
+  const [adaptivePreviewPoints, setAdaptivePreviewPoints] = useState<{x: number, y: number}[] | null>(null);
   
   // Performance optimization: throttle mouse move events
   const lastUpdateTime = useRef(0);
@@ -226,11 +215,9 @@ export function SimpleBrushTool({
 
     const structureColor = getStructureColor();
 
-    // Draw brush cursor - match actual world coordinate output size
+    // Draw brush cursor or adaptive preview shape
     if (cursorPosition && !isDrawing) {
       let currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      
-      // Smart brush uses fixed radius - the adaptation happens during painting
       
       // Convert brush size from pixels to world coordinates to match actual output
       const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
@@ -240,22 +227,38 @@ export function SimpleBrushTool({
       const zoomScale = ctTransform?.current?.scale || 1;
       const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
 
-      // For smart brush, the adaptive radius is already shown in the cursor
-      // No need for additional preview
-      if (!smartBrushEnabled || isEraseMode || isTemporaryEraseMode) {
+      // For smart brush, show adaptive preview shape if available
+      if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 0 && !isEraseMode && !isTemporaryEraseMode) {
+        // Draw adaptive preview shape
+        ctx.beginPath();
+        adaptivePreviewPoints.forEach((point, index) => {
+          if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        });
+        ctx.closePath();
+        ctx.strokeStyle = structureColor;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 3]); // Dashed line to indicate preview
+        ctx.stroke();
+        ctx.setLineDash([]); // Reset dash
+        
+        // Fill with low opacity
+        ctx.fillStyle = structureColor;
+        ctx.globalAlpha = 0.2;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+      } else {
         // Regular brush cursor
         ctx.beginPath();
         ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
         ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      } else {
-        // Smart brush cursor - show adaptive radius
-        ctx.beginPath();
-        ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
-        ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 3; // Thicker line for smart brush
-        ctx.setLineDash([6, 3]); // Dashed line to indicate adaptive
+        ctx.lineWidth = smartBrushEnabled ? 3 : 2;
+        if (smartBrushEnabled) {
+          ctx.setLineDash([6, 3]); // Dashed line to indicate smart brush
+        }
         ctx.stroke();
         ctx.setLineDash([]); // Reset dash
       }
@@ -323,7 +326,7 @@ export function SimpleBrushTool({
     adjustedBrushSize,
     isEraseMode,
     isTemporaryEraseMode,
-    adaptivePreview,
+    adaptivePreviewPoints,
     smartBrushEnabled,
     dicomImage,
   ]);
@@ -396,8 +399,47 @@ export function SimpleBrushTool({
       const coords = getCanvasCoords(e);
       setCursorPosition(coords);
 
-      // No preview generation for smart brush - just show adaptive cursor
-      setAdaptivePreview(null);
+      // Generate adaptive preview when smart brush is enabled and not drawing
+      if (smartBrushEnabled && !isDrawing && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
+        try {
+          const ctx = canvasRef.current.getContext('2d');
+          if (ctx) {
+            const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+            const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
+            const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
+            
+            // Get canvas dimensions
+            const imageRows = canvasRef.current.height;
+            const imageCols = canvasRef.current.width;
+            
+            // Get pixel data from canvas
+            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+            
+            // Create adaptive preview shape
+            const previewPoints = createAdaptivePreview(
+              imageData.data,
+              imageCols,
+              imageRows,
+              pixelX,
+              pixelY,
+              brushSize
+            );
+            
+            // Convert preview points to canvas coordinates
+            const canvasPreviewPoints = previewPoints.map(p => ({
+              x: p.x * transform.scale + transform.offsetX,
+              y: p.y * transform.scale + transform.offsetY
+            }));
+            
+            setAdaptivePreviewPoints(canvasPreviewPoints);
+          }
+        } catch (error) {
+          console.error("Error creating adaptive preview:", error);
+          setAdaptivePreviewPoints(null);
+        }
+      } else {
+        setAdaptivePreviewPoints(null);
+      }
 
       if (isDrawing && selectedStructure) {
         e.preventDefault();
@@ -470,6 +512,7 @@ export function SimpleBrushTool({
 
     const handleMouseLeave = () => {
       setCursorPosition(null);
+      setAdaptivePreviewPoints(null);
       if (isDrawing) {
         finalizeBrushStroke();
       }
@@ -562,126 +605,8 @@ export function SimpleBrushTool({
       const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
       const [rowSpacing, colSpacing] = pixelSpacing;
 
-      // Debug smart brush condition
-      console.log("🔍 Smart brush condition check:", {
-        smartBrushEnabled,
-        isEraseMode,
-        isTemporaryEraseMode,
-        hasCanvas: !!canvasRef.current
-      });
-      
-      // Smart brush implementation using gradient-sensitive region growing from canvas
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
-        console.log("🎯 Using Smart Brush - Gradient-sensitive region growing");
-        console.log("📊 Smart brush enabled:", smartBrushEnabled);
-        
-        try {
-          // Get the canvas context and pixel data
-          const ctx = canvasRef.current.getContext('2d');
-          if (!ctx) throw new Error('Could not get canvas context');
-          
-          // Get canvas dimensions
-          const imageRows = canvasRef.current.height;
-          const imageCols = canvasRef.current.width;
-          
-          // Get pixel data from canvas
-          const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
-          const pixelData = imageData.data;
-          
-          // Convert RGBA to grayscale float array
-          const floatPixelData = new Float32Array(imageCols * imageRows);
-          for (let i = 0; i < floatPixelData.length; i++) {
-            // Use the red channel as grayscale (since it's a grayscale DICOM image)
-            floatPixelData[i] = pixelData[i * 4];
-          }
-          
-          // Get seed points in pixel coordinates
-          const seedPoints = brushPointsRef.current.map(point => {
-            const pixelX = Math.round((point.x - transform.offsetX) / transform.scale);
-            const pixelY = Math.round((point.y - transform.offsetY) / transform.scale);
-            return { x: pixelX, y: pixelY };
-          });
-          
-          console.log("🔎 Smart brush execution params:", {
-            seedPoints,
-            brushSize,
-            transform,
-            canvasSize: `${imageCols}x${imageRows}`,
-            brushPointsCount: brushPointsRef.current.length
-          });
-          
-          // Get existing contours on this slice to merge with
-          const existingContours = rtStructures?.structures
-            ?.find((s: any) => s.roiNumber === selectedStructure)
-            ?.contours?.filter((c: any) => Math.abs(c.slicePosition - currentSlicePosition) < 0.5) || [];
-          
-          console.log("📦 Existing contours:", existingContours.length);
-          
-          // Use adaptive brush stroke that changes radius based on intensity
-          const finalMask = adaptiveBrushStroke(
-            floatPixelData,
-            imageCols,
-            imageRows,
-            seedPoints,
-            brushSize
-          );
-          
-          // Smooth the resulting mask
-          const smoothedMask = smoothContourMask(finalMask, imageCols, imageRows, 2);
-          
-          // Convert mask to contour points
-          console.log("📏 Mask info before conversion:", {
-            smoothedMaskSize: smoothedMask.length,
-            nonZeroPixels: smoothedMask.filter((v: number) => v > 0).length,
-            brushSizeUsed: brushSize
-          });
-          
-          const contourPixelPoints = maskToContourPoints(smoothedMask, imageCols, imageRows, 1.5);
-          
-          console.log("📏 Mask-to-polygon conversion result:", {
-            maskNonZeroPixels: smoothedMask.filter((v: number) => v > 0).length,
-            contourPointsCount: contourPixelPoints.length,
-            brushSizeUsed: brushSize
-          });
-          
-          // Convert pixel points to world coordinates
-          const worldPoints: number[] = [];
-          for (const point of contourPixelPoints) {
-            const worldX = imagePosition[0] + (point.x * colSpacing);
-            const worldY = imagePosition[1] + (point.y * rowSpacing);
-            const worldZ = currentSlicePosition;
-            worldPoints.push(worldX, worldY, worldZ);
-          }
-          
-          console.log(`✅ Smart brush generated ${worldPoints.length / 3} contour points`);
-          console.log("🌍 First few world points:", worldPoints.slice(0, 9));
-          
-          // Send smart brush contour update - use brush_stroke action for proper merging
-          if (onContourUpdate && worldPoints.length >= 9) {
-            console.log("📤 Sending smart brush update as brush stroke");
-            onContourUpdate({
-              action: "brush_stroke", // Use regular brush action for proper merging
-              structureId: selectedStructure,
-              slicePosition: currentSlicePosition,
-              pointCount: worldPoints.length / 3,
-              points: worldPoints,
-              brushSize: brushSize,
-              smartBrushEnabled: true,
-              predictionEnabled: false,
-              isEraseMode: false,
-            });
-          } else {
-            console.log("⚠️ Not enough points or no onContourUpdate callback");
-          }
-          
-          brushPointsRef.current = [];
-          setAdaptivePreview(null);
-          return;
-        } catch (error) {
-          console.error("Smart brush error, falling back to regular brush:", error);
-          // Fall through to regular brush if smart brush fails
-        }
-      }
+      // Smart brush is now just a preview - no actual drawing yet
+      // The actual smart brush logic will be implemented later
 
       // Regular brush mode - convert all brush points to world coordinates
       const worldPoints = brushPointsRef.current.map((point) => {
