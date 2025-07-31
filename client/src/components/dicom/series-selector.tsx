@@ -35,6 +35,7 @@ interface SeriesSelectorProps {
   onSecondarySeriesSelect?: (seriesId: number | null) => void;
   onAllStructuresVisibilityChange?: (allVisible: boolean) => void;
   preventRTLoading?: boolean;
+  localizationMode?: boolean;
 }
 
 export function SeriesSelector({
@@ -58,7 +59,8 @@ export function SeriesSelector({
   secondarySeriesId,
   onSecondarySeriesSelect,
   onAllStructuresVisibilityChange,
-  preventRTLoading = false
+  preventRTLoading = false,
+  localizationMode = false
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);

@@ -749,6 +749,249 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Handle advanced margin preview operation
+  const handleAdvancedMarginPreview = async (payload: any) => {
+    console.log('🔹 🎯 Working Viewer: handleAdvancedMarginPreview called with payload:', payload);
+    console.log('🔹 📊 Current RT structures state:', localRTStructures ? 'Available' : 'Not available');
+    console.log('🔹 📊 RT structures from props:', rtStructures ? 'Available' : 'Not available');
+    
+    // Use rtStructures from props if localRTStructures is not available
+    const structures = localRTStructures || rtStructures;
+    
+    if (!structures) {
+      console.error("🔹 ❌ RT structures not available for advanced margin preview in both local and props");
+      return;
+    }
+
+    const { structureId, parameters } = payload;
+    console.log(`🔹 📊 Generating advanced margin preview for structure ${structureId} with parameters:`, parameters);
+
+    try {
+      // Import simple margin preview operations (faster, no freezing)
+      console.log('🔹 📦 Importing simple margin preview operations...');
+      const { applySimpleMarginPreviewBatch, applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
+      console.log('🔹 ✅ Simple margin preview operations imported successfully');
+
+      // Find the target structure
+      console.log('🔹 🔍 Looking for structure ID:', structureId, 'type:', typeof structureId);
+      console.log('🔹 📊 Available structures:', structures.structures?.map((s: any) => ({
+        roiNumber: s.roiNumber, 
+        name: s.structureName || s.name,
+        type: typeof s.roiNumber
+      })));
+      
+      const structure = structures.structures?.find(
+        (s: any) => s.roiNumber === structureId,
+      );
+      if (!structure) {
+        console.error(`🔹 ❌ Structure ${structureId} not found in available structures`);
+        return;
+      }
+      
+      console.log(`🔹 ✅ Found structure: ${structure.structureName || structure.name} with ${structure.contours?.length || 0} contours`);
+
+      // Get all contours for the structure
+      const allContours = structure.contours || [];
+      console.log(`🔹 Processing ${allContours.length} contours for advanced margin preview`);
+
+      // Prepare image context
+      const imageContext = imageMetadata ? {
+        pixelSpacing: imageMetadata.pixelSpacing?.split("\\").map(Number) as [number, number],
+        sliceThickness: parseFloat(imageMetadata.sliceThickness || '3.0'),
+        imagePosition: imageMetadata.imagePosition?.split("\\").map(Number) as [number, number, number]
+      } : undefined;
+
+      const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
+
+      // Try proper morphological operations first, then fallback
+      console.log('🔹 🧬 Attempting proper morphological margin operations for preview...');
+      
+      try {
+        // Import proper morphological operations
+        const { applyProperMorphologicalMargin } = await import('@/lib/proper-morphological-margins');
+        
+        // Convert contours to proper format
+        const contours3D = allContours.map((contour: any) => ({
+          points: contour.points,
+          slicePosition: contour.slicePosition
+        }));
+        
+        // Prepare image metadata for morphological operations
+        const morphImageMetadata = {
+          pixelSpacing: imageContext?.pixelSpacing || [1.171875, 1.171875], // Default HN-ATLAS spacing
+          sliceThickness: imageContext?.sliceThickness || 3.0,
+          imagePosition: imageContext?.imagePosition || [0, 0, 0],
+          imageSize: {
+            width: 512,   // Default CT image size
+            height: 512,
+            depth: Math.max(50, Math.ceil(Math.abs(parameters.marginValues.uniform) * 2 / (imageContext?.sliceThickness || 3.0)))
+          }
+        };
+        
+        console.log('🔹 📊 Using morphological metadata:', morphImageMetadata);
+        
+        // Apply proper morphological margin operation
+        const expandedContours = await applyProperMorphologicalMargin(
+          contours3D,
+          parameters.marginValues.uniform,
+          morphImageMetadata
+        );
+        
+        // Convert back to preview format
+        for (const expandedContour of expandedContours) {
+          previewContoursWithSlices.push({
+            points: expandedContour.points,
+            slicePosition: expandedContour.slicePosition
+          });
+        }
+        
+        console.log(`🔹 🧬 ✅ Proper morphological operation created ${expandedContours.length} preview contours (artifact-free)`);
+        
+      } catch (error) {
+        console.warn('🔹 ⚠️ Morphological operation failed, falling back to simple operations:', error);
+        
+        // Fallback to simple slice-by-slice operations
+        for (const contour of allContours) {
+          if (!contour.points || contour.points.length < 9) {
+            console.log('🔹 ⚠️ Skipping contour with insufficient points');
+            continue;
+          }
+
+          console.log(`🔹 Processing contour with ${contour.points.length / 3} points on slice ${contour.slicePosition}`);
+
+          // Apply simple margin operation for preview with pixel spacing
+          const result = await applySimpleMarginPreview(contour.points, {
+            marginValue: parameters.marginValues.uniform,
+            pixelSpacing: imageContext?.pixelSpacing
+          });
+
+          previewContoursWithSlices.push({
+            points: result.contourPoints,
+            slicePosition: contour.slicePosition
+          });
+
+          console.log(`🔹 ✅ Generated simple margin preview contour with ${result.contourPoints.length / 3} points for slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
+        }
+      }
+
+      // Set preview contours for rendering - ensure 3D structure is preserved
+      console.log(`🔹 📊 Preview contours prepared:`, {
+        totalContours: previewContoursWithSlices.length,
+        sliceRange: {
+          min: Math.min(...previewContoursWithSlices.map(c => c.slicePosition)),
+          max: Math.max(...previewContoursWithSlices.map(c => c.slicePosition))
+        },
+        pointsPerContour: previewContoursWithSlices.map(c => c.points.length / 3)
+      });
+      
+      // Ensure preview contours are properly structured for 3D rendering
+      const structuredPreviewContours = previewContoursWithSlices.map(contour => ({
+        points: contour.points,
+        slicePosition: contour.slicePosition,
+        previewMargin: parameters.marginValues.uniform // Add margin info for renderer
+      }));
+      
+      setPreviewContours(structuredPreviewContours as any);
+      console.log(`🔹 ✅ Set ${structuredPreviewContours.length} advanced margin preview contours for 3D rendering`);
+      console.log('🔹 🎨 Sample preview contour data:', structuredPreviewContours.slice(0, 1)); // Show first one for debugging
+
+    } catch (error) {
+      console.error(`🔹 ❌ Error generating advanced margin preview:`, error);
+      console.error('🔹 📋 Error stack:', (error as Error)?.stack || 'No stack trace available');
+    }
+  };
+
+  // Handle advanced margin execution operation
+  const handleAdvancedMarginExecution = async (payload: any) => {
+    console.log('🔹 🎯 Working Viewer: handleAdvancedMarginExecution called with payload:', payload);
+    console.log('🔹 📊 Current RT structures state:', localRTStructures ? 'Available' : 'Not available');
+    
+    // Use rtStructures from props if localRTStructures is not available, but prefer local for execution
+    if (!localRTStructures && !rtStructures) {
+      console.error("🔹 ❌ RT structures not available for advanced margin execution in both local and props");
+      return;
+    }
+    
+    // For execution, we need to ensure we have local structures
+    if (!localRTStructures && rtStructures) {
+      console.log('🔹 📦 Initializing local RT structures from props for execution');
+      setLocalRTStructures(rtStructures);
+      // Wait for state update
+      setTimeout(() => handleAdvancedMarginExecution(payload), 100);
+      return;
+    }
+
+    const { structureId, parameters } = payload;
+    console.log(`🔹 📊 Executing advanced margin operation for structure ${structureId} with parameters:`, parameters);
+
+    try {
+      // Import simple margin operations for execution
+      const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
+
+      // Create a deep copy of RT structures to avoid mutation
+      const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+
+      // Find the target structure
+      const structure = updatedRTStructures.structures?.find(
+        (s: any) => s.roiNumber === structureId,
+      );
+      if (!structure) {
+        console.error(`Structure ${structureId} not found`);
+        return;
+      }
+
+      // Prepare image context
+      const imageContext = imageMetadata ? {
+        pixelSpacing: imageMetadata.pixelSpacing?.split("\\").map(Number) as [number, number],
+        sliceThickness: parseFloat(imageMetadata.sliceThickness || '3.0'),
+        imagePosition: imageMetadata.imagePosition?.split("\\").map(Number) as [number, number, number]
+      } : undefined;
+
+      // Process all contours for the structure
+      const processedContours = [];
+      for (const contour of structure.contours || []) {
+        if (!contour.points || contour.points.length < 9) {
+          console.log('🔹 ⚠️ Skipping contour with insufficient points');
+          processedContours.push(contour);
+          continue;
+        }
+
+        // Apply simple margin operation for execution with pixel spacing
+        const result = await applySimpleMarginPreview(contour.points, {
+          marginValue: parameters.marginValues.uniform,
+          pixelSpacing: imageContext?.pixelSpacing
+        });
+
+        // Update contour with new points
+        const updatedContour = {
+          ...contour,
+          points: result.contourPoints,
+          numberOfPoints: result.contourPoints.length / 3
+        };
+
+        processedContours.push(updatedContour);
+        console.log(`🔹 ✅ Applied simple margin to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
+      }
+
+      // Update structure with processed contours
+      structure.contours = processedContours;
+
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'advanced_margin');
+
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      console.log(`🔹 ✅ Advanced margin operation completed for structure ${structureId}`);
+
+    } catch (error) {
+      console.error(`🔹 ❌ Error executing advanced margin operation:`, error);
+    }
+  };
+
   // Handle grow structure operation - works on ALL slices
   const handleGrowStructure = (payload: any) => {
     if (!localRTStructures) {
@@ -867,6 +1110,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (payload && payload.action === "clear_preview") {
       console.log("🔹 Clearing preview contours");
       setPreviewContours([]);
+      return;
+    }
+
+    // Handle advanced margin preview operations
+    if (payload && payload.action === "preview_margin") {
+      console.log("🔹 Advanced margin preview request:", payload);
+      await handleAdvancedMarginPreview(payload);
+      return;
+    }
+
+    // Handle advanced margin execution operations
+    if (payload && payload.action === "execute_margin") {
+      console.log("🔹 Advanced margin execution request:", payload);
+      await handleAdvancedMarginExecution(payload);
       return;
     }
     
@@ -1754,7 +2011,56 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setCrosshairMode(true);
       console.log('Crosshair mode activated');
     },
-  }), [rtStructures]);
+    navigateToSlice: (targetZ: number) => {
+      if (!images || images.length === 0) {
+        console.warn('🎯 Cannot navigate: no images available');
+        return;
+      }
+
+      console.log(`🎯 Navigating to Z position: ${targetZ.toFixed(1)}`);
+
+      // Find the closest slice to the target Z position
+      let closestIndex = 0;
+      let closestDistance = Infinity;
+
+      images.forEach((image, index) => {
+        // Get Z position from image metadata
+        let imageZ = index; // fallback to index
+        
+        if (image.parsedSliceLocation !== undefined && image.parsedSliceLocation !== null) {
+          imageZ = image.parsedSliceLocation;
+        } else if (image.parsedZPosition !== undefined && image.parsedZPosition !== null) {
+          imageZ = image.parsedZPosition;
+        } else if (image.imageMetadata?.sliceLocation !== undefined) {
+          const parsed = parseFloat(image.imageMetadata.sliceLocation);
+          if (!isNaN(parsed)) {
+            imageZ = parsed;
+          }
+        } else if (image.imageMetadata?.imagePosition) {
+          const imagePos = typeof image.imageMetadata.imagePosition === 'string'
+            ? image.imageMetadata.imagePosition.split("\\")
+            : image.imageMetadata.imagePosition;
+          if (imagePos && imagePos.length >= 3) {
+            const parsed = parseFloat(imagePos[2]);
+            if (!isNaN(parsed)) {
+              imageZ = parsed;
+            }
+          }
+        }
+
+        const distance = Math.abs(imageZ - targetZ);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      });
+
+      console.log(`🎯 Found closest slice: index ${closestIndex}, distance ${closestDistance.toFixed(1)}mm`);
+      
+      // Navigate to the closest slice
+      setCurrentIndex(closestIndex);
+    },
+  }), [rtStructures, images, setCurrentIndex]);
 
   // Handle auto-zoom when autoZoomLevel prop changes - DISABLED FOR DEBUGGING
   /*
@@ -3436,9 +3742,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     });
     }
 
-    // Render preview contours with dashed yellow styling (only for current slice)
+    // Render preview contours with dashed yellow styling (FOR ALL SLICES - true 3D preview)
     if (previewContours && previewContours.length > 0) {
-      const tolerance = 0.5; // Same tolerance as regular contours
+      const tolerance = 0.5; // Same tolerance as regular contours  
       let renderedPreviewCount = 0;
       
       // Set preview contour styling - bright yellow and dashed
@@ -3454,18 +3760,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Check if this is the new format with slice position
         if (contour.slicePosition !== undefined) {
           const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
-          if (positionDiff <= tolerance) {
+          
+          // FIXED: Show preview contours on ALL slices for true 3D preview
+          // Only filter out contours that are very far away (> 100mm) for performance
+          if (positionDiff <= 100) { // Much larger tolerance to show 3D preview
             drawContour(ctx, { points: contour.points }, canvas.width, canvas.height, currentImage, animationTime);
             renderedPreviewCount++;
+            
+            // Log when we're showing preview on current slice vs other slices
+            if (positionDiff <= tolerance) {
+              console.log(`🔹 🎯 Showing preview on CURRENT slice ${currentSlicePosition.toFixed(1)} (diff: ${positionDiff.toFixed(1)}mm)`);
+            } else {
+              console.log(`🔹 🌐 Showing 3D preview on slice ${contour.slicePosition.toFixed(1)} (current: ${currentSlicePosition.toFixed(1)}, diff: ${positionDiff.toFixed(1)}mm)`);
+            }
           }
         } else {
-          // Fallback for old format (array of points)
+          // Fallback for old format (array of points) - always show
           drawContour(ctx, { points: contour }, canvas.width, canvas.height, currentImage, animationTime);
           renderedPreviewCount++;
         }
       });
       
-      console.log(`🔹 Rendered ${renderedPreviewCount} preview contours for slice ${currentSlicePosition.toFixed(1)}`);
+      console.log(`🔹 🌐 Rendered ${renderedPreviewCount} preview contours for 3D visualization (current slice: ${currentSlicePosition.toFixed(1)})`);
       
       // Reset line dash for other elements
       ctx.setLineDash([]);

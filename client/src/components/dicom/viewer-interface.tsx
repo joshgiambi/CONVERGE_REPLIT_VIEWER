@@ -8,7 +8,9 @@ import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
-import { GrowMarginToolbar } from './grow-margin-toolbar';
+import { X, Target } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AdvancedMarginTool } from './advanced-margin-tool';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -68,7 +70,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
-  const [showGrowMarginOperations, setShowGrowMarginOperations] = useState(false);
+  const [showAdvancedMarginTool, setShowAdvancedMarginTool] = useState(false);
+  const [showLocalizationTool, setShowLocalizationTool] = useState(false);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -447,6 +450,84 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   //   }
   // }, [selectedForEdit, rtStructures]);
 
+  // Handle structure localization
+  const handleStructureLocalization = useCallback((structureId: number) => {
+    if (!rtStructures?.structures || !workingViewerRef.current) {
+      console.warn('🎯 Cannot localize: missing structures or viewer ref');
+      return;
+    }
+
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure || !structure.contours || structure.contours.length === 0) {
+      console.warn(`🎯 Cannot localize: structure ${structureId} not found or has no contours`);
+      return;
+    }
+
+    console.log(`🎯 Localizing to structure "${structure.structureName}"...`);
+
+    // Calculate structure bounds and centroid
+    let minZ = Infinity, maxZ = -Infinity;
+    let totalX = 0, totalY = 0, totalZ = 0, totalPoints = 0;
+    
+    structure.contours.forEach((contour: any) => {
+      if (contour.points && contour.points.length >= 6) {
+        // Track Z bounds for finding middle slice
+        if (contour.slicePosition !== undefined) {
+          minZ = Math.min(minZ, contour.slicePosition);
+          maxZ = Math.max(maxZ, contour.slicePosition);
+        }
+        
+        // Calculate centroid
+        for (let i = 0; i < contour.points.length; i += 3) {
+          totalX += contour.points[i];
+          totalY += contour.points[i + 1];
+          totalZ += contour.points[i + 2];
+          totalPoints++;
+        }
+      }
+    });
+    
+    if (totalPoints === 0) {
+      console.warn(`🎯 Cannot localize: structure ${structureId} has no valid points`);
+      return;
+    }
+
+    // Calculate centroid
+    const centroidX = totalX / totalPoints;
+    const centroidY = totalY / totalPoints;
+    const centroidZ = totalZ / totalPoints;
+    
+    // Use middle Z slice if we have slice position bounds, otherwise use centroid Z
+    const targetZ = (minZ !== Infinity && maxZ !== -Infinity) ? (minZ + maxZ) / 2 : centroidZ;
+    
+    console.log(`🎯 Localizing to "${structure.structureName}":`, {
+      centroid: `(${centroidX.toFixed(1)}, ${centroidY.toFixed(1)}, ${centroidZ.toFixed(1)})`,
+      sliceBounds: minZ !== Infinity ? `${minZ.toFixed(1)} to ${maxZ.toFixed(1)}` : 'unknown',
+      targetZ: targetZ.toFixed(1)
+    });
+    
+    // Navigate to the structure by finding the closest slice
+    if (workingViewerRef.current && workingViewerRef.current.navigateToSlice) {
+      workingViewerRef.current.navigateToSlice(targetZ);
+    } else {
+      console.warn('🎯 WorkingViewer navigateToSlice method not available');
+    }
+    
+    console.log(`🎯 ✅ Localization completed for "${structure.structureName}"`);
+  }, [rtStructures, workingViewerRef]);
+
+  // Handle localization button toggle
+  const handleLocalizationToggle = useCallback(() => {
+    const newState = !showLocalizationTool;
+    setShowLocalizationTool(newState);
+    
+    if (newState) {
+      console.log('🎯 Localization mode ACTIVATED - click any structure to navigate to its center');
+    } else {
+      console.log('🎯 Localization mode DEACTIVATED');
+    }
+  }, [showLocalizationTool]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -478,7 +559,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onStructureColorChange={handleStructureColorChange}
             onStructureSelection={handleStructureSelection}
             selectedForEdit={selectedForEdit}
-            onSelectedForEditChange={setSelectedForEdit}
+            onSelectedForEditChange={(structureId) => {
+              setSelectedForEdit(structureId);
+              
+              // If localization mode is active, auto-navigate to the selected structure
+              if (showLocalizationTool && structureId && rtStructures?.structures) {
+                handleStructureLocalization(structureId);
+              }
+            }}
             onContourSettingsChange={onContourSettingsChange}
             onAutoZoom={(zoom) => {
               // Set auto-zoom level for WorkingViewer
@@ -496,6 +584,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onSecondarySeriesSelect={setSecondarySeriesId}
             preventRTLoading={true}
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
+            // Pass localization mode to highlight when active
+            localizationMode={showLocalizationTool}
           />
         </div>
 
@@ -620,6 +710,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourEdit={() => {
             // Close boolean operations toolbar when opening contour edit
             setShowBooleanOperations(false);
+            // Close advanced margin tool when opening contour edit
+            setShowAdvancedMarginTool(false);
+            // Close localization tool when opening contour edit
+            setShowLocalizationTool(false);
             
             // If no structure is selected, select the first one or last loaded
             if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
@@ -633,7 +727,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourOperations={() => {
             // Close contour edit toolbar when opening boolean operations
             setIsContourEditMode(false);
+            // Close advanced margin tool when opening boolean operations
+            setShowAdvancedMarginTool(false);
+            // Close localization tool when opening boolean operations
+            setShowLocalizationTool(false);
             setShowBooleanOperations(true);
+          }}
+          onAdvancedMarginTool={() => {
+            // Close contour edit toolbar when opening advanced margin tool
+            setIsContourEditMode(false);
+            // Close boolean operations toolbar when opening advanced margin tool
+            setShowBooleanOperations(false);
+            // Close localization tool when opening advanced margin tool
+            setShowLocalizationTool(false);
+            setShowAdvancedMarginTool(true);
           }}
           onMPRToggle={() => {
             setMprVisible(!mprVisible);
@@ -644,6 +751,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isMeasureActive={activeToolMode === 'measure'}
           isContourEditActive={isContourEditMode}
           isContourOperationsActive={showBooleanOperations}
+          isAdvancedMarginToolActive={showAdvancedMarginTool}
+          onLocalization={handleLocalizationToggle}
+          isLocalizationActive={showLocalizationTool}
           className="toolbar-custom"
         />
       )}
@@ -685,10 +795,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setIsContourEditMode(false);
             setShowBooleanOperations(true);
           }}
-          onOpenGrowMarginOperations={() => {
+          onOpenAdvancedMarginTool={() => {
             setIsContourEditMode(false);
-            setShowGrowMarginOperations(true);
+            setShowLocalizationTool(true);
           }}
+
         />
       )}
 
@@ -707,28 +818,61 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }}
       />
 
-      {/* Grow Margin Operations Toolbar */}
-      <GrowMarginToolbar
-        isVisible={showGrowMarginOperations}
-        onClose={() => setShowGrowMarginOperations(false)}
-        selectedStructure={selectedForEdit ? rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit) : undefined}
-        onExecuteOperation={(operation) => {
-          console.log('Executing grow/margin operation:', operation);
-          // TODO: Implement grow/margin operation execution
-          setShowGrowMarginOperations(false);
-        }}
-      />
-
-      {/* Temporary Test Button for Grow-Margin Toolbar */}
-      {rtStructures?.structures && (
-        <button
-          onClick={() => setShowGrowMarginOperations(true)}
-          className="fixed top-4 right-4 z-50 bg-yellow-500 text-black px-4 py-2 rounded-lg hover:bg-yellow-400 transition-colors"
-          title="Test Grow-Margin Toolbar"
-        >
-          Test Grow-Margin Toolbar
-        </button>
+      {/* Advanced Margin Tool */}
+      {showAdvancedMarginTool && rtStructures && selectedForEdit && (
+        <AdvancedMarginTool
+          isVisible={showAdvancedMarginTool}
+          onClose={() => setShowAdvancedMarginTool(false)}
+          selectedStructure={rtStructures.structures?.find((s: any) => s.roiNumber === selectedForEdit) ? {
+            id: selectedForEdit,
+            structureName: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.structureName || 'Unknown',
+            color: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color ? 
+              `rgb(${rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color.join(',')})` : 
+              undefined
+          } : undefined}
+          onPreviewOperation={(operation) => {
+            // Handle preview operation
+            console.log('🔹 🎯 Viewer Interface: Handling preview operation:', operation);
+            if (workingViewerRef.current) {
+              console.log('🔹 ✅ Working viewer ref found, calling handleContourUpdate');
+              workingViewerRef.current.handleContourUpdate({
+                action: 'preview_margin',
+                structureId: operation.structureId,
+                parameters: operation.parameters
+              });
+            } else {
+              console.error('🔹 ❌ Working viewer ref not found!');
+            }
+          }}
+          onExecuteOperation={(operation) => {
+            // Handle execution operation
+            console.log('🔹 🎯 Viewer Interface: Handling execute operation:', operation);
+            if (workingViewerRef.current) {
+              console.log('🔹 ✅ Working viewer ref found, calling handleContourUpdate');
+              workingViewerRef.current.handleContourUpdate({
+                action: 'execute_margin',
+                structureId: operation.structureId,
+                parameters: operation.parameters
+              });
+            } else {
+              console.error('🔹 ❌ Working viewer ref not found!');
+            }
+            setShowAdvancedMarginTool(false);
+          }}
+          onClearPreview={() => {
+            // Handle clear preview
+            if (workingViewerRef.current) {
+              workingViewerRef.current.handleContourUpdate({
+                action: 'clear_preview'
+              });
+            }
+          }}
+        />
       )}
+
+
+
+
 
       {/* Error Modal */}
       <ErrorModal

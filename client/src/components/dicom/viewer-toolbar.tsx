@@ -18,7 +18,10 @@ import {
   Grid3x3,
   Activity,
   Crosshair,
-  Workflow
+  Workflow,
+  ArrowUpFromLine,
+  Move3d,
+  Target
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -30,8 +33,10 @@ interface ViewerToolbarProps {
   onCrosshairs?: () => void;
   onContourEdit?: () => void;
   onContourOperations?: () => void;
+  onAdvancedMarginTool?: () => void;
   isContourEditActive?: boolean;
   isContourOperationsActive?: boolean;
+  isAdvancedMarginToolActive?: boolean;
   isPanActive?: boolean;
   isMeasureActive?: boolean;
   isCrosshairsActive?: boolean;
@@ -45,6 +50,8 @@ interface ViewerToolbarProps {
   className?: string;
   onMPRToggle?: () => void;
   isMPRActive?: boolean;
+  onLocalization?: () => void;
+  isLocalizationActive?: boolean;
 }
 
 export function ViewerToolbar({
@@ -56,8 +63,10 @@ export function ViewerToolbar({
   onCrosshairs,
   onContourEdit,
   onContourOperations,
+  onAdvancedMarginTool,
   isContourEditActive = false,
   isContourOperationsActive = false,
+  isAdvancedMarginToolActive = false,
   isPanActive = false,
   isMeasureActive = false,
   isCrosshairsActive = false,
@@ -67,7 +76,9 @@ export function ViewerToolbar({
   windowLevel,
   className,
   onMPRToggle,
-  isMPRActive = false
+  isMPRActive = false,
+  onLocalization,
+  isLocalizationActive = false
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
@@ -100,13 +111,13 @@ export function ViewerToolbar({
     { id: 'fusion', icon: Layers, label: 'New Fusion (Coming Soon)', action: () => console.log('New Fusion - Coming Soon') },
     { id: 'dose-plan', icon: Activity, label: 'Dose/Plan Review (Coming Soon)', action: () => console.log('Dose/Plan Review - Coming Soon') },
     { id: 'separator' },
-    { id: 'settings', icon: Settings, label: 'Settings', action: () => console.log('Settings') },
+    { id: 'localization', icon: Target, label: '🎯 Structure Localization', action: onLocalization || (() => console.log('🎯 Localization button clicked!')), selectable: true },
     { id: 'metadata', icon: Info, label: 'View DICOM Metadata', action: () => setShowMetadata(!showMetadata) },
     { id: 'help', icon: HelpCircle, label: 'Interaction Guide', action: () => setTipsDialogOpen(!tipsDialogOpen) },
   ];
 
   return (
-    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
+    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-2 duration-300">
       <div className="relative">
         {/* Main Toolbar */}
         <div className="bg-white/10 backdrop-blur-md border border-white/40 rounded-xl px-3 py-2 shadow-2xl">
@@ -130,6 +141,8 @@ export function ViewerToolbar({
                       h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90
                       ${tool.id === 'mpr' && isMPRActive
                         ? 'bg-green-600/20 text-green-400 border border-green-500/50 shadow-sm' 
+                        : tool.id === 'localization' && isLocalizationActive
+                        ? 'bg-orange-600/20 text-orange-400 border border-orange-500/50 shadow-sm'
                         : isActive 
                         ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-sm' 
                         : 'hover:bg-white/20 hover:text-white'
@@ -167,7 +180,7 @@ export function ViewerToolbar({
         </div>
 
         {/* Contour Edit and Operations Popout Icons - Always visible */}
-        <div className="absolute -right-28 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
+        <div className="absolute -right-40 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-left-2 duration-300">
           <div className="flex space-x-2">
             {/* Contour Edit Button */}
             {onContourEdit && (
@@ -222,6 +235,36 @@ export function ViewerToolbar({
                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                   Boolean Operations
                 </div>
+              </div>
+            )}
+            
+
+
+            {/* Advanced Margin Tool Button */}
+            {onAdvancedMarginTool && (
+              <div className="relative group">
+                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                  isAdvancedMarginToolActive 
+                    ? 'border-cyan-400/70 bg-cyan-600/20 shadow-cyan-500/20' 
+                    : 'border-cyan-500/50'
+                }`}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                      isAdvancedMarginToolActive
+                        ? 'text-cyan-300 hover:text-cyan-200'
+                        : 'text-cyan-400 hover:text-cyan-300 hover:bg-white/20'
+                    }`}
+                    onClick={onAdvancedMarginTool}
+                  >
+                    <Move3d className="w-4 h-4" />
+                  </Button>
+                </div>
+                {/* Tooltip */}
+                                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                   Margin Operations
+                 </div>
               </div>
             )}
           </div>

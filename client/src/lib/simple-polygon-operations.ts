@@ -217,8 +217,12 @@ export function growContourSimple(contour: number[], distance: number): number[]
     }
     
     // Create multiple offset layers for smoother results
-    const layers = Math.max(5, Math.ceil(absDistance / 1.0)); // More layers for much smoother results
+    // Fixed: Reduce layer count for larger distances to prevent instability
+    const baseLayerCount = Math.min(10, Math.max(3, Math.ceil(absDistance / 2.0)));
+    const layers = absDistance > 5.0 ? Math.max(3, Math.ceil(baseLayerCount / 2)) : baseLayerCount;
     const stepDistance = absDistance / layers;
+    
+    console.log(`🔹 📊 Using ${layers} layers with step distance ${stepDistance.toFixed(3)}mm for stability`);
     
     let currentPolygon = polygon;
     
@@ -236,10 +240,10 @@ export function growContourSimple(contour: number[], distance: number): number[]
       }
     }
     
-    // Multiple final smoothing passes for preview contours
+    // Apply final smoothing and self-intersection removal
     currentPolygon = smoothPolygon(currentPolygon);
-    currentPolygon = smoothPolygon(currentPolygon);
-    currentPolygon = smoothPolygon(currentPolygon);
+    currentPolygon = removeSelfIntersections(currentPolygon);
+    currentPolygon = smoothPolygon(currentPolygon); // Final smoothing after intersection removal
     
     const result = polygonToContour(currentPolygon, z);
     console.log(`🔹 ✅ Contour ${isGrowing ? 'grown' : 'shrunk'} from ${contour.length/3} to ${result.length/3} points`);
@@ -265,24 +269,57 @@ function bufferPolygon(polygon: [number, number][], distance: number): [number, 
     const curr = polygon[i];
     const next = polygon[(i + 1) % polygon.length];
     
-    // Calculate normals
+    // Calculate normals for adjacent edges
     const normal1 = getNormal(prev, curr);
     const normal2 = getNormal(curr, next);
     
-    // Average normal
-    const avgNormalX = (normal1[0] + normal2[0]) / 2;
-    const avgNormalY = (normal1[1] + normal2[1]) / 2;
+    // Calculate the angle between edges to handle sharp corners better
+    const edgeVec1 = [curr[0] - prev[0], curr[1] - prev[1]];
+    const edgeVec2 = [next[0] - curr[0], next[1] - curr[1]];
     
-    // Normalize
-    const length = Math.sqrt(avgNormalX * avgNormalX + avgNormalY * avgNormalY);
-    const normalizedX = length > 0 ? avgNormalX / length : 0;
-    const normalizedY = length > 0 ? avgNormalY / length : 1;
+    const edge1Length = Math.sqrt(edgeVec1[0] * edgeVec1[0] + edgeVec1[1] * edgeVec1[1]);
+    const edge2Length = Math.sqrt(edgeVec2[0] * edgeVec2[0] + edgeVec2[1] * edgeVec2[1]);
     
-    // Apply offset
-    buffered.push([
-      curr[0] + normalizedX * distance,
-      curr[1] + normalizedY * distance
-    ]);
+    if (edge1Length < 0.001 || edge2Length < 0.001) {
+      // Skip degenerate edges
+      continue;
+    }
+    
+    // Average normal with better handling of sharp angles
+    let avgNormalX = (normal1[0] + normal2[0]) / 2;
+    let avgNormalY = (normal1[1] + normal2[1]) / 2;
+    
+    // Normalize average normal
+    const avgLength = Math.sqrt(avgNormalX * avgNormalX + avgNormalY * avgNormalY);
+    if (avgLength > 0.001) {
+      avgNormalX /= avgLength;
+      avgNormalY /= avgLength;
+    } else {
+      // Fallback to first normal if averaging failed
+      avgNormalX = normal1[0];
+      avgNormalY = normal1[1];
+    }
+    
+    // Apply offset with bounds checking for stability
+    const offsetX = curr[0] + avgNormalX * distance;
+    const offsetY = curr[1] + avgNormalY * distance;
+    
+    // Validate the offset point isn't too far from original (prevents wild offsets)
+    const maxOffset = Math.abs(distance) * 3; // Allow up to 3x the expected offset
+    const actualOffset = Math.sqrt(
+      (offsetX - curr[0]) ** 2 + (offsetY - curr[1]) ** 2
+    );
+    
+    if (actualOffset <= maxOffset) {
+      buffered.push([offsetX, offsetY]);
+    } else {
+      // Use a clamped offset for stability
+      const clampFactor = maxOffset / actualOffset;
+      buffered.push([
+        curr[0] + avgNormalX * distance * clampFactor,
+        curr[1] + avgNormalY * distance * clampFactor
+      ]);
+    }
   }
   
   return buffered;
@@ -298,8 +335,10 @@ function getNormal(p1: [number, number], p2: [number, number]): [number, number]
   
   if (length === 0) return [0, 1];
   
-  // Perpendicular vector (rotated 90 degrees)
-  return [-dy / length, dx / length];
+  // Perpendicular vector (rotated 90 degrees clockwise for outward normal)
+  // Fixed: was [-dy/length, dx/length] which gives left normal (inward)
+  // Now: [dy/length, -dx/length] which gives right normal (outward)
+  return [dy / length, -dx / length];
 }
 
 /**
@@ -326,6 +365,50 @@ function smoothPolygon(polygon: [number, number][]): [number, number][] {
   }
   
   return smoothed;
+}
+
+/**
+ * Remove self-intersections from polygon to prevent loops and artifacts
+ */
+function removeSelfIntersections(polygon: [number, number][]): [number, number][] {
+  if (polygon.length < 4) return polygon;
+  
+  const cleaned: [number, number][] = [];
+  
+  // Simple approach: remove points that create acute angles or very short segments
+  for (let i = 0; i < polygon.length; i++) {
+    const prev = polygon[(i - 1 + polygon.length) % polygon.length];
+    const curr = polygon[i];
+    const next = polygon[(i + 1) % polygon.length];
+    
+    // Calculate vectors
+    const v1 = [curr[0] - prev[0], curr[1] - prev[1]];
+    const v2 = [next[0] - curr[0], next[1] - curr[1]];
+    
+    // Calculate distances
+    const dist1 = Math.sqrt(v1[0] * v1[0] + v1[1] * v1[1]);
+    const dist2 = Math.sqrt(v2[0] * v2[0] + v2[1] * v2[1]);
+    
+    // Skip points that create very short segments (likely artifacts)
+    if (dist1 < 0.1 || dist2 < 0.1) {
+      continue;
+    }
+    
+    // Calculate angle between vectors
+    const dot = v1[0] * v2[0] + v1[1] * v2[1];
+    const cross = v1[0] * v2[1] - v1[1] * v2[0];
+    const angle = Math.atan2(cross, dot);
+    
+    // Skip points that create very sharp turns (likely self-intersections)
+    if (Math.abs(angle) > Math.PI * 0.9) { // More than 162 degrees
+      continue;
+    }
+    
+    cleaned.push(curr);
+  }
+  
+  // Ensure we have at least 3 points for a valid polygon
+  return cleaned.length >= 3 ? cleaned : polygon;
 }
 
 /**
