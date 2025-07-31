@@ -604,7 +604,7 @@ export function SimpleBrushTool({
     const sizeText = document.createElement("div");
     const sizeCm = (brushSize * pixelSpacing) / 10; // Convert pixels to cm
     sizeText.innerHTML = `
-      <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+      <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #60a5fa;">Brush Thickness</div>
       <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
       <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${brushSize} px)</div>
     `;
@@ -624,7 +624,7 @@ export function SimpleBrushTool({
     const sliderFill = document.createElement("div");
     sliderFill.style.height = "100%";
     sliderFill.style.width = "50%";
-    sliderFill.style.backgroundColor = "#fbbf24"; // Yellow/amber to match settings panel
+    sliderFill.style.backgroundColor = "#60a5fa"; // Blue to match UI theme
     sliderFill.style.borderRadius = "2px";
     sliderBar.appendChild(sliderFill);
     

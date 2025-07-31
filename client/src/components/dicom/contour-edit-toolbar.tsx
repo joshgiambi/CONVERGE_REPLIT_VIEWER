@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Brush, 
@@ -33,7 +34,9 @@ import {
   ChevronDown,
   Sparkles,
   Workflow,
-  Eye
+  Eye,
+  Zap,
+  Keyboard
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -707,10 +710,44 @@ export function ContourEditToolbar({
             </Button>
           </div>
         ) : showSettings === 'brush' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs text-gray-300 mb-2 block">Brush Radius</Label>
+          <div className="w-96 space-y-4">
+            {/* Brush Settings Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-700/50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+                  <Brush className="w-4 h-4 text-blue-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-white">Brush Tool Settings</h4>
+                  <p className="text-xs text-gray-400">Medical-grade contouring controls</p>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-xs border-blue-500/30 text-blue-400">
+                Advanced
+              </Badge>
+            </div>
+            
+            {/* Brush Size Control */}
+            <div className="space-y-3 p-4 bg-gray-800/20 rounded-lg border border-gray-700/30">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm text-white font-medium">Brush Radius</Label>
+                <div className="text-right">
+                  <div className="text-sm font-semibold text-blue-400">
+                    {(() => {
+                      const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
+                      const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
+                      const brushSizeMM = brushThickness[0] * avgPixelSpacing;
+                      const brushSizeCM = brushSizeMM / 10;
+                      return `${brushSizeCM.toFixed(2)} cm`;
+                    })()}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {brushThickness[0]} pixels
+                  </div>
+                </div>
+              </div>
+              
+              <div className="px-2">
                 <Slider
                   value={brushThickness}
                   onValueChange={(value) => {
@@ -728,76 +765,111 @@ export function ContourEditToolbar({
                   max={102}  // Max ~100mm for typical pixel spacing of ~1mm
                   min={1}    // Min ~1mm
                   step={1}
-                  className="w-full"
-                />
-                <div className="text-xs text-gray-400 mt-1">
-                  {/* Get actual pixel spacing from image metadata */}
-                  {(() => {
-                    const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
-                    const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
-                    const brushSizeMM = brushThickness[0] * avgPixelSpacing;
-                    const brushSizeCM = brushSizeMM / 10;
-                    return `${brushSizeMM.toFixed(1)} mm (${brushSizeCM.toFixed(2)} cm) - ${brushThickness[0]} px`;
-                  })()}
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">3D Mode</Label>
-                <Switch
-                  checked={is3D}
-                  onCheckedChange={setIs3D}
-                  className="data-[state=checked]:bg-blue-500"
+                  className="w-full [&_[role=slider]]:bg-blue-500 [&_[role=slider]]:border-blue-400 [&_[role=slider]]:shadow-lg [&_[role=slider]]:shadow-blue-500/20"
                 />
               </div>
               
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Smart Brush</Label>
-                <Switch
-                  checked={smartBrush}
-                  onCheckedChange={setSmartBrush}
-                  className="data-[state=checked]:bg-green-500"
-                />
+              <div className="flex justify-between text-xs text-gray-500 px-2">
+                <span>0.1 cm</span>
+                <span>5.0 cm</span>
+                <span>10.0 cm</span>
               </div>
-              
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-gray-300">Next Slice Prediction</Label>
-                  {isPredictionEnabled && (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                      <span className="text-xs text-purple-400 font-medium">ACTIVE</span>
-                    </div>
-                  )}
-                </div>
-                <Switch
-                  checked={isPredictionEnabled}
-                  onCheckedChange={(enabled) => {
-                    setIsPredictionEnabled(enabled);
-                    // Update tool state immediately when prediction toggle changes
-                    if (onToolChange && activeTool === 'brush') {
-                      onToolChange({
-                        tool: 'brush',
-                        brushSize: brushThickness[0],
-                        isActive: true,
-                        predictionEnabled: enabled
-                      });
-                    }
-                  }}
-                  className="data-[state=checked]:bg-purple-500"
-                />
-              </div>
-              
-              {isPredictionEnabled && (
-                <div className="text-xs text-purple-400 bg-purple-900/20 border border-purple-600/30 rounded p-2">
-                  When enabled, contour changes will generate predicted contours on adjacent slices with animated dashed borders.
-                </div>
-              )}
             </div>
             
+            {/* Brush Modes */}
             <div className="space-y-3">
-              <div className="text-xs text-gray-500">
-                Brush tool settings for medical-grade contouring
+              <Label className="text-sm text-white font-medium">Brush Modes</Label>
+              
+              <div className="space-y-2">
+                {/* 3D Mode */}
+                <div className="flex items-center justify-between p-3 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-blue-500/30 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                      <Layers className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div>
+                      <Label className="text-sm text-white cursor-pointer">3D Mode</Label>
+                      <p className="text-xs text-gray-400">Apply across multiple slices</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={is3D}
+                    onCheckedChange={setIs3D}
+                    className="data-[state=checked]:bg-blue-500"
+                  />
+                </div>
+                
+                {/* Smart Brush */}
+                <div className="flex items-center justify-between p-3 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-green-500/30 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                      <Zap className="w-4 h-4 text-green-400" />
+                    </div>
+                    <div>
+                      <Label className="text-sm text-white cursor-pointer">Smart Brush</Label>
+                      <p className="text-xs text-gray-400">Auto-detect add/delete mode</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={smartBrush}
+                    onCheckedChange={setSmartBrush}
+                    className="data-[state=checked]:bg-green-500"
+                  />
+                </div>
+                
+                {/* Prediction Mode */}
+                <div className="flex items-center justify-between p-3 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-purple-500/30 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div>
+                      <Label className="text-sm text-white cursor-pointer">AI Prediction</Label>
+                      <p className="text-xs text-gray-400">Generate adjacent slice contours</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isPredictionEnabled && (
+                      <Badge className="text-xs bg-purple-500/20 text-purple-400 border-purple-500/30 animate-pulse">
+                        ACTIVE
+                      </Badge>
+                    )}
+                    <Switch
+                      checked={isPredictionEnabled}
+                      onCheckedChange={(enabled) => {
+                        setIsPredictionEnabled(enabled);
+                        // Update tool state immediately when prediction toggle changes
+                        if (onToolChange && activeTool === 'brush') {
+                          onToolChange({
+                            tool: 'brush',
+                            brushSize: brushThickness[0],
+                            isActive: true,
+                            predictionEnabled: enabled
+                          });
+                        }
+                      }}
+                      className="data-[state=checked]:bg-purple-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Keyboard Shortcuts */}
+            <div className="p-3 bg-gray-800/10 rounded-lg border border-gray-700/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Keyboard className="w-4 h-4 text-gray-400" />
+                <Label className="text-xs text-gray-400 font-medium">Keyboard Shortcuts</Label>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">Hold Shift</span>
+                  <span className="text-gray-400">Temporary erase mode</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">Right-click + Drag</span>
+                  <span className="text-gray-400">Adjust brush size</span>
+                </div>
               </div>
             </div>
           </div>
