@@ -3,6 +3,7 @@ import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { 
   adaptiveRegionGrow,
   adaptiveBrushStroke,
+  calculateAdaptiveRadius,
   smoothContourMask, 
   maskToContourPoints,
   polygonToMask,
@@ -228,7 +229,44 @@ export function SimpleBrushTool({
 
     // Draw brush cursor - match actual world coordinate output size
     if (cursorPosition && !isDrawing) {
-      const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
+      let currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
+      
+      // If smart brush is enabled, calculate adaptive radius
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+          const pixelX = Math.round((cursorPosition.x - transform.offsetX) / transform.scale);
+          const pixelY = Math.round((cursorPosition.y - transform.offsetY) / transform.scale);
+          
+          const imageRows = canvasRef.current.height;
+          const imageCols = canvasRef.current.width;
+          
+          if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
+            // Get pixel data
+            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+            const pixelData = imageData.data;
+            
+            // Convert RGBA to grayscale float array
+            const floatPixelData = new Float32Array(imageCols * imageRows);
+            for (let i = 0; i < floatPixelData.length; i++) {
+              floatPixelData[i] = pixelData[i * 4];
+            }
+            
+            // Calculate adaptive radius
+            const adaptiveRadius = calculateAdaptiveRadius(
+              floatPixelData,
+              imageCols,
+              imageRows,
+              pixelX,
+              pixelY,
+              currentBrushSize
+            );
+            
+            currentBrushSize = adaptiveRadius;
+          }
+        }
+      }
       
       // Convert brush size from pixels to world coordinates to match actual output
       const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
@@ -238,68 +276,24 @@ export function SimpleBrushTool({
       const zoomScale = ctTransform?.current?.scale || 1;
       const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
 
-      // Draw adaptive preview for smart brush
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && adaptivePreview) {
-        const { mask, bounds } = adaptivePreview;
-        
-        // Draw the adaptive region preview
-        ctx.save();
-        ctx.globalAlpha = 0.3;
-        
-        // Draw each pixel of the mask within bounds
-        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-        const imageRows = dicomImage?.rows || 512;
-        const imageCols = dicomImage?.columns || 512;
-        
-        ctx.fillStyle = structureColor;
-        for (let y = bounds.minY; y <= bounds.maxY; y++) {
-          for (let x = bounds.minX; x <= bounds.maxX; x++) {
-            if (mask[y * imageCols + x]) {
-              const screenX = x * transform.scale + transform.offsetX;
-              const screenY = y * transform.scale + transform.offsetY;
-              ctx.fillRect(screenX, screenY, transform.scale, transform.scale);
-            }
-          }
-        }
-        
-        ctx.restore();
-        
-        // Draw morphing outline around the adaptive region
-        ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 3;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        
-        // Simple boundary tracing for preview outline
-        const visited = new Set<string>();
-        for (let y = bounds.minY; y <= bounds.maxY; y++) {
-          for (let x = bounds.minX; x <= bounds.maxX; x++) {
-            if (mask[y * imageCols + x] && !visited.has(`${x},${y}`)) {
-              // Check if this is a boundary pixel
-              const isBoundary = 
-                (x === 0 || !mask[y * imageCols + (x - 1)]) ||
-                (x === imageCols - 1 || !mask[y * imageCols + (x + 1)]) ||
-                (y === 0 || !mask[(y - 1) * imageCols + x]) ||
-                (y === imageRows - 1 || !mask[(y + 1) * imageCols + x]);
-              
-              if (isBoundary) {
-                const screenX = x * transform.scale + transform.offsetX;
-                const screenY = y * transform.scale + transform.offsetY;
-                ctx.moveTo(screenX + transform.scale / 2, screenY + transform.scale / 2);
-                ctx.arc(screenX + transform.scale / 2, screenY + transform.scale / 2, 1, 0, 2 * Math.PI);
-              }
-            }
-          }
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else {
+      // For smart brush, the adaptive radius is already shown in the cursor
+      // No need for additional preview
+      if (!smartBrushEnabled || isEraseMode || isTemporaryEraseMode) {
         // Regular brush cursor
         ctx.beginPath();
         ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
         ctx.strokeStyle = structureColor;
         ctx.lineWidth = 2;
         ctx.stroke();
+      } else {
+        // Smart brush cursor - show adaptive radius
+        ctx.beginPath();
+        ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
+        ctx.strokeStyle = structureColor;
+        ctx.lineWidth = 3; // Thicker line for smart brush
+        ctx.setLineDash([6, 3]); // Dashed line to indicate adaptive
+        ctx.stroke();
+        ctx.setLineDash([]); // Reset dash
       }
 
       // Draw center dot
@@ -438,81 +432,8 @@ export function SimpleBrushTool({
       const coords = getCanvasCoords(e);
       setCursorPosition(coords);
 
-      // Generate adaptive preview for smart brush
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && !isDrawing && canvasRef.current) {
-        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-        const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
-        const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
-        
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          const imageRows = canvasRef.current.height;
-          const imageCols = canvasRef.current.width;
-          
-          if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
-            // Get pixel data from canvas
-            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
-            const pixelData = imageData.data;
-            
-            // Convert RGBA to grayscale float array
-            const floatPixelData = new Float32Array(imageCols * imageRows);
-            for (let i = 0; i < floatPixelData.length; i++) {
-              floatPixelData[i] = pixelData[i * 4];
-            }
-            
-            // Generate preview
-            console.log('🔍 Smart brush preview params:', {
-              pixelX, pixelY,
-              brushRadius: brushSize,
-              originalBrushSize: brushSize,
-              transform: transform,
-              imageSize: `${imageCols}x${imageRows}`,
-              pixelDataType: floatPixelData.constructor.name,
-              pixelDataLength: floatPixelData.length
-            });
-            
-            // Create adaptive brush preview at current position
-            const previewMask = adaptiveBrushStroke(
-              floatPixelData,
-              imageCols,
-              imageRows,
-              [{ x: pixelX, y: pixelY }], // Single point for preview
-              brushSize
-            );
-            
-            // Find bounds for efficient rendering
-            let minX = imageCols, minY = imageRows, maxX = 0, maxY = 0;
-            let hasPixels = false;
-            for (let y = 0; y < imageRows; y++) {
-              for (let x = 0; x < imageCols; x++) {
-                if (previewMask[y * imageCols + x]) {
-                  minX = Math.min(minX, x);
-                  minY = Math.min(minY, y);
-                  maxX = Math.max(maxX, x);
-                  maxY = Math.max(maxY, y);
-                  hasPixels = true;
-                }
-              }
-            }
-            
-            const preview = hasPixels ? {
-              mask: previewMask,
-              bounds: { minX, minY, maxX, maxY }
-            } : null;
-            
-            console.log('🎯 Preview result:', {
-              hasMask: !!preview?.mask,
-              maskSize: preview?.mask?.length,
-              bounds: preview?.bounds,
-              nonZeroPixels: preview?.mask ? Array.from(preview.mask).filter((v: any) => v > 0).length : 0
-            });
-            
-            setAdaptivePreview(preview);
-          }
-        }
-      } else {
-        setAdaptivePreview(null);
-      }
+      // No preview generation for smart brush - just show adaptive cursor
+      setAdaptivePreview(null);
 
       if (isDrawing && selectedStructure) {
         e.preventDefault();
