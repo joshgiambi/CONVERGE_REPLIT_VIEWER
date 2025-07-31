@@ -1509,78 +1509,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
       );
 
-      // Check if smart contour intersects with any existing contour
-      let intersectsWithExisting = false;
-      const intersectingContours: any[] = [];
-      const nonIntersectingContours: any[] = [];
+      // For smart brush, we replace all contours on the slice with the smart result
+      // This prevents overlapping contours
       
-      for (const contour of existingOnSlice) {
-        if (contour.points && contour.points.length >= 9) {
-          const intersects = doPolygonsIntersectSimple(smartContourPoints, contour.points);
-          if (intersects) {
-            intersectsWithExisting = true;
-            intersectingContours.push(contour);
-          } else {
-            nonIntersectingContours.push(contour);
-          }
-        }
-      }
-
       // Remove all existing contours at this slice
       structure.contours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
       );
 
-      if (intersectsWithExisting) {
-        // Union smart contour with intersecting contours
-        const polygonsToUnion: number[][] = [];
-        
-        // Add intersecting contours
-        for (const contour of intersectingContours) {
-          polygonsToUnion.push(contour.points);
-        }
-        
-        // Add the smart contour
-        polygonsToUnion.push(smartContourPoints);
-
-        // Perform union
-        const unionResults = unionMultipleContoursSimple(polygonsToUnion);
-        const unionResult = unionResults.length > 0 ? unionResults[0] : [];
-        
-        // Add the unified contour
-        if (unionResult.length >= 9) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: unionResult,
-            numberOfPoints: unionResult.length / 3,
-          });
-        }
-        
-        // Re-add non-intersecting contours
-        for (const contour of nonIntersectingContours) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: contour.points,
-            numberOfPoints: contour.numberOfPoints,
-          });
-        }
-      } else {
-        // Smart contour doesn't intersect - create separate blob
-        structure.contours.push({
-          slicePosition: payload.slicePosition,
-          points: smartContourPoints,
-          numberOfPoints: smartContourPoints.length / 3,
-        });
-        
-        // Re-add all existing contours unchanged
-        for (const contour of existingOnSlice) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: contour.points,
-            numberOfPoints: contour.numberOfPoints,
-          });
-        }
-      }
+      // Add the smart brush result as the new contour
+      structure.contours.push({
+        slicePosition: payload.slicePosition,
+        points: smartContourPoints,
+        numberOfPoints: smartContourPoints.length / 3,
+      });
 
       console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
       setLocalRTStructures(updatedStructures);

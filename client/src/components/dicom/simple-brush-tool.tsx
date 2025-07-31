@@ -462,7 +462,9 @@ export function SimpleBrushTool({
             // Generate preview
             console.log('🔍 Smart brush preview params:', {
               pixelX, pixelY,
-              brushRadius: brushSize / transform.scale,
+              brushRadius: brushSize,
+              originalBrushSize: brushSize,
+              transform: transform,
               imageSize: `${imageCols}x${imageRows}`,
               pixelDataType: floatPixelData.constructor.name,
               pixelDataLength: floatPixelData.length
@@ -474,7 +476,7 @@ export function SimpleBrushTool({
               imageRows,
               pixelX,
               pixelY,
-              brushSize / transform.scale, // Convert to pixel units
+              brushSize, // Use full brush size for preview
               30 // Gradient threshold
             );
             
@@ -695,7 +697,13 @@ export function SimpleBrushTool({
             return { x: pixelX, y: pixelY };
           });
           
-          console.log("🔎 Seed points:", seedPoints);
+          console.log("🔎 Smart brush execution params:", {
+            seedPoints,
+            brushSize,
+            transform,
+            canvasSize: `${imageCols}x${imageRows}`,
+            brushPointsCount: brushPointsRef.current.length
+          });
           
           // Get existing contours on this slice to merge with
           const existingContours = rtStructures?.structures
@@ -731,7 +739,7 @@ export function SimpleBrushTool({
               imageCols,
               imageRows,
               seedPoints,
-              brushSize / transform.scale, // Convert brush size to pixel units
+              brushSize, // Use full brush size
               30,        // Gradient threshold
               1000,      // Max iterations
               300        // Hounsfield window for CT
@@ -746,7 +754,7 @@ export function SimpleBrushTool({
               imageCols,
               imageRows,
               seedPoints,
-              brushSize / transform.scale,
+              brushSize,
               30,
               1000,
               300
@@ -757,7 +765,19 @@ export function SimpleBrushTool({
           const smoothedMask = smoothContourMask(finalMask, imageCols, imageRows, 2);
           
           // Convert mask to contour points
+          console.log("📏 Mask info before conversion:", {
+            smoothedMaskSize: smoothedMask.length,
+            nonZeroPixels: smoothedMask.filter((v: number) => v > 0).length,
+            brushSizeUsed: brushSize
+          });
+          
           const contourPixelPoints = maskToContourPoints(smoothedMask, imageCols, imageRows, 1.5);
+          
+          console.log("📏 Mask-to-polygon conversion result:", {
+            maskNonZeroPixels: smoothedMask.filter((v: number) => v > 0).length,
+            contourPointsCount: contourPixelPoints.length,
+            brushSizeUsed: brushSize
+          });
           
           // Convert pixel points to world coordinates
           const worldPoints: number[] = [];
