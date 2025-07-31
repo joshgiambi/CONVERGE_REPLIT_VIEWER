@@ -207,6 +207,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
+  const [dicomPixelData, setDicomPixelData] = useState<any>(null);
   
   // GPU acceleration state for hybrid rendering
   const [isGPUMode, setIsGPUMode] = useState(false);
