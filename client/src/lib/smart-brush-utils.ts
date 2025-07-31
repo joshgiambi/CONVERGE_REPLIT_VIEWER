@@ -21,10 +21,18 @@ export function adaptiveBrushStroke(
   baseRadius: number
 ): Uint8Array {
   const mask = new Uint8Array(width * height);
-  const painted = new Set<number>(); // Track painted pixels to avoid overlaps
   
-  // Intensity threshold for considering pixels as "similar tissue"
-  const intensityThreshold = 100; // Adjust based on typical HU differences between tissues
+  // Dynamic intensity threshold based on local variance
+  const getIntensityThreshold = (centerIntensity: number): number => {
+    // Air: < -500 HU
+    if (centerIntensity < -500) return 200; // Large threshold for air/lung
+    // Soft tissue: -100 to 100 HU  
+    if (centerIntensity >= -100 && centerIntensity <= 100) return 50; // Smaller threshold
+    // Bone: > 400 HU
+    if (centerIntensity > 400) return 100; // Medium threshold for bone
+    // Default
+    return 75;
+  };
   
   // For each point in the stroke
   for (let i = 0; i < strokePoints.length; i++) {
@@ -36,6 +44,7 @@ export function adaptiveBrushStroke(
     
     // Get intensity at center point (where user clicked)
     const centerIntensity = pixelData[cy * width + cx];
+    const threshold = getIntensityThreshold(centerIntensity);
     
     // Paint within circular radius, but only similar intensities
     const radiusSquared = baseRadius * baseRadius;
@@ -53,13 +62,14 @@ export function adaptiveBrushStroke(
             const idx = y * width + x;
             const pixelIntensity = pixelData[idx];
             
-            // Only paint if:
-            // 1. Not already painted
-            // 2. Intensity is similar to center (same tissue type)
-            if (!painted.has(idx) && 
-                Math.abs(pixelIntensity - centerIntensity) < intensityThreshold) {
-              mask[idx] = 255;
-              painted.add(idx);
+            // Paint if intensity is similar (adaptive based on tissue type)
+            if (Math.abs(pixelIntensity - centerIntensity) < threshold) {
+              // Use distance-based opacity for smoother edges
+              const distanceRatio = Math.sqrt(distSquared) / baseRadius;
+              const opacity = distanceRatio > 0.8 ? 128 : 255; // Softer edges
+              
+              // Take maximum opacity if already painted
+              mask[idx] = Math.max(mask[idx], opacity);
             }
           }
         }

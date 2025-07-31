@@ -3,7 +3,6 @@ import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { 
   adaptiveRegionGrow,
   adaptiveBrushStroke,
-  calculateAdaptiveRadius,
   smoothContourMask, 
   maskToContourPoints,
   polygonToMask,
@@ -231,42 +230,7 @@ export function SimpleBrushTool({
     if (cursorPosition && !isDrawing) {
       let currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
       
-      // If smart brush is enabled, calculate adaptive radius
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-          const pixelX = Math.round((cursorPosition.x - transform.offsetX) / transform.scale);
-          const pixelY = Math.round((cursorPosition.y - transform.offsetY) / transform.scale);
-          
-          const imageRows = canvasRef.current.height;
-          const imageCols = canvasRef.current.width;
-          
-          if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
-            // Get pixel data
-            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
-            const pixelData = imageData.data;
-            
-            // Convert RGBA to grayscale float array
-            const floatPixelData = new Float32Array(imageCols * imageRows);
-            for (let i = 0; i < floatPixelData.length; i++) {
-              floatPixelData[i] = pixelData[i * 4];
-            }
-            
-            // Calculate adaptive radius
-            const adaptiveRadius = calculateAdaptiveRadius(
-              floatPixelData,
-              imageCols,
-              imageRows,
-              pixelX,
-              pixelY,
-              currentBrushSize
-            );
-            
-            currentBrushSize = adaptiveRadius;
-          }
-        }
-      }
+      // Smart brush uses fixed radius - the adaptation happens during painting
       
       // Convert brush size from pixels to world coordinates to match actual output
       const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
@@ -692,18 +656,19 @@ export function SimpleBrushTool({
           console.log(`✅ Smart brush generated ${worldPoints.length / 3} contour points`);
           console.log("🌍 First few world points:", worldPoints.slice(0, 9));
           
-          // Send smart brush contour update
+          // Send smart brush contour update - use brush_stroke action for proper merging
           if (onContourUpdate && worldPoints.length >= 9) {
-            console.log("📤 Sending smart brush update");
+            console.log("📤 Sending smart brush update as brush stroke");
             onContourUpdate({
-              action: "smart_brush_stroke",
+              action: "brush_stroke", // Use regular brush action for proper merging
               structureId: selectedStructure,
               slicePosition: currentSlicePosition,
               pointCount: worldPoints.length / 3,
               points: worldPoints,
               brushSize: brushSize,
               smartBrushEnabled: true,
-              predictionEnabled: predictionEnabled,
+              predictionEnabled: false,
+              isEraseMode: false,
             });
           } else {
             console.log("⚠️ Not enough points or no onContourUpdate callback");
