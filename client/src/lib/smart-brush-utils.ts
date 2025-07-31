@@ -20,10 +20,12 @@ export function createAdaptivePreview(
   centerY: number,
   radius: number
 ): Point[] {
-  // For now, just return a simple circle to debug rendering
-  return createCirclePoints(centerX, centerY, radius);
+  // Temporarily use a simple circle for debugging
+  if (true) {
+    return createCirclePoints(centerX, centerY, radius);
+  }
   
-  /* Adaptive code disabled for debugging
+  // Re-enable adaptive preview with smoother, more sensitive algorithm
   const cx = Math.round(centerX);
   const cy = Math.round(centerY);
   
@@ -35,8 +37,8 @@ export function createAdaptivePreview(
   // Get intensity at center
   const centerIntensity = pixelData[cy * width + cx];
   
-  // Sample rays from center to find tissue boundaries
-  const numRays = 32; // Number of rays to cast
+  // Sample more rays for smoother shape
+  const numRays = 64; // Double the rays for smoother shape
   const shapePoints: Point[] = [];
   
   for (let i = 0; i < numRays; i++) {
@@ -44,27 +46,31 @@ export function createAdaptivePreview(
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
     
-    // Find how far we can go along this ray while staying in similar tissue
-    let distance = 0;
-    const maxDistance = radius;
-    const step = 1;
+    // Find edge with more sensitive detection
+    let distance = radius;
+    const step = 0.5; // Smaller steps for smoother edge detection
+    let prevIntensity = centerIntensity;
     
-    while (distance < maxDistance) {
-      distance += step;
-      const x = Math.round(cx + dx * distance);
-      const y = Math.round(cy + dy * distance);
+    for (let d = 1; d <= radius; d += step) {
+      const x = Math.round(cx + dx * d);
+      const y = Math.round(cy + dy * d);
       
-      if (x < 0 || x >= width || y < 0 || y >= height) break;
-      
-      const pixelIntensity = pixelData[y * width + x];
-      const intensityDiff = Math.abs(pixelIntensity - centerIntensity);
-      
-      // Stop if we hit different tissue (threshold based on tissue type)
-      const threshold = getAdaptiveThreshold(centerIntensity);
-      if (intensityDiff > threshold) {
-        distance -= step; // Back up one step
+      if (x < 0 || x >= width || y < 0 || y >= height) {
+        distance = d - step;
         break;
       }
+      
+      const pixelIntensity = pixelData[y * width + x];
+      const gradientMagnitude = Math.abs(pixelIntensity - prevIntensity);
+      
+      // More sensitive threshold - detect smaller changes
+      const threshold = 20; // Much lower threshold for higher sensitivity
+      if (gradientMagnitude > threshold) {
+        distance = d - step;
+        break;
+      }
+      
+      prevIntensity = pixelIntensity;
     }
     
     // Add point at this distance
@@ -74,8 +80,20 @@ export function createAdaptivePreview(
     });
   }
   
-  return shapePoints;
-  */
+  // Smooth the shape by averaging neighboring points
+  const smoothedPoints: Point[] = [];
+  for (let i = 0; i < shapePoints.length; i++) {
+    const prev = shapePoints[(i - 1 + shapePoints.length) % shapePoints.length];
+    const curr = shapePoints[i];
+    const next = shapePoints[(i + 1) % shapePoints.length];
+    
+    smoothedPoints.push({
+      x: (prev.x + curr.x * 2 + next.x) / 4,
+      y: (prev.y + curr.y * 2 + next.y) / 4
+    });
+  }
+  
+  return smoothedPoints;
 }
 
 /**

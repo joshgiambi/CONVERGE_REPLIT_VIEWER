@@ -229,15 +229,10 @@ export function SimpleBrushTool({
 
       // For smart brush, show adaptive preview shape if available
       if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
-        // Debug log to check points
-        if (adaptivePreviewPoints.length > 0) {
-          console.log('Drawing adaptive preview with', adaptivePreviewPoints.length, 'points');
-          console.log('First point:', adaptivePreviewPoints[0]);
-          console.log('Last point:', adaptivePreviewPoints[adaptivePreviewPoints.length - 1]);
-        }
-        
         // Draw adaptive preview shape
         ctx.save();
+        
+        // Draw filled shape first with higher opacity
         ctx.beginPath();
         adaptivePreviewPoints.forEach((point, index) => {
           if (index === 0) {
@@ -248,16 +243,17 @@ export function SimpleBrushTool({
         });
         ctx.closePath();
         
-        // Draw the shape
-        ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 3]); // Dashed line to indicate preview
-        ctx.stroke();
-        
-        // Fill with low opacity
-        ctx.fillStyle = structureColor;
-        ctx.globalAlpha = 0.15;
+        // Use bright yellow for high visibility
+        ctx.fillStyle = "#ffff00";
+        ctx.globalAlpha = 0.3; // Higher opacity for better visibility
         ctx.fill();
+        
+        // Draw the outline with bright color
+        ctx.globalAlpha = 1.0;
+        ctx.strokeStyle = "#00ff00"; // Bright green outline
+        ctx.lineWidth = 4; // Extra thick line
+        ctx.setLineDash([10, 5]); // Larger dashes for better visibility
+        ctx.stroke();
         
         ctx.restore();
         ctx.setLineDash([]); // Reset dash
@@ -444,20 +440,16 @@ export function SimpleBrushTool({
               brushSize
             );
             
-            console.log('Adaptive preview:', {
-              centerPixel: { x: pixelX, y: pixelY },
-              brushSize,
-              numPoints: previewPoints.length,
-              firstFewPoints: previewPoints.slice(0, 5)
-            });
-            
             // Convert preview points to canvas coordinates
             const canvasPreviewPoints = previewPoints.map(p => ({
               x: p.x * transform.scale + transform.offsetX,
               y: p.y * transform.scale + transform.offsetY
             }));
             
-            setAdaptivePreviewPoints(canvasPreviewPoints);
+            // Only update if we have valid points
+            if (canvasPreviewPoints.length > 2) {
+              setAdaptivePreviewPoints(canvasPreviewPoints);
+            }
           }
         } catch (error) {
           console.error("Error creating adaptive preview:", error);
