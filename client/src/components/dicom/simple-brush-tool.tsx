@@ -232,10 +232,22 @@ export function SimpleBrushTool({
       // Convert world size back to screen pixels for cursor display
       const zoomScale = ctTransform?.current?.scale || 1;
       const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
+      
+      // Debug what condition will be used
+      if (Math.random() < 0.05) {
+        console.log('Draw overlay conditions:', {
+          smartBrushEnabled,
+          hasAdaptivePreviewPoints: !!adaptivePreviewPoints,
+          adaptivePreviewPointsLength: adaptivePreviewPoints?.length || 0,
+          isEraseMode,
+          isTemporaryEraseMode
+        });
+      }
 
       // For smart brush, show adaptive preview shape if available
       if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
         // Draw adaptive preview shape
+        console.log(`Drawing adaptive preview with ${adaptivePreviewPoints.length} points`, adaptivePreviewPoints.slice(0, 3));
         ctx.save();
         
         // Draw filled shape first with higher opacity
@@ -502,6 +514,7 @@ export function SimpleBrushTool({
             
             // Only update if we have valid points
             if (canvasPreviewPoints.length > 2) {
+              console.log('Setting adaptive preview points:', canvasPreviewPoints.length, 'Smart brush enabled:', smartBrushEnabled, 'isEraseMode:', isEraseMode, 'isTemporaryEraseMode:', isTemporaryEraseMode);
               previousPreviewPointsRef.current = canvasPreviewPoints;
               setAdaptivePreviewPoints(canvasPreviewPoints);
               
