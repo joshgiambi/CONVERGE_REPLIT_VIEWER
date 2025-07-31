@@ -458,6 +458,14 @@ export function SimpleBrushTool({
           }
           
           // Generate preview
+          console.log('🔍 Smart brush preview params:', {
+            pixelX, pixelY,
+            brushRadius: brushSize / transform.scale,
+            imageSize: `${imageCols}x${imageRows}`,
+            pixelDataType: pixelData.constructor.name,
+            pixelDataLength: pixelData.length
+          });
+          
           const preview = createAdaptivePreview(
             pixelData,
             imageCols,
@@ -467,6 +475,13 @@ export function SimpleBrushTool({
             brushSize / transform.scale, // Convert to pixel units
             30 // Gradient threshold
           );
+          
+          console.log('🎯 Preview result:', {
+            hasMask: !!preview.mask,
+            maskSize: preview.mask.length,
+            bounds: preview.bounds,
+            nonZeroPixels: Array.from(preview.mask).filter(v => v > 0).length
+          });
           
           setAdaptivePreview(preview);
         }
@@ -637,9 +652,27 @@ export function SimpleBrushTool({
       const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
       const [rowSpacing, colSpacing] = pixelSpacing;
 
+      // Debug smart brush condition
+      console.log("🔍 Smart brush condition check:", {
+        smartBrushEnabled,
+        isEraseMode,
+        isTemporaryEraseMode,
+        hasPixelData: !!dicomImage?.pixelData,
+        pixelDataType: dicomImage?.pixelData?.constructor.name,
+        dicomImageKeys: dicomImage ? Object.keys(dicomImage) : 'no dicomImage'
+      });
+      
       // Smart brush implementation using gradient-sensitive region growing
       if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && dicomImage?.pixelData) {
         console.log("🎯 Using Smart Brush - Gradient-sensitive region growing");
+        console.log("📊 Smart brush enabled:", smartBrushEnabled);
+        console.log("📐 Image metadata:", { 
+          imagePosition, 
+          pixelSpacing, 
+          rows: dicomImage.rows, 
+          columns: dicomImage.columns,
+          pixelDataLength: dicomImage.pixelData.length
+        });
         
         try {
           // Get the DICOM image dimensions and pixel data
@@ -662,10 +695,14 @@ export function SimpleBrushTool({
             return { x: pixelX, y: pixelY };
           });
           
+          console.log("🔎 Seed points:", seedPoints);
+          
           // Get existing contours on this slice to merge with
           const existingContours = rtStructures?.structures
             ?.find((s: any) => s.roiNumber === selectedStructure)
             ?.contours?.filter((c: any) => Math.abs(c.slicePosition - currentSlicePosition) < 0.5) || [];
+          
+          console.log("📦 Existing contours:", existingContours.length);
           
           let finalMask: Uint8Array;
           
@@ -732,9 +769,11 @@ export function SimpleBrushTool({
           }
           
           console.log(`✅ Smart brush generated ${worldPoints.length / 3} contour points`);
+          console.log("🌍 First few world points:", worldPoints.slice(0, 9));
           
           // Send smart brush contour update
           if (onContourUpdate && worldPoints.length >= 9) {
+            console.log("📤 Sending smart brush update");
             onContourUpdate({
               action: "smart_brush_stroke",
               structureId: selectedStructure,
@@ -745,6 +784,8 @@ export function SimpleBrushTool({
               smartBrushEnabled: true,
               predictionEnabled: predictionEnabled,
             });
+          } else {
+            console.log("⚠️ Not enough points or no onContourUpdate callback");
           }
           
           brushPointsRef.current = [];

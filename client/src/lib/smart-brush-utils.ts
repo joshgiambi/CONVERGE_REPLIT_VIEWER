@@ -118,6 +118,16 @@ export function adaptiveRegionGrow(
   maxIterations: number,
   hounsFieldWindow: number
 ): Uint8Array {
+  console.log('🚀 adaptiveRegionGrow called with:', {
+    pixelDataType: pixelData.constructor.name,
+    width, height,
+    seedPoints,
+    brushRadius,
+    gradientThreshold,
+    maxIterations,
+    hounsFieldWindow
+  });
+  
   const mask = new Uint8Array(width * height);
   
   // Compute gradient map
@@ -461,6 +471,8 @@ export function createAdaptivePreview(
   gradientThreshold: number
 ): { mask: Uint8Array; bounds: { minX: number; minY: number; maxX: number; maxY: number } } {
   // Quick region grow for preview
+  console.log('🎨 Creating adaptive preview at:', { brushX, brushY, brushRadius, gradientThreshold });
+  
   const previewMask = adaptiveRegionGrow(
     pixelData,
     width,
@@ -471,6 +483,11 @@ export function createAdaptivePreview(
     500, // Fewer iterations for preview
     200  // Smaller HU window for preview
   );
+  
+  console.log('📊 Preview mask generated:', {
+    totalPixels: width * height,
+    filledPixels: Array.from(previewMask).filter(v => v > 0).length
+  });
   
   // Find bounds for efficient rendering
   let minX = width, minY = height, maxX = 0, maxY = 0;
