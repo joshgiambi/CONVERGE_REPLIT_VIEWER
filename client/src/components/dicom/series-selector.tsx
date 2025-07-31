@@ -230,6 +230,12 @@ export function SeriesSelector({
         if (!isCancelled) {
           console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
           console.log('RT series details:', allRTSeries);
+          console.log('RT series with associations:', allRTSeries.map(rt => ({
+            id: rt.id,
+            description: rt.seriesDescription,
+            referencedSeriesId: rt.referencedSeriesId,
+            studyId: rt.studyId
+          })));
           setRTSeries(allRTSeries);
         }
       } catch (error) {
@@ -614,12 +620,18 @@ export function SeriesSelector({
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
                               {/* RT Structure Series nested under CT - only show those that reference this CT */}
-                              {console.log('RT Series available:', rtSeries.length, 'for CT series:', seriesItem.id)}
-                              {console.log('RT Series details:', rtSeries)}
-                              {rtSeries.filter((rtS: any) => 
-                                // Show RT structures that reference this CT series, or those without a reference (backward compatibility)
-                                rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
-                              ).length > 0 && (
+                              {rtSeries && rtSeries.length > 0 && rtSeries.filter((rtS: any) => {
+                                // Debug log for RT series filtering
+                                const isMatch = rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1);
+                                console.log('RT Series filter:', {
+                                  rtSeriesId: rtS.id, 
+                                  referencedSeriesId: rtS.referencedSeriesId, 
+                                  ctSeriesId: seriesItem.id,
+                                  isMatch,
+                                  rtSeriesLength: rtSeries.length
+                                });
+                                return isMatch;
+                              }).length > 0 && (
                                 <div className="space-y-1 border-l-2 border-green-500/30 pl-3">
                                   {rtSeries.filter((rtS: any) => 
                                     rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)

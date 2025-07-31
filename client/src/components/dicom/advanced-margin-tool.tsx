@@ -93,11 +93,16 @@ export function AdvancedMarginTool({
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   // Auto-preview when settings change if preview is enabled and realtime is on
+  // Debounce to prevent excessive updates
   useEffect(() => {
     if (parameters.preview.enabled && parameters.preview.updateRealtime && selectedStructure && isPreviewActive) {
-      handlePreview();
+      const timeoutId = setTimeout(() => {
+        handlePreview();
+      }, 300); // 300ms debounce delay
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [parameters, selectedStructure?.id]);
+  }, [parameters.marginValues, parameters.marginType, parameters.algorithmType, selectedStructure?.id]);
 
   // Clear preview when closing
   useEffect(() => {
@@ -338,8 +343,10 @@ export function AdvancedMarginTool({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-24 left-96 z-50">
-      <div className="backdrop-blur-md border border-cyan-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/80 w-[420px] max-h-[60vh] overflow-y-auto">
+    <div className="fixed bottom-24 left-[400px] z-50">
+      <div className="backdrop-blur-md border border-cyan-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[420px] max-h-[60vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}>
         
         {/* Header */}
         <div className="flex items-center justify-between mb-3">

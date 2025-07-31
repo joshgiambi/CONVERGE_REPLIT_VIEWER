@@ -1811,18 +1811,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get RT Structure Set for a study
-  app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const studyId = parseInt(req.params.studyId);
-      const rtStructures = await storage.getRTStructuresForStudy(studyId);
-      // Filter for RTSTRUCT modality
-      const rtStructSeries = rtStructures.filter(s => s.modality === 'RTSTRUCT');
-      res.json(rtStructSeries);
-    } catch (error: any) {
-      next(error);
-    }
-  });
+
 
   // Debug Frame of Reference UID matching
   app.get("/api/studies/:studyId/frame-references", async (req: Request, res: Response, next: NextFunction) => {
@@ -1871,9 +1860,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Get the first image of the RT structure to parse its references
           const images = await storage.getImagesBySeriesId(rtSeries.id);
           if (images.length > 0 && images[0].filePath) {
-            const filePath = images[0].filePath.startsWith('uploads/') 
-              ? images[0].filePath 
-              : path.join('uploads', images[0].filePath);
+            // Use the filePath directly as it's already complete
+            const filePath = images[0].filePath;
+            console.log('Checking RT structure file path:', filePath);
               
             if (fs.existsSync(filePath)) {
               // Use the RT structure parser to get referenced series information
@@ -1881,7 +1870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               
               // Find which series in this study the RT structure references
               if (rtStructureSet.referencedSeriesUID) {
-                const referencedSeries = series.find(s => s.seriesInstanceUid === rtStructureSet.referencedSeriesUID);
+                const referencedSeries = series.find(s => s.seriesInstanceUID === rtStructureSet.referencedSeriesUID);
                 if (referencedSeries) {
                   return {
                     ...rtSeries,
