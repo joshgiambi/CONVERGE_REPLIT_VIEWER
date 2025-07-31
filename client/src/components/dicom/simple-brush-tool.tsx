@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
+import { adaptiveRegionGrow, smoothContourMask, maskToContourPoints } from "@/lib/smart-brush-utils";
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -17,9 +18,11 @@ interface SimpleBrushToolProps {
   enableSmartMode?: boolean;
   onBrushModeChange?: (mode: any) => void;
   predictionEnabled?: boolean;
+  smartBrushEnabled?: boolean;
   onBrushSizeChange?: (size: number) => void;
   ctTransform: React.RefObject<{ scale: number; offsetX: number; offsetY: number }>;
   isEraseMode?: boolean; // New prop for erase mode
+  dicomImage?: any; // For accessing pixel data
 }
 
 export function SimpleBrushTool({
@@ -35,9 +38,11 @@ export function SimpleBrushTool({
   panY,
   imageMetadata,
   predictionEnabled = false,
+  smartBrushEnabled = false,
   onBrushSizeChange,
   ctTransform,
   isEraseMode = false,
+  dicomImage = null,
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current, isEraseMode });
   const [isDrawing, setIsDrawing] = useState(false);
@@ -521,7 +526,82 @@ export function SimpleBrushTool({
       const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
       const [rowSpacing, colSpacing] = pixelSpacing;
 
-      // Convert all brush points to world coordinates accounting for zoom/pan
+      // Smart brush implementation using gradient-sensitive region growing
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && dicomImage?.pixelData) {
+        console.log("🎯 Using Smart Brush - Gradient-sensitive region growing");
+        
+        try {
+          // Get the DICOM image dimensions and pixel data
+          const imageRows = dicomImage.rows || 512;
+          const imageCols = dicomImage.columns || 512;
+          const pixelData = dicomImage.pixelData;
+          
+          // Convert pixel data to Float32Array if needed
+          let floatPixelData: Float32Array;
+          if (pixelData instanceof Float32Array) {
+            floatPixelData = pixelData;
+          } else {
+            floatPixelData = new Float32Array(pixelData);
+          }
+          
+          // Get seed points in pixel coordinates
+          const seedPoints = brushPointsRef.current.map(point => {
+            const pixelX = Math.round((point.x - transform.offsetX) / transform.scale);
+            const pixelY = Math.round((point.y - transform.offsetY) / transform.scale);
+            return { x: pixelX, y: pixelY };
+          });
+          
+          // Apply gradient-sensitive region growing
+          const smartMask = adaptiveRegionGrow(
+            floatPixelData,
+            imageRows,
+            imageCols,
+            seedPoints,
+            brushSize, // Use brush size as growth radius
+            20,        // Gradient threshold - adjust for sensitivity
+            300,       // Max iterations
+            1000       // Hounsfield window for CT
+          );
+          
+          // Smooth the resulting mask
+          const smoothedMask = smoothContourMask(smartMask, imageRows, imageCols, 2);
+          
+          // Convert mask to contour points
+          const contourPixelPoints = maskToContourPoints(smoothedMask, imageRows, imageCols);
+          
+          // Convert pixel points to world coordinates
+          const worldPoints = contourPixelPoints.map(point => {
+            const worldX = imagePosition[0] + (point.x * colSpacing);
+            const worldY = imagePosition[1] + (point.y * rowSpacing);
+            const worldZ = currentSlicePosition;
+            return [worldX, worldY, worldZ];
+          });
+          
+          console.log(`✅ Smart brush generated ${worldPoints.length} contour points`);
+          
+          // Send smart brush contour update
+          if (onContourUpdate) {
+            onContourUpdate({
+              action: "smart_brush_stroke",
+              structureId: selectedStructure,
+              slicePosition: currentSlicePosition,
+              pointCount: worldPoints.length,
+              points: worldPoints,
+              brushSize: brushSize,
+              smartBrushEnabled: true,
+              predictionEnabled: predictionEnabled,
+            });
+          }
+          
+          brushPointsRef.current = [];
+          return;
+        } catch (error) {
+          console.error("Smart brush error, falling back to regular brush:", error);
+          // Fall through to regular brush if smart brush fails
+        }
+      }
+
+      // Regular brush mode - convert all brush points to world coordinates
       const worldPoints = brushPointsRef.current.map((point) => {
         // Convert canvas coordinates to pixel coordinates by inverting the zoom/pan transform
         const pixelX = (point.x - transform.offsetX) / transform.scale;

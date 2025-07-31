@@ -123,6 +123,7 @@ interface WorkingViewerProps {
     brushSize: number;
     isActive: boolean;
     predictionEnabled?: boolean;
+    smartBrushEnabled?: boolean;
   };
   selectedForEdit?: number | null;
   onBrushSizeChange?: (size: number) => void;
@@ -131,6 +132,7 @@ interface WorkingViewerProps {
     brushSize: number;
     isActive: boolean;
     predictionEnabled?: boolean;
+    smartBrushEnabled?: boolean;
   }) => void;
   onContourUpdate?: (updatedStructures: any) => void;
   contourSettings?: { width: number; opacity: number };
@@ -1483,6 +1485,110 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
+    } else if (payload.action === "smart_brush_stroke") {
+      // Handle smart brush stroke - add already processed contour points
+      console.log("🎯 Processing smart brush stroke:", payload);
+      
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) {
+        console.error(`Structure ${payload.structureId} not found`);
+        return;
+      }
+
+      // Smart brush already provides processed contour points
+      const smartContourPoints = payload.points.flat(); // Flatten the array if needed
+      
+      console.log(`Smart brush contour with ${smartContourPoints.length / 3} points`);
+
+      // Collect all contours on this slice
+      const tol = 0.5;
+      const existingOnSlice = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
+      );
+
+      // Check if smart contour intersects with any existing contour
+      let intersectsWithExisting = false;
+      const intersectingContours: any[] = [];
+      const nonIntersectingContours: any[] = [];
+      
+      for (const contour of existingOnSlice) {
+        if (contour.points && contour.points.length >= 9) {
+          const intersects = doPolygonsIntersectSimple(smartContourPoints, contour.points);
+          if (intersects) {
+            intersectsWithExisting = true;
+            intersectingContours.push(contour);
+          } else {
+            nonIntersectingContours.push(contour);
+          }
+        }
+      }
+
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
+      );
+
+      if (intersectsWithExisting) {
+        // Union smart contour with intersecting contours
+        const polygonsToUnion: number[][] = [];
+        
+        // Add intersecting contours
+        for (const contour of intersectingContours) {
+          polygonsToUnion.push(contour.points);
+        }
+        
+        // Add the smart contour
+        polygonsToUnion.push(smartContourPoints);
+
+        // Perform union
+        const unionResults = unionMultipleContoursSimple(polygonsToUnion);
+        const unionResult = unionResults.length > 0 ? unionResults[0] : [];
+        
+        // Add the unified contour
+        if (unionResult.length >= 9) {
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: unionResult,
+            numberOfPoints: unionResult.length / 3,
+          });
+        }
+        
+        // Re-add non-intersecting contours
+        for (const contour of nonIntersectingContours) {
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: contour.points,
+            numberOfPoints: contour.numberOfPoints,
+          });
+        }
+      } else {
+        // Smart contour doesn't intersect - create separate blob
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: smartContourPoints,
+          numberOfPoints: smartContourPoints.length / 3,
+        });
+        
+        // Re-add all existing contours unchanged
+        for (const contour of existingOnSlice) {
+          structure.contours.push({
+            slicePosition: payload.slicePosition,
+            points: contour.points,
+            numberOfPoints: contour.numberOfPoints,
+          });
+        }
+      }
+
+      console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
+      setLocalRTStructures(updatedStructures);
+      
+      // Save state to undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'add_smart_brush', payload.structureId, updatedStructures);
+      }
+      saveContourUpdates(updatedStructures, 'add_smart_brush');
     } else if (payload.action === "erase_stroke") {
       // Handle erase stroke - subtract points from contour
       console.log("🔹 Processing erase stroke:", payload);
@@ -4709,7 +4815,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 smoothingEnabled={true}
                 enableSmartMode={true}
                 predictionEnabled={brushToolState?.predictionEnabled || false}
+                smartBrushEnabled={brushToolState?.smartBrushEnabled || false}
                 ctTransform={ctTransform}
+                dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 onBrushModeChange={(mode: BrushOperation) => {
                   console.log("Brush mode changed:", mode);
                 }}
@@ -4756,7 +4864,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 smoothingEnabled={true}
                 enableSmartMode={true}
                 predictionEnabled={false} // No prediction for erase tool
+                smartBrushEnabled={false} // No smart mode for erase tool
                 ctTransform={ctTransform}
+                dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 isEraseMode={true} // Pass erase mode flag
                 onBrushModeChange={(mode: BrushOperation) => {
                   console.log("Erase mode changed:", mode);

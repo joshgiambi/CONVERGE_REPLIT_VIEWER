@@ -751,24 +751,27 @@ export function ContourEditToolbar({
             
             {/* Mode Toggles - Compact Row */}
             <div className="flex items-center gap-2">
-              {/* 3D Mode */}
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-blue-500/30 transition-colors">
-                <Layers className="w-3.5 h-3.5 text-blue-400" />
-                <Label className="text-xs text-gray-300 cursor-pointer">3D</Label>
-                <Switch
-                  checked={is3D}
-                  onCheckedChange={setIs3D}
-                  className="data-[state=checked]:bg-blue-500 scale-75"
-                />
-              </div>
-              
-              {/* Smart Brush */}
+              {/* Smart Brush - Gradient-Sensitive */}
               <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-green-500/30 transition-colors">
                 <Zap className="w-3.5 h-3.5 text-green-400" />
-                <Label className="text-xs text-gray-300 cursor-pointer">Smart</Label>
+                <div className="flex flex-col">
+                  <Label className="text-xs text-gray-300 cursor-pointer">Smart Brush</Label>
+                  <span className="text-[10px] text-gray-500">Edge-aware</span>
+                </div>
                 <Switch
                   checked={smartBrush}
-                  onCheckedChange={setSmartBrush}
+                  onCheckedChange={(enabled) => {
+                    setSmartBrush(enabled);
+                    if (onToolChange && activeTool === 'brush') {
+                      onToolChange({
+                        tool: 'brush',
+                        brushSize: brushThickness[0],
+                        isActive: true,
+                        smartBrushEnabled: enabled,
+                        predictionEnabled: isPredictionEnabled
+                      });
+                    }
+                  }}
                   className="data-[state=checked]:bg-green-500 scale-75"
                 />
               </div>
@@ -776,7 +779,10 @@ export function ContourEditToolbar({
               {/* AI Prediction */}
               <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-purple-500/30 transition-colors">
                 <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <Label className="text-xs text-gray-300 cursor-pointer">AI</Label>
+                <div className="flex flex-col">
+                  <Label className="text-xs text-gray-300 cursor-pointer">AI Predict</Label>
+                  <span className="text-[10px] text-gray-500">Next slice</span>
+                </div>
                 {isPredictionEnabled && (
                   <Badge className="text-[10px] px-1 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30 animate-pulse">
                     ON
@@ -791,6 +797,7 @@ export function ContourEditToolbar({
                         tool: 'brush',
                         brushSize: brushThickness[0],
                         isActive: true,
+                        smartBrushEnabled: smartBrush,
                         predictionEnabled: enabled
                       });
                     }
