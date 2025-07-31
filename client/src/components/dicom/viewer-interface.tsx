@@ -761,7 +761,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
 
       {/* Contour Edit Toolbar */}
-      {selectedForEdit && rtStructures && rtStructures.structures && !showBooleanOperations && (
+      {selectedForEdit && rtStructures && rtStructures.structures && !showBooleanOperations && !showAdvancedMarginTool && (
         <ContourEditToolbar
           selectedStructure={rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)}
           isVisible={isContourEditMode}
@@ -793,33 +793,37 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           imageMetadata={imageMetadata}
           onOpenBooleanOperations={() => {
             setIsContourEditMode(false);
+            setShowAdvancedMarginTool(false);
             setShowBooleanOperations(true);
           }}
           onOpenAdvancedMarginTool={() => {
             setIsContourEditMode(false);
-            setShowLocalizationTool(true);
+            setShowBooleanOperations(false);
+            setShowAdvancedMarginTool(true);
           }}
 
         />
       )}
 
       {/* Boolean Operations Toolbar */}
-      <BooleanOperationsToolbar
-        isVisible={showBooleanOperations}
-        onClose={() => setShowBooleanOperations(false)}
-        availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
-        onExecuteOperation={(expression, newStructure) => {
-          console.log('Executing boolean operation:', expression, newStructure);
-          // TODO: Implement boolean operation execution
-          if (newStructure?.createNewStructure) {
-            console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
-          }
-          setShowBooleanOperations(false);
-        }}
-      />
+      {showBooleanOperations && !showAdvancedMarginTool && (
+        <BooleanOperationsToolbar
+          isVisible={showBooleanOperations}
+          onClose={() => setShowBooleanOperations(false)}
+          availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
+          onExecuteOperation={(expression, newStructure) => {
+            console.log('Executing boolean operation:', expression, newStructure);
+            // TODO: Implement boolean operation execution
+            if (newStructure?.createNewStructure) {
+              console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
+            }
+            setShowBooleanOperations(false);
+          }}
+        />
+      )}
 
       {/* Advanced Margin Tool */}
-      {showAdvancedMarginTool && rtStructures && selectedForEdit && (
+      {showAdvancedMarginTool && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
         <AdvancedMarginTool
           isVisible={showAdvancedMarginTool}
           onClose={() => setShowAdvancedMarginTool(false)}
