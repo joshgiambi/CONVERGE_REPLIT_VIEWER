@@ -438,52 +438,55 @@ export function SimpleBrushTool({
       setCursorPosition(coords);
 
       // Generate adaptive preview for smart brush
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && !isDrawing && dicomImage?.pixelData) {
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && !isDrawing && canvasRef.current) {
         const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
         const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
         const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
         
-        const imageRows = dicomImage.rows || 512;
-        const imageCols = dicomImage.columns || 512;
-        
-        if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
-          // Get pixel data
-          let pixelData: Float32Array | Uint16Array | Uint8Array;
-          if (dicomImage.pixelData instanceof Float32Array || 
-              dicomImage.pixelData instanceof Uint16Array || 
-              dicomImage.pixelData instanceof Uint8Array) {
-            pixelData = dicomImage.pixelData;
-          } else {
-            pixelData = new Float32Array(dicomImage.pixelData);
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          const imageRows = canvasRef.current.height;
+          const imageCols = canvasRef.current.width;
+          
+          if (pixelX >= 0 && pixelX < imageCols && pixelY >= 0 && pixelY < imageRows) {
+            // Get pixel data from canvas
+            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+            const pixelData = imageData.data;
+            
+            // Convert RGBA to grayscale float array
+            const floatPixelData = new Float32Array(imageCols * imageRows);
+            for (let i = 0; i < floatPixelData.length; i++) {
+              floatPixelData[i] = pixelData[i * 4];
+            }
+            
+            // Generate preview
+            console.log('🔍 Smart brush preview params:', {
+              pixelX, pixelY,
+              brushRadius: brushSize / transform.scale,
+              imageSize: `${imageCols}x${imageRows}`,
+              pixelDataType: floatPixelData.constructor.name,
+              pixelDataLength: floatPixelData.length
+            });
+            
+            const preview = createAdaptivePreview(
+              floatPixelData,
+              imageCols,
+              imageRows,
+              pixelX,
+              pixelY,
+              brushSize / transform.scale, // Convert to pixel units
+              30 // Gradient threshold
+            );
+            
+            console.log('🎯 Preview result:', {
+              hasMask: !!preview.mask,
+              maskSize: preview.mask.length,
+              bounds: preview.bounds,
+              nonZeroPixels: Array.from(preview.mask).filter(v => v > 0).length
+            });
+            
+            setAdaptivePreview(preview);
           }
-          
-          // Generate preview
-          console.log('🔍 Smart brush preview params:', {
-            pixelX, pixelY,
-            brushRadius: brushSize / transform.scale,
-            imageSize: `${imageCols}x${imageRows}`,
-            pixelDataType: pixelData.constructor.name,
-            pixelDataLength: pixelData.length
-          });
-          
-          const preview = createAdaptivePreview(
-            pixelData,
-            imageCols,
-            imageRows,
-            pixelX,
-            pixelY,
-            brushSize / transform.scale, // Convert to pixel units
-            30 // Gradient threshold
-          );
-          
-          console.log('🎯 Preview result:', {
-            hasMask: !!preview.mask,
-            maskSize: preview.mask.length,
-            bounds: preview.bounds,
-            nonZeroPixels: Array.from(preview.mask).filter(v => v > 0).length
-          });
-          
-          setAdaptivePreview(preview);
         }
       } else {
         setAdaptivePreview(null);
@@ -657,35 +660,32 @@ export function SimpleBrushTool({
         smartBrushEnabled,
         isEraseMode,
         isTemporaryEraseMode,
-        hasPixelData: !!dicomImage?.pixelData,
-        pixelDataType: dicomImage?.pixelData?.constructor.name,
-        dicomImageKeys: dicomImage ? Object.keys(dicomImage) : 'no dicomImage'
+        hasCanvas: !!canvasRef.current
       });
       
-      // Smart brush implementation using gradient-sensitive region growing
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && dicomImage?.pixelData) {
+      // Smart brush implementation using gradient-sensitive region growing from canvas
+      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
         console.log("🎯 Using Smart Brush - Gradient-sensitive region growing");
         console.log("📊 Smart brush enabled:", smartBrushEnabled);
-        console.log("📐 Image metadata:", { 
-          imagePosition, 
-          pixelSpacing, 
-          rows: dicomImage.rows, 
-          columns: dicomImage.columns,
-          pixelDataLength: dicomImage.pixelData.length
-        });
         
         try {
-          // Get the DICOM image dimensions and pixel data
-          const imageRows = dicomImage.rows || 512;
-          const imageCols = dicomImage.columns || 512;
-          const pixelData = dicomImage.pixelData;
+          // Get the canvas context and pixel data
+          const ctx = canvasRef.current.getContext('2d');
+          if (!ctx) throw new Error('Could not get canvas context');
           
-          // Convert pixel data to appropriate format
-          let floatPixelData: Float32Array | Uint16Array | Uint8Array;
-          if (pixelData instanceof Float32Array || pixelData instanceof Uint16Array || pixelData instanceof Uint8Array) {
-            floatPixelData = pixelData;
-          } else {
-            floatPixelData = new Float32Array(pixelData);
+          // Get canvas dimensions
+          const imageRows = canvasRef.current.height;
+          const imageCols = canvasRef.current.width;
+          
+          // Get pixel data from canvas
+          const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+          const pixelData = imageData.data;
+          
+          // Convert RGBA to grayscale float array
+          const floatPixelData = new Float32Array(imageCols * imageRows);
+          for (let i = 0; i < floatPixelData.length; i++) {
+            // Use the red channel as grayscale (since it's a grayscale DICOM image)
+            floatPixelData[i] = pixelData[i * 4];
           }
           
           // Get seed points in pixel coordinates
