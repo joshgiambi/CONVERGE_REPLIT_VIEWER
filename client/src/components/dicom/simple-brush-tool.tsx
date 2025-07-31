@@ -415,37 +415,69 @@ export function SimpleBrushTool({
             const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
             const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
             
-            // Get canvas dimensions
-            const imageRows = canvasRef.current.height;
-            const imageCols = canvasRef.current.width;
+            // Get the actual DICOM image dimensions from transform
+            const imageWidth = transform.imageWidth || imageMetadata?.Columns || 512;
+            const imageHeight = transform.imageHeight || imageMetadata?.Rows || 512;
+            const canvasWidth = canvasRef.current.width;
+            const canvasHeight = canvasRef.current.height;
             
-            // Get pixel data from canvas
-            const imageData = ctx.getImageData(0, 0, imageCols, imageRows);
+            // Calculate where the DICOM image is rendered on the canvas
+            const scaledWidth = imageWidth * transform.scale;
+            const scaledHeight = imageHeight * transform.scale;
+            const imageStartX = (canvasWidth - scaledWidth) / 2;
+            const imageStartY = (canvasHeight - scaledHeight) / 2;
+            
+            // Adjust pixel coordinates to be relative to the extracted image area
+            const adjustedPixelX = (coords.x - imageStartX) / transform.scale;
+            const adjustedPixelY = (coords.y - imageStartY) / transform.scale;
+            
+            // Check if cursor is within the actual DICOM image bounds
+            if (adjustedPixelX < 0 || adjustedPixelX >= imageWidth || 
+                adjustedPixelY < 0 || adjustedPixelY >= imageHeight) {
+              // Cursor is outside the DICOM image - don't show preview
+              setAdaptivePreviewPoints(null);
+              return;
+            }
+            
+            // Debug log - only log occasionally to reduce noise
+            if (Math.random() < 0.05) {
+              console.log('Canvas:', canvasWidth, 'x', canvasHeight);
+              console.log('Image:', imageWidth, 'x', imageHeight); 
+              console.log('Scaled:', scaledWidth, 'x', scaledHeight);
+              console.log('Image starts at:', imageStartX, imageStartY);
+              console.log('Canvas mouse:', coords.x, coords.y);
+              console.log('Adjusted pixel:', adjustedPixelX, adjustedPixelY);
+            }
+            
+            // Get pixel data only from the area where the DICOM image is rendered
+            const imageData = ctx.getImageData(
+              Math.floor(imageStartX),
+              Math.floor(imageStartY),
+              Math.ceil(scaledWidth),
+              Math.ceil(scaledHeight)
+            );
             const pixelData = imageData.data;
             
             // Convert RGBA to grayscale
-            const grayscaleData = new Float32Array(imageCols * imageRows);
+            const grayscaleData = new Float32Array(scaledWidth * scaledHeight);
             for (let i = 0; i < grayscaleData.length; i++) {
-              // Use the red channel as grayscale (since it's a grayscale DICOM image)
               grayscaleData[i] = pixelData[i * 4];
             }
-            
-
             
             // Create adaptive preview shape
             const previewPoints = createAdaptivePreview(
               grayscaleData,
-              imageCols,
-              imageRows,
-              pixelX,
-              pixelY,
+              Math.ceil(scaledWidth),
+              Math.ceil(scaledHeight),
+              Math.round(adjustedPixelX * transform.scale),
+              Math.round(adjustedPixelY * transform.scale),
               brushSize
             );
             
-            // Convert preview points to canvas coordinates
+            // Convert preview points back to canvas coordinates
             const canvasPreviewPoints = previewPoints.map(p => ({
-              x: p.x * transform.scale + transform.offsetX,
-              y: p.y * transform.scale + transform.offsetY
+              x: p.x + imageStartX,
+              y: p.y + imageStartY
             }));
             
             // Only update if we have valid points
