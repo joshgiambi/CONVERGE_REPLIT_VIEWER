@@ -316,11 +316,18 @@ export function SimpleBrushTool({
         e.preventDefault();
         e.stopPropagation();
         
-        // Calculate new size based on horizontal mouse movement - use full range 5-512px
         const deltaX = e.clientX - sizeAdjustStart.x;
         const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
-        const sizeChangePixels = deltaX * 0.8; // Improved sensitivity
-        const newSizePixels = Math.max(5, Math.min(512, sizeAdjustStart.size + sizeChangePixels));  // Full range 5-512px
+        
+        // Calculate minimum pixels for 0.1 cm (1 mm)
+        const minPixelsFor1mm = Math.ceil(1 / pixelSpacing); // ~1 pixel for typical spacing
+        const maxPixels = 102; // ~10 cm for typical spacing
+        
+        // More sensitive scaling - 50 pixels = 1 cm change
+        const deltaCm = deltaX / 50;
+        const baseSizeCm = (sizeAdjustStart.size * pixelSpacing) / 10;
+        const newSizeCm = Math.max(0.1, Math.min(10, baseSizeCm + deltaCm));
+        const newSizePixels = Math.max(minPixelsFor1mm, Math.min(maxPixels, (newSizeCm * 10) / pixelSpacing));
         
         setAdjustedBrushSize(Math.round(newSizePixels));
         
@@ -332,17 +339,16 @@ export function SimpleBrushTool({
           if (sizeText) {
             const sizeCm = (newSizePixels * pixelSpacing) / 10;
             sizeText.innerHTML = `
-              <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+              <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #60a5fa;">Brush Thickness</div>
               <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
               <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(newSizePixels)} px)</div>
             `;
           }
           
           if (sliderFill) {
-            // Map size to slider width (0-100%) using full range 5-512px
-            const minSize = 5;
-            const maxSize = 512;
-            const percentage = ((newSizePixels - minSize) / (maxSize - minSize)) * 100;
+            // Map size to slider width (0-100%) for 0.1cm to 10cm range
+            const currentSizeCm = (newSizePixels * pixelSpacing) / 10;
+            const percentage = ((currentSizeCm - 0.1) / (10 - 0.1)) * 100;
             sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
           }
         }
@@ -652,7 +658,7 @@ export function SimpleBrushTool({
     if (sizeText) {
       const sizeCm = (sizePixels * pixelSpacing) / 10;
       sizeText.innerHTML = `
-        <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #fbbf24;">Brush Thickness</div>
+        <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #60a5fa;">Brush Thickness</div>
         <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
         <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(sizePixels)} px)</div>
       `;
