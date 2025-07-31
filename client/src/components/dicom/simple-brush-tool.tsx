@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { 
   adaptiveRegionGrow,
-  simpleIntensityFill,
+  adaptiveBrushStroke,
   smoothContourMask, 
   maskToContourPoints,
   polygonToMask,
@@ -471,13 +471,12 @@ export function SimpleBrushTool({
               pixelDataLength: floatPixelData.length
             });
             
-            // Simple preview using the same intensity fill
-            const previewMask = simpleIntensityFill(
+            // Create adaptive brush preview at current position
+            const previewMask = adaptiveBrushStroke(
               floatPixelData,
               imageCols,
               imageRows,
-              pixelX,
-              pixelY,
+              [{ x: pixelX, y: pixelY }], // Single point for preview
               brushSize
             );
             
@@ -505,7 +504,7 @@ export function SimpleBrushTool({
               hasMask: !!preview?.mask,
               maskSize: preview?.mask?.length,
               bounds: preview?.bounds,
-              nonZeroPixels: preview?.mask ? Array.from(preview.mask).filter(v => v > 0).length : 0
+              nonZeroPixels: preview?.mask ? Array.from(preview.mask).filter((v: any) => v > 0).length : 0
             });
             
             setAdaptivePreview(preview);
@@ -733,25 +732,14 @@ export function SimpleBrushTool({
           
           console.log("📦 Existing contours:", existingContours.length);
           
-          // Simple approach: just do intensity fill for each seed point
-          let finalMask = new Uint8Array(imageRows * imageCols);
-          
-          // Apply simple intensity fill for each seed point
-          for (const seed of seedPoints) {
-            const seedMask = simpleIntensityFill(
-              floatPixelData,
-              imageCols,
-              imageRows,
-              seed.x,
-              seed.y,
-              brushSize
-            );
-            
-            // Union with final mask
-            for (let i = 0; i < finalMask.length; i++) {
-              finalMask[i] = finalMask[i] || seedMask[i];
-            }
-          }
+          // Use adaptive brush stroke that changes radius based on intensity
+          const finalMask = adaptiveBrushStroke(
+            floatPixelData,
+            imageCols,
+            imageRows,
+            seedPoints,
+            brushSize
+          );
           
           // Smooth the resulting mask
           const smoothedMask = smoothContourMask(finalMask, imageCols, imageRows, 2);

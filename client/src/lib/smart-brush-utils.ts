@@ -9,58 +9,82 @@ interface Point {
 }
 
 /**
- * Simple intensity-based flood fill - much simpler approach
- * Just fills pixels within intensity tolerance and brush radius
+ * Adaptive brush that changes radius based on intensity
+ * Mimics Eclipse TPS behavior where brush size adapts to tissue boundaries
  */
-export function simpleIntensityFill(
+export function adaptiveBrushStroke(
   pixelData: Float32Array | Uint16Array | Uint8Array,
   width: number,
   height: number,
-  seedX: number,
-  seedY: number,
-  brushRadius: number
+  strokePoints: Point[],
+  baseRadius: number
 ): Uint8Array {
   const mask = new Uint8Array(width * height);
-  const cx = Math.round(seedX);
-  const cy = Math.round(seedY);
   
-  if (cx < 0 || cx >= width || cy < 0 || cy >= height) return mask;
-  
-  // Get intensity at seed point
-  const seedIntensity = pixelData[cy * width + cx];
-  
-  // Simple intensity tolerance (±30 for most tissues)
-  const tolerance = 30;
-  const minIntensity = seedIntensity - tolerance;
-  const maxIntensity = seedIntensity + tolerance;
-  
-  // Flood fill within brush radius
-  const visited = new Set<number>();
-  const queue: Point[] = [{ x: cx, y: cy }];
-  const radiusSquared = brushRadius * brushRadius;
-  
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const idx = current.y * width + current.x;
+  // For each point in the stroke
+  for (const point of strokePoints) {
+    const cx = Math.round(point.x);
+    const cy = Math.round(point.y);
     
-    if (visited.has(idx)) continue;
-    visited.add(idx);
+    if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
     
-    // Check if within brush radius
-    const dx = current.x - cx;
-    const dy = current.y - cy;
-    if (dx * dx + dy * dy > radiusSquared) continue;
+    // Get intensity at center point
+    const centerIntensity = pixelData[cy * width + cx];
     
-    // Check intensity
-    const intensity = pixelData[idx];
-    if (intensity >= minIntensity && intensity <= maxIntensity) {
-      mask[idx] = 255;
-      
-      // Add neighbors
-      if (current.x > 0) queue.push({ x: current.x - 1, y: current.y });
-      if (current.x < width - 1) queue.push({ x: current.x + 1, y: current.y });
-      if (current.y > 0) queue.push({ x: current.x, y: current.y - 1 });
-      if (current.y < height - 1) queue.push({ x: current.x, y: current.y + 1 });
+    // Adaptive radius based on local homogeneity
+    // In homogeneous areas (like inside organs), use full radius
+    // Near edges, reduce radius
+    let adaptiveRadius = baseRadius;
+    
+    // Check intensity variance in a small window
+    let variance = 0;
+    let count = 0;
+    const checkRadius = 5;
+    
+    for (let dy = -checkRadius; dy <= checkRadius; dy++) {
+      for (let dx = -checkRadius; dx <= checkRadius; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          const intensity = pixelData[y * width + x];
+          variance += Math.abs(intensity - centerIntensity);
+          count++;
+        }
+      }
+    }
+    
+    variance /= count;
+    
+    // Adapt radius based on variance
+    // High variance = near edge = smaller brush
+    // Low variance = homogeneous = larger brush
+    if (variance > 50) {
+      adaptiveRadius = baseRadius * 0.3; // 30% size at edges
+    } else if (variance > 30) {
+      adaptiveRadius = baseRadius * 0.6; // 60% size near edges
+    } else {
+      adaptiveRadius = baseRadius; // Full size in homogeneous regions
+    }
+    
+    // Paint circular brush at this point with adaptive radius
+    const radiusSquared = adaptiveRadius * adaptiveRadius;
+    
+    for (let dy = -Math.ceil(adaptiveRadius); dy <= Math.ceil(adaptiveRadius); dy++) {
+      for (let dx = -Math.ceil(adaptiveRadius); dx <= Math.ceil(adaptiveRadius); dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          const distSquared = dx * dx + dy * dy;
+          if (distSquared <= radiusSquared) {
+            // Additional intensity check - only paint similar intensities
+            const pixelIntensity = pixelData[y * width + x];
+            if (Math.abs(pixelIntensity - centerIntensity) < 100) {
+              mask[y * width + x] = 255;
+            }
+          }
+        }
+      }
     }
   }
   
