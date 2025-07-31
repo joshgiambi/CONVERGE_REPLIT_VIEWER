@@ -66,6 +66,7 @@ export function SimpleBrushTool({
   
   // Smart brush preview state - just the morphing shape points
   const [adaptivePreviewPoints, setAdaptivePreviewPoints] = useState<{x: number, y: number}[] | null>(null);
+  const previousPreviewPointsRef = useRef<{x: number, y: number}[] | null>(null);
   
   // Performance optimization: throttle mouse move events
   const lastUpdateTime = useRef(0);
@@ -475,13 +476,28 @@ export function SimpleBrushTool({
             );
             
             // Convert preview points back to canvas coordinates
-            const canvasPreviewPoints = previewPoints.map(p => ({
+            let canvasPreviewPoints = previewPoints.map(p => ({
               x: p.x + imageStartX,
               y: p.y + imageStartY
             }));
             
+            // Apply temporal smoothing to reduce jumpiness
+            if (previousPreviewPointsRef.current && 
+                previousPreviewPointsRef.current.length === canvasPreviewPoints.length) {
+              // Blend with previous frame for smooth transitions
+              const blendFactor = 0.7; // How much to keep from previous frame
+              canvasPreviewPoints = canvasPreviewPoints.map((point, i) => {
+                const prevPoint = previousPreviewPointsRef.current![i];
+                return {
+                  x: prevPoint.x * blendFactor + point.x * (1 - blendFactor),
+                  y: prevPoint.y * blendFactor + point.y * (1 - blendFactor)
+                };
+              });
+            }
+            
             // Only update if we have valid points
             if (canvasPreviewPoints.length > 2) {
+              previousPreviewPointsRef.current = canvasPreviewPoints;
               setAdaptivePreviewPoints(canvasPreviewPoints);
             }
           }

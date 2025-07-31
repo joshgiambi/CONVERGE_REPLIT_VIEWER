@@ -57,8 +57,8 @@ export function createAdaptivePreview(
   }
   
   const avgGradient = gradientCount > 0 ? gradientSum / gradientCount : 10;
-  // Lower threshold for more sensitivity
-  const adaptiveThreshold = Math.max(3, Math.min(10, avgGradient * 0.3));
+  // Moderate threshold to reduce jumpiness while still being responsive
+  const adaptiveThreshold = Math.max(5, Math.min(15, avgGradient * 0.5));
   
   // Sample more rays for smoother shape
   const numRays = 128; // Even more rays for smoother shape
@@ -102,11 +102,12 @@ export function createAdaptivePreview(
     // Adjust distance based on whether we hit a boundary or not
     let adjustedDistance = distance;
     if (distance >= radius * 0.9) {
-      // In homogeneous area - expand slightly
-      adjustedDistance = Math.min(radius * 1.1, distance * 1.05);
+      // In homogeneous area - expand very slightly
+      adjustedDistance = Math.min(radius * 1.05, distance * 1.02);
     } else {
-      // Hit a boundary - keep contracted
-      adjustedDistance = distance * 0.9;
+      // Hit a boundary - contract gradually based on how early we hit it
+      const contractionFactor = 0.7 + (distance / radius) * 0.25;
+      adjustedDistance = distance * contractionFactor;
     }
     
     shapePoints.push({
