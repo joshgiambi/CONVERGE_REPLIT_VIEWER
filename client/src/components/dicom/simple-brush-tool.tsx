@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { 
-  adaptiveRegionGrow, 
+  adaptiveRegionGrow,
+  simpleIntensityFill,
   smoothContourMask, 
   maskToContourPoints,
   polygonToMask,
@@ -470,21 +471,41 @@ export function SimpleBrushTool({
               pixelDataLength: floatPixelData.length
             });
             
-            const preview = createAdaptivePreview(
+            // Simple preview using the same intensity fill
+            const previewMask = simpleIntensityFill(
               floatPixelData,
               imageCols,
               imageRows,
               pixelX,
               pixelY,
-              brushSize, // Use full brush size for preview
-              30 // Gradient threshold
+              brushSize
             );
             
+            // Find bounds for efficient rendering
+            let minX = imageCols, minY = imageRows, maxX = 0, maxY = 0;
+            let hasPixels = false;
+            for (let y = 0; y < imageRows; y++) {
+              for (let x = 0; x < imageCols; x++) {
+                if (previewMask[y * imageCols + x]) {
+                  minX = Math.min(minX, x);
+                  minY = Math.min(minY, y);
+                  maxX = Math.max(maxX, x);
+                  maxY = Math.max(maxY, y);
+                  hasPixels = true;
+                }
+              }
+            }
+            
+            const preview = hasPixels ? {
+              mask: previewMask,
+              bounds: { minX, minY, maxX, maxY }
+            } : null;
+            
             console.log('🎯 Preview result:', {
-              hasMask: !!preview.mask,
-              maskSize: preview.mask.length,
-              bounds: preview.bounds,
-              nonZeroPixels: Array.from(preview.mask).filter(v => v > 0).length
+              hasMask: !!preview?.mask,
+              maskSize: preview?.mask?.length,
+              bounds: preview?.bounds,
+              nonZeroPixels: preview?.mask ? Array.from(preview.mask).filter(v => v > 0).length : 0
             });
             
             setAdaptivePreview(preview);
@@ -712,53 +733,24 @@ export function SimpleBrushTool({
           
           console.log("📦 Existing contours:", existingContours.length);
           
-          let finalMask: Uint8Array;
+          // Simple approach: just do intensity fill for each seed point
+          let finalMask = new Uint8Array(imageRows * imageCols);
           
-          if (existingContours.length > 0) {
-            // Convert existing contours to mask
-            const existingMask = new Uint8Array(imageRows * imageCols);
-            for (const contour of existingContours) {
-              if (contour.points && contour.points.length >= 9) {
-                const contourMask = polygonToMask(
-                  contour.points,
-                  imageCols,
-                  imageRows,
-                  imagePosition,
-                  pixelSpacing
-                );
-                // Union with existing mask
-                for (let i = 0; i < existingMask.length; i++) {
-                  existingMask[i] = existingMask[i] || contourMask[i];
-                }
-              }
+          // Apply simple intensity fill for each seed point
+          for (const seed of seedPoints) {
+            const seedMask = simpleIntensityFill(
+              floatPixelData,
+              imageCols,
+              imageRows,
+              seed.x,
+              seed.y,
+              brushSize
+            );
+            
+            // Union with final mask
+            for (let i = 0; i < finalMask.length; i++) {
+              finalMask[i] = finalMask[i] || seedMask[i];
             }
-            
-            // Apply adaptive region growing
-            const smartMask = adaptiveRegionGrow(
-              floatPixelData,
-              imageCols,
-              imageRows,
-              seedPoints,
-              brushSize, // Use full brush size
-              30,        // Gradient threshold
-              1000,      // Max iterations
-              300        // Hounsfield window for CT
-            );
-            
-            // Merge with existing mask
-            finalMask = mergeWithExistingMask(smartMask, existingMask, imageCols, imageRows, false);
-          } else {
-            // No existing contours, just use adaptive region
-            finalMask = adaptiveRegionGrow(
-              floatPixelData,
-              imageCols,
-              imageRows,
-              seedPoints,
-              brushSize,
-              30,
-              1000,
-              300
-            );
           }
           
           // Smooth the resulting mask

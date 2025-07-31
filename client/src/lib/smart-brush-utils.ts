@@ -9,6 +9,65 @@ interface Point {
 }
 
 /**
+ * Simple intensity-based flood fill - much simpler approach
+ * Just fills pixels within intensity tolerance and brush radius
+ */
+export function simpleIntensityFill(
+  pixelData: Float32Array | Uint16Array | Uint8Array,
+  width: number,
+  height: number,
+  seedX: number,
+  seedY: number,
+  brushRadius: number
+): Uint8Array {
+  const mask = new Uint8Array(width * height);
+  const cx = Math.round(seedX);
+  const cy = Math.round(seedY);
+  
+  if (cx < 0 || cx >= width || cy < 0 || cy >= height) return mask;
+  
+  // Get intensity at seed point
+  const seedIntensity = pixelData[cy * width + cx];
+  
+  // Simple intensity tolerance (±30 for most tissues)
+  const tolerance = 30;
+  const minIntensity = seedIntensity - tolerance;
+  const maxIntensity = seedIntensity + tolerance;
+  
+  // Flood fill within brush radius
+  const visited = new Set<number>();
+  const queue: Point[] = [{ x: cx, y: cy }];
+  const radiusSquared = brushRadius * brushRadius;
+  
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const idx = current.y * width + current.x;
+    
+    if (visited.has(idx)) continue;
+    visited.add(idx);
+    
+    // Check if within brush radius
+    const dx = current.x - cx;
+    const dy = current.y - cy;
+    if (dx * dx + dy * dy > radiusSquared) continue;
+    
+    // Check intensity
+    const intensity = pixelData[idx];
+    if (intensity >= minIntensity && intensity <= maxIntensity) {
+      mask[idx] = 255;
+      
+      // Add neighbors
+      if (current.x > 0) queue.push({ x: current.x - 1, y: current.y });
+      if (current.x < width - 1) queue.push({ x: current.x + 1, y: current.y });
+      if (current.y > 0) queue.push({ x: current.x, y: current.y - 1 });
+      if (current.y < height - 1) queue.push({ x: current.x, y: current.y + 1 });
+    }
+  }
+  
+  return mask;
+}
+
+/**
  * Compute gradient magnitude at a pixel using Sobel operator
  */
 function computeGradientMagnitude(
