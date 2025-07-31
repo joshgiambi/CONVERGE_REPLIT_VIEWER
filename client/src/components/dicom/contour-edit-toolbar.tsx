@@ -920,7 +920,7 @@ export function ContourEditToolbar({
   };
 
   return (
-    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
+    <div className="fixed left-4 top-20 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
       <div className="relative max-w-[90vw]">
         <div 
           className="backdrop-blur-md border rounded-xl px-3 py-2 shadow-2xl"
