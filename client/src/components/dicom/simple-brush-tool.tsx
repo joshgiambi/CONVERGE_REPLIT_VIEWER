@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { createAdaptivePreview } from "@/lib/smart-brush-utils";
+import { combineContours } from "@/lib/clipper-boolean-operations";
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -282,8 +283,8 @@ export function SimpleBrushTool({
       ctx.fill();
     }
 
-    // Draw current brush stroke - match actual output size
-    if (brushPointsRef.current.length > 0) {
+    // Draw current brush stroke - only for regular brush, not smart brush
+    if (brushPointsRef.current.length > 0 && !smartBrushEnabled) {
       ctx.strokeStyle = structureColor;
       const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
       
@@ -669,7 +670,24 @@ export function SimpleBrushTool({
     );
   };
 
-  const finalizeBrushStroke = () => {
+  // Helper function to calculate contour area
+  const calculateContourArea = (contour: number[]): number => {
+    let area = 0;
+    const n = contour.length / 3;
+    
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const x1 = contour[i * 3];
+      const y1 = contour[i * 3 + 1];
+      const x2 = contour[j * 3];
+      const y2 = contour[j * 3 + 1];
+      area += (x1 * y2 - x2 * y1);
+    }
+    
+    return Math.abs(area / 2);
+  };
+
+  const finalizeBrushStroke = async () => {
     try {
       if (!selectedStructure || !rtStructures?.structures) {
         console.log("Finalizing brush stroke: No structure selected");
@@ -693,43 +711,94 @@ export function SimpleBrushTool({
       if (smartBrushEnabled && adaptiveShapesRef.current.length > 0 && !isInEraseMode) {
         console.log(`Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
         
-        // Merge all adaptive shapes into a single contour
-        // Take the union of all collected adaptive shapes
-        const allPoints: { x: number; y: number }[] = [];
-        adaptiveShapesRef.current.forEach(shape => {
-          allPoints.push(...shape);
+        // Convert adaptive shapes to world coordinate contours for ClipperLib
+        const contours: number[][] = [];
+        
+        adaptiveShapesRef.current.forEach((shape) => {
+          if (shape.length > 2) {
+            const contour: number[] = [];
+            shape.forEach(p => {
+              const pixelX = (p.x - transform.offsetX) / transform.scale;
+              const pixelY = (p.y - transform.offsetY) / transform.scale;
+              const worldX = imagePosition[0] + (pixelX * colSpacing);
+              const worldY = imagePosition[1] + (pixelY * rowSpacing);
+              const worldZ = currentSlicePosition;
+              contour.push(worldX, worldY, worldZ);
+            });
+            contours.push(contour);
+          }
         });
         
-        // Remove duplicates and create a single unified contour
-        const uniquePoints = allPoints.filter((point, index, self) => 
-          index === self.findIndex(p => 
-            Math.abs(p.x - point.x) < 0.5 && Math.abs(p.y - point.y) < 0.5
-          )
-        );
+        if (contours.length === 0) {
+          console.log("No valid contours to merge");
+          return;
+        }
         
-        // Convert to world coordinates
-        const worldPoints = uniquePoints.map((point) => {
-          const pixelX = (point.x - transform.offsetX) / transform.scale;
-          const pixelY = (point.y - transform.offsetY) / transform.scale;
-          const worldX = imagePosition[0] + (pixelX * colSpacing);
-          const worldY = imagePosition[1] + (pixelY * rowSpacing);
-          const worldZ = currentSlicePosition;
-          return [worldX, worldY, worldZ];
-        });
+        // Use the async clipper boolean operation to merge all contours
+        try {
+          let mergedContours = [contours[0]];
+          
+          // Merge each subsequent contour with the result
+          for (let i = 1; i < contours.length; i++) {
+            const combinedResults: number[][] = [];
+            
+            // Combine the new contour with each existing merged contour
+            for (const existingContour of mergedContours) {
+              const result = await combineContours(existingContour, contours[i]);
+              combinedResults.push(...result);
+            }
+            
+            if (combinedResults.length > 0) {
+              mergedContours = combinedResults;
+            }
+          }
+          
+          // Take the largest resulting contour
+          let largestContour = mergedContours[0];
+          if (mergedContours.length > 1) {
+            let maxArea = 0;
+            for (const contour of mergedContours) {
+              const area = calculateContourArea(contour);
+              if (area > maxArea) {
+                maxArea = area;
+                largestContour = contour;
+              }
+            }
+          }
+          
+          console.log(`Smart brush completed: ${largestContour.length / 3} points for structure ${selectedStructure}`);
 
-        console.log(`Smart brush completed: ${worldPoints.length} points for structure ${selectedStructure}`);
-
-        // Send as replace contour action (creates a complete contour)
-        if (onContourUpdate) {
-          onContourUpdate({
-            action: "replace_contour",
-            structureId: selectedStructure,
-            slicePosition: currentSlicePosition,
-            pointCount: worldPoints.length,
-            points: worldPoints.flat(), // Flatten the array for the expected format
-            brushSize: brushSize,
-            isAdaptiveBrush: true,
+          // Send as replace contour action (creates a complete contour)
+          if (onContourUpdate) {
+            onContourUpdate({
+              action: "replace_contour",
+              structureId: selectedStructure,
+              slicePosition: currentSlicePosition,
+              pointCount: largestContour.length / 3,
+              points: largestContour,
+              brushSize: brushSize,
+              isAdaptiveBrush: true,
+            });
+          }
+        } catch (error) {
+          console.error("Error merging adaptive shapes:", error);
+          // Fall back to using all points without merging
+          const allPoints: number[] = [];
+          contours.forEach(contour => {
+            allPoints.push(...contour);
           });
+          
+          if (onContourUpdate) {
+            onContourUpdate({
+              action: "replace_contour",
+              structureId: selectedStructure,
+              slicePosition: currentSlicePosition,
+              pointCount: allPoints.length / 3,
+              points: allPoints,
+              brushSize: brushSize,
+              isAdaptiveBrush: true,
+            });
+          }
         }
       } 
       // Handle regular brush mode
