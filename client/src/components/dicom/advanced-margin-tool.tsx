@@ -338,23 +338,23 @@ export function AdvancedMarginTool({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-24 left-80 z-50">
-      <div className="backdrop-blur-sm border border-cyan-500/60 rounded-xl px-6 py-4 shadow-2xl bg-cyan-900/10 w-[520px] max-h-[80vh] overflow-y-auto">
+    <div className="fixed bottom-24 left-96 z-50">
+      <div className="backdrop-blur-md border border-cyan-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/80 w-[420px] max-h-[60vh] overflow-y-auto">
         
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
             <div 
-              className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
+              className="w-3 h-3 rounded border-2 border-white/60 shadow-sm"
               style={{ backgroundColor: selectedStructure?.color || '#22D3EE' }}
             />
-            <span className="text-white text-sm font-medium">Advanced Margin Tool</span>
+            <span className="text-white text-sm font-medium">Advanced Margin</span>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="h-6 w-6 p-0 text-white/60 hover:text-white hover:bg-white/10 rounded-lg"
+            className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"
           >
             <X size={14} />
           </Button>
