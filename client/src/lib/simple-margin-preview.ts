@@ -38,6 +38,30 @@ export async function applySimpleMarginPreview(
       throw new Error('Invalid contour points for margin operation');
     }
     
+    // Safety checks to prevent crashes
+    const pointCount = contourPoints.length / 3;
+    const MAX_SAFE_POINTS = 1000;
+    const MAX_SAFE_MARGIN = 100; // 100mm
+    
+    if (pointCount > MAX_SAFE_POINTS) {
+      console.warn(`🔹 ⚠️ Contour has ${pointCount} points, exceeds safe limit for preview. Using simplified processing.`);
+      // Use larger step size to reduce complexity
+      const skipFactor = Math.ceil(pointCount / MAX_SAFE_POINTS);
+      const simplifiedPoints: number[] = [];
+      for (let i = 0; i < contourPoints.length; i += skipFactor * 3) {
+        simplifiedPoints.push(contourPoints[i], contourPoints[i + 1], contourPoints[i + 2]);
+      }
+      contourPoints = simplifiedPoints;
+    }
+    
+    if (Math.abs(parameters.marginValue) > MAX_SAFE_MARGIN) {
+      console.warn(`🔹 ⚠️ Margin ${Math.abs(parameters.marginValue)}mm exceeds safe limit for preview, clamping to ${MAX_SAFE_MARGIN}mm`);
+      parameters = {
+        ...parameters,
+        marginValue: parameters.marginValue > 0 ? MAX_SAFE_MARGIN : -MAX_SAFE_MARGIN
+      };
+    }
+    
     // Convert margin from mm to pixels if pixel spacing is available
     let distanceInPixels = parameters.marginValue;
     if (parameters.pixelSpacing) {

@@ -50,13 +50,19 @@ export async function applyEnhancedMargin(
     hasImageContext: !!imageContext
   });
 
-  // For preview operations or large contours, use simple operations to prevent freezing
+  // For preview operations, large contours, or large margins, use simple operations to prevent freezing
   const pointCount = contourPoints.length / 3;
+  const marginSize = Math.abs(parameters.marginValues.uniform);
   const isLargeContour = pointCount > 100;
-  const shouldUseSimple = isLargeContour || parameters.preview?.enabled;
+  const isLargeMargin = marginSize > 50; // 50mm threshold
+  const shouldUseSimple = isLargeContour || isLargeMargin || parameters.preview?.enabled;
   
   if (shouldUseSimple) {
-    console.log('🔹 ⚡ Using simple operations for performance (large contour or preview mode)');
+    console.log('🔹 ⚡ Using simple operations for performance:', {
+      reason: isLargeContour ? 'large contour' : isLargeMargin ? 'large margin' : 'preview mode',
+      pointCount,
+      marginSize
+    });
     return applySimpleMarginOperation(contourPoints, parameters);
   }
 

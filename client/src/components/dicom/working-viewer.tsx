@@ -803,54 +803,99 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
 
-      // Try proper morphological operations first, then fallback
-      console.log('🔹 🧬 Attempting proper morphological margin operations for preview...');
+      // Add memory safety checks for morphological operations
+      const marginSize = Math.abs(parameters.marginValues.uniform);
+      const sliceThickness = imageContext?.sliceThickness || 3.0;
+      const estimatedDepth = Math.ceil(marginSize * 2 / sliceThickness);
+      const estimatedMemoryMB = (512 * 512 * estimatedDepth) / (1024 * 1024);
+      
+      console.log('🔹 🧮 Memory estimation:', {
+        marginSize,
+        sliceThickness,
+        estimatedDepth,
+        estimatedMemoryMB: estimatedMemoryMB.toFixed(1)
+      });
+
+      // Safety threshold: prevent operations that would use more than 100MB of memory
+      const MEMORY_LIMIT_MB = 100;
+      const shouldUseMorphological = marginSize <= 25 && estimatedMemoryMB < MEMORY_LIMIT_MB && allContours.length <= 100;
+
+      if (shouldUseMorphological) {
+        // Try proper morphological operations first, then fallback
+        console.log('🔹 🧬 Attempting proper morphological margin operations for preview...');
+        
+        try {
+          // Import proper morphological operations
+          const { applyProperMorphologicalMargin } = await import('@/lib/proper-morphological-margins');
+          
+          // Convert contours to proper format
+          const contours3D = allContours.map((contour: any) => ({
+            points: contour.points,
+            slicePosition: contour.slicePosition
+          }));
+          
+          // Prepare image metadata for morphological operations with reasonable limits
+          const morphImageMetadata = {
+            pixelSpacing: imageContext?.pixelSpacing || [1.171875, 1.171875], // Default HN-ATLAS spacing
+            sliceThickness: imageContext?.sliceThickness || 3.0,
+            imagePosition: imageContext?.imagePosition || [0, 0, 0],
+            imageSize: {
+              width: 512,   // Default CT image size
+              height: 512,
+              depth: Math.min(200, Math.max(50, estimatedDepth)) // Cap depth to prevent memory issues
+            }
+          };
+          
+          console.log('🔹 📊 Using morphological metadata:', morphImageMetadata);
+          
+          // Apply proper morphological margin operation with timeout
+          const morphPromise = applyProperMorphologicalMargin(
+            contours3D,
+            parameters.marginValues.uniform,
+            morphImageMetadata
+          );
+          
+          // Set a timeout to prevent indefinite processing
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Morphological operation timeout')), 10000)
+          );
+          
+          const expandedContours = await Promise.race([morphPromise, timeoutPromise]) as any[];
+          
+          // Convert back to preview format
+          for (const expandedContour of expandedContours) {
+            previewContoursWithSlices.push({
+              points: expandedContour.points,
+              slicePosition: expandedContour.slicePosition
+            });
+          }
+          
+          console.log(`🔹 🧬 ✅ Proper morphological operation created ${expandedContours.length} preview contours (artifact-free)`);
+          
+        } catch (error) {
+          console.warn('🔹 ⚠️ Morphological operation failed, falling back to simple operations:', error);
+          
+          // Clear any partial results and fall through to simple operations
+          previewContoursWithSlices.length = 0;
+          throw error; // Re-throw to trigger fallback
+        }
+      } else {
+        console.log('🔹 ⚠️ Skipping morphological operations due to memory/size constraints, using simple fallback');
+        throw new Error('Using simple fallback due to constraints');
+      }
+
+    } catch (error) {
+      console.warn('🔹 ⚠️ Advanced morphological preview failed, using simple fallback:', error);
+      
+      // Clear any partial results
+      const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
       
       try {
-        // Import proper morphological operations
-        const { applyProperMorphologicalMargin } = await import('@/lib/proper-morphological-margins');
-        
-        // Convert contours to proper format
-        const contours3D = allContours.map((contour: any) => ({
-          points: contour.points,
-          slicePosition: contour.slicePosition
-        }));
-        
-        // Prepare image metadata for morphological operations
-        const morphImageMetadata = {
-          pixelSpacing: imageContext?.pixelSpacing || [1.171875, 1.171875], // Default HN-ATLAS spacing
-          sliceThickness: imageContext?.sliceThickness || 3.0,
-          imagePosition: imageContext?.imagePosition || [0, 0, 0],
-          imageSize: {
-            width: 512,   // Default CT image size
-            height: 512,
-            depth: Math.max(50, Math.ceil(Math.abs(parameters.marginValues.uniform) * 2 / (imageContext?.sliceThickness || 3.0)))
-          }
-        };
-        
-        console.log('🔹 📊 Using morphological metadata:', morphImageMetadata);
-        
-        // Apply proper morphological margin operation
-        const expandedContours = await applyProperMorphologicalMargin(
-          contours3D,
-          parameters.marginValues.uniform,
-          morphImageMetadata
-        );
-        
-        // Convert back to preview format
-        for (const expandedContour of expandedContours) {
-          previewContoursWithSlices.push({
-            points: expandedContour.points,
-            slicePosition: expandedContour.slicePosition
-          });
-        }
-        
-        console.log(`🔹 🧬 ✅ Proper morphological operation created ${expandedContours.length} preview contours (artifact-free)`);
-        
-      } catch (error) {
-        console.warn('🔹 ⚠️ Morphological operation failed, falling back to simple operations:', error);
+        // Import simple margin preview operations
+        const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
         
         // Fallback to simple slice-by-slice operations
+        const allContours = structure?.contours || [];
         for (const contour of allContours) {
           if (!contour.points || contour.points.length < 9) {
             console.log('🔹 ⚠️ Skipping contour with insufficient points');
@@ -872,15 +917,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           console.log(`🔹 ✅ Generated simple margin preview contour with ${result.contourPoints.length / 3} points for slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
         }
+        
+      } catch (fallbackError) {
+        console.error('🔹 ❌ Even simple margin preview failed:', fallbackError);
+        return; // Exit completely if all operations fail
       }
-
+      
       // Set preview contours for rendering - ensure 3D structure is preserved
       console.log(`🔹 📊 Preview contours prepared:`, {
         totalContours: previewContoursWithSlices.length,
-        sliceRange: {
+        sliceRange: previewContoursWithSlices.length > 0 ? {
           min: Math.min(...previewContoursWithSlices.map(c => c.slicePosition)),
           max: Math.max(...previewContoursWithSlices.map(c => c.slicePosition))
-        },
+        } : { min: 0, max: 0 },
         pointsPerContour: previewContoursWithSlices.map(c => c.points.length / 3)
       });
       
@@ -892,13 +941,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }));
       
       setPreviewContours(structuredPreviewContours as any);
-      console.log(`🔹 ✅ Set ${structuredPreviewContours.length} advanced margin preview contours for 3D rendering`);
-      console.log('🔹 🎨 Sample preview contour data:', structuredPreviewContours.slice(0, 1)); // Show first one for debugging
-
-    } catch (error) {
-      console.error(`🔹 ❌ Error generating advanced margin preview:`, error);
-      console.error('🔹 📋 Error stack:', (error as Error)?.stack || 'No stack trace available');
+      console.log(`🔹 ✅ Set ${structuredPreviewContours.length} simple margin preview contours for 3D rendering`);
+      return;
     }
+
+    // Only execute this if morphological operations succeeded
+    // Set preview contours for rendering - ensure 3D structure is preserved
+    console.log(`🔹 📊 Preview contours prepared:`, {
+      totalContours: previewContoursWithSlices.length,
+      sliceRange: previewContoursWithSlices.length > 0 ? {
+        min: Math.min(...previewContoursWithSlices.map(c => c.slicePosition)),
+        max: Math.max(...previewContoursWithSlices.map(c => c.slicePosition))
+      } : { min: 0, max: 0 },
+      pointsPerContour: previewContoursWithSlices.map(c => c.points.length / 3)
+    });
+    
+    // Ensure preview contours are properly structured for 3D rendering
+    const structuredPreviewContours = previewContoursWithSlices.map(contour => ({
+      points: contour.points,
+      slicePosition: contour.slicePosition,
+      previewMargin: parameters.marginValues.uniform // Add margin info for renderer
+    }));
+    
+    setPreviewContours(structuredPreviewContours as any);
+    console.log(`🔹 ✅ Set ${structuredPreviewContours.length} advanced margin preview contours for 3D rendering`);
+    console.log('🔹 🎨 Sample preview contour data:', structuredPreviewContours.slice(0, 1)); // Show first one for debugging
   };
 
   // Handle advanced margin execution operation

@@ -204,54 +204,124 @@ export function growContourSimple(contour: number[], distance: number): number[]
     const z = contour[2] || 0;
     const polygon = contourToPolygon(contour);
     
-    // Use absolute distance for buffering operations
+    // Input validation
+    if (polygon.length < 3) {
+      console.warn('🔹 ⚠️ Invalid polygon with less than 3 points');
+      return contour;
+    }
+    
+    // Safety check: prevent extremely large operations that could crash the app
     const absDistance = Math.abs(distance);
+    const MAX_SAFE_MARGIN = 100; // 100mm maximum
+    const MAX_POINTS = 1000; // Maximum points to prevent memory issues
+    
+    if (absDistance > MAX_SAFE_MARGIN) {
+      console.warn(`🔹 ⚠️ Margin ${absDistance}mm exceeds safe limit ${MAX_SAFE_MARGIN}mm, clamping`);
+      distance = distance > 0 ? MAX_SAFE_MARGIN : -MAX_SAFE_MARGIN;
+    }
+    
+    if (polygon.length > MAX_POINTS) {
+      console.warn(`🔹 ⚠️ Input polygon has ${polygon.length} points, exceeds safe limit ${MAX_POINTS}, simplifying`);
+      // Simplify by taking every nth point to reduce complexity
+      const skipFactor = Math.ceil(polygon.length / MAX_POINTS);
+      const simplifiedPolygon: [number, number][] = [];
+      for (let i = 0; i < polygon.length; i += skipFactor) {
+        simplifiedPolygon.push(polygon[i]);
+      }
+      polygon.length = 0;
+      polygon.push(...simplifiedPolygon);
+    }
+    
     const isGrowing = distance > 0;
     
-    console.log(`🔹 ${isGrowing ? 'Growing' : 'Shrinking'} by ${absDistance}mm`);
+    console.log(`🔹 ${isGrowing ? 'Growing' : 'Shrinking'} by ${Math.abs(distance)}mm`);
     
     // For very small distances, just return original
-    if (absDistance < 0.1) {
+    if (Math.abs(distance) < 0.1) {
       console.log('🔹 Distance too small, returning original');
       return contour;
     }
     
-    // Create multiple offset layers for smoother results
-    // Fixed: Reduce layer count for larger distances to prevent instability
-    const baseLayerCount = Math.min(10, Math.max(3, Math.ceil(absDistance / 2.0)));
-    const layers = absDistance > 5.0 ? Math.max(3, Math.ceil(baseLayerCount / 2)) : baseLayerCount;
-    const stepDistance = absDistance / layers;
+    // Simplified approach: use fewer layers for performance and stability
+    // Cap the number of layers to prevent excessive computation
+    const maxLayers = 5; // Reduced from 10
+    const baseLayerCount = Math.min(maxLayers, Math.max(2, Math.ceil(Math.abs(distance) / 3.0)));
+    const layers = Math.abs(distance) > 10.0 ? 2 : baseLayerCount; // Use only 2 layers for large margins
+    const stepDistance = distance / layers;
     
-    console.log(`🔹 📊 Using ${layers} layers with step distance ${stepDistance.toFixed(3)}mm for stability`);
+    console.log(`🔹 📊 Using ${layers} layers with step distance ${stepDistance.toFixed(3)}mm for performance`);
     
     let currentPolygon = polygon;
+    let operationCount = 0;
+    const MAX_OPERATIONS = 20; // Prevent infinite loops
     
-    // Apply buffering in small steps for smoother results
-    for (let i = 0; i < layers; i++) {
+    // Apply buffering in small steps with performance monitoring
+    const startTime = performance.now();
+    const MAX_PROCESSING_TIME = 5000; // 5 seconds maximum
+    
+    for (let i = 0; i < layers && operationCount < MAX_OPERATIONS; i++) {
+      // Check processing time to prevent hangs
+      if (performance.now() - startTime > MAX_PROCESSING_TIME) {
+        console.warn('🔹 ⚠️ Processing time exceeded limit, stopping early');
+        break;
+      }
+      
       const layerDistance = isGrowing ? stepDistance : -stepDistance;
       const newPolygon = bufferPolygon(currentPolygon, layerDistance);
+      operationCount++;
       
-      // Check if buffering produced a valid result
-      if (newPolygon.length >= 3) {
+      // Validate result
+      if (newPolygon.length >= 3 && newPolygon.length <= MAX_POINTS) {
         currentPolygon = newPolygon;
         
-        // Apply smoothing every layer for better results
-        currentPolygon = smoothPolygon(currentPolygon);
+        // Apply limited smoothing only for small polygons
+        if (currentPolygon.length <= 200) {
+          currentPolygon = smoothPolygon(currentPolygon);
+          operationCount++;
+        }
+      } else {
+        console.warn(`🔹 ⚠️ Layer ${i} produced invalid result (${newPolygon.length} points), stopping early`);
+        break;
       }
     }
     
-    // Apply final smoothing and self-intersection removal
-    currentPolygon = smoothPolygon(currentPolygon);
-    currentPolygon = removeSelfIntersections(currentPolygon);
-    currentPolygon = smoothPolygon(currentPolygon); // Final smoothing after intersection removal
+    // Apply final cleanup only if polygon is manageable size
+    if (currentPolygon.length <= 500) {
+      try {
+        // Light smoothing
+        currentPolygon = smoothPolygon(currentPolygon);
+        
+        // Simple self-intersection removal with timeout
+        const cleanupStart = performance.now();
+        currentPolygon = removeSelfIntersections(currentPolygon);
+        
+        // Final smoothing only if cleanup was fast
+        if (performance.now() - cleanupStart < 100) { // 100ms limit
+          currentPolygon = smoothPolygon(currentPolygon);
+        }
+      } catch (cleanupError) {
+        console.warn('🔹 ⚠️ Cleanup operations failed, using raw result:', cleanupError);
+      }
+    } else {
+      console.log('🔹 ⚡ Skipping cleanup for large polygon to maintain performance');
+    }
     
     const result = polygonToContour(currentPolygon, z);
-    console.log(`🔹 ✅ Contour ${isGrowing ? 'grown' : 'shrunk'} from ${contour.length/3} to ${result.length/3} points`);
+    const processingTime = performance.now() - startTime;
+    
+    console.log(`🔹 ✅ Contour ${isGrowing ? 'grown' : 'shrunk'} from ${contour.length/3} to ${result.length/3} points in ${processingTime.toFixed(1)}ms`);
+    
+    // Final validation
+    if (result.length < 9) {
+      console.warn('🔹 ⚠️ Result too small, returning original contour');
+      return contour;
+    }
     
     return result;
     
   } catch (error) {
     console.error('🔹 ❌ Grow operation failed:', error);
+    console.error('🔹 📋 Stack trace:', (error as Error)?.stack);
     return contour; // Return original if operation fails
   }
 }
