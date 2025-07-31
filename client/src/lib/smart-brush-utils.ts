@@ -9,61 +9,9 @@ interface Point {
 }
 
 /**
- * Calculate adaptive radius based on local tissue characteristics
- * Returns the adapted radius for a given position
- */
-export function calculateAdaptiveRadius(
-  pixelData: Float32Array | Uint16Array | Uint8Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  baseRadius: number
-): number {
-  const cx = Math.round(x);
-  const cy = Math.round(y);
-  
-  if (cx < 0 || cx >= width || cy < 0 || cy >= height) return baseRadius;
-  
-  // Get intensity at center point
-  const centerIntensity = pixelData[cy * width + cx];
-  
-  // Check intensity variance in a small window
-  let variance = 0;
-  let count = 0;
-  const checkRadius = 3; // Smaller window for faster response
-  
-  for (let dy = -checkRadius; dy <= checkRadius; dy++) {
-    for (let dx = -checkRadius; dx <= checkRadius; dx++) {
-      const px = cx + dx;
-      const py = cy + dy;
-      if (px >= 0 && px < width && py >= 0 && py < height) {
-        const intensity = pixelData[py * width + px];
-        variance += Math.abs(intensity - centerIntensity);
-        count++;
-      }
-    }
-  }
-  
-  variance /= count;
-  
-  // Adapt radius based on variance (inverted from Eclipse description)
-  // High variance = near edge = smaller brush
-  // Low variance = homogeneous = larger brush
-  if (variance > 80) {
-    return baseRadius * 0.3; // 30% size at edges
-  } else if (variance > 40) {
-    return baseRadius * 0.5; // 50% size near edges  
-  } else if (variance > 20) {
-    return baseRadius * 0.7; // 70% size in transition
-  } else {
-    return baseRadius; // Full size in homogeneous regions
-  }
-}
-
-/**
- * Adaptive brush stroke - paints with dynamically sized brush
- * Creates a clean continuous stroke without overlaps
+ * Eclipse-style adaptive brush stroke
+ * Paints within a fixed radius but only on similar tissue types
+ * The brush morphs and squishes based on grayscale differences
  */
 export function adaptiveBrushStroke(
   pixelData: Float32Array | Uint16Array | Uint8Array,
@@ -75,6 +23,9 @@ export function adaptiveBrushStroke(
   const mask = new Uint8Array(width * height);
   const painted = new Set<number>(); // Track painted pixels to avoid overlaps
   
+  // Intensity threshold for considering pixels as "similar tissue"
+  const intensityThreshold = 100; // Adjust based on typical HU differences between tissues
+  
   // For each point in the stroke
   for (let i = 0; i < strokePoints.length; i++) {
     const point = strokePoints[i];
@@ -83,22 +34,30 @@ export function adaptiveBrushStroke(
     
     if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
     
-    // Get adaptive radius for this position
-    const adaptiveRadius = calculateAdaptiveRadius(pixelData, width, height, cx, cy, baseRadius);
+    // Get intensity at center point (where user clicked)
+    const centerIntensity = pixelData[cy * width + cx];
     
-    // Paint circular brush at this point
-    const radiusSquared = adaptiveRadius * adaptiveRadius;
+    // Paint within circular radius, but only similar intensities
+    const radiusSquared = baseRadius * baseRadius;
     
-    for (let dy = -Math.ceil(adaptiveRadius); dy <= Math.ceil(adaptiveRadius); dy++) {
-      for (let dx = -Math.ceil(adaptiveRadius); dx <= Math.ceil(adaptiveRadius); dx++) {
+    for (let dy = -Math.ceil(baseRadius); dy <= Math.ceil(baseRadius); dy++) {
+      for (let dx = -Math.ceil(baseRadius); dx <= Math.ceil(baseRadius); dx++) {
         const x = cx + dx;
         const y = cy + dy;
         
         if (x >= 0 && x < width && y >= 0 && y < height) {
           const distSquared = dx * dx + dy * dy;
+          
+          // Check if within circular radius
           if (distSquared <= radiusSquared) {
             const idx = y * width + x;
-            if (!painted.has(idx)) { // Only paint if not already painted
+            const pixelIntensity = pixelData[idx];
+            
+            // Only paint if:
+            // 1. Not already painted
+            // 2. Intensity is similar to center (same tissue type)
+            if (!painted.has(idx) && 
+                Math.abs(pixelIntensity - centerIntensity) < intensityThreshold) {
               mask[idx] = 255;
               painted.add(idx);
             }
