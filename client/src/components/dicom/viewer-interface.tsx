@@ -582,7 +582,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }}
             secondarySeriesId={secondarySeriesId}
             onSecondarySeriesSelect={setSecondarySeriesId}
-            preventRTLoading={true}
+            preventRTLoading={false}
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
             // Pass localization mode to highlight when active
             localizationMode={showLocalizationTool}
