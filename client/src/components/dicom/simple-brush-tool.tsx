@@ -665,14 +665,18 @@ export function SimpleBrushTool({
     const handleMouseDown = (e: MouseEvent) => {
       console.log("🖱️ Mouse down event triggered, button:", e.button, "selectedStructure:", selectedStructure, "isAdjustingSize:", isAdjustingSize);
       if (e.button === 0 && selectedStructure && !isAdjustingSize) {
+        console.log("✅ Entering drawing mode");
         // Left click and structure selected
         e.preventDefault();
         e.stopPropagation();
         setIsDrawing(true);
+        console.log("✅ Set isDrawing to true");
         const coords = getCanvasCoords(e);
+        console.log("✅ Got canvas coords:", coords);
         brushPointsRef.current = [coords];
         adaptiveShapesRef.current = []; // Clear adaptive shapes for new stroke
         
+        console.log("🎨 Smart brush enabled:", smartBrushEnabled);
         if (smartBrushEnabled) {
           console.log("🎨 Smart brush stroke started - adaptive shapes cleared");
         }
