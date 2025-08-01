@@ -710,6 +710,7 @@ export function SimpleBrushTool({
 
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawingRef.current) {
+        console.log(`🛑 Mouse up - finalizing stroke. Smart brush enabled: ${smartBrushEnabled}, Adaptive shapes collected: ${adaptiveShapesRef.current.length}`);
         finalizeBrushStroke();
         setIsDrawing(false);
         isDrawingRef.current = false; // Clear the ref too
