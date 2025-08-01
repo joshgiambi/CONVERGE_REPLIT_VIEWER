@@ -588,6 +588,7 @@ export function SimpleBrushTool({
               // If drawing with smart brush, collect this adaptive shape
               if (isDrawing && smartBrushEnabled) {
                 adaptiveShapesRef.current.push(canvasPreviewPoints);
+                console.log(`Collected adaptive shape #${adaptiveShapesRef.current.length} with ${canvasPreviewPoints.length} points`);
                 
                 // Send all collected adaptive shapes as preview during drawing
                 if (onPreviewUpdate && canvasRef.current) {
@@ -668,6 +669,10 @@ export function SimpleBrushTool({
         const coords = getCanvasCoords(e);
         brushPointsRef.current = [coords];
         adaptiveShapesRef.current = []; // Clear adaptive shapes for new stroke
+        
+        if (smartBrushEnabled) {
+          console.log("🎨 Smart brush stroke started - adaptive shapes cleared");
+        }
         
         // For standard brush, start collecting points
         if (!smartBrushEnabled) {
@@ -839,7 +844,8 @@ export function SimpleBrushTool({
 
       // Handle smart brush mode
       if (smartBrushEnabled && adaptiveShapesRef.current.length > 0 && !isInEraseMode) {
-        console.log(`Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
+        console.log(`🎨 Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
+        console.log(`🎨 Adaptive shapes point counts: ${adaptiveShapesRef.current.map(shape => shape.length).join(', ')}`);
         
         // Convert adaptive shapes to world coordinate contours for ClipperLib
         const contours: number[][] = [];
