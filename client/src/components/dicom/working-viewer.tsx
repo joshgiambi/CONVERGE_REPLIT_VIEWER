@@ -35,76 +35,17 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 
-// Helper function to check if two polygons intersect
-function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
-  // Convert flat arrays to points
-  const points1: [number, number][] = [];
-  const points2: [number, number][] = [];
-  
-  for (let i = 0; i < polygon1.length; i += 3) {
-    points1.push([polygon1[i], polygon1[i + 1]]);
-  }
-  
-  for (let i = 0; i < polygon2.length; i += 3) {
-    points2.push([polygon2[i], polygon2[i + 1]]);
-  }
-  
-  // Check if any point from polygon1 is inside polygon2 or vice versa
-  for (const point of points1) {
-    if (isPointInPolygon(point, points2)) {
-      return true;
-    }
-  }
-  
-  for (const point of points2) {
-    if (isPointInPolygon(point, points1)) {
-      return true;
-    }
-  }
-  
-  // Check if any edges intersect
-  for (let i = 0; i < points1.length; i++) {
-    const a1 = points1[i];
-    const a2 = points1[(i + 1) % points1.length];
-    
-    for (let j = 0; j < points2.length; j++) {
-      const b1 = points2[j];
-      const b2 = points2[(j + 1) % points2.length];
-      
-      if (doSegmentsIntersect(a1, a2, b1, b2)) {
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
+// Debug flag - set to true in development, false in production
+const DEBUG = process.env.NODE_ENV !== 'production';
 
-// Helper function to check if a point is inside a polygon
-function isPointInPolygon(point: [number, number], polygon: [number, number][]): boolean {
-  let inside = false;
-  const [x, y] = point;
-  
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
-    
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  
-  return inside;
-}
+// Typed preview contour interface for consistency
+type PreviewContour = { 
+  points: number[]; 
+  slicePosition: number; 
+  meta?: { margin?: number; type?: string };
+};
 
-// Helper function to check if two line segments intersect
-function doSegmentsIntersect(a1: [number, number], a2: [number, number], b1: [number, number], b2: [number, number]): boolean {
-  const ccw = (A: [number, number], B: [number, number], C: [number, number]) => {
-    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0]);
-  };
-  
-  return ccw(a1, b1, b2) !== ccw(a2, b1, b2) && ccw(a1, a2, b1) !== ccw(a1, a2, b2);
-}
+// Using doPolygonsIntersectSimple from simple-polygon-operations for consistency
 
 interface WorkingViewerProps {
   seriesId: number;
@@ -136,6 +77,7 @@ interface WorkingViewerProps {
     smartBrushEnabled?: boolean;
   }) => void;
   onContourUpdate?: (updatedStructures: any) => void;
+  onRTStructureUpdate?: (structures: any) => Promise<void>;
   contourSettings?: { width: number; opacity: number };
   autoZoomLevel?: number;
   autoLocalizeTarget?: { x: number; y: number; z: number };
@@ -169,6 +111,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onBrushSizeChange,
     onBrushToolChange,
     onContourUpdate,
+    onRTStructureUpdate,
     contourSettings,
     autoZoomLevel,
     autoLocalizeTarget,
@@ -204,7 +147,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
-  const [previewContours, setPreviewContours] = useState<Array<{points: number[], slicePosition: number} | number[]>>([]);
+  const [previewContours, setPreviewContours] = useState<PreviewContour[]>([]);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -317,6 +260,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
+  
+  // Optimized rendering with cached LUT and offscreen canvas
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cachedLUTRef = useRef<{ key: string; lut: Uint8Array } | null>(null);
 
 
 
@@ -338,12 +285,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     const { operation, sourceStructureId, targetStructureId, slicePosition } = payload;
-    console.log(
+    if (DEBUG) console.log(
       `Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`,
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
 
     // Find the source and target structures
     const sourceStructure = updatedRTStructures.structures?.find(
@@ -360,10 +307,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Find contours on the specified slice for both structures
     const sourceContour = sourceStructure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
     );
     const targetContour = targetStructure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
     );
 
     if (!sourceContour || !sourceContour.points || sourceContour.points.length < 9) {
@@ -421,12 +368,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     const { structureId, slicePosition, marginParams } = payload;
-    console.log(
+    if (DEBUG) console.log(
       `Applying ${marginParams.marginType} margin operation to structure ${structureId} at slice ${slicePosition}`,
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(
@@ -439,9 +386,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     // Find contour on current slice
-    const tolerance = 1.5;
     const contour = structure.contours.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) <= tolerance,
+      (c: any) => Math.abs(c.slicePosition - slicePosition) <= SLICE_TOL_MM,
     );
 
     if (!contour || !contour.points || contour.points.length === 0) {
@@ -528,7 +474,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Find the contour for the specified slice
     const contour = structure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
     );
 
     if (!contour || !contour.points || contour.points.length < 9) {
@@ -557,7 +503,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       // Set preview contours for rendering
-      setPreviewContours([previewPoints]);
+      setPreviewContours([{
+        points: previewPoints,
+        slicePosition: slicePosition,
+        meta: { type: 'grow_preview' }
+      }]);
       
       console.log(`🔹 ✅ Generated preview with ${previewPoints.length / 3} points`);
       
@@ -575,12 +525,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const { structureId, slicePosition, distance, direction = 'all' } = payload;
     const isGrowing = distance > 0;
-    console.log(
+    if (DEBUG) console.log(
       `${isGrowing ? 'Growing' : 'Shrinking'} contour for structure ${structureId} by ${Math.abs(distance)}mm ${direction !== 'all' ? `in ${direction} direction` : 'in all directions'} at slice ${slicePosition}`,
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+    const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(
@@ -593,7 +543,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Find the contour for the specified slice
     const contour = structure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < 0.5,
+      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
     );
 
     if (!contour || !contour.points || contour.points.length < 9) {
@@ -981,7 +931,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
 
       // Create a deep copy of RT structures to avoid mutation
-      const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+      const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
 
       // Find the target structure
       const structure = updatedRTStructures.structures?.find(
@@ -1053,12 +1003,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const { structureId, distance, direction = 'all' } = payload;
     const isGrowing = distance > 0;
-    console.log(
+    if (DEBUG) console.log(
       `🔹 ${isGrowing ? 'Growing' : 'Shrinking'} ENTIRE STRUCTURE ${structureId} by ${Math.abs(distance)}mm on ALL slices`,
     );
 
     // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = JSON.parse(JSON.stringify(localRTStructures));
+    const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
 
     // Find the target structure
     const structure = updatedRTStructures.structures?.find(
@@ -1327,7 +1277,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     // Create a deep copy to avoid mutations
-    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
 
     if (payload.action === "brush_stroke") {
       // Handle brush stroke - add points to contour
@@ -1859,10 +1809,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!structure) return;
 
       // Find and replace the contour on current slice
-      const tolerance = 1.5;
       const contourIndex = structure.contours.findIndex(
         (c: any) =>
-          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
+          Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM,
       );
 
       if (contourIndex >= 0) {
@@ -1896,11 +1845,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!structure) return;
 
       // Replace all contours at this slice with the merged result
-      const tolerance = 1.5;
       
       // Remove all existing contours at this slice
       structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
       );
 
       // Add the merged contours from the boolean operation
@@ -1927,11 +1875,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!structure) return;
 
       // Replace all contours at this slice with the subtraction result
-      const tolerance = 1.5;
       
       // Remove all existing contours at this slice
       structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
       );
 
       // Add the resulting contours from the boolean operation
@@ -1987,10 +1934,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Before delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
       
       // Remove contour at specified slice position for this structure only - tight tolerance
-      const tolerance = 0.1;
       const originalLength = structure.contours.length;
       structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
       );
 
       const deletedCount = originalLength - structure.contours.length;
@@ -2501,6 +2447,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Separate effect for window level changes - only re-render, don't reload metadata
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
+      // Clear MPR cache on window/level change for proper updates
+      if (mprCacheRef.current.size > 0) {
+        if (DEBUG) console.log('Clearing MPR cache due to window/level change');
+        mprCacheRef.current.clear();
+      }
       scheduleRender();
     }
   }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading]);
@@ -3548,10 +3499,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     width: number,
     height: number,
   ) => {
-    // Create image data at original size
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
     // Get rescale parameters for proper HU conversion
     const { slope, intercept } = getRescaleParams(imageMetadata);
 
@@ -3559,22 +3506,40 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const { width: windowWidth, center: windowCenter } = currentWindowLevel;
     const min = windowCenter - windowWidth / 2;
     const max = windowCenter + windowWidth / 2;
-
-    for (let i = 0; i < pixelArray.length; i++) {
-      // Apply rescale slope and intercept to get HU value
-      const hu = pixelArray[i] * slope + intercept;
-
-      // Apply windowing
-      let normalizedValue;
-      if (hu <= min) {
-        normalizedValue = 0;
-      } else if (hu >= max) {
-        normalizedValue = 255;
-      } else {
-        normalizedValue = ((hu - min) / windowWidth) * 255;
+    
+    // Create/update cached LUT if window/level changed
+    const lutKey = `${windowWidth}-${windowCenter}-${slope}-${intercept}`;
+    let lut: Uint8Array;
+    
+    if (cachedLUTRef.current?.key === lutKey) {
+      lut = cachedLUTRef.current.lut;
+    } else {
+      // Build new LUT
+      lut = new Uint8Array(65536);
+      for (let i = 0; i < 65536; i++) {
+        const hu = (i - 32768) * slope + intercept;
+        let normalizedValue;
+        if (hu <= min) {
+          normalizedValue = 0;
+        } else if (hu >= max) {
+          normalizedValue = 255;
+        } else {
+          normalizedValue = ((hu - min) / windowWidth) * 255;
+        }
+        lut[i] = Math.max(0, Math.min(255, normalizedValue));
       }
+      cachedLUTRef.current = { key: lutKey, lut };
+    }
+    
+    // Create image data at original size
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
 
-      const gray = Math.max(0, Math.min(255, normalizedValue));
+    // Apply LUT to pixel data
+    for (let i = 0; i < pixelArray.length; i++) {
+      // Convert Float32 to Uint16 index for LUT
+      const pixelValue = Math.max(0, Math.min(65535, Math.round(pixelArray[i] + 32768)));
+      const gray = lut[pixelValue];
 
       const pixelIndex = i * 4;
       data[pixelIndex] = gray; // R
@@ -3583,10 +3548,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       data[pixelIndex + 3] = 255; // A
     }
 
-    // Create a temporary canvas for the original image
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width;
-    tempCanvas.height = height;
+    // Reuse offscreen canvas if possible
+    if (!offscreenCanvasRef.current || 
+        offscreenCanvasRef.current.width !== width || 
+        offscreenCanvasRef.current.height !== height) {
+      offscreenCanvasRef.current = document.createElement("canvas");
+      offscreenCanvasRef.current.width = width;
+      offscreenCanvasRef.current.height = height;
+    }
+    
+    const tempCanvas = offscreenCanvasRef.current;
     const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
     if (!tempCtx) return;
 
@@ -4189,9 +4160,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Render MPR views with current window/level settings
           await Promise.all([
-            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, windowWidth, windowCenter),
-            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, windowWidth, windowCenter)
-          ]);
+            sagittalCanvasRef.current && renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, windowWidth, windowCenter),
+            coronalCanvasRef.current && renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, windowWidth, windowCenter)
+          ].filter(Boolean));
         } catch (error) {
           console.error("Error updating MPR views:", error);
         } finally {
@@ -4467,7 +4438,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
     
     // Deep copy and add the predicted contour
-    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
     const updatedTestStructure = updatedStructures.structures.find((s: any) => s.roiNumber === 943);
     if (updatedTestStructure) {
       updatedTestStructure.contours.push(predictedContour);
@@ -4493,10 +4464,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handlePredictionConfirm = (structureId: number, slicePosition: number) => {
     if (!rtStructures) return;
     
-    console.log(`🔄 Confirming prediction for structure ${structureId} at slice ${slicePosition}`);
+    if (DEBUG) console.log(`🔄 Confirming prediction for structure ${structureId} at slice ${slicePosition}`);
     
     // Deep copy the structures
-    const updatedStructures = JSON.parse(JSON.stringify(rtStructures));
+    const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
     
     // Find the structure and contour to confirm
     const structure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);

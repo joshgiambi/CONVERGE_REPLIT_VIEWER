@@ -3,6 +3,14 @@
 ## Overview
 Superbeam is a full-stack DICOM medical imaging application built with React, Express.js, and PostgreSQL. It enables users to upload, manage, and view medical images with advanced DICOM metadata handling and contour editing capabilities, functioning as a PACS-like interface for medical imaging workflows. The project aims to provide a robust, high-performance system for medical image analysis and manipulation, with a focus on accurate multi-modal fusion.
 
+## Recent Changes (August 1, 2025)
+- **Performance Optimizations**: Implemented cached LUT (Look-Up Table) and reusable offscreen canvas for render16BitImage function
+- **Memory Improvements**: Replaced all JSON.parse(JSON.stringify) with structuredClone API for better performance
+- **Code Quality**: Added DEBUG flag to control excessive logging output
+- **Type Safety**: Fixed missing onRTStructureUpdate prop and improved PreviewContour type definition
+- **Consistency**: Replaced hardcoded tolerance values with SLICE_TOL_MM constant throughout codebase
+- **MPR Enhancement**: Added automatic cache invalidation on window/level changes for proper image updates
+
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
