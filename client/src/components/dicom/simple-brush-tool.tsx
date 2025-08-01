@@ -280,20 +280,12 @@ export function SimpleBrushTool({
         });
         ctx.closePath();
         
-        // Fill with structure color
+        // Fill with structure color (no outline for cleaner preview)
         ctx.fillStyle = structureColor;
-        ctx.globalAlpha = 0.2; // Semi-transparent fill
+        ctx.globalAlpha = 0.3; // Semi-transparent fill
         ctx.fill();
         
-        // Draw the outline with structure color
-        ctx.globalAlpha = 1.0;
-        ctx.strokeStyle = structureColor;
-        ctx.lineWidth = 2; // Normal thickness
-        ctx.setLineDash([5, 3]); // Dashed line to indicate preview
-        ctx.stroke();
-        
         ctx.restore();
-        ctx.setLineDash([]); // Reset dash
       } else {
         // Regular brush cursor
         ctx.beginPath();
@@ -360,16 +352,10 @@ export function SimpleBrushTool({
           });
           ctx.closePath();
           
-          // Fill with semi-transparent structure color
+          // Fill with semi-transparent structure color (no outline for cleaner preview)
           ctx.fillStyle = structureColor;
-          ctx.globalAlpha = 0.2;
+          ctx.globalAlpha = 0.3; // Slightly higher opacity since no outline
           ctx.fill();
-          
-          // Draw outline
-          ctx.globalAlpha = 0.8;
-          ctx.strokeStyle = structureColor;
-          ctx.lineWidth = 2;
-          ctx.stroke();
         }
       });
       
