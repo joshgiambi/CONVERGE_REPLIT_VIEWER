@@ -465,6 +465,7 @@ export function SimpleBrushTool({
 
       // Generate adaptive preview when smart brush is enabled (both hovering and drawing)
       if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
+        console.log(`Smart brush preview check: enabled=${smartBrushEnabled}, erase=${isEraseMode}, tempErase=${isTemporaryEraseMode}, hasCanvas=${!!canvasRef.current}`);
         try {
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
@@ -586,9 +587,10 @@ export function SimpleBrushTool({
               }
               
               // If drawing with smart brush, collect this adaptive shape
+              console.log(`Smart brush collection check: isDrawing=${isDrawing}, smartBrushEnabled=${smartBrushEnabled}, previewPoints=${canvasPreviewPoints.length}`);
               if (isDrawing && smartBrushEnabled) {
                 adaptiveShapesRef.current.push(canvasPreviewPoints);
-                console.log(`Collected adaptive shape #${adaptiveShapesRef.current.length} with ${canvasPreviewPoints.length} points`);
+                console.log(`✅ Collected adaptive shape #${adaptiveShapesRef.current.length} with ${canvasPreviewPoints.length} points`);
                 
                 // Send all collected adaptive shapes as preview during drawing
                 if (onPreviewUpdate && canvasRef.current) {
@@ -850,7 +852,7 @@ export function SimpleBrushTool({
         // Convert adaptive shapes to world coordinate contours for ClipperLib
         const contours: number[][] = [];
         
-        adaptiveShapesRef.current.forEach((shape) => {
+        adaptiveShapesRef.current.forEach((shape, index) => {
           if (shape.length > 2) {
             const contour: number[] = [];
             shape.forEach(p => {
@@ -862,6 +864,7 @@ export function SimpleBrushTool({
               contour.push(worldX, worldY, worldZ);
             });
             contours.push(contour);
+            console.log(`🎨 Converted adaptive shape ${index + 1} to world coords: ${contour.length / 3} points`);
           }
         });
         
