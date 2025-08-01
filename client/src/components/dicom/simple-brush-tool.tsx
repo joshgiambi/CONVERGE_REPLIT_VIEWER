@@ -55,6 +55,7 @@ export function SimpleBrushTool({
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current, isEraseMode });
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false); // Immediate tracking for drawing state
   const [cursorPosition, setCursorPosition] = useState<{
     x: number;
     y: number;
@@ -465,7 +466,6 @@ export function SimpleBrushTool({
 
       // Generate adaptive preview when smart brush is enabled (both hovering and drawing)
       if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
-        console.log(`Smart brush preview check: enabled=${smartBrushEnabled}, erase=${isEraseMode}, tempErase=${isTemporaryEraseMode}, hasCanvas=${!!canvasRef.current}`);
         try {
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
@@ -554,7 +554,6 @@ export function SimpleBrushTool({
             
             // Only update if we have valid points
             if (canvasPreviewPoints.length > 2) {
-              console.log('Setting adaptive preview points:', canvasPreviewPoints.length, 'Smart brush enabled:', smartBrushEnabled, 'isEraseMode:', isEraseMode, 'isTemporaryEraseMode:', isTemporaryEraseMode);
               previousPreviewPointsRef.current = canvasPreviewPoints;
               setAdaptivePreviewPoints(canvasPreviewPoints);
               
@@ -587,8 +586,7 @@ export function SimpleBrushTool({
               }
               
               // If drawing with smart brush, collect this adaptive shape
-              console.log(`Smart brush collection check: isDrawing=${isDrawing}, smartBrushEnabled=${smartBrushEnabled}, previewPoints=${canvasPreviewPoints.length}`);
-              if (isDrawing && smartBrushEnabled) {
+              if (isDrawingRef.current && smartBrushEnabled) {
                 adaptiveShapesRef.current.push(canvasPreviewPoints);
                 console.log(`✅ Collected adaptive shape #${adaptiveShapesRef.current.length} with ${canvasPreviewPoints.length} points`);
                 
@@ -641,7 +639,7 @@ export function SimpleBrushTool({
         }
       }
 
-      if (isDrawing && selectedStructure) {
+      if (isDrawingRef.current && selectedStructure) {
         e.preventDefault();
         e.stopPropagation();
         
@@ -669,8 +667,12 @@ export function SimpleBrushTool({
         // Left click and structure selected
         e.preventDefault();
         e.stopPropagation();
+        
+        // Set both state and ref for immediate access
         setIsDrawing(true);
-        console.log("✅ Set isDrawing to true");
+        isDrawingRef.current = true;
+        console.log("✅ Set isDrawing to true (state and ref)");
+        
         const coords = getCanvasCoords(e);
         console.log("✅ Got canvas coords:", coords);
         brushPointsRef.current = [coords];
@@ -707,9 +709,10 @@ export function SimpleBrushTool({
     };
 
     const handleMouseUp = (e: MouseEvent) => {
-      if (isDrawing) {
+      if (isDrawingRef.current) {
         finalizeBrushStroke();
         setIsDrawing(false);
+        isDrawingRef.current = false; // Clear the ref too
         
         // Clear adaptive preview points and preview after finalizing smart brush
         if (smartBrushEnabled) {
@@ -744,10 +747,11 @@ export function SimpleBrushTool({
       if (onPreviewUpdate) {
         onPreviewUpdate(null);
       }
-      if (isDrawing) {
+      if (isDrawingRef.current) {
         finalizeBrushStroke();
       }
       setIsDrawing(false);
+      isDrawingRef.current = false;
     };
 
     // Prevent context menu on right click
