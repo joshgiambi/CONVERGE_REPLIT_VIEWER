@@ -663,6 +663,7 @@ export function SimpleBrushTool({
     };
 
     const handleMouseDown = (e: MouseEvent) => {
+      console.log("🖱️ Mouse down event triggered, button:", e.button, "selectedStructure:", selectedStructure, "isAdjustingSize:", isAdjustingSize);
       if (e.button === 0 && selectedStructure && !isAdjustingSize) {
         // Left click and structure selected
         e.preventDefault();
