@@ -341,6 +341,40 @@ export function SimpleBrushTool({
       ctx.stroke();
       ctx.globalAlpha = 1.0;
     }
+    
+    // Draw all collected adaptive shapes during smart brush drawing
+    if (isDrawing && smartBrushEnabled && adaptiveShapesRef.current.length > 0) {
+      ctx.save();
+      
+      // Draw each collected adaptive shape
+      adaptiveShapesRef.current.forEach((shape, shapeIndex) => {
+        if (shape.length > 2) {
+          // Draw filled shape with structure color
+          ctx.beginPath();
+          shape.forEach((point, index) => {
+            if (index === 0) {
+              ctx.moveTo(point.x, point.y);
+            } else {
+              ctx.lineTo(point.x, point.y);
+            }
+          });
+          ctx.closePath();
+          
+          // Fill with semi-transparent structure color
+          ctx.fillStyle = structureColor;
+          ctx.globalAlpha = 0.2;
+          ctx.fill();
+          
+          // Draw outline
+          ctx.globalAlpha = 0.8;
+          ctx.strokeStyle = structureColor;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      });
+      
+      ctx.restore();
+    }
   };
 
   // Use requestAnimationFrame for smooth drawing
@@ -538,7 +572,7 @@ export function SimpleBrushTool({
               setAdaptivePreviewPoints(canvasPreviewPoints);
               
               // Convert preview to world coordinates and send to viewer for rendering
-              if (onPreviewUpdate && canvasRef.current && !isDrawing) {
+              if (onPreviewUpdate && canvasRef.current) {
                 const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
                 const worldPoints: number[] = [];
                 
@@ -549,11 +583,12 @@ export function SimpleBrushTool({
                     point.y,
                     canvasRef.current.width,
                     canvasRef.current.height,
-                    imageMetadata || {}
+                    imageMetadata || {},
+                    currentSlicePosition
                   );
                   
                   // Add to flat array format (x,y,z)
-                  worldPoints.push(worldPoint.x, worldPoint.y, worldPoint.z);
+                  worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
                 }
                 
                 // Send preview contour to viewer
@@ -567,6 +602,36 @@ export function SimpleBrushTool({
               // If drawing with smart brush, collect this adaptive shape
               if (isDrawing && smartBrushEnabled) {
                 adaptiveShapesRef.current.push(canvasPreviewPoints);
+                
+                // Send all collected adaptive shapes as preview during drawing
+                if (onPreviewUpdate && canvasRef.current) {
+                  const allPreviewContours: any[] = [];
+                  
+                  // Convert all collected adaptive shapes to world coordinates
+                  for (const shape of adaptiveShapesRef.current) {
+                    const worldPoints: number[] = [];
+                    for (const point of shape) {
+                      const worldPoint = canvasToWorld(
+                        point.x,
+                        point.y,
+                        canvasRef.current.width,
+                        canvasRef.current.height,
+                        imageMetadata || {},
+                        currentSlicePosition
+                      );
+                      worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
+                    }
+                    
+                    allPreviewContours.push({
+                      points: worldPoints,
+                      slicePosition: currentSlicePosition,
+                      isPreview: true
+                    });
+                  }
+                  
+                  // Send all preview contours to show the full path
+                  onPreviewUpdate(allPreviewContours);
+                }
               }
             }
           }
