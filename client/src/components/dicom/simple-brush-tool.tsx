@@ -884,10 +884,11 @@ export function SimpleBrushTool({
         // Send all adaptive shapes as a single combined contour
         console.log(`Smart brush completed: ${allWorldPoints.length / 3} total points from ${adaptiveShapesRef.current.length} adaptive shapes`);
         
-        // Send as brush stroke which will be processed and combined properly
+        // Send as smart brush stroke which will be processed and combined properly
         if (onContourUpdate) {
+          console.log(`🎯 Sending smart brush contour to viewer: ${allWorldPoints.length / 3} points for structure ${selectedStructure}`);
           onContourUpdate({
-            action: "brush_stroke",
+            action: "smart_brush_stroke",
             structureId: selectedStructure,
             slicePosition: currentSlicePosition,
             pointCount: allWorldPoints.length / 3,
@@ -895,6 +896,9 @@ export function SimpleBrushTool({
             brushSize: brushSize,
             isAdaptiveBrush: true,
           });
+          console.log(`✅ Smart brush contour sent successfully`);
+        } else {
+          console.error(`❌ onContourUpdate is not defined - cannot send contour!`);
         }
       } 
       // Handle regular brush mode
