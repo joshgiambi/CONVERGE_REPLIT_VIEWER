@@ -864,70 +864,94 @@ export function SimpleBrushTool({
           return;
         }
         
-        // Use the async clipper boolean operation to merge all contours
-        try {
-          let mergedContours = [contours[0]];
+        // Combine all adaptive shapes into a single path
+        // Treat all collected shapes as one continuous stroke
+        console.log(`Combining ${contours.length} adaptive shapes into single path`);
+        
+        if (contours.length === 1) {
+          // Single shape - just use it directly
+          const singleContour = contours[0];
+          console.log(`Smart brush completed: ${singleContour.length / 3} points for structure ${selectedStructure}`);
           
-          // Merge each subsequent contour with the result
-          for (let i = 1; i < contours.length; i++) {
-            const combinedResults: number[][] = [];
-            
-            // Combine the new contour with each existing merged contour
-            for (const existingContour of mergedContours) {
-              const result = await combineContours(existingContour, contours[i]);
-              combinedResults.push(...result);
-            }
-            
-            if (combinedResults.length > 0) {
-              mergedContours = combinedResults;
-            }
+          if (onContourUpdate) {
+            onContourUpdate({
+              action: "replace_contour",
+              structureId: selectedStructure,
+              slicePosition: currentSlicePosition,
+              pointCount: singleContour.length / 3,
+              points: singleContour,
+              brushSize: brushSize,
+              isAdaptiveBrush: true,
+            });
           }
-          
-          // Take the largest resulting contour
-          let largestContour = mergedContours[0];
-          if (mergedContours.length > 1) {
-            let maxArea = 0;
-            for (const contour of mergedContours) {
-              const area = calculateContourArea(contour);
-              if (area > maxArea) {
-                maxArea = area;
-                largestContour = contour;
+        } else {
+          // Multiple shapes - union them all together
+          try {
+            let mergedContours = [contours[0]];
+            
+            // Merge each subsequent contour with the result
+            for (let i = 1; i < contours.length; i++) {
+              const combinedResults: number[][] = [];
+              
+              // Combine the new contour with each existing merged contour
+              for (const existingContour of mergedContours) {
+                const result = await combineContours(existingContour, contours[i]);
+                combinedResults.push(...result);
+              }
+              
+              if (combinedResults.length > 0) {
+                mergedContours = combinedResults;
               }
             }
-          }
-          
-          console.log(`Smart brush completed: ${largestContour.length / 3} points for structure ${selectedStructure}`);
+            
+            // Take the largest resulting contour
+            let largestContour = mergedContours[0];
+            if (mergedContours.length > 1) {
+              let maxArea = 0;
+              for (const contour of mergedContours) {
+                const area = calculateContourArea(contour);
+                if (area > maxArea) {
+                  maxArea = area;
+                  largestContour = contour;
+                }
+              }
+            }
+            
+            console.log(`Smart brush completed: ${largestContour.length / 3} points for structure ${selectedStructure}`);
 
-          // Send as replace contour action (creates a complete contour)
-          if (onContourUpdate) {
-            onContourUpdate({
-              action: "replace_contour",
-              structureId: selectedStructure,
-              slicePosition: currentSlicePosition,
-              pointCount: largestContour.length / 3,
-              points: largestContour,
-              brushSize: brushSize,
-              isAdaptiveBrush: true,
+            // Send as replace contour action (creates a complete contour)
+            if (onContourUpdate) {
+              onContourUpdate({
+                action: "replace_contour",
+                structureId: selectedStructure,
+                slicePosition: currentSlicePosition,
+                pointCount: largestContour.length / 3,
+                points: largestContour,
+                brushSize: brushSize,
+                isAdaptiveBrush: true,
+              });
+            }
+          } catch (unionError) {
+            console.error("Error unioning adaptive shapes, sending as brush stroke instead:", unionError);
+            
+            // Fall back to sending all shapes as a brush stroke
+            const allPoints: number[] = [];
+            contours.forEach(contour => {
+              // Add each contour's points
+              allPoints.push(...contour);
             });
-          }
-        } catch (error) {
-          console.error("Error merging adaptive shapes:", error);
-          // Fall back to using all points without merging
-          const allPoints: number[] = [];
-          contours.forEach(contour => {
-            allPoints.push(...contour);
-          });
-          
-          if (onContourUpdate) {
-            onContourUpdate({
-              action: "replace_contour",
-              structureId: selectedStructure,
-              slicePosition: currentSlicePosition,
-              pointCount: allPoints.length / 3,
-              points: allPoints,
-              brushSize: brushSize,
-              isAdaptiveBrush: true,
-            });
+            
+            if (onContourUpdate && allPoints.length > 0) {
+              onContourUpdate({
+                action: "brush_stroke",
+                structureId: selectedStructure,
+                slicePosition: currentSlicePosition,
+                pointCount: allPoints.length / 3,
+                points: allPoints,
+                brushSize: brushSize,
+                isAdaptiveBrush: true,
+              });
+            }
           }
         }
       } 
