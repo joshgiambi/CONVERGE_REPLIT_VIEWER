@@ -698,6 +698,14 @@ export function SimpleBrushTool({
       if (isDrawing) {
         finalizeBrushStroke();
         setIsDrawing(false);
+        
+        // Clear adaptive preview points and preview after finalizing smart brush
+        if (smartBrushEnabled) {
+          setAdaptivePreviewPoints(null);
+          if (onPreviewUpdate) {
+            onPreviewUpdate(null);
+          }
+        }
       }
       
       if (isAdjustingSize) {
