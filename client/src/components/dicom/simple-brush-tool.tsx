@@ -21,7 +21,13 @@ interface SimpleBrushToolProps {
   predictionEnabled?: boolean;
   smartBrushEnabled?: boolean;
   onBrushSizeChange?: (size: number) => void;
-  ctTransform: React.RefObject<{ scale: number; offsetX: number; offsetY: number }>;
+  ctTransform: React.RefObject<{ 
+    scale: number; 
+    offsetX: number; 
+    offsetY: number;
+    imageWidth?: number;
+    imageHeight?: number;
+  }>;
   isEraseMode?: boolean; // New prop for erase mode
   dicomImage?: any; // For accessing pixel data
 }
@@ -247,7 +253,18 @@ export function SimpleBrushTool({
       // For smart brush, show adaptive preview shape if available
       if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
         // Draw adaptive preview shape
-        console.log(`Drawing adaptive preview with ${adaptivePreviewPoints.length} points`, adaptivePreviewPoints.slice(0, 3));
+        console.log(`Drawing adaptive preview with ${adaptivePreviewPoints.length} points at cursor (${cursorPosition.x}, ${cursorPosition.y})`, adaptivePreviewPoints.slice(0, 3));
+        
+        // Add visibility debugging
+        const bounds = {
+          minX: Math.min(...adaptivePreviewPoints.map(p => p.x)),
+          maxX: Math.max(...adaptivePreviewPoints.map(p => p.x)),
+          minY: Math.min(...adaptivePreviewPoints.map(p => p.y)),
+          maxY: Math.max(...adaptivePreviewPoints.map(p => p.y))
+        };
+        console.log('Preview bounds:', bounds);
+        console.log('Canvas size:', overlayCanvasRef.current.width, 'x', overlayCanvasRef.current.height);
+        
         ctx.save();
         
         // Draw filled shape first with higher opacity

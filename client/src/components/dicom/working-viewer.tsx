@@ -33,6 +33,7 @@ import {
 } from "@/lib/cornerstone3d-adapter";
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
+import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 
 // Helper function to check if two polygons intersect
 function doPolygonsIntersect(polygon1: number[], polygon2: number[]): boolean {
@@ -319,32 +320,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
 
 
-  // Save contour updates to server
-  const saveContourUpdates = async (updatedStructures: any, action?: string) => {
-    if (!seriesId || isSaving) return;
-    
-    setIsSaving(true);
-    try {
-      const response = await fetch(`/api/rt-structures/${seriesId}/contours`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          structures: updatedStructures.structures,
-          action: action || 'update_contours'
-        })
-      });
-
-      if (!response.ok) {
-        console.error('Failed to save contour updates');
-      } else {
-        console.log('Contour updates saved successfully');
-      }
-    } catch (error) {
-      console.error('Error saving contour updates:', error);
-    } finally {
-      setIsSaving(false);
+  // Save contour updates using debounced save
+  const saveContourUpdates = (updatedStructures: any, action?: string) => {
+    console.log(`Queuing save for ${action || 'unknown action'}`);
+    if (debouncedSaveRef.current) {
+      debouncedSaveRef.current(updatedStructures);
+    } else {
+      console.warn('Debounced save not initialized');
     }
   };
 
@@ -1151,6 +1133,62 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [lastPanX, setLastPanX] = useState(0);
   const [lastPanY, setLastPanY] = useState(0);
 
+  // Simple debounce implementation
+  const debounce = (func: Function, wait: number) => {
+    let timeout: NodeJS.Timeout;
+    const debounced = (...args: any[]) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+    debounced.cancel = () => clearTimeout(timeout);
+    return debounced;
+  };
+
+  // Create debounced save function
+  const debouncedSaveRef = useRef<any>(null);
+  const lastSavedHashRef = useRef<string>("");
+  
+  // Initialize debounced save on mount
+  useEffect(() => {
+    const saveToServer = async (structures: any) => {
+      if (!structures) return;
+      
+      // Create hash of structures to check for changes
+      const structuresHash = JSON.stringify({
+        count: structures.structures?.length || 0,
+        contourCounts: structures.structures?.map((s: any) => ({
+          id: s.roiNumber,
+          count: s.contours?.length || 0
+        }))
+      });
+      
+      // Skip if no changes since last save
+      if (structuresHash === lastSavedHashRef.current) {
+        console.log("Skipping save - no changes detected");
+        return;
+      }
+      
+      try {
+        console.log("Saving contour updates to server...");
+        if (onRTStructureUpdate) {
+          await onRTStructureUpdate(structures);
+        }
+        lastSavedHashRef.current = structuresHash;
+      } catch (error) {
+        console.error("Failed to save contour updates:", error);
+      }
+    };
+    
+    // Create debounced function with 500ms delay
+    debouncedSaveRef.current = debounce(saveToServer, 500);
+    
+    return () => {
+      if (debouncedSaveRef.current?.cancel) {
+        debouncedSaveRef.current.cancel();
+      }
+    };
+  }, [onRTStructureUpdate]);
+
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = async (payload: any) => {
     // Handle refresh action from undo/redo
@@ -1325,9 +1363,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // and causing structures to morph/shrink when multiple strokes are added
 
       // Collect all contours on this slice
-      const tol = 0.5;
       const existingOnSlice = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM
       );
 
       // Check if brush stroke intersects with any existing contour
@@ -1350,7 +1387,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Remove all existing contours at this slice
       structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
       );
 
       if (intersectsWithExisting) {
@@ -1436,7 +1473,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           if (nextPrediction.confidence > 0.5 && nextPrediction.predictedContour.length > 0) {
             // Check if there's already a contour on the next slice
             const nextSliceContourIndex = structure.contours.findIndex(
-              (c: any) => Math.abs(c.slicePosition - nextSlicePosition) < 0.5
+              (c: any) => Math.abs(c.slicePosition - nextSlicePosition) < SLICE_TOL_MM
             );
             
             if (nextSliceContourIndex === -1) {
@@ -1463,7 +1500,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           if (prevPrediction.confidence > 0.5 && prevPrediction.predictedContour.length > 0) {
             const prevSliceContourIndex = structure.contours.findIndex(
-              (c: any) => Math.abs(c.slicePosition - prevSlicePosition) < 0.5
+              (c: any) => Math.abs(c.slicePosition - prevSlicePosition) < SLICE_TOL_MM
             );
             
             if (prevSliceContourIndex === -1) {
@@ -3515,22 +3552,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
 
+    // Get rescale parameters for proper HU conversion
+    const { slope, intercept } = getRescaleParams(imageMetadata);
+
     // Apply window/level settings
     const { width: windowWidth, center: windowCenter } = currentWindowLevel;
     const min = windowCenter - windowWidth / 2;
     const max = windowCenter + windowWidth / 2;
 
     for (let i = 0; i < pixelArray.length; i++) {
-      const pixelValue = pixelArray[i];
+      // Apply rescale slope and intercept to get HU value
+      const hu = pixelArray[i] * slope + intercept;
 
       // Apply windowing
       let normalizedValue;
-      if (pixelValue <= min) {
+      if (hu <= min) {
         normalizedValue = 0;
-      } else if (pixelValue >= max) {
+      } else if (hu >= max) {
         normalizedValue = 255;
       } else {
-        normalizedValue = ((pixelValue - min) / windowWidth) * 255;
+        normalizedValue = ((hu - min) / windowWidth) * 255;
       }
 
       const gray = Math.max(0, Math.min(255, normalizedValue));
@@ -3772,8 +3813,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
-    const tolerance = 0.5; // mm tolerance for slice matching - reduced to only show contours on current slice
-
     // CRITICAL DEBUG: Log all slice position sources for comparison
     console.log(`🔍 SLICE POSITION DEBUG:
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
@@ -3848,7 +3887,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const positionDiff = Math.abs(
           contour.slicePosition - currentSlicePosition,
         );
-        if (positionDiff <= tolerance) {
+        if (positionDiff <= SLICE_TOL_MM) {
           console.log(
             `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
           );
@@ -3860,7 +3899,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Render preview contours with dashed yellow styling (FOR ALL SLICES - true 3D preview)
     if (previewContours && previewContours.length > 0) {
-      const tolerance = 0.5; // Same tolerance as regular contours  
       let renderedPreviewCount = 0;
       
       // Set preview contour styling - bright yellow and dashed
@@ -3884,7 +3922,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             renderedPreviewCount++;
             
             // Log when we're showing preview on current slice vs other slices
-            if (positionDiff <= tolerance) {
+            if (positionDiff <= SLICE_TOL_MM) {
               console.log(`🔹 🎯 Showing preview on CURRENT slice ${currentSlicePosition.toFixed(1)} (diff: ${positionDiff.toFixed(1)}mm)`);
             } else {
               console.log(`🔹 🌐 Showing 3D preview on slice ${contour.slicePosition.toFixed(1)} (current: ${currentSlicePosition.toFixed(1)}, diff: ${positionDiff.toFixed(1)}mm)`);
