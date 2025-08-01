@@ -859,119 +859,42 @@ export function SimpleBrushTool({
         console.log(`🎨 Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
         console.log(`🎨 Adaptive shapes point counts: ${adaptiveShapesRef.current.map(shape => shape.length).join(', ')}`);
         
-        // Convert adaptive shapes to world coordinate contours for ClipperLib
-        const contours: number[][] = [];
+        // Combine all adaptive shapes into a single continuous contour
+        const allWorldPoints: number[] = [];
         
         adaptiveShapesRef.current.forEach((shape, index) => {
           if (shape.length > 2) {
-            const contour: number[] = [];
             shape.forEach(p => {
               const pixelX = (p.x - transform.offsetX) / transform.scale;
               const pixelY = (p.y - transform.offsetY) / transform.scale;
               const worldX = imagePosition[0] + (pixelX * colSpacing);
               const worldY = imagePosition[1] + (pixelY * rowSpacing);
               const worldZ = currentSlicePosition;
-              contour.push(worldX, worldY, worldZ);
+              allWorldPoints.push(worldX, worldY, worldZ);
             });
-            contours.push(contour);
-            console.log(`🎨 Converted adaptive shape ${index + 1} to world coords: ${contour.length / 3} points`);
+            console.log(`🎨 Added adaptive shape ${index + 1} to combined path: ${shape.length} points`);
           }
         });
         
-        if (contours.length === 0) {
-          console.log("No valid contours to merge");
+        if (allWorldPoints.length === 0) {
+          console.log("No valid points to create contour");
           return;
         }
         
-        // Combine all adaptive shapes into a single path
-        // Treat all collected shapes as one continuous stroke
-        console.log(`Combining ${contours.length} adaptive shapes into single path`);
+        // Send all adaptive shapes as a single combined contour
+        console.log(`Smart brush completed: ${allWorldPoints.length / 3} total points from ${adaptiveShapesRef.current.length} adaptive shapes`);
         
-        if (contours.length === 1) {
-          // Single shape - just use it directly
-          const singleContour = contours[0];
-          console.log(`Smart brush completed: ${singleContour.length / 3} points for structure ${selectedStructure}`);
-          
-          if (onContourUpdate) {
-            onContourUpdate({
-              action: "replace_contour",
-              structureId: selectedStructure,
-              slicePosition: currentSlicePosition,
-              pointCount: singleContour.length / 3,
-              points: singleContour,
-              brushSize: brushSize,
-              isAdaptiveBrush: true,
-            });
-          }
-        } else {
-          // Multiple shapes - union them all together
-          try {
-            let mergedContours = [contours[0]];
-            
-            // Merge each subsequent contour with the result
-            for (let i = 1; i < contours.length; i++) {
-              const combinedResults: number[][] = [];
-              
-              // Combine the new contour with each existing merged contour
-              for (const existingContour of mergedContours) {
-                const result = await combineContours(existingContour, contours[i]);
-                combinedResults.push(...result);
-              }
-              
-              if (combinedResults.length > 0) {
-                mergedContours = combinedResults;
-              }
-            }
-            
-            // Take the largest resulting contour
-            let largestContour = mergedContours[0];
-            if (mergedContours.length > 1) {
-              let maxArea = 0;
-              for (const contour of mergedContours) {
-                const area = calculateContourArea(contour);
-                if (area > maxArea) {
-                  maxArea = area;
-                  largestContour = contour;
-                }
-              }
-            }
-            
-            console.log(`Smart brush completed: ${largestContour.length / 3} points for structure ${selectedStructure}`);
-
-            // Send as replace contour action (creates a complete contour)
-            if (onContourUpdate) {
-              onContourUpdate({
-                action: "replace_contour",
-                structureId: selectedStructure,
-                slicePosition: currentSlicePosition,
-                pointCount: largestContour.length / 3,
-                points: largestContour,
-                brushSize: brushSize,
-                isAdaptiveBrush: true,
-              });
-            }
-          } catch (unionError) {
-            console.error("Error unioning adaptive shapes, sending as brush stroke instead:", unionError);
-            
-            // Fall back to sending all shapes as a brush stroke
-            const allPoints: number[] = [];
-            contours.forEach(contour => {
-              // Add each contour's points
-              allPoints.push(...contour);
-            });
-            
-            if (onContourUpdate && allPoints.length > 0) {
-              onContourUpdate({
-                action: "brush_stroke",
-                structureId: selectedStructure,
-                slicePosition: currentSlicePosition,
-                pointCount: allPoints.length / 3,
-                points: allPoints,
-                brushSize: brushSize,
-                isAdaptiveBrush: true,
-              });
-            }
-          }
+        // Send as brush stroke which will be processed and combined properly
+        if (onContourUpdate) {
+          onContourUpdate({
+            action: "brush_stroke",
+            structureId: selectedStructure,
+            slicePosition: currentSlicePosition,
+            pointCount: allWorldPoints.length / 3,
+            points: allWorldPoints,
+            brushSize: brushSize,
+            isAdaptiveBrush: true,
+          });
         }
       } 
       // Handle regular brush mode
