@@ -30,6 +30,7 @@ interface SimpleBrushToolProps {
   }>;
   isEraseMode?: boolean; // New prop for erase mode
   dicomImage?: any; // For accessing pixel data
+  onPreviewUpdate?: (previewContours: any[] | null) => void; // New prop for smart brush preview
 }
 
 export function SimpleBrushTool({
@@ -50,6 +51,7 @@ export function SimpleBrushTool({
   ctTransform,
   isEraseMode = false,
   dicomImage = null,
+  onPreviewUpdate,
 }: SimpleBrushToolProps) {
   console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current, isEraseMode });
   const [isDrawing, setIsDrawing] = useState(false);
@@ -535,6 +537,33 @@ export function SimpleBrushTool({
               previousPreviewPointsRef.current = canvasPreviewPoints;
               setAdaptivePreviewPoints(canvasPreviewPoints);
               
+              // Convert preview to world coordinates and send to viewer for rendering
+              if (onPreviewUpdate && canvasRef.current && !isDrawing) {
+                const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+                const worldPoints: number[] = [];
+                
+                // Convert each point from canvas to world coordinates
+                for (const point of canvasPreviewPoints) {
+                  const worldPoint = canvasToWorld(
+                    point.x,
+                    point.y,
+                    canvasRef.current.width,
+                    canvasRef.current.height,
+                    imageMetadata || {}
+                  );
+                  
+                  // Add to flat array format (x,y,z)
+                  worldPoints.push(worldPoint.x, worldPoint.y, worldPoint.z);
+                }
+                
+                // Send preview contour to viewer
+                onPreviewUpdate([{
+                  points: worldPoints,
+                  slicePosition: currentSlicePosition,
+                  isPreview: true
+                }]);
+              }
+              
               // If drawing with smart brush, collect this adaptive shape
               if (isDrawing && smartBrushEnabled) {
                 adaptiveShapesRef.current.push(canvasPreviewPoints);
@@ -545,9 +574,17 @@ export function SimpleBrushTool({
           console.error("Error creating adaptive preview:", error instanceof Error ? error.message : error);
           console.error("Stack:", error instanceof Error ? error.stack : "No stack");
           setAdaptivePreviewPoints(null);
+          // Clear preview on error
+          if (onPreviewUpdate) {
+            onPreviewUpdate(null);
+          }
         }
       } else {
         setAdaptivePreviewPoints(null);
+        // Clear preview when smart brush is not enabled or in erase mode
+        if (onPreviewUpdate && smartBrushEnabled) {
+          onPreviewUpdate(null);
+        }
       }
 
       if (isDrawing && selectedStructure) {
@@ -632,6 +669,10 @@ export function SimpleBrushTool({
     const handleMouseLeave = () => {
       setCursorPosition(null);
       setAdaptivePreviewPoints(null);
+      // Clear preview when mouse leaves
+      if (onPreviewUpdate) {
+        onPreviewUpdate(null);
+      }
       if (isDrawing) {
         finalizeBrushStroke();
       }

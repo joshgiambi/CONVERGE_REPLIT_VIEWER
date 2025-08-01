@@ -1475,7 +1475,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
     } else if (payload.action === "smart_brush_stroke") {
       // Handle smart brush stroke - add already processed contour points
-      console.log("🎯 Processing smart brush stroke:", payload);
+      if (DEBUG) console.log("🎯 Processing smart brush stroke:", payload);
       
       const structure = updatedStructures.structures.find(
         (s: any) => s.roiNumber === payload.structureId,
@@ -1488,30 +1488,77 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Smart brush already provides processed contour points
       const smartContourPoints = payload.points.flat(); // Flatten the array if needed
       
-      console.log(`Smart brush contour with ${smartContourPoints.length / 3} points`);
+      if (DEBUG) console.log(`Smart brush contour with ${smartContourPoints.length / 3} points`);
 
-      // Collect all contours on this slice
-      const tol = 0.5;
-      const existingOnSlice = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
-      );
-
-      // For smart brush, we replace all contours on the slice with the smart result
-      // This prevents overlapping contours
+      // Convert smart brush polygon to format for union operations
+      const smartPolygon: number[] = smartContourPoints;
       
-      // Remove all existing contours at this slice
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
+      // Find existing contours on this slice
+      const existingOnSlice = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM
       );
 
-      // Add the smart brush result as the new contour
-      structure.contours.push({
-        slicePosition: payload.slicePosition,
-        points: smartContourPoints,
-        numberOfPoints: smartContourPoints.length / 3,
-      });
+      // Remove existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
+      );
 
-      console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
+      if (existingOnSlice.length === 0) {
+        // No existing contours, just add the smart brush result
+        structure.contours.push({
+          slicePosition: payload.slicePosition,
+          points: smartPolygon,
+          numberOfPoints: smartPolygon.length / 3,
+        });
+      } else {
+        // Union smart brush with existing contours like regular brush does
+        const intersectingContours: any[] = [];
+        const nonIntersectingContours: any[] = [];
+
+        existingOnSlice.forEach((existingContour: any) => {
+          if (doPolygonsIntersectSimple(smartPolygon, existingContour.points)) {
+            intersectingContours.push(existingContour);
+          } else {
+            nonIntersectingContours.push(existingContour);
+          }
+        });
+
+        // Union all intersecting contours with the smart brush polygon
+        let finalContour: any;
+        if (intersectingContours.length === 0) {
+          // No intersections, smart brush becomes a separate contour
+          finalContour = {
+            slicePosition: payload.slicePosition,
+            points: smartPolygon,
+            numberOfPoints: smartPolygon.length / 3,
+          };
+        } else {
+          // Union all intersecting contours together with smart brush
+          const allContoursToUnion = [smartPolygon, ...intersectingContours.map(c => c.points)];
+          const unionResult = unionMultipleContoursSimple(allContoursToUnion);
+          
+          if (unionResult && unionResult.length > 0) {
+            finalContour = {
+              slicePosition: payload.slicePosition,
+              points: unionResult,
+              numberOfPoints: unionResult.length / 3,
+            };
+          } else {
+            // Union failed, use smart brush as-is
+            finalContour = {
+              slicePosition: payload.slicePosition,
+              points: smartPolygon,
+              numberOfPoints: smartPolygon.length / 3,
+            };
+          }
+        }
+
+        // Add the final contour and all non-intersecting contours back
+        structure.contours.push(finalContour);
+        nonIntersectingContours.forEach(c => structure.contours.push(c));
+      }
+
+      if (DEBUG) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
       setLocalRTStructures(updatedStructures);
       
       // Save state to undo system
@@ -4781,6 +4828,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     });
                   }
                 }}
+                onPreviewUpdate={setPreviewContours}
               />
             )}
 
@@ -4831,6 +4879,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     });
                   }
                 }}
+                onPreviewUpdate={setPreviewContours}
               />
             )}
 
