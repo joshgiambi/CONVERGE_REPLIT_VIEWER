@@ -1485,77 +1485,72 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
 
-      // Smart brush already provides processed contour points
-      const smartContourPoints = payload.points.flat(); // Flatten the array if needed
-      
-      if (DEBUG) console.log(`Smart brush contour with ${smartContourPoints.length / 3} points`);
+      // The smart brush now provides a pre-unified polygon. We will process it
+      // with the same robust logic as a regular brush stroke to correctly handle
+      // intersections and the creation of multiple blobs.
+      const brushPolygon: number[] = payload.points;
 
-      // Convert smart brush polygon to format for union operations
-      const smartPolygon: number[] = smartContourPoints;
-      
-      // Find existing contours on this slice
+      // Collect all contours on this slice
       const existingOnSlice = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM
       );
 
-      // Remove existing contours at this slice
+      // Check if brush stroke intersects with any existing contour
+      let intersectsWithExisting = false;
+      const intersectingContours: any[] = [];
+      const nonIntersectingContours: any[] = [];
+
+      for (const contour of existingOnSlice) {
+        if (contour.points && contour.points.length >= 9) {
+          const intersects = doPolygonsIntersectSimple(brushPolygon, contour.points);
+          if (intersects) {
+            intersectsWithExisting = true;
+            intersectingContours.push(contour);
+          } else {
+            nonIntersectingContours.push(contour);
+          }
+        }
+      }
+
+      // Remove all existing contours at this slice; we will add them back.
       structure.contours = structure.contours.filter(
         (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
       );
 
-      if (existingOnSlice.length === 0) {
-        // No existing contours, just add the smart brush result
+      if (intersectsWithExisting) {
+        // If the new stroke intersects, union it with all intersecting contours
+        const polygonsToUnion = [brushPolygon, ...intersectingContours.map(c => c.points)];
+        const unionResults = unionMultipleContoursSimple(polygonsToUnion);
+        
+        // Add the new unified contour(s)
+        if (unionResults && unionResults.length > 0) {
+          unionResults.forEach((polygonPoints: number[]) => {
+            if (polygonPoints.length >= 9) {
+              structure.contours.push({
+                slicePosition: payload.slicePosition,
+                points: polygonPoints,
+                numberOfPoints: polygonPoints.length / 3,
+              });
+            }
+          });
+        }
+        
+        // Re-add the contours that did not intersect
+        for (const contour of nonIntersectingContours) {
+          structure.contours.push(contour);
+        }
+      } else {
+        // If there's no intersection, add the new brush stroke as a new contour
         structure.contours.push({
           slicePosition: payload.slicePosition,
-          points: smartPolygon,
-          numberOfPoints: smartPolygon.length / 3,
+          points: brushPolygon,
+          numberOfPoints: brushPolygon.length / 3,
         });
-      } else {
-        // Union smart brush with existing contours like regular brush does
-        const intersectingContours: any[] = [];
-        const nonIntersectingContours: any[] = [];
-
-        existingOnSlice.forEach((existingContour: any) => {
-          if (doPolygonsIntersectSimple(smartPolygon, existingContour.points)) {
-            intersectingContours.push(existingContour);
-          } else {
-            nonIntersectingContours.push(existingContour);
-          }
-        });
-
-        // Union all intersecting contours with the smart brush polygon
-        let finalContour: any;
-        if (intersectingContours.length === 0) {
-          // No intersections, smart brush becomes a separate contour
-          finalContour = {
-            slicePosition: payload.slicePosition,
-            points: smartPolygon,
-            numberOfPoints: smartPolygon.length / 3,
-          };
-        } else {
-          // Union all intersecting contours together with smart brush
-          const allContoursToUnion = [smartPolygon, ...intersectingContours.map(c => c.points)];
-          const unionResult = unionMultipleContoursSimple(allContoursToUnion);
-          
-          if (unionResult && unionResult.length > 0) {
-            finalContour = {
-              slicePosition: payload.slicePosition,
-              points: unionResult,
-              numberOfPoints: unionResult.length / 3,
-            };
-          } else {
-            // Union failed, use smart brush as-is
-            finalContour = {
-              slicePosition: payload.slicePosition,
-              points: smartPolygon,
-              numberOfPoints: smartPolygon.length / 3,
-            };
-          }
+        
+        // And re-add all the other existing contours as they were
+        for (const contour of existingOnSlice) {
+          structure.contours.push(contour);
         }
-
-        // Add the final contour and all non-intersecting contours back
-        structure.contours.push(finalContour);
-        nonIntersectingContours.forEach(c => structure.contours.push(c));
       }
 
       if (DEBUG) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
@@ -1563,9 +1558,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Save state to undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'add_smart_brush', payload.structureId, updatedStructures);
+        undoRedoManager.saveState(seriesId, 'smart_brush_stroke', payload.structureId, updatedStructures);
       }
-      saveContourUpdates(updatedStructures, 'add_smart_brush');
+      saveContourUpdates(updatedStructures, 'smart_brush_stroke');
     } else if (payload.action === "erase_stroke") {
       // Handle erase stroke - subtract points from contour
       console.log("🔹 Processing erase stroke:", payload);

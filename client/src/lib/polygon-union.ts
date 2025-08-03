@@ -5,26 +5,41 @@
  * Simple polygon union using a grid-based approach
  * This creates the "paint bucket fill" effect for overlapping circles
  */
-export function polygonUnion(polygons: number[][]): number[] {
+export function polygonUnion(polygons: number[][], brushRadiusInMm?: number): number[] {
   if (polygons.length === 0) return [];
-  if (polygons.length === 1) return polygons[0];
-  
-  // Find bounding box of all polygons
+  if (polygons.length === 1 && !brushRadiusInMm) return polygons[0];
+
   let minX = Infinity, minY = Infinity;
   let maxX = -Infinity, maxY = -Infinity;
-  const zValue = polygons[0][2]; // Assume all on same slice
-  
-  for (const polygon of polygons) {
-    for (let i = 0; i < polygon.length; i += 3) {
-      minX = Math.min(minX, polygon[i]);
-      maxX = Math.max(maxX, polygon[i]);
-      minY = Math.min(minY, polygon[i + 1]);
-      maxY = Math.max(maxY, polygon[i + 1]);
+
+  // If a brushRadiusInMm is provided, we are unioning circles from a brush stroke.
+  // In this case, we can optimize the bounding box calculation.
+  if (brushRadiusInMm) {
+    for (const polygon of polygons) {
+      // Since these are circles, we can calculate the bounding box from the center point.
+      const centerX = polygon[0];
+      const centerY = polygon[1];
+      minX = Math.min(minX, centerX - brushRadiusInMm);
+      maxX = Math.max(maxX, centerX + brushRadiusInMm);
+      minY = Math.min(minY, centerY - brushRadiusInMm);
+      maxY = Math.max(maxY, centerY + brushRadiusInMm);
+    }
+  } else {
+    // Find bounding box of all polygons
+    for (const polygon of polygons) {
+      for (let i = 0; i < polygon.length; i += 3) {
+        minX = Math.min(minX, polygon[i]);
+        maxX = Math.max(maxX, polygon[i]);
+        minY = Math.min(minY, polygon[i + 1]);
+        maxY = Math.max(maxY, polygon[i + 1]);
+      }
     }
   }
+
+  const zValue = polygons[0][2]; // Assume all on same slice
   
   // Create a grid for rasterization
-  const gridSize = 0.1; // mm resolution - reduced from 0.5mm to minimize boundary shrinkage
+  const gridSize = 0.25; // mm resolution. Tuned for performance. A smaller value (e.g., 0.1) is more accurate but slower.
   const width = Math.ceil((maxX - minX) / gridSize) + 2;
   const height = Math.ceil((maxY - minY) / gridSize) + 2;
   const grid = new Uint8Array(width * height);

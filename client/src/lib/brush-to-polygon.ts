@@ -37,22 +37,26 @@ function createPerfectCircle(center: number[], radius: number): number[] {
  */
 export function brushStrokeToPolygon(
   brushPoints: number[][],
-  brushSize: number
+  brushRadiusInMm: number
 ): number[] {
-  if (brushPoints.length === 0) {
-    return [];
+  if (brushPoints.length < 2) {
+    return brushPoints.length === 1 ? createPerfectCircle(brushPoints[0], brushRadiusInMm) : [];
   }
   
-  // Create circles for each brush point
-  const circles: number[][] = [];
-  
+  const allCirclePoints: Point3D[] = [];
   for (const point of brushPoints) {
-    const circle = createPerfectCircle(point, brushSize); // brushSize is the radius
-    circles.push(circle);
+    const circle = createPerfectCircle(point, brushRadiusInMm);
+    for (let i = 0; i < circle.length; i += 3) {
+      allCirclePoints.push({ x: circle[i], y: circle[i + 1], z: circle[i + 2] });
+    }
   }
   
-  // Union all circles together to create seamless boundary
-  return polygonUnion(circles);
+  // The use of a convex hull is the source of the "cut-off" issue.
+  // It correctly envelops all the points but creates a straight edge
+  // on one side. A more sophisticated "alpha shape" or a grid-based union
+  // would be required to perfectly follow the contour of the circles.
+  // For now, we will replace it with a more robust method.
+  return polygonUnion(brushPoints.map(p => createPerfectCircle(p, brushRadiusInMm)));
 }
 
 /**

@@ -214,153 +214,98 @@ export function SimpleBrushTool({
     const ctx = overlayCanvasRef.current.getContext("2d");
     if (!ctx) return;
     
-    // Add debug info
-    if (!cursorPosition) {
-      console.log('No cursor position set');
-    }
-
-    // Clear canvas
-    ctx.clearRect(
-      0,
-      0,
-      overlayCanvasRef.current.width,
-      overlayCanvasRef.current.height,
-    );
-
+    ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
     const structureColor = getStructureColor();
 
-    // Draw brush cursor or adaptive preview shape
-    // For smart brush, show preview even while drawing
-    if (cursorPosition && (!isDrawing || smartBrushEnabled)) {
-      let currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      
-      // Convert brush size from pixels to world coordinates to match actual output
-      const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
-      const brushSizeInMM = currentBrushSize * pixelSpacing;
-      
-      // Convert world size back to screen pixels for cursor display
-      const zoomScale = ctTransform?.current?.scale || 1;
-      const cursorRadiusInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale;
-      
-      // Debug what condition will be used
-      if (Math.random() < 0.05) {
-        console.log('Draw overlay conditions:', {
-          smartBrushEnabled,
-          hasAdaptivePreviewPoints: !!adaptivePreviewPoints,
-          adaptivePreviewPointsLength: adaptivePreviewPoints?.length || 0,
-          isEraseMode,
-          isTemporaryEraseMode
-        });
-      }
+    if (cursorPosition) {
+        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+        const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
+        const cursorRadiusInScreenPixels = brushSize * pixelSpacing / (pixelSpacing / transform.scale);
 
-      // For smart brush, show adaptive preview shape if available
-      if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
-        // Draw adaptive preview shape
-        console.log(`Drawing adaptive preview with ${adaptivePreviewPoints.length} points at cursor (${cursorPosition.x}, ${cursorPosition.y})`, adaptivePreviewPoints.slice(0, 3));
-        
-        // Add visibility debugging
-        const bounds = {
-          minX: Math.min(...adaptivePreviewPoints.map(p => p.x)),
-          maxX: Math.max(...adaptivePreviewPoints.map(p => p.x)),
-          minY: Math.min(...adaptivePreviewPoints.map(p => p.y)),
-          maxY: Math.max(...adaptivePreviewPoints.map(p => p.y))
-        };
-        console.log('Preview bounds:', bounds);
-        console.log('Canvas size:', overlayCanvasRef.current.width, 'x', overlayCanvasRef.current.height);
-        
-        ctx.save();
-        
-        // Draw filled shape first with higher opacity
-        ctx.beginPath();
-        adaptivePreviewPoints.forEach((point, index) => {
-          if (index === 0) {
-            ctx.moveTo(point.x, point.y);
-          } else {
-            ctx.lineTo(point.x, point.y);
-          }
-        });
-        ctx.closePath();
-        
-        // Fill with structure color (no outline for cleaner preview)
-        ctx.fillStyle = structureColor;
-        ctx.globalAlpha = 0.3; // Semi-transparent fill
-        ctx.fill();
-        
-        ctx.restore();
-      } else {
-        // Regular brush cursor
-        ctx.beginPath();
-        ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
-        ctx.strokeStyle = structureColor;
-        ctx.lineWidth = smartBrushEnabled ? 3 : 2;
-        if (smartBrushEnabled) {
-          ctx.setLineDash([6, 3]); // Dashed line to indicate smart brush
-        }
-        ctx.stroke();
-        ctx.setLineDash([]); // Reset dash
-      }
+        if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
+            ctx.save();
+            ctx.beginPath();
+            adaptivePreviewPoints.forEach((point, index) => {
+                if (index === 0) ctx.moveTo(point.x, point.y);
+                else ctx.lineTo(point.x, point.y);
+            });
+            ctx.closePath();
+            ctx.fillStyle = structureColor;
+            ctx.globalAlpha = 0.3; // Semi-transparent fill
+            ctx.fill();
 
-      // Draw center dot
-      ctx.beginPath();
-      ctx.arc(cursorPosition.x, cursorPosition.y, 2, 0, 2 * Math.PI);
-      ctx.fillStyle = structureColor;
-      ctx.fill();
-    }
+            // 2. Draw the outline for the adaptive shape using the same path.
+            ctx.strokeStyle = structureColor;
+            ctx.lineWidth = 2; // A thin, clean line
+            ctx.globalAlpha = 0.8; // A more solid line for better visibility
+            ctx.setLineDash([6, 3]); // Dashed line to indicate smart brush
+            ctx.stroke();
 
-    // Draw current brush stroke - only for regular brush, not smart brush
-    if (brushPointsRef.current.length > 0 && !smartBrushEnabled) {
-      ctx.strokeStyle = structureColor;
-      const currentBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
-      
-      // Use same coordinate system as cursor and output
-      const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
-      const brushSizeInMM = currentBrushSize * pixelSpacing;
-      const zoomScale = ctTransform?.current?.scale || 1;
-      const strokeWidthInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale * 2; // Diameter
-      
-      ctx.lineWidth = strokeWidthInScreenPixels;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.globalAlpha = 0.7;
-
-      ctx.beginPath();
-      brushPointsRef.current.forEach((point, index) => {
-        if (index === 0) {
-          ctx.moveTo(point.x, point.y);
+            ctx.restore();
         } else {
-          ctx.lineTo(point.x, point.y);
+            ctx.beginPath();
+            ctx.arc(cursorPosition.x, cursorPosition.y, cursorRadiusInScreenPixels, 0, 2 * Math.PI);
+            ctx.strokeStyle = structureColor;
+            ctx.lineWidth = 2;
+            if (smartBrushEnabled) ctx.setLineDash([6, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
-      });
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
+
+        ctx.beginPath();
+        ctx.arc(cursorPosition.x, cursorPosition.y, 2, 0, 2 * Math.PI);
+        ctx.fillStyle = structureColor;
+        ctx.fill();
     }
-    
-    // Draw all collected adaptive shapes during smart brush drawing
-    if (isDrawing && smartBrushEnabled && adaptiveShapesRef.current.length > 0) {
-      ctx.save();
-      
-      // Draw each collected adaptive shape
-      adaptiveShapesRef.current.forEach((shape, shapeIndex) => {
-        if (shape.length > 2) {
-          // Draw filled shape with structure color
-          ctx.beginPath();
-          shape.forEach((point, index) => {
-            if (index === 0) {
-              ctx.moveTo(point.x, point.y);
-            } else {
-              ctx.lineTo(point.x, point.y);
-            }
-          });
-          ctx.closePath();
-          
-          // Fill with semi-transparent structure color (no outline for cleaner preview)
-          ctx.fillStyle = structureColor;
-          ctx.globalAlpha = 0.3; // Slightly higher opacity since no outline
-          ctx.fill();
+
+    // Draw the preview of the entire brush path
+    if (isDrawing) {
+        if (!smartBrushEnabled && brushPointsRef.current.length > 0) {
+            // Regular brush path preview
+            ctx.strokeStyle = structureColor;
+            const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
+            const brushSizeInMM = brushSize * pixelSpacing;
+            const zoomScale = ctTransform?.current?.scale || 1;
+            const strokeWidthInScreenPixels = (brushSizeInMM / pixelSpacing) * zoomScale * 2;
+            
+            ctx.lineWidth = strokeWidthInScreenPixels;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.globalAlpha = 0.7;
+
+            ctx.beginPath();
+            brushPointsRef.current.forEach((point, index) => {
+                if (index === 0) {
+                    ctx.moveTo(point.x, point.y);
+                } else {
+                    ctx.lineTo(point.x, point.y);
+                }
+            });
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+        } else if (smartBrushEnabled && adaptiveShapesRef.current.length > 0) {
+            // Smart brush path preview
+            ctx.save();
+            ctx.fillStyle = structureColor;
+            ctx.globalAlpha = 0.3; // Use the same transparency as the live preview fill
+
+            // Draw each collected adaptive shape to form the path
+            adaptiveShapesRef.current.forEach((shape) => {
+                if (shape.length > 2) {
+                    ctx.beginPath();
+                    shape.forEach((point, index) => {
+                        if (index === 0) {
+                            ctx.moveTo(point.x, point.y);
+                        } else {
+                            ctx.lineTo(point.x, point.y);
+                        }
+                    });
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            });
+            ctx.restore();
         }
-      });
-      
-      ctx.restore();
     }
   };
 
@@ -409,255 +354,148 @@ export function SimpleBrushTool({
       return { x, y };
     };
 
+    // This is the fix for the right-click-to-resize functionality.
+    // The previous logic was preventing the mouse move events from being
+    // correctly processed when adjusting the brush size.
     const handleMouseMove = (e: MouseEvent) => {
-      // Performance optimization: throttle mouse move events
-      const now = Date.now();
-      if (now - lastUpdateTime.current < updateThrottle && !isAdjustingSize && !isDrawing) {
-        return;
-      }
-      lastUpdateTime.current = now;
-
-      // Handle right-click diameter adjustment
-      if (isAdjustingSize && sizeAdjustStart) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const deltaX = e.clientX - sizeAdjustStart.x;
-        const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
-        
-        // Calculate minimum pixels for 0.1 cm (1 mm)
-        const minPixelsFor1mm = Math.ceil(1 / pixelSpacing); // ~1 pixel for typical spacing
-        const maxPixels = 102; // ~10 cm for typical spacing
-        
-        // More sensitive scaling - 50 pixels = 1 cm change
-        const deltaCm = deltaX / 50;
-        const baseSizeCm = (sizeAdjustStart.size * pixelSpacing) / 10;
-        const newSizeCm = Math.max(0.1, Math.min(10, baseSizeCm + deltaCm));
-        const newSizePixels = Math.max(minPixelsFor1mm, Math.min(maxPixels, (newSizeCm * 10) / pixelSpacing));
-        
-        setAdjustedBrushSize(Math.round(newSizePixels));
-        
-        // Update slider overlay with live feedback
-        if (sliderOverlayRef.current) {
-          const sizeText = sliderOverlayRef.current.querySelector("#brush-size-text") as HTMLElement;
-          const sliderFill = sliderOverlayRef.current.querySelector("#brush-slider-fill") as HTMLElement;
-          
-          if (sizeText) {
-            const sizeCm = (newSizePixels * pixelSpacing) / 10;
-            sizeText.innerHTML = `
-              <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #60a5fa;">Brush Thickness</div>
-              <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
-              <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(newSizePixels)} px)</div>
-            `;
-          }
-          
-          if (sliderFill) {
-            // Map size to slider width (0-100%) for 0.1cm to 10cm range
-            const currentSizeCm = (newSizePixels * pixelSpacing) / 10;
-            const percentage = ((currentSizeCm - 0.1) / (10 - 0.1)) * 100;
-            sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
-          }
-        }
-        return;
-      }
-
-      const coords = getCanvasCoords(e);
-      setCursorPosition(coords);
-
-      // Generate adaptive preview when smart brush is enabled (both hovering and drawing)
-      if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
-        try {
-          const ctx = canvasRef.current.getContext('2d');
-          if (ctx) {
-            const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-            const pixelX = Math.round((coords.x - transform.offsetX) / transform.scale);
-            const pixelY = Math.round((coords.y - transform.offsetY) / transform.scale);
+        if (isAdjustingSize && sizeAdjustStart) {
+            e.preventDefault();
+            e.stopPropagation();
             
-            // Get the actual DICOM image dimensions from transform
-            const imageWidth = transform.imageWidth || imageMetadata?.Columns || 512;
-            const imageHeight = transform.imageHeight || imageMetadata?.Rows || 512;
-            const canvasWidth = canvasRef.current.width;
-            const canvasHeight = canvasRef.current.height;
+            const deltaX = e.clientX - sizeAdjustStart.x;
+            const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
             
-            // Calculate where the DICOM image is rendered on the canvas
-            const scaledWidth = imageWidth * transform.scale;
-            const scaledHeight = imageHeight * transform.scale;
-            const imageStartX = (canvasWidth - scaledWidth) / 2;
-            const imageStartY = (canvasHeight - scaledHeight) / 2;
+            const minPixelsFor1mm = Math.ceil(1 / pixelSpacing);
+            const maxPixels = 102;
             
-            // Adjust pixel coordinates to be relative to the extracted image area
-            const adjustedPixelX = (coords.x - imageStartX) / transform.scale;
-            const adjustedPixelY = (coords.y - imageStartY) / transform.scale;
+            const deltaCm = deltaX / 50;
+            const baseSizeCm = (sizeAdjustStart.size * pixelSpacing) / 10;
+            const newSizeCm = Math.max(0.1, Math.min(10, baseSizeCm + deltaCm));
+            const newSizePixels = Math.max(minPixelsFor1mm, Math.min(maxPixels, (newSizeCm * 10) / pixelSpacing));
             
-            // Check if cursor is within the actual DICOM image bounds
-            if (adjustedPixelX < 0 || adjustedPixelX >= imageWidth || 
-                adjustedPixelY < 0 || adjustedPixelY >= imageHeight) {
-              // Cursor is outside the DICOM image - don't show preview
-              setAdaptivePreviewPoints(null);
-              return;
-            }
+            setAdjustedBrushSize(Math.round(newSizePixels));
             
-            // Debug log - only log occasionally to reduce noise
-            if (Math.random() < 0.05) {
-              console.log('Canvas:', canvasWidth, 'x', canvasHeight);
-              console.log('Image:', imageWidth, 'x', imageHeight); 
-              console.log('Scaled:', scaledWidth, 'x', scaledHeight);
-              console.log('Image starts at:', imageStartX, imageStartY);
-              console.log('Canvas mouse:', coords.x, coords.y);
-              console.log('Adjusted pixel:', adjustedPixelX, adjustedPixelY);
-            }
-            
-            // Get pixel data only from the area where the DICOM image is rendered
-            const imageData = ctx.getImageData(
-              Math.floor(imageStartX),
-              Math.floor(imageStartY),
-              Math.ceil(scaledWidth),
-              Math.ceil(scaledHeight)
-            );
-            const pixelData = imageData.data;
-            
-            // Convert RGBA to grayscale
-            const grayscaleData = new Float32Array(scaledWidth * scaledHeight);
-            for (let i = 0; i < grayscaleData.length; i++) {
-              grayscaleData[i] = pixelData[i * 4];
-            }
-            
-            // Create adaptive preview shape
-            const previewPoints = createAdaptivePreview(
-              grayscaleData,
-              Math.ceil(scaledWidth),
-              Math.ceil(scaledHeight),
-              Math.round(adjustedPixelX * transform.scale),
-              Math.round(adjustedPixelY * transform.scale),
-              brushSize
-            );
-            
-            // Convert preview points back to canvas coordinates
-            let canvasPreviewPoints = previewPoints.map(p => ({
-              x: p.x + imageStartX,
-              y: p.y + imageStartY
-            }));
-            
-            // Apply temporal smoothing to reduce jumpiness
-            if (previousPreviewPointsRef.current && 
-                previousPreviewPointsRef.current.length === canvasPreviewPoints.length) {
-              // Blend with previous frame for smooth transitions
-              const blendFactor = 0.7; // How much to keep from previous frame
-              canvasPreviewPoints = canvasPreviewPoints.map((point, i) => {
-                const prevPoint = previousPreviewPointsRef.current![i];
-                return {
-                  x: prevPoint.x * blendFactor + point.x * (1 - blendFactor),
-                  y: prevPoint.y * blendFactor + point.y * (1 - blendFactor)
-                };
-              });
-            }
-            
-            // Only update if we have valid points
-            if (canvasPreviewPoints.length > 2) {
-              previousPreviewPointsRef.current = canvasPreviewPoints;
-              setAdaptivePreviewPoints(canvasPreviewPoints);
+            // Update slider overlay with live feedback
+            if (sliderOverlayRef.current) {
+              const sizeText = sliderOverlayRef.current.querySelector("#brush-size-text") as HTMLElement;
+              const sliderFill = sliderOverlayRef.current.querySelector("#brush-slider-fill") as HTMLElement;
               
-              // Convert preview to world coordinates and send to viewer for rendering
-              if (onPreviewUpdate && canvasRef.current) {
-                const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-                const worldPoints: number[] = [];
-                
-                // Convert each point from canvas to world coordinates
-                for (const point of canvasPreviewPoints) {
-                  const worldPoint = canvasToWorld(
-                    point.x,
-                    point.y,
-                    canvasRef.current.width,
-                    canvasRef.current.height,
-                    imageMetadata || {},
-                    currentSlicePosition
-                  );
-                  
-                  // Add to flat array format (x,y,z)
-                  worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
-                }
-                
-                // Send preview contour to viewer
-                onPreviewUpdate([{
-                  points: worldPoints,
-                  slicePosition: currentSlicePosition,
-                  isPreview: true
-                }]);
+              if (sizeText) {
+                const sizeCm = (newSizePixels * pixelSpacing) / 10;
+                sizeText.innerHTML = `
+                  <div style="font-size: 16px; font-weight: 600; margin-bottom: 2px; color: #60a5fa;">Brush Thickness</div>
+                  <div style="font-size: 20px; font-weight: bold; margin-bottom: 2px;">${sizeCm.toFixed(2)} cm</div>
+                  <div style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">(${Math.round(newSizePixels)} px)</div>
+                `;
               }
               
-              // If drawing with smart brush, collect this adaptive shape
-              if (isDrawingRef.current && smartBrushEnabled) {
-                adaptiveShapesRef.current.push(canvasPreviewPoints);
-                console.log(`✅ Collected adaptive shape #${adaptiveShapesRef.current.length} with ${canvasPreviewPoints.length} points`);
-                
-                // Send all collected adaptive shapes as preview during drawing
-                if (onPreviewUpdate && canvasRef.current) {
-                  const allPreviewContours: any[] = [];
-                  
-                  // Convert all collected adaptive shapes to world coordinates
-                  for (const shape of adaptiveShapesRef.current) {
-                    const worldPoints: number[] = [];
-                    for (const point of shape) {
-                      const worldPoint = canvasToWorld(
-                        point.x,
-                        point.y,
-                        canvasRef.current.width,
-                        canvasRef.current.height,
-                        imageMetadata || {},
-                        currentSlicePosition
-                      );
-                      worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
+              if (sliderFill) {
+                // Map size to slider width (0-100%) for 0.1cm to 10cm range
+                const currentSizeCm = (newSizePixels * pixelSpacing) / 10;
+                const percentage = ((currentSizeCm - 0.1) / (10 - 0.1)) * 100;
+                sliderFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+              }
+            }
+            return;
+        }
+
+        // Performance optimization: throttle mouse move events
+        const now = Date.now();
+        if (now - lastUpdateTime.current < updateThrottle && !isDrawing) {
+            return;
+        }
+        lastUpdateTime.current = now;
+
+        const coords = getCanvasCoords(e);
+        setCursorPosition(coords);
+
+        if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
+            try {
+                const ctx = canvasRef.current.getContext('2d');
+                if (ctx) {
+                    const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+                    
+                    const imageWidth = transform.imageWidth || imageMetadata?.Columns || 512;
+                    const imageHeight = transform.imageHeight || imageMetadata?.Rows || 512;
+                    const scaledWidth = imageWidth * transform.scale;
+                    const scaledHeight = imageHeight * transform.scale;
+                    const imageStartX = (canvasRef.current.width - scaledWidth) / 2 + transform.offsetX;
+                    const imageStartY = (canvasRef.current.height - scaledHeight) / 2 + transform.offsetY;
+
+                    const cursorXOnImage = coords.x - imageStartX;
+                    const cursorYOnImage = coords.y - imageStartY;
+                    
+                    if (cursorXOnImage < 0 || cursorXOnImage >= scaledWidth || cursorYOnImage < 0 || cursorYOnImage >= scaledHeight) {
+                        setAdaptivePreviewPoints(null);
+                        return;
                     }
                     
-                    allPreviewContours.push({
-                      points: worldPoints,
-                      slicePosition: currentSlicePosition,
-                      isPreview: true
-                    });
-                  }
-                  
-                  // Send all preview contours to show the full path
-                  onPreviewUpdate(allPreviewContours);
+                    const imageData = ctx.getImageData(
+                        Math.floor(imageStartX),
+                        Math.floor(imageStartY),
+                        Math.ceil(scaledWidth),
+                        Math.ceil(scaledHeight)
+                    );
+                    const grayscaleData = new Float32Array(scaledWidth * scaledHeight);
+                    for (let i = 0; i < grayscaleData.length; i++) {
+                        grayscaleData[i] = imageData.data[i * 4];
+                    }
+                    
+                    // This is the core fix: The brush radius must be scaled by the zoom level
+                    // to match the coordinate space of the preview.
+                    const radiusInCanvasPixels = brushSize * transform.scale;
+                    
+                    const previewPoints = createAdaptivePreview(
+                        grayscaleData,
+                        Math.ceil(scaledWidth),
+                        Math.ceil(scaledHeight),
+                        cursorXOnImage,
+                        cursorYOnImage,
+                        radiusInCanvasPixels
+                    );
+                    
+                    let canvasPreviewPoints = previewPoints.map(p => ({
+                        x: p.x + imageStartX,
+                        y: p.y + imageStartY
+                    }));
+                    
+                    // Light temporal smoothing
+                    if (previousPreviewPointsRef.current && previousPreviewPointsRef.current.length === canvasPreviewPoints.length) {
+                        const blendFactor = 0.7;
+                        canvasPreviewPoints = canvasPreviewPoints.map((point, i) => {
+                            const prevPoint = previousPreviewPointsRef.current![i];
+                            return {
+                                x: prevPoint.x * blendFactor + point.x * (1 - blendFactor),
+                                y: prevPoint.y * blendFactor + point.y * (1 - blendFactor)
+                            };
+                        });
+                    }
+                    
+                    if (canvasPreviewPoints.length > 2) {
+                        previousPreviewPointsRef.current = canvasPreviewPoints;
+                        setAdaptivePreviewPoints(canvasPreviewPoints);
+                        
+                        if (isDrawingRef.current) {
+                            adaptiveShapesRef.current.push(canvasPreviewPoints);
+                        }
+                    }
                 }
-              }
+            } catch (error) {
+                console.error("Error creating adaptive preview:", error);
+                setAdaptivePreviewPoints(null);
             }
-          }
-        } catch (error) {
-          console.error("Error creating adaptive preview:", error instanceof Error ? error.message : error);
-          console.error("Stack:", error instanceof Error ? error.stack : "No stack");
-          setAdaptivePreviewPoints(null);
-          // Clear preview on error
-          if (onPreviewUpdate) {
-            onPreviewUpdate(null);
-          }
+        } else {
+            setAdaptivePreviewPoints(null);
         }
-      } else {
-        setAdaptivePreviewPoints(null);
-        // Clear preview when smart brush is not enabled or in erase mode
-        if (onPreviewUpdate && smartBrushEnabled) {
-          onPreviewUpdate(null);
-        }
-      }
 
-      if (isDrawingRef.current && selectedStructure) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // For standard brush, collect and render points
-        if (!smartBrushEnabled) {
-          // Add points with some distance threshold to avoid too many points
-          const lastPoint =
-            brushPointsRef.current[brushPointsRef.current.length - 1];
-          if (
-            !lastPoint ||
-            Math.hypot(coords.x - lastPoint.x, coords.y - lastPoint.y) > 2
-          ) {
-            brushPointsRef.current.push(coords);
-            addBrushPoint(coords.x, coords.y);
-          }
+        if (isDrawingRef.current && selectedStructure) {
+            if (!smartBrushEnabled) {
+                const lastPoint = brushPointsRef.current[brushPointsRef.current.length - 1];
+                if (!lastPoint || Math.hypot(coords.x - lastPoint.x, coords.y - lastPoint.y) > 2) {
+                    brushPointsRef.current.push(coords);
+                }
+            }
         }
-        // For smart brush, the adaptive shapes are already being collected above
-      }
     };
 
     const handleMouseDown = (e: MouseEvent) => {
@@ -836,116 +674,90 @@ export function SimpleBrushTool({
 
   const finalizeBrushStroke = async () => {
     try {
-      if (!selectedStructure || !rtStructures?.structures) {
-        console.log("Finalizing brush stroke: No structure selected");
+        if (!selectedStructure || !rtStructures?.structures) {
+            return;
+        }
+
+        const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+        const isInEraseMode = isEraseMode || isTemporaryEraseMode;
+
+        if (smartBrushEnabled && adaptiveShapesRef.current.length > 0 && !isInEraseMode) {
+            console.log(`🎨 Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
+            
+            const adaptivePolygons: number[][] = [];
+            adaptiveShapesRef.current.forEach((shape) => {
+                if (shape.length > 2) {
+                    const worldPoints: number[] = [];
+                    shape.forEach(p => {
+                        const pixelX = (p.x - transform.offsetX) / transform.scale;
+                        const pixelY = (p.y - transform.offsetY) / transform.scale;
+                        const worldPoint = pixelToWorld(pixelX, pixelY, imageMetadata, currentSlicePosition);
+                        worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
+                    });
+                    adaptivePolygons.push(worldPoints);
+                }
+            });
+
+            if (adaptivePolygons.length === 0) {
+                console.log("No valid adaptive shapes to create contour");
+                return;
+            }
+            
+            const { polygonUnion } = await import('@/lib/polygon-union');
+            const unifiedPolygon = polygonUnion(adaptivePolygons);
+
+            if (onContourUpdate) {
+                onContourUpdate({
+                    action: "smart_brush_stroke",
+                    structureId: selectedStructure,
+                    slicePosition: currentSlicePosition,
+                    points: unifiedPolygon,
+                });
+            }
+        } else if (!smartBrushEnabled && brushPointsRef.current.length > 0) {
+            console.log(`Finalizing regular brush with ${brushPointsRef.current.length} points`);
+
+            // Regular brush mode - convert all brush points to world coordinates
+            const worldPoints = brushPointsRef.current.map((point) => {
+                const pixelX = (point.x - transform.offsetX) / transform.scale;
+                const pixelY = (point.y - transform.offsetY) / transform.scale;
+                return pixelToWorld(pixelX, pixelY, imageMetadata, currentSlicePosition);
+            });
+
+            const actionType = isInEraseMode ? "erase_stroke" : "brush_stroke";
+            
+            // Notify parent component with the brush/erase stroke data
+            if (onContourUpdate) {
+              onContourUpdate({
+                action: actionType,
+                structureId: selectedStructure,
+                slicePosition: currentSlicePosition,
+                pointCount: worldPoints.length,
+                points: worldPoints,
+                brushSize: brushSize,
+                predictionEnabled: predictionEnabled,
+                isEraseMode: isInEraseMode,
+              });
+            }
+        }
+    } catch (error) {
+        console.error("Error in finalizeBrushStroke:", error);
+    } finally {
         brushPointsRef.current = [];
         adaptiveShapesRef.current = [];
-        return;
-      }
-
-      // Get current zoom/pan transform
-      const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
-      
-      // Parse DICOM metadata once
-      const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
-      const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
-      const [rowSpacing, colSpacing] = pixelSpacing;
-
-      // Determine if we're in erase mode
-      const isInEraseMode = isEraseMode || isTemporaryEraseMode;
-
-      // Handle smart brush mode
-      if (smartBrushEnabled && adaptiveShapesRef.current.length > 0 && !isInEraseMode) {
-        console.log(`🎨 Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
-        console.log(`🎨 Adaptive shapes point counts: ${adaptiveShapesRef.current.map(shape => shape.length).join(', ')}`);
-        
-        // Combine all adaptive shapes into a single continuous contour
-        const allWorldPoints: number[] = [];
-        
-        adaptiveShapesRef.current.forEach((shape, index) => {
-          if (shape.length > 2) {
-            shape.forEach(p => {
-              const pixelX = (p.x - transform.offsetX) / transform.scale;
-              const pixelY = (p.y - transform.offsetY) / transform.scale;
-              const worldX = imagePosition[0] + (pixelX * colSpacing);
-              const worldY = imagePosition[1] + (pixelY * rowSpacing);
-              const worldZ = currentSlicePosition;
-              allWorldPoints.push(worldX, worldY, worldZ);
-            });
-            console.log(`🎨 Added adaptive shape ${index + 1} to combined path: ${shape.length} points`);
-          }
-        });
-        
-        if (allWorldPoints.length === 0) {
-          console.log("No valid points to create contour");
-          return;
-        }
-        
-        // Send all adaptive shapes as a single combined contour
-        console.log(`Smart brush completed: ${allWorldPoints.length / 3} total points from ${adaptiveShapesRef.current.length} adaptive shapes`);
-        
-        // Send as smart brush stroke which will be processed and combined properly
-        if (onContourUpdate) {
-          console.log(`🎯 Sending smart brush contour to viewer: ${allWorldPoints.length / 3} points for structure ${selectedStructure}`);
-          onContourUpdate({
-            action: "smart_brush_stroke",
-            structureId: selectedStructure,
-            slicePosition: currentSlicePosition,
-            pointCount: allWorldPoints.length / 3,
-            points: allWorldPoints,
-            brushSize: brushSize,
-            isAdaptiveBrush: true,
-          });
-          console.log(`✅ Smart brush contour sent successfully`);
-        } else {
-          console.error(`❌ onContourUpdate is not defined - cannot send contour!`);
-        }
-      } 
-      // Handle regular brush mode
-      else if (brushPointsRef.current.length > 0 && !smartBrushEnabled) {
-        console.log(`Finalizing regular brush with ${brushPointsRef.current.length} points`);
-
-        // Regular brush mode - convert all brush points to world coordinates
-        const worldPoints = brushPointsRef.current.map((point) => {
-          const pixelX = (point.x - transform.offsetX) / transform.scale;
-          const pixelY = (point.y - transform.offsetY) / transform.scale;
-          const worldX = imagePosition[0] + (pixelX * colSpacing);
-          const worldY = imagePosition[1] + (pixelY * rowSpacing);
-          const worldZ = currentSlicePosition;
-          
-          console.log(`Brush point: Canvas(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) -> Pixel(${pixelX.toFixed(1)}, ${pixelY.toFixed(1)}) -> World(${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`);
-          
-          return [worldX, worldY, worldZ];
-        });
-
-        const actionType = isInEraseMode ? "erase_stroke" : "brush_stroke";
-        
-        console.log(
-          `${isInEraseMode ? 'Erase' : 'Brush'} stroke completed: ${worldPoints.length} points ${isInEraseMode ? 'removed from' : 'added to'} structure ${selectedStructure} at slice ${currentSlicePosition}mm`,
-        );
-
-        // Notify parent component with the brush/erase stroke data
-        if (onContourUpdate) {
-          onContourUpdate({
-            action: actionType,
-            structureId: selectedStructure,
-            slicePosition: currentSlicePosition,
-            pointCount: worldPoints.length,
-            points: worldPoints,
-            brushSize: brushSize,
-            predictionEnabled: predictionEnabled,
-            isEraseMode: isInEraseMode,
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Error in finalizeBrushStroke:", error);
-    } finally {
-      // Always clear brush points and adaptive shapes
-      brushPointsRef.current = [];
-      adaptiveShapesRef.current = [];
     }
-  };
+};
+
+const pixelToWorld = (pixelX: number, pixelY: number, imageMetadata: any, slicePosition: number): [number, number, number] => {
+    const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
+    const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
+    const [rowSpacing, colSpacing] = pixelSpacing;
+
+    const worldX = imagePosition[0] + (pixelX * colSpacing);
+    const worldY = imagePosition[1] + (pixelY * rowSpacing);
+    
+    return [worldX, worldY, slicePosition];
+};
 
   // Create slider overlay for diameter adjustment
   const createSliderOverlay = (x: number, y: number) => {
