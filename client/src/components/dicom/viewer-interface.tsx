@@ -10,7 +10,7 @@ import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { AdvancedMarginTool } from './advanced-margin-tool';
+import { MarginToolbar } from './margin-toolbar';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -70,7 +70,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
-  const [showAdvancedMarginTool, setShowAdvancedMarginTool] = useState(false);
+  const [showMarginToolbar, setShowMarginToolbar] = useState(false);
   const [showLocalizationTool, setShowLocalizationTool] = useState(false);
 
   // Clear RT structures when patient changes
@@ -710,8 +710,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourEdit={() => {
             // Close boolean operations toolbar when opening contour edit
             setShowBooleanOperations(false);
-            // Close advanced margin tool when opening contour edit
-            setShowAdvancedMarginTool(false);
+            // Close margin toolbar when opening contour edit
+            setShowMarginToolbar(false);
             // Close localization tool when opening contour edit
             setShowLocalizationTool(false);
             
@@ -727,20 +727,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onContourOperations={() => {
             // Close contour edit toolbar when opening boolean operations
             setIsContourEditMode(false);
-            // Close advanced margin tool when opening boolean operations
-            setShowAdvancedMarginTool(false);
+            // Close margin toolbar when opening boolean operations
+            setShowMarginToolbar(false);
             // Close localization tool when opening boolean operations
             setShowLocalizationTool(false);
             setShowBooleanOperations(true);
           }}
           onAdvancedMarginTool={() => {
-            // Close contour edit toolbar when opening advanced margin tool
+            // Close contour edit toolbar when opening margin toolbar
             setIsContourEditMode(false);
-            // Close boolean operations toolbar when opening advanced margin tool
+            // Close boolean operations toolbar when opening margin toolbar
             setShowBooleanOperations(false);
-            // Close localization tool when opening advanced margin tool
+            // Close localization tool when opening margin toolbar
             setShowLocalizationTool(false);
-            setShowAdvancedMarginTool(true);
+            setShowMarginToolbar(true);
           }}
           onMPRToggle={() => {
             setMprVisible(!mprVisible);
@@ -793,20 +793,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           imageMetadata={imageMetadata}
           onOpenBooleanOperations={() => {
             setIsContourEditMode(false);
-            setShowAdvancedMarginTool(false);
+            setShowMarginToolbar(false);
             setShowBooleanOperations(true);
           }}
           onOpenAdvancedMarginTool={() => {
             setIsContourEditMode(false);
             setShowBooleanOperations(false);
-            setShowAdvancedMarginTool(true);
+            setShowMarginToolbar(true);
           }}
 
         />
       )}
 
       {/* Boolean Operations Toolbar */}
-      {showBooleanOperations && !showAdvancedMarginTool && (
+      {showBooleanOperations && !showMarginToolbar && (
         <BooleanOperationsToolbar
           isVisible={showBooleanOperations}
           onClose={() => setShowBooleanOperations(false)}
@@ -822,11 +822,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Advanced Margin Tool */}
-      {showAdvancedMarginTool && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
-        <AdvancedMarginTool
-          isVisible={showAdvancedMarginTool}
-          onClose={() => setShowAdvancedMarginTool(false)}
+      {/* Margin Toolbar */}
+      {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
+        <MarginToolbar
+          isVisible={showMarginToolbar}
+          onClose={() => setShowMarginToolbar(false)}
           selectedStructure={rtStructures.structures?.find((s: any) => s.roiNumber === selectedForEdit) ? {
             id: selectedForEdit,
             structureName: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.structureName || 'Unknown',
@@ -834,36 +834,30 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               `rgb(${rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color.join(',')})` : 
               undefined
           } : undefined}
-          onPreviewOperation={(operation) => {
-            // Handle preview operation
-            console.log('🔹 🎯 Viewer Interface: Handling preview operation:', operation);
-            if (workingViewerRef.current) {
-              console.log('🔹 ✅ Working viewer ref found, calling handleContourUpdate');
-              workingViewerRef.current.handleContourUpdate({
-                action: 'preview_margin',
-                structureId: operation.structureId,
-                parameters: operation.parameters
-              });
-            } else {
-              console.error('🔹 ❌ Working viewer ref not found!');
-            }
-          }}
           onExecuteOperation={(operation) => {
-            // Handle execution operation
-            console.log('🔹 🎯 Viewer Interface: Handling execute operation:', operation);
+            // Handle execute operation
+            console.log('🔹 🎯 Viewer Interface: Handling margin operation:', operation);
             if (workingViewerRef.current) {
               console.log('🔹 ✅ Working viewer ref found, calling handleContourUpdate');
-              workingViewerRef.current.handleContourUpdate({
-                action: 'execute_margin',
-                structureId: operation.structureId,
-                parameters: operation.parameters
-              });
+              if (operation.preview) {
+                workingViewerRef.current.handleContourUpdate({
+                  action: 'preview_margin',
+                  structureId: operation.structureId,
+                  parameters: operation.parameters
+                });
+              } else {
+                workingViewerRef.current.handleContourUpdate({
+                  action: 'execute_margin',
+                  structureId: operation.structureId,
+                  parameters: operation.parameters
+                });
+                setShowMarginToolbar(false);
+              }
             } else {
               console.error('🔹 ❌ Working viewer ref not found!');
             }
-            setShowAdvancedMarginTool(false);
           }}
-          onClearPreview={() => {
+          onPreviewClear={() => {
             // Handle clear preview
             if (workingViewerRef.current) {
               workingViewerRef.current.handleContourUpdate({

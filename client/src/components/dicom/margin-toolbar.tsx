@@ -1,0 +1,371 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+import { 
+  Expand,
+  Move,
+  Box,
+  Play,
+  Eye,
+  EyeOff,
+  X,
+  Settings2,
+  ChevronDown
+} from 'lucide-react';
+
+interface MarginToolbarProps {
+  selectedStructure: {
+    id: number;
+    structureName: string;
+    color?: string;
+  } | null;
+  isVisible: boolean;
+  onClose: () => void;
+  onExecuteOperation: (operation: {
+    type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
+    parameters: any;
+    structureId: number;
+    preview?: boolean;
+  }) => void;
+  onPreviewClear?: () => void;
+}
+
+export function MarginToolbar({ 
+  selectedStructure, 
+  isVisible, 
+  onClose,
+  onExecuteOperation,
+  onPreviewClear
+}: MarginToolbarProps) {
+  const [activeMode, setActiveMode] = useState<'uniform' | 'directional' | 'anisotropic'>('uniform');
+  const [showSettings, setShowSettings] = useState(false);
+  const [isPreviewActive, setIsPreviewActive] = useState(false);
+  
+  // Margin values
+  const [uniformMargin, setUniformMargin] = useState(5);
+  const [anisotropicMargins, setAnisotropicMargins] = useState({ x: 5, y: 5, z: 5 });
+  const [directionalMargins, setDirectionalMargins] = useState({
+    superior: 5, inferior: 5,
+    anterior: 5, posterior: 5,
+    left: 5, right: 5
+  });
+
+  if (!isVisible || !selectedStructure) return null;
+
+  const structureColor = selectedStructure.color || '#ffffff';
+  const backgroundHue = 200; // Blue-ish hue for medical theme
+
+  const handleModeChange = (mode: 'uniform' | 'directional' | 'anisotropic') => {
+    setActiveMode(mode);
+    setShowSettings(true);
+  };
+
+  const handlePreview = () => {
+    if (!selectedStructure) return;
+
+    const parameters: any = {
+      marginType: activeMode.toUpperCase(),
+      marginValues: {},
+      preview: { enabled: true, opacity: 0.5, color: '#FFFF00' }
+    };
+
+    if (activeMode === 'uniform') {
+      parameters.marginValues = { uniform: uniformMargin };
+    } else if (activeMode === 'anisotropic') {
+      parameters.marginValues = anisotropicMargins;
+    } else if (activeMode === 'directional') {
+      parameters.marginValues = directionalMargins;
+    }
+
+    onExecuteOperation({
+      type: activeMode === 'uniform' ? 'uniform_margin' : 
+            activeMode === 'anisotropic' ? 'anisotropic_margin' : 
+            'directional_margin',
+      parameters,
+      structureId: selectedStructure.id,
+      preview: true
+    });
+
+    setIsPreviewActive(true);
+  };
+
+  const handleExecute = () => {
+    if (!selectedStructure) return;
+
+    const parameters: any = {
+      marginType: activeMode.toUpperCase(),
+      marginValues: {},
+      preview: { enabled: false }
+    };
+
+    if (activeMode === 'uniform') {
+      parameters.marginValues = { uniform: uniformMargin };
+    } else if (activeMode === 'anisotropic') {
+      parameters.marginValues = anisotropicMargins;
+    } else if (activeMode === 'directional') {
+      parameters.marginValues = directionalMargins;
+    }
+
+    onExecuteOperation({
+      type: activeMode === 'uniform' ? 'uniform_margin' : 
+            activeMode === 'anisotropic' ? 'anisotropic_margin' : 
+            'directional_margin',
+      parameters,
+      structureId: selectedStructure.id,
+      preview: false
+    });
+
+    setIsPreviewActive(false);
+  };
+
+  const handleClearPreview = () => {
+    if (onPreviewClear) {
+      onPreviewClear();
+    }
+    setIsPreviewActive(false);
+  };
+
+  const renderUniformSettings = () => (
+    <div className="space-y-3 p-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs text-white/70">Margin Distance</Label>
+        <div className="flex items-center space-x-2">
+          <Slider
+            value={[uniformMargin]}
+            onValueChange={(value) => setUniformMargin(value[0])}
+            min={-10}
+            max={20}
+            step={0.5}
+            className="w-32"
+          />
+          <Input
+            type="number"
+            value={uniformMargin}
+            onChange={(e) => setUniformMargin(parseFloat(e.target.value) || 0)}
+            className="w-16 h-6 bg-white/10 border-white/30 text-white text-xs"
+            step="0.5"
+          />
+          <span className="text-white/50 text-xs">mm</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAnisotropicSettings = () => (
+    <div className="space-y-3 p-3">
+      <div className="text-xs text-white/60 mb-2">
+        Set same values for uniform expansion or different for directional
+      </div>
+      {Object.entries({ x: 'X (L/R)', y: 'Y (A/P)', z: 'Z (S/I)' }).map(([axis, label]) => (
+        <div key={axis} className="flex items-center justify-between">
+          <Label className="text-xs text-white/70 w-16">{label}</Label>
+          <div className="flex items-center space-x-2">
+            <Slider
+              value={[anisotropicMargins[axis as keyof typeof anisotropicMargins]]}
+              onValueChange={(value) => 
+                setAnisotropicMargins(prev => ({ ...prev, [axis]: value[0] }))
+              }
+              min={-10}
+              max={20}
+              step={0.5}
+              className="w-32"
+            />
+            <Input
+              type="number"
+              value={anisotropicMargins[axis as keyof typeof anisotropicMargins]}
+              onChange={(e) => 
+                setAnisotropicMargins(prev => ({ ...prev, [axis]: parseFloat(e.target.value) || 0 }))
+              }
+              className="w-16 h-6 bg-white/10 border-white/30 text-white text-xs"
+              step="0.5"
+            />
+            <span className="text-white/50 text-xs">mm</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderDirectionalSettings = () => (
+    <div className="space-y-2 p-3">
+      <div className="grid grid-cols-2 gap-3">
+        {Object.entries({
+          superior: 'Superior (+Z)',
+          inferior: 'Inferior (-Z)',
+          anterior: 'Anterior (-Y)',
+          posterior: 'Posterior (+Y)',
+          left: 'Left (+X)',
+          right: 'Right (-X)'
+        }).map(([dir, label]) => (
+          <div key={dir} className="flex items-center space-x-2">
+            <Label className="text-xs text-white/70 w-20">{label}</Label>
+            <Input
+              type="number"
+              value={directionalMargins[dir as keyof typeof directionalMargins]}
+              onChange={(e) => 
+                setDirectionalMargins(prev => ({ ...prev, [dir]: parseFloat(e.target.value) || 0 }))
+              }
+              className="w-14 h-6 bg-white/10 border-white/30 text-white text-xs"
+              step="0.5"
+            />
+            <span className="text-white/50 text-xs">mm</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed bottom-24 lg:left-[58.33%] left-1/2 transform -translate-x-1/2 z-50" 
+         style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
+      <div className="relative">
+        <div 
+          className="backdrop-blur-md border rounded-xl px-4 py-3 shadow-2xl"
+          style={{ 
+            backgroundColor: `hsla(${backgroundHue}, 20%, 10%, 0.75)`,
+            borderColor: `${structureColor}60` 
+          }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center space-x-3">
+              <div 
+                className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
+                style={{ backgroundColor: structureColor }}
+              />
+              <span className="text-white text-sm font-medium">Margin:</span>
+              <span className="text-white/70 text-sm">{selectedStructure.structureName}</span>
+              
+              {/* Separator */}
+              <div className="w-px h-6 bg-white/30 mx-2" />
+              
+              {/* Mode buttons */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleModeChange('uniform')}
+                className={`h-7 px-3 border-2 text-white rounded-lg backdrop-blur-sm shadow-sm ${
+                  activeMode === 'uniform' 
+                    ? 'bg-cyan-500/30 border-cyan-400/60 hover:bg-cyan-500/40' 
+                    : 'bg-white/10 border-white/30 hover:bg-white/20'
+                }`}
+                title="Uniform margin"
+              >
+                <Expand className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Uniform</span>
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleModeChange('anisotropic')}
+                className={`h-7 px-3 border-2 text-white rounded-lg backdrop-blur-sm shadow-sm ${
+                  activeMode === 'anisotropic' 
+                    ? 'bg-cyan-500/30 border-cyan-400/60 hover:bg-cyan-500/40' 
+                    : 'bg-white/10 border-white/30 hover:bg-white/20'
+                }`}
+                title="Anisotropic margin (X,Y,Z)"
+              >
+                <Box className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">X,Y,Z</span>
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleModeChange('directional')}
+                className={`h-7 px-3 border-2 text-white rounded-lg backdrop-blur-sm shadow-sm ${
+                  activeMode === 'directional' 
+                    ? 'bg-cyan-500/30 border-cyan-400/60 hover:bg-cyan-500/40' 
+                    : 'bg-white/10 border-white/30 hover:bg-white/20'
+                }`}
+                title="Directional margin"
+              >
+                <Move className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Directional</span>
+              </Button>
+              
+              {/* Settings toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSettings(!showSettings)}
+                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:bg-white/20 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                <Settings2 className="w-3 h-3" />
+              </Button>
+              
+              {/* Separator */}
+              <div className="w-px h-6 bg-white/30 mx-2" />
+              
+              {/* Action buttons */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePreview}
+                disabled={!selectedStructure}
+                className="h-7 px-3 bg-yellow-900/30 border-2 border-yellow-600/50 text-yellow-400 hover:bg-yellow-900/40 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                <Eye className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Preview</span>
+              </Button>
+              
+              {isPreviewActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearPreview}
+                  className="h-7 w-7 p-0 bg-gray-900/30 border-2 border-gray-600/50 text-gray-400 hover:bg-gray-900/40 rounded-lg backdrop-blur-sm shadow-sm"
+                >
+                  <EyeOff className="w-3 h-3" />
+                </Button>
+              )}
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExecute}
+                disabled={!selectedStructure}
+                className="h-7 px-3 bg-cyan-500/30 border-2 border-cyan-500/60 text-cyan-300 hover:bg-cyan-500/40 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                <Play className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Execute</span>
+              </Button>
+            </div>
+            
+            {/* Close button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="h-6 w-6 p-0 text-white/60 hover:text-white hover:bg-white/20 rounded-lg ml-3"
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          </div>
+          
+          {/* Settings panel */}
+          {showSettings && (
+            <div className="mt-3 border-t border-white/20 pt-2">
+              {activeMode === 'uniform' && renderUniformSettings()}
+              {activeMode === 'anisotropic' && renderAnisotropicSettings()}
+              {activeMode === 'directional' && renderDirectionalSettings()}
+            </div>
+          )}
+          
+          {/* Preview status */}
+          {isPreviewActive && (
+            <div className="mt-2 p-2 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
+              <div className="flex items-center text-xs text-yellow-400">
+                <Eye className="w-3 h-3 mr-2" />
+                <span>Preview active - Yellow dashed outline shows margin result</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

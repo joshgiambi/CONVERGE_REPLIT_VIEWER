@@ -5,7 +5,7 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 
 ## Recent Changes (August 1-4, 2025)
 - **Anisotropic Margin Operations**: Implemented radiotherapy-grade anisotropic margin operations using morphological dilation/erosion based on Slicer forum recommendations. Supports both uniform expansion (same margin in all directions) and anisotropic expansion (different margin values in X, Y, Z directions based on 3D tumor movement patterns)
-- **Enhanced Margin Tool UI**: Added new "Anisotropic Margins" tab with separate X, Y, Z directional controls. Users can set same values for standard uniform expansion or different values for directional expansion
+- **Compact Margin Toolbar**: Redesigned margin operations UI to match contour edit toolbar with minimal real estate. New floating toolbar features icon-based mode selection (Uniform, X,Y,Z, Directional) with expandable settings panels
 - **Morphological Operations**: Replaced simple polygon buffering with iterative morphological operations for better margin accuracy in radiotherapy applications
 - **Performance Optimizations**: Implemented cached LUT (Look-Up Table) and reusable offscreen canvas for render16BitImage function
 - **Memory Improvements**: Replaced all JSON.parse(JSON.stringify) with structuredClone API for better performance
