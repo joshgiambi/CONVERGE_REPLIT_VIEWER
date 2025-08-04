@@ -8,7 +8,7 @@ import polygonClipping from 'polygon-clipping';
 /**
  * Convert 3D contour points (x,y,z format) to 2D polygon format for polygon-clipping
  */
-function contourToPolygon(points: number[]): [number, number][] {
+export function contourToPolygon(points: number[]): [number, number][] {
   const polygon: [number, number][] = [];
   for (let i = 0; i < points.length; i += 3) {
     polygon.push([points[i], points[i + 1]]);
@@ -29,7 +29,7 @@ function contourToPolygon(points: number[]): [number, number][] {
 /**
  * Convert polygon-clipping result back to 3D contour points
  */
-function polygonToContour(polygon: [number, number][], z: number = 0): number[] {
+export function polygonToContour(polygon: [number, number][], z: number = 0): number[] {
   const contour: number[] = [];
   for (const point of polygon) {
     contour.push(point[0], point[1], z);

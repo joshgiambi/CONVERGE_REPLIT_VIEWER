@@ -31,7 +31,7 @@ interface AdvancedMarginToolProps {
 }
 
 interface MarginParameters {
-  marginType: 'UNIFORM' | 'DIRECTIONAL' | 'MORPHOLOGICAL';
+  marginType: 'UNIFORM' | 'DIRECTIONAL' | 'MORPHOLOGICAL' | 'ANISOTROPIC';
   marginValues: {
     uniform: number;        // mm
     superior: number;       // mm (+Z)
@@ -40,13 +40,18 @@ interface MarginParameters {
     posterior: number;      // mm (+Y)
     left: number;          // mm (+X)
     right: number;         // mm (-X)
+    // Anisotropic margins for radiotherapy
+    x: number;            // mm in X direction
+    y: number;            // mm in Y direction
+    z: number;            // mm in Z direction
   };
-  algorithmType: 'SIMPLE' | 'MORPHOLOGICAL' | 'SURFACE_BASED';
+  algorithmType: 'SIMPLE' | 'MORPHOLOGICAL' | 'SURFACE_BASED' | 'ANISOTROPIC_MORPH';
   kernelType: 'SPHERICAL' | 'CUBIC' | 'ELLIPSOIDAL';
   smoothingType: 'LINEAR' | 'GAUSSIAN' | 'SPLINE';
   cornerHandling: 'ROUND' | 'MITER' | 'BEVEL';
   resolution: number;       // mm between points
   iterations: number;       // Number of dilation/erosion iterations
+  interpolateSlices: boolean; // For Z-direction extension
   preview: {
     enabled: boolean;
     opacity: number;
@@ -64,7 +69,10 @@ const defaultMarginParameters = (): MarginParameters => ({
     anterior: 5.0,
     posterior: 5.0,
     left: 5.0,
-    right: 5.0
+    right: 5.0,
+    x: 5.0,
+    y: 5.0,
+    z: 5.0
   },
   algorithmType: 'MORPHOLOGICAL',
   kernelType: 'SPHERICAL',
@@ -72,6 +80,7 @@ const defaultMarginParameters = (): MarginParameters => ({
   cornerHandling: 'ROUND',
   resolution: 1.0,
   iterations: 1,
+  interpolateSlices: false,
   preview: {
     enabled: true,
     opacity: 0.6,
@@ -171,6 +180,7 @@ export function AdvancedMarginTool({
     onExecuteOperation({
       type: parameters.marginType === 'UNIFORM' ? 'uniform_margin' : 
             parameters.marginType === 'DIRECTIONAL' ? 'directional_margin' : 
+            parameters.marginType === 'ANISOTROPIC' ? 'anisotropic_margin' :
             'morphological_margin',
       parameters,
       structureId: selectedStructure.id
@@ -242,6 +252,60 @@ export function AdvancedMarginTool({
           </div>
         </div>
       ))}
+    </div>
+  );
+  
+  const renderAnisotropicMarginControls = () => (
+    <div className="space-y-4">
+      <div className="text-xs text-white/70 mb-3">
+        Anisotropic margins allow different values for X, Y, and Z directions.
+        Used in radiotherapy to account for directional tumor movement.
+      </div>
+      
+      {Object.entries({
+        x: 'X Direction (Left/Right)',
+        y: 'Y Direction (Anterior/Posterior)',
+        z: 'Z Direction (Superior/Inferior)'
+      }).map(([key, label]) => (
+        <div key={key}>
+          <Label className="text-xs text-white/70">{label}</Label>
+          <div className="flex items-center space-x-2 mt-1">
+            <Slider
+              value={[parameters.marginValues[key as keyof typeof parameters.marginValues]]}
+              onValueChange={(value) => handleParameterChange(`marginValues.${key}`, value[0])}
+              min={0}
+              max={20}
+              step={0.5}
+              className="flex-1"
+            />
+            <Input
+              type="number"
+              value={parameters.marginValues[key as keyof typeof parameters.marginValues]}
+              onChange={(e) => handleParameterChange(`marginValues.${key}`, parseFloat(e.target.value) || 0)}
+              className="w-16 h-7 bg-white/10 border-white/30 text-white text-xs"
+              step="0.5"
+            />
+            <span className="text-white/50 text-xs w-8">mm</span>
+          </div>
+        </div>
+      ))}
+      
+      <div className="mt-4 pt-3 border-t border-white/20">
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={parameters.interpolateSlices || false}
+            onChange={(e) => handleParameterChange('interpolateSlices', e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-white/70 text-xs">Interpolate between slices (Z-direction extension)</span>
+        </label>
+      </div>
+      
+      <div className="text-xs text-white/50 mt-2">
+        Algorithm uses morphological operations (dilation/erosion) with elliptical kernels
+        to simulate vtkImageDilateErode3D behavior.
+      </div>
     </div>
   );
 
@@ -391,7 +455,7 @@ export function AdvancedMarginTool({
           onValueChange={(value) => handleParameterChange('marginType', value)}
           className="mb-4"
         >
-          <TabsList className="grid w-full grid-cols-3 bg-white/10">
+          <TabsList className="grid w-full grid-cols-4 bg-white/10">
             <TabsTrigger value="UNIFORM" className="text-xs data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-300">
               Uniform
             </TabsTrigger>
@@ -400,6 +464,9 @@ export function AdvancedMarginTool({
             </TabsTrigger>
             <TabsTrigger value="MORPHOLOGICAL" className="text-xs data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-300">
               Morphological
+            </TabsTrigger>
+            <TabsTrigger value="ANISOTROPIC" className="text-xs data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-300">
+              Anisotropic
             </TabsTrigger>
           </TabsList>
 
@@ -414,6 +481,10 @@ export function AdvancedMarginTool({
           <TabsContent value="MORPHOLOGICAL" className="mt-4">
             {renderUniformMarginControls()}
             {renderAdvancedSettings()}
+          </TabsContent>
+          
+          <TabsContent value="ANISOTROPIC" className="mt-4">
+            {renderAnisotropicMarginControls()}
           </TabsContent>
         </Tabs>
 

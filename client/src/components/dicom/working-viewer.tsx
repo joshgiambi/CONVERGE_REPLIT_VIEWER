@@ -927,9 +927,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     console.log(`🔹 📊 Executing advanced margin operation for structure ${structureId} with parameters:`, parameters);
 
     try {
-      // Import simple margin operations for execution
-      const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
-
       // Create a deep copy of RT structures to avoid mutation
       const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
 
@@ -949,30 +946,76 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         imagePosition: imageMetadata.imagePosition?.split("\\").map(Number) as [number, number, number]
       } : undefined;
 
-      // Process all contours for the structure
+      // Process all contours for the structure based on margin type
       const processedContours = [];
-      for (const contour of structure.contours || []) {
-        if (!contour.points || contour.points.length < 9) {
-          console.log('🔹 ⚠️ Skipping contour with insufficient points');
-          processedContours.push(contour);
-          continue;
+      
+      if (parameters.marginType === 'ANISOTROPIC') {
+        // Import anisotropic margin operations
+        const { applyAnisotropicMargin } = await import('@/lib/anisotropic-margin-operations');
+        
+        for (const contour of structure.contours || []) {
+          if (!contour.points || contour.points.length < 9) {
+            console.log('🔹 ⚠️ Skipping contour with insufficient points');
+            processedContours.push(contour);
+            continue;
+          }
+
+          // Apply anisotropic margin operation
+          const result = await applyAnisotropicMargin(contour.points, {
+            marginX: parameters.marginValues.x,
+            marginY: parameters.marginValues.y,
+            marginZ: parameters.marginValues.z,
+            pixelSpacing: imageContext?.pixelSpacing,
+            sliceThickness: imageContext?.sliceThickness,
+            interpolateSlices: parameters.interpolateSlices
+          });
+
+          // Update contour with new points
+          const updatedContour = {
+            ...contour,
+            points: result.contourPoints,
+            numberOfPoints: result.contourPoints.length / 3
+          };
+
+          processedContours.push(updatedContour);
+          console.log(`🔹 ✅ Applied anisotropic margin (X:${parameters.marginValues.x}mm, Y:${parameters.marginValues.y}mm, Z:${parameters.marginValues.z}mm) to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
         }
+      } else {
+        // Import simple margin operations for execution
+        const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
+        
+        // Use appropriate margin value based on type
+        let marginValue = parameters.marginValues.uniform;
+        if (parameters.marginType === 'DIRECTIONAL') {
+          // For directional margins, use average for now (could be enhanced)
+          marginValue = (parameters.marginValues.superior + parameters.marginValues.inferior + 
+                        parameters.marginValues.anterior + parameters.marginValues.posterior + 
+                        parameters.marginValues.left + parameters.marginValues.right) / 6;
+        }
+        
+        for (const contour of structure.contours || []) {
+          if (!contour.points || contour.points.length < 9) {
+            console.log('🔹 ⚠️ Skipping contour with insufficient points');
+            processedContours.push(contour);
+            continue;
+          }
 
-        // Apply simple margin operation for execution with pixel spacing
-        const result = await applySimpleMarginPreview(contour.points, {
-          marginValue: parameters.marginValues.uniform,
-          pixelSpacing: imageContext?.pixelSpacing
-        });
+          // Apply simple margin operation for execution with pixel spacing
+          const result = await applySimpleMarginPreview(contour.points, {
+            marginValue: marginValue,
+            pixelSpacing: imageContext?.pixelSpacing
+          });
 
-        // Update contour with new points
-        const updatedContour = {
-          ...contour,
-          points: result.contourPoints,
-          numberOfPoints: result.contourPoints.length / 3
-        };
+          // Update contour with new points
+          const updatedContour = {
+            ...contour,
+            points: result.contourPoints,
+            numberOfPoints: result.contourPoints.length / 3
+          };
 
-        processedContours.push(updatedContour);
-        console.log(`🔹 ✅ Applied simple margin to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
+          processedContours.push(updatedContour);
+          console.log(`🔹 ✅ Applied ${parameters.marginType.toLowerCase()} margin to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
+        }
       }
 
       // Update structure with processed contours
