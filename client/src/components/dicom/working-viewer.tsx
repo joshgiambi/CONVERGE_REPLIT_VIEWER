@@ -362,81 +362,46 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Handle Eclipse TPS margin operation
   const handleMarginOperation = (payload: any) => {
-    if (!rtStructures) {
+    console.log('🔹 handleMarginOperation called with:', payload);
+    
+    if (!localRTStructures && !rtStructures) {
       console.error("RT structures not available for margin operation");
       return;
     }
 
-    const { structureId, slicePosition, marginParams } = payload;
-    if (DEBUG) console.log(
-      `Applying ${marginParams.marginType} margin operation to structure ${structureId} at slice ${slicePosition}`,
-    );
-
-    // Create a deep copy of RT structures to avoid mutation
-    const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
-
-    // Find the target structure
-    const structure = updatedRTStructures.structures?.find(
-      (s: any) => s.roiNumber === structureId,
-    );
-
-    if (!structure) {
-      console.error(`Structure ${structureId} not found`);
-      return;
-    }
-
-    // Find contour on current slice
-    const contour = structure.contours.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) <= SLICE_TOL_MM,
-    );
-
-    if (!contour || !contour.points || contour.points.length === 0) {
-      console.warn(
-        `No contour found for structure ${structureId} at slice ${slicePosition}`,
-      );
-      return;
-    }
-
-    try {
-      // Convert margin values from mm to pixels using pixel spacing
-      const pixelSpacing = imageMetadata?.pixelSpacing?.[0] || 1.171875; // Default from HN-ATLAS
+    const structures = localRTStructures || rtStructures;
+    const { structureId, parameters } = payload;
+    
+    // Check if this is an execute operation (applying preview)
+    if (payload.action === 'apply_margin' && !payload.isPreview && previewContours.length > 0) {
+      console.log('🔹 Executing margin operation - applying preview contours');
       
-      // Apply margin based on type
-      let marginValueMm = marginParams.marginValues.uniform;
+      // Create a deep copy of RT structures
+      const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
       
-      if (marginParams.marginType === 'ASYMMETRIC') {
-        // For asymmetric margins, we'll use a weighted average for now
-        // In a full implementation, this would consider anatomical directions
-        const values = marginParams.marginValues;
-        marginValueMm = (values.anterior + values.posterior + values.left + values.right) / 4;
-      }
-      
-      const marginValuePixels = marginValueMm / pixelSpacing;
-      
-      // Use the grow contour function with the margin value
-      const grownContour = growContour(
-        {
-          points: contour.points,
-          slicePosition: slicePosition,
-        },
-        marginValueMm, // growContour expects mm
+      // Find the target structure
+      const structure = updatedRTStructures.structures?.find(
+        (s: any) => s.roiNumber === structureId,
       );
       
-      // Apply smoothing based on interpolation type
-      let smoothingFactor = 0.15;
-      if (marginParams.interpolationType === 'SMOOTH') {
-        smoothingFactor = 0.25;
-      } else if (marginParams.interpolationType === 'DISCRETE') {
-        smoothingFactor = 0.05;
+      if (!structure) {
+        console.error(`Structure ${structureId} not found`);
+        return;
       }
       
-      const smoothedContour = smoothContour(grownContour, smoothingFactor);
+      // Replace structure contours with preview contours
+      structure.contours = previewContours.map((preview: any) => ({
+        slicePosition: preview.slicePosition,
+        points: preview.points,
+        numberOfPoints: preview.points.length / 3
+      }));
       
-      // Update the contour with margin-expanded points
-      contour.points = smoothedContour.points;
-      contour.numberOfPoints = smoothedContour.points.length / 3;
-
-      // Update local structures and save to server
+      console.log(`🔹 Replaced ${structure.contours.length} contours with preview contours`);
+      
+      // Clear preview
+      setPreviewContours([]);
+      
+      // Update local structures and save
       setLocalRTStructures(updatedRTStructures);
       saveContourUpdates(updatedRTStructures, 'apply_margin');
       
@@ -444,12 +409,70 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
-
-      console.log(
-        `Successfully applied ${marginParams.marginType} margin of ${marginValueMm}mm to structure ${structureId}`,
+      
+      console.log(`✅ Successfully applied margin to structure ${structureId}`);
+      return;
+    }
+    
+    // For single slice margin operations (legacy)
+    if (payload.slicePosition !== undefined) {
+      console.log('🔹 Single slice margin operation (legacy)');
+      
+      const { slicePosition, marginParams } = payload;
+      const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
+      
+      const structure = updatedRTStructures.structures?.find(
+        (s: any) => s.roiNumber === structureId,
       );
-    } catch (error) {
-      console.error("Error applying margin operation:", error);
+      
+      if (!structure) {
+        console.error(`Structure ${structureId} not found`);
+        return;
+      }
+      
+      const contour = structure.contours.find(
+        (c: any) => Math.abs(c.slicePosition - slicePosition) <= SLICE_TOL_MM,
+      );
+      
+      if (!contour || !contour.points || contour.points.length === 0) {
+        console.warn(`No contour found for structure ${structureId} at slice ${slicePosition}`);
+        return;
+      }
+      
+      try {
+        const marginValueMm = marginParams.marginValues.uniform;
+        
+        const grownContour = growContour(
+          {
+            points: contour.points,
+            slicePosition: slicePosition,
+          },
+          marginValueMm,
+        );
+        
+        let smoothingFactor = 0.15;
+        if (marginParams.interpolationType === 'SMOOTH') {
+          smoothingFactor = 0.25;
+        } else if (marginParams.interpolationType === 'DISCRETE') {
+          smoothingFactor = 0.05;
+        }
+        
+        const smoothedContour = smoothContour(grownContour, smoothingFactor);
+        
+        contour.points = smoothedContour.points;
+        contour.numberOfPoints = smoothedContour.points.length / 3;
+        
+        setLocalRTStructures(updatedRTStructures);
+        saveContourUpdates(updatedRTStructures, 'apply_margin');
+        
+        if (onContourUpdate) {
+          onContourUpdate(updatedRTStructures);
+        }
+        
+        console.log(`Successfully applied margin of ${marginValueMm}mm to structure ${structureId}`);
+      } catch (error) {
+        console.error("Error applying margin operation:", error);
+      }
     }
   };
 
@@ -687,353 +710,137 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Handle advanced margin preview operation
   const handleAdvancedMarginPreview = async (payload: any) => {
     console.log('🔹 🎯 Working Viewer: handleAdvancedMarginPreview called with payload:', payload);
-    console.log('🔹 📊 Current RT structures state:', localRTStructures ? 'Available' : 'Not available');
-    console.log('🔹 📊 RT structures from props:', rtStructures ? 'Available' : 'Not available');
     
     // Use rtStructures from props if localRTStructures is not available
     const structures = localRTStructures || rtStructures;
     
     if (!structures) {
-      console.error("🔹 ❌ RT structures not available for advanced margin preview in both local and props");
+      console.error("🔹 ❌ RT structures not available for margin preview");
       return;
     }
 
     const { structureId, parameters } = payload;
-    console.log(`🔹 📊 Generating advanced margin preview for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Generating margin preview for structure ${structureId} with parameters:`, parameters);
 
     try {
-      // Import simple margin preview operations (faster, no freezing)
-      console.log('🔹 📦 Importing simple margin preview operations...');
-      const { applySimpleMarginPreviewBatch, applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
-      console.log('🔹 ✅ Simple margin preview operations imported successfully');
-
       // Find the target structure
-      console.log('🔹 🔍 Looking for structure ID:', structureId, 'type:', typeof structureId);
-      console.log('🔹 📊 Available structures:', structures.structures?.map((s: any) => ({
-        roiNumber: s.roiNumber, 
-        name: s.structureName || s.name,
-        type: typeof s.roiNumber
-      })));
-      
       const structure = structures.structures?.find(
         (s: any) => s.roiNumber === structureId,
       );
       if (!structure) {
-        console.error(`🔹 ❌ Structure ${structureId} not found in available structures`);
+        console.error(`🔹 ❌ Structure ${structureId} not found`);
         return;
       }
       
       console.log(`🔹 ✅ Found structure: ${structure.structureName || structure.name} with ${structure.contours?.length || 0} contours`);
 
-      // Get all contours for the structure
-      const allContours = structure.contours || [];
-      console.log(`🔹 Processing ${allContours.length} contours for advanced margin preview`);
+      // Clear any existing preview
+      setPreviewContours([]);
 
-      // Prepare image context
-      const imageContext = imageMetadata ? {
-        pixelSpacing: imageMetadata.pixelSpacing?.split("\\").map(Number) as [number, number],
-        sliceThickness: parseFloat(imageMetadata.sliceThickness || '3.0'),
-        imagePosition: imageMetadata.imagePosition?.split("\\").map(Number) as [number, number, number]
-      } : undefined;
+      // Execute the actual margin operation
+      const marginPayload = {
+        action: "apply_margin",
+        structureId,
+        parameters,
+        isPreview: true  // Mark as preview
+      };
 
-      const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
-
-      // Add memory safety checks for morphological operations
-      const marginSize = Math.abs(parameters.marginValues.uniform);
-      const sliceThickness = imageContext?.sliceThickness || 3.0;
-      const estimatedDepth = Math.ceil(marginSize * 2 / sliceThickness);
-      const estimatedMemoryMB = (512 * 512 * estimatedDepth) / (1024 * 1024);
+      // Import the margin operation handler
+      const { expandContour } = await import('@/lib/simple-polygon-operations');
       
-      console.log('🔹 🧮 Memory estimation:', {
-        marginSize,
-        sliceThickness,
-        estimatedDepth,
-        estimatedMemoryMB: estimatedMemoryMB.toFixed(1)
-      });
-
-      // Safety threshold: prevent operations that would use more than 100MB of memory
-      const MEMORY_LIMIT_MB = 100;
-      const shouldUseMorphological = marginSize <= 25 && estimatedMemoryMB < MEMORY_LIMIT_MB && allContours.length <= 100;
-
-      if (shouldUseMorphological) {
-        // Try proper morphological operations first, then fallback
-        console.log('🔹 🧬 Attempting proper morphological margin operations for preview...');
-        
-        try {
-          // Import proper morphological operations
-          const { applyProperMorphologicalMargin } = await import('@/lib/proper-morphological-margins');
-          
-          // Convert contours to proper format
-          const contours3D = allContours.map((contour: any) => ({
-            points: contour.points,
-            slicePosition: contour.slicePosition
-          }));
-          
-          // Prepare image metadata for morphological operations with reasonable limits
-          const morphImageMetadata = {
-            pixelSpacing: imageContext?.pixelSpacing || [1.171875, 1.171875], // Default HN-ATLAS spacing
-            sliceThickness: imageContext?.sliceThickness || 3.0,
-            imagePosition: imageContext?.imagePosition || [0, 0, 0],
-            imageSize: {
-              width: 512,   // Default CT image size
-              height: 512,
-              depth: Math.min(200, Math.max(50, estimatedDepth)) // Cap depth to prevent memory issues
+      // Process all contours and create preview
+      const previewContoursWithSlices: any[] = [];
+      
+      for (const contour of structure.contours || []) {
+        if (contour.points && contour.points.length >= 9) {
+          try {
+            const expandedContour = expandContour(
+              contour.points,
+              parameters.marginValues.uniform || 5
+            );
+            
+            if (expandedContour && expandedContour.length >= 9) {
+              previewContoursWithSlices.push({
+                points: expandedContour,
+                slicePosition: contour.slicePosition,
+                isPreview: true,
+                previewColor: '#FFFF00'  // Yellow for preview
+              });
             }
-          };
-          
-          console.log('🔹 📊 Using morphological metadata:', morphImageMetadata);
-          
-          // Apply proper morphological margin operation with timeout
-          const morphPromise = applyProperMorphologicalMargin(
-            contours3D,
-            parameters.marginValues.uniform,
-            morphImageMetadata
-          );
-          
-          // Set a timeout to prevent indefinite processing
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Morphological operation timeout')), 10000)
-          );
-          
-          const expandedContours = await Promise.race([morphPromise, timeoutPromise]) as any[];
-          
-          // Convert back to preview format
-          for (const expandedContour of expandedContours) {
-            previewContoursWithSlices.push({
-              points: expandedContour.points,
-              slicePosition: expandedContour.slicePosition
-            });
+          } catch (error) {
+            console.error('Error expanding contour:', error);
           }
-          
-          console.log(`🔹 🧬 ✅ Proper morphological operation created ${expandedContours.length} preview contours (artifact-free)`);
-          
-        } catch (error) {
-          console.warn('🔹 ⚠️ Morphological operation failed, falling back to simple operations:', error);
-          
-          // Clear any partial results and fall through to simple operations
-          previewContoursWithSlices.length = 0;
-          throw error; // Re-throw to trigger fallback
         }
-      } else {
-        console.log('🔹 ⚠️ Skipping morphological operations due to memory/size constraints, using simple fallback');
-        throw new Error('Using simple fallback due to constraints');
       }
 
+      // Set preview contours to be rendered
+      console.log(`🔹 ✅ Created ${previewContoursWithSlices.length} preview contours`);
+      setPreviewContours(previewContoursWithSlices);
     } catch (error) {
-      console.warn('🔹 ⚠️ Advanced morphological preview failed, using simple fallback:', error);
-      
-      // Clear any partial results
-      const previewContoursWithSlices: Array<{points: number[], slicePosition: number}> = [];
-      
-      try {
-        // Import simple margin preview operations
-        const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
-        
-        // Fallback to simple slice-by-slice operations
-        const allContours = structure?.contours || [];
-        for (const contour of allContours) {
-          if (!contour.points || contour.points.length < 9) {
-            console.log('🔹 ⚠️ Skipping contour with insufficient points');
-            continue;
-          }
-
-          console.log(`🔹 Processing contour with ${contour.points.length / 3} points on slice ${contour.slicePosition}`);
-
-          // Apply simple margin operation for preview with pixel spacing
-          const result = await applySimpleMarginPreview(contour.points, {
-            marginValue: parameters.marginValues.uniform,
-            pixelSpacing: imageContext?.pixelSpacing
-          });
-
-          previewContoursWithSlices.push({
-            points: result.contourPoints,
-            slicePosition: contour.slicePosition
-          });
-
-          console.log(`🔹 ✅ Generated simple margin preview contour with ${result.contourPoints.length / 3} points for slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
-        }
-        
-      } catch (fallbackError) {
-        console.error('🔹 ❌ Even simple margin preview failed:', fallbackError);
-        return; // Exit completely if all operations fail
-      }
-      
-      // Set preview contours for rendering - ensure 3D structure is preserved
-      console.log(`🔹 📊 Preview contours prepared:`, {
-        totalContours: previewContoursWithSlices.length,
-        sliceRange: previewContoursWithSlices.length > 0 ? {
-          min: Math.min(...previewContoursWithSlices.map(c => c.slicePosition)),
-          max: Math.max(...previewContoursWithSlices.map(c => c.slicePosition))
-        } : { min: 0, max: 0 },
-        pointsPerContour: previewContoursWithSlices.map(c => c.points.length / 3)
-      });
-      
-      // Ensure preview contours are properly structured for 3D rendering
-      const structuredPreviewContours = previewContoursWithSlices.map(contour => ({
-        points: contour.points,
-        slicePosition: contour.slicePosition,
-        previewMargin: parameters.marginValues.uniform // Add margin info for renderer
-      }));
-      
-      setPreviewContours(structuredPreviewContours as any);
-      console.log(`🔹 ✅ Set ${structuredPreviewContours.length} simple margin preview contours for 3D rendering`);
-      return;
+      console.error('🔹 ❌ Margin preview failed:', error);
+      setPreviewContours([]);
     }
-
-    // Only execute this if morphological operations succeeded
-    // Set preview contours for rendering - ensure 3D structure is preserved
-    console.log(`🔹 📊 Preview contours prepared:`, {
-      totalContours: previewContoursWithSlices.length,
-      sliceRange: previewContoursWithSlices.length > 0 ? {
-        min: Math.min(...previewContoursWithSlices.map(c => c.slicePosition)),
-        max: Math.max(...previewContoursWithSlices.map(c => c.slicePosition))
-      } : { min: 0, max: 0 },
-      pointsPerContour: previewContoursWithSlices.map(c => c.points.length / 3)
-    });
-    
-    // Ensure preview contours are properly structured for 3D rendering
-    const structuredPreviewContours = previewContoursWithSlices.map(contour => ({
-      points: contour.points,
-      slicePosition: contour.slicePosition,
-      previewMargin: parameters.marginValues.uniform // Add margin info for renderer
-    }));
-    
-    setPreviewContours(structuredPreviewContours as any);
-    console.log(`🔹 ✅ Set ${structuredPreviewContours.length} advanced margin preview contours for 3D rendering`);
-    console.log('🔹 🎨 Sample preview contour data:', structuredPreviewContours.slice(0, 1)); // Show first one for debugging
   };
 
   // Handle advanced margin execution operation
   const handleAdvancedMarginExecution = async (payload: any) => {
     console.log('🔹 🎯 Working Viewer: handleAdvancedMarginExecution called with payload:', payload);
-    console.log('🔹 📊 Current RT structures state:', localRTStructures ? 'Available' : 'Not available');
     
-    // Use rtStructures from props if localRTStructures is not available, but prefer local for execution
+    // Check if we have preview contours to apply
+    if (!previewContours || previewContours.length === 0) {
+      console.error("🔹 ❌ No preview contours available to execute");
+      return;
+    }
+    
+    // Use local structures or props structures
     if (!localRTStructures && !rtStructures) {
-      console.error("🔹 ❌ RT structures not available for advanced margin execution in both local and props");
+      console.error("🔹 ❌ RT structures not available for margin execution");
       return;
     }
     
-    // For execution, we need to ensure we have local structures
-    if (!localRTStructures && rtStructures) {
-      console.log('🔹 📦 Initializing local RT structures from props for execution');
-      setLocalRTStructures(rtStructures);
-      // Wait for state update
-      setTimeout(() => handleAdvancedMarginExecution(payload), 100);
-      return;
-    }
-
-    const { structureId, parameters } = payload;
-    console.log(`🔹 📊 Executing advanced margin operation for structure ${structureId} with parameters:`, parameters);
-
+    const structures = localRTStructures || rtStructures;
+    const { structureId } = payload;
+    
+    console.log(`🔹 📊 Executing margin operation for structure ${structureId} - applying ${previewContours.length} preview contours`);
+    
     try {
-      // Create a deep copy of RT structures to avoid mutation
-      const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
-
+      // Create a deep copy of RT structures
+      const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
+      
       // Find the target structure
       const structure = updatedRTStructures.structures?.find(
         (s: any) => s.roiNumber === structureId,
       );
+      
       if (!structure) {
         console.error(`Structure ${structureId} not found`);
         return;
       }
-
-      // Prepare image context
-      const imageContext = imageMetadata ? {
-        pixelSpacing: imageMetadata.pixelSpacing?.split("\\").map(Number) as [number, number],
-        sliceThickness: parseFloat(imageMetadata.sliceThickness || '3.0'),
-        imagePosition: imageMetadata.imagePosition?.split("\\").map(Number) as [number, number, number]
-      } : undefined;
-
-      // Process all contours for the structure based on margin type
-      const processedContours = [];
       
-      if (parameters.marginType === 'ANISOTROPIC') {
-        // Import anisotropic margin operations
-        const { applyAnisotropicMargin } = await import('@/lib/anisotropic-margin-operations');
-        
-        for (const contour of structure.contours || []) {
-          if (!contour.points || contour.points.length < 9) {
-            console.log('🔹 ⚠️ Skipping contour with insufficient points');
-            processedContours.push(contour);
-            continue;
-          }
-
-          // Apply anisotropic margin operation
-          const result = await applyAnisotropicMargin(contour.points, {
-            marginX: parameters.marginValues.x,
-            marginY: parameters.marginValues.y,
-            marginZ: parameters.marginValues.z,
-            pixelSpacing: imageContext?.pixelSpacing,
-            sliceThickness: imageContext?.sliceThickness,
-            interpolateSlices: parameters.interpolateSlices
-          });
-
-          // Update contour with new points
-          const updatedContour = {
-            ...contour,
-            points: result.contourPoints,
-            numberOfPoints: result.contourPoints.length / 3
-          };
-
-          processedContours.push(updatedContour);
-          console.log(`🔹 ✅ Applied anisotropic margin (X:${parameters.marginValues.x}mm, Y:${parameters.marginValues.y}mm, Z:${parameters.marginValues.z}mm) to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
-        }
-      } else {
-        // Import simple margin operations for execution
-        const { applySimpleMarginPreview } = await import('@/lib/simple-margin-preview');
-        
-        // Use appropriate margin value based on type
-        let marginValue = parameters.marginValues.uniform;
-        if (parameters.marginType === 'DIRECTIONAL') {
-          // For directional margins, use average for now (could be enhanced)
-          marginValue = (parameters.marginValues.superior + parameters.marginValues.inferior + 
-                        parameters.marginValues.anterior + parameters.marginValues.posterior + 
-                        parameters.marginValues.left + parameters.marginValues.right) / 6;
-        }
-        
-        for (const contour of structure.contours || []) {
-          if (!contour.points || contour.points.length < 9) {
-            console.log('🔹 ⚠️ Skipping contour with insufficient points');
-            processedContours.push(contour);
-            continue;
-          }
-
-          // Apply simple margin operation for execution with pixel spacing
-          const result = await applySimpleMarginPreview(contour.points, {
-            marginValue: marginValue,
-            pixelSpacing: imageContext?.pixelSpacing
-          });
-
-          // Update contour with new points
-          const updatedContour = {
-            ...contour,
-            points: result.contourPoints,
-            numberOfPoints: result.contourPoints.length / 3
-          };
-
-          processedContours.push(updatedContour);
-          console.log(`🔹 ✅ Applied ${parameters.marginType.toLowerCase()} margin to contour on slice ${contour.slicePosition} in ${result.processingTime.toFixed(2)}ms`);
-        }
-      }
-
-      // Update structure with processed contours
-      structure.contours = processedContours;
-
-      // Update local structures and save to server
+      // Replace structure contours with preview contours (removing the preview properties)
+      structure.contours = previewContours.map((preview: any) => ({
+        slicePosition: preview.slicePosition,
+        points: preview.points,
+        numberOfPoints: preview.points.length / 3
+      }));
+      
+      console.log(`🔹 ✅ Replaced ${structure.contours.length} contours with expanded contours`);
+      
+      // Clear preview contours
+      setPreviewContours([]);
+      
+      // Update local structures and save
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'advanced_margin');
-
+      saveContourUpdates(updatedRTStructures, 'apply_margin');
+      
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
-
-      console.log(`🔹 ✅ Advanced margin operation completed for structure ${structureId}`);
-
+      
+      console.log(`✅ Successfully applied margin to structure ${structureId}`);
     } catch (error) {
-      console.error(`🔹 ❌ Error executing advanced margin operation:`, error);
+      console.error("🔹 ❌ Error applying margin operation:", error);
     }
   };
 

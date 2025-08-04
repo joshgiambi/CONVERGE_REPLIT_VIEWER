@@ -232,9 +232,10 @@ export function growContourSimple(contour: number[], distance: number): number[]
       polygon.push(...simplifiedPolygon);
     }
     
-    const isGrowing = distance > 0;
+    // Invert the logic: negative values expand, positive values shrink (medical convention)
+    const isGrowing = distance < 0;
     
-    console.log(`🔹 ${isGrowing ? 'Growing' : 'Shrinking'} by ${Math.abs(distance)}mm`);
+    console.log(`🔹 ${isGrowing ? 'Expanding' : 'Shrinking'} by ${Math.abs(distance)}mm`);
     
     // For very small distances, just return original
     if (Math.abs(distance) < 0.1) {

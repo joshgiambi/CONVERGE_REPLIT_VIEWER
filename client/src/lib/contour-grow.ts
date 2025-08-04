@@ -40,7 +40,10 @@ export function growContour(contour: ContourPoints, growDistance: number): Conto
   }
 
   // Apply offset polygon algorithm
-  const grownPoints = offsetPolygon(points2D, growDistance);
+  // FIX: Invert the sign for correct behavior
+  // Our UI convention: positive = expand, negative = shrink
+  // But offsetPolygon expects: positive = shrink, negative = expand
+  const grownPoints = offsetPolygon(points2D, -growDistance);
 
   // Convert back to flat array format with original Z values
   const grownFlatPoints: number[] = [];

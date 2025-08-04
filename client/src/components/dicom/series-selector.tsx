@@ -496,15 +496,17 @@ export function SeriesSelector({
     
     const shouldShow = !allVisible;
     
-    rtStructures.structures.forEach((structure: any) => {
-      // Update local state
-      setStructureVisibility(prev => {
-        const newMap = new Map(prev);
+    // Update all visibility states at once
+    setStructureVisibility(prev => {
+      const newMap = new Map(prev);
+      rtStructures.structures.forEach((structure: any) => {
         newMap.set(structure.roiNumber, shouldShow);
-        return newMap;
       });
-      
-      // Call parent callback to actually update visibility
+      return newMap;
+    });
+    
+    // Call parent callback for each structure
+    rtStructures.structures.forEach((structure: any) => {
       if (onStructureVisibilityChange) {
         onStructureVisibilityChange(structure.roiNumber, shouldShow);
       }
