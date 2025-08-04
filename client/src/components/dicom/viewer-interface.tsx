@@ -740,14 +740,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             // Close localization tool when opening margin toolbar
             setShowLocalizationTool(false);
-            
-            // If no structure is selected, select the first one or last loaded
-            if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
-              // Try to get the last loaded structure or default to first
-              const lastStructure = rtStructures.structures[rtStructures.structures.length - 1];
-              setSelectedForEdit(lastStructure.roiNumber);
-            }
-            
             setShowMarginToolbar(true);
           }}
           onMPRToggle={() => {
@@ -841,7 +833,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             color: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color ? 
               `rgb(${rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color.join(',')})` : 
               undefined
-          } : null}
+          } : undefined}
           onExecuteOperation={(operation) => {
             // Handle execute operation
             console.log('🔹 🎯 Viewer Interface: Handling margin operation:', operation);
