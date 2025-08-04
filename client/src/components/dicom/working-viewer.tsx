@@ -68,6 +68,7 @@ interface WorkingViewerProps {
     smartBrushEnabled?: boolean;
   };
   selectedForEdit?: number | null;
+  selectedStructures?: Set<number>;
   onBrushSizeChange?: (size: number) => void;
   onBrushToolChange?: (state: {
     tool: string | null;
@@ -108,6 +109,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     structureVisibility: externalStructureVisibility,
     brushToolState,
     selectedForEdit,
+    selectedStructures,
     onBrushSizeChange,
     onBrushToolChange,
     onContourUpdate,
@@ -3732,12 +3734,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     if (localRTStructures?.structures) {
       localRTStructures.structures.forEach((structure: any) => {
-      // Check if this structure is visible or if it's selected for editing
+      // Check if this structure is visible or if it's selected for editing/selection
       const isVisible = structureVisibility.get(structure.roiNumber);
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
+      const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
 
-      // Always show selected structure for editing, even if visibility is off
-      if (!isVisible && !isSelectedForEdit) return;
+      // Show structure if:
+      // 1. It's individually visible (eye button on)
+      // 2. It's selected for editing
+      // 3. It's selected (checkbox checked)
+      // 4. All structures are visible and it's not individually hidden
+      const shouldShow = isVisible || isSelectedForEdit || isSelectedStructure;
+      
+      // If all structures are hidden globally, only show if it's selected or being edited
+      if (!allStructuresVisible && !isSelectedForEdit && !isSelectedStructure) return;
+      
+      // If the structure is individually hidden and not selected/edited, don't show it
+      if (!shouldShow) return;
 
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
