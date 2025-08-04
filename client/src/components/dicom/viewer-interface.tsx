@@ -751,7 +751,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isMeasureActive={activeToolMode === 'measure'}
           isContourEditActive={isContourEditMode}
           isContourOperationsActive={showBooleanOperations}
-          isAdvancedMarginToolActive={showAdvancedMarginTool}
+          isAdvancedMarginToolActive={showMarginToolbar}
           onLocalization={handleLocalizationToggle}
           isLocalizationActive={showLocalizationTool}
           className="toolbar-custom"
