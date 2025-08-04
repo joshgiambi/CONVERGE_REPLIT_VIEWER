@@ -17,7 +17,7 @@ interface AdvancedMarginToolProps {
     color?: string;
   };
   onExecuteOperation: (operation: {
-    type: 'uniform_margin' | 'directional_margin' | 'morphological_margin';
+    type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
     parameters: MarginParameters;
     structureId: number;
     preview?: boolean;
@@ -259,7 +259,8 @@ export function AdvancedMarginTool({
     <div className="space-y-4">
       <div className="text-xs text-white/70 mb-3">
         Anisotropic margins allow different values for X, Y, and Z directions.
-        Used in radiotherapy to account for directional tumor movement.
+        Use same values for uniform expansion or different values for directional expansion.
+        Used in radiotherapy to account for directional tumor movement patterns.
       </div>
       
       {Object.entries({

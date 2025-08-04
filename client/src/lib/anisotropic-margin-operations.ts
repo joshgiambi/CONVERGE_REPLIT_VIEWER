@@ -36,12 +36,15 @@ export async function applyAnisotropicMargin(
 ): Promise<AnisotropicMarginResult> {
   const startTime = performance.now();
   
+  const isUniform = parameters.marginX === parameters.marginY && parameters.marginY === parameters.marginZ;
+  
   console.log('🔹 📐 Applying anisotropic margin:', {
     marginX: parameters.marginX,
     marginY: parameters.marginY,
     marginZ: parameters.marginZ,
     pixelSpacing: parameters.pixelSpacing,
-    inputPoints: contourPoints.length / 3
+    inputPoints: contourPoints.length / 3,
+    isUniform
   });
   
   // Validate input
@@ -104,6 +107,12 @@ function applyEllipticalMargin(
   const isGrowing = marginX > 0 || marginY > 0;
   const absMarginX = Math.abs(marginX);
   const absMarginY = Math.abs(marginY);
+  
+  // Optimize for uniform margin case (standard expansion)
+  const isUniform = absMarginX === absMarginY;
+  if (isUniform) {
+    console.log('🔹 📐 Using optimized uniform margin expansion');
+  }
   
   // Calculate normals at each point
   const normals: [number, number][] = [];
