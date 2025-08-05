@@ -36,6 +36,7 @@ interface SeriesSelectorProps {
   onAllStructuresVisibilityChange?: (allVisible: boolean) => void;
   preventRTLoading?: boolean;
   localizationMode?: boolean;
+  loadedRTSeriesId?: number | null;
 }
 
 export function SeriesSelector({
@@ -60,7 +61,8 @@ export function SeriesSelector({
   onSecondarySeriesSelect,
   onAllStructuresVisibilityChange,
   preventRTLoading = false,
-  localizationMode = false
+  localizationMode = false,
+  loadedRTSeriesId
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -262,6 +264,17 @@ export function SeriesSelector({
       setStructureVisibility(visibilityMap);
     }
   }, [rtStructures]);
+
+  // Sync selectedRTSeries with loadedRTSeriesId when RT series are loaded
+  useEffect(() => {
+    if (loadedRTSeriesId && rtSeries.length > 0) {
+      const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
+      if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
+        console.log('Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
+        setSelectedRTSeries(loadedSeries);
+      }
+    }
+  }, [loadedRTSeriesId, rtSeries]);
 
   const handleRTSeriesSelect = async (rtSeries: any) => {
     try {

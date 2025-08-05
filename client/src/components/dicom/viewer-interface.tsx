@@ -65,6 +65,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
   
+  // Track loaded RT series for selection state
+  const [loadedRTSeriesId, setLoadedRTSeriesId] = useState<number | null>(null);
+  
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
   
@@ -82,6 +85,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     setSelectedForEdit(null);
     setSelectedStructureColors([]);
     setIsContourEditMode(false);
+    setLoadedRTSeriesId(null);  // Clear loaded RT series ID
   }, [studyData?.patient?.id]);
 
   // Automatically enter contour edit mode when a structure is selected for editing
@@ -141,6 +145,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         // Clear RT structures if no RT series found
         console.log(`No RT structures found in any study`);
         setRTStructures(null);
+        setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
@@ -302,6 +307,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const handleRTSeriesSelect = async (rtSeries: any) => {
     try {
       console.log('Auto-loading RT structures for series:', rtSeries.id);
+      
+      // Track which RT series is loaded
+      setLoadedRTSeriesId(rtSeries.id);
       
       // Load RT structure contours
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
@@ -597,6 +605,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
             // Pass localization mode to highlight when active
             localizationMode={showLocalizationTool}
+            loadedRTSeriesId={loadedRTSeriesId}
           />
         </div>
 

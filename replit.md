@@ -3,7 +3,9 @@
 ## Overview
 Superbeam is a full-stack DICOM medical imaging application built with React, Express.js, and PostgreSQL. It enables users to upload, manage, and view medical images with advanced DICOM metadata handling and contour editing capabilities, functioning as a PACS-like interface for medical imaging workflows. The project aims to provide a robust, high-performance system for medical image analysis and manipulation, with a focus on accurate multi-modal fusion.
 
-## Recent Changes (August 1-4, 2025)
+## Recent Changes (August 1-5, 2025)
+- **RT Structure Selection Fix**: Fixed issue where RT structure sets weren't showing as selected in series selector when auto-loaded. Added loadedRTSeriesId tracking to ensure proper selection state synchronization
+- **Structure Visibility Fix**: Resolved critical RT button and show/hide all synchronization issue by consolidating state control. Individual eye icons now properly override show/hide all state when needed
 - **Anisotropic Margin Operations**: Implemented radiotherapy-grade anisotropic margin operations using morphological dilation/erosion based on Slicer forum recommendations. Supports both uniform expansion (same margin in all directions) and anisotropic expansion (different margin values in X, Y, Z directions based on 3D tumor movement patterns)
 - **Compact Margin Toolbar**: Redesigned margin operations UI to match contour edit toolbar with minimal real estate. New floating toolbar features icon-based mode selection (Uniform, X,Y,Z, Directional) with expandable settings panels
 - **Morphological Operations**: Replaced simple polygon buffering with iterative morphological operations for better margin accuracy in radiotherapy applications
