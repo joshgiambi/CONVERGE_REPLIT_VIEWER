@@ -140,12 +140,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     useState(externalRTStructures);
   const rtStructures = localRTStructures || externalRTStructures;
   const structureVisibility = externalStructureVisibility || new Map();
-  const [showStructures, setShowStructures] = useState(true);
-  
-  // Sync showStructures with allStructuresVisible prop
-  useEffect(() => {
-    setShowStructures(allStructuresVisible);
-  }, [allStructuresVisible]);
+  // Use prop directly instead of local state
+  const showStructures = allStructuresVisible ?? true;
   const [renderTrigger, setRenderTrigger] = useState(0);
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
@@ -3738,6 +3734,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const isVisible = structureVisibility.get(structure.roiNumber);
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
       const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
+      
+      // Debug visibility map
+      console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
+        isVisible,
+        visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
+        allStructuresVisible,
+        willShow: isSelectedForEdit || isSelectedStructure || 
+                 (allStructuresVisible ? isVisible !== false : isVisible === true)
+      });
 
       if (DEBUG) {
         console.log(`Structure ${structure.structureName} (${structure.roiNumber}):`, {
@@ -4536,18 +4541,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           <div className="flex items-center space-x-2">
             {rtStructures && (
-              <Button
-                size="sm"
-                variant={showStructures ? "default" : "ghost"}
-                onClick={() => setShowStructures(!showStructures)}
-                className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
-                  showStructures 
-                    ? 'bg-green-600/80 hover:bg-green-700/80 text-white border border-green-500/50 shadow-sm backdrop-blur-sm' 
-                    : 'hover:bg-gray-700/50 hover:text-white'
-                }`}
-              >
-                RT ({rtStructures?.structures?.length || 0})
-              </Button>
+              <div className="flex items-center gap-1 px-2 py-1 bg-gray-800/50 rounded-lg">
+                <Badge 
+                  variant={showStructures ? "default" : "secondary"}
+                  className={`${
+                    showStructures 
+                      ? 'bg-green-600/80 text-white border-green-500/50' 
+                      : 'bg-gray-700/50 text-gray-300'
+                  }`}
+                >
+                  RT ({rtStructures?.structures?.length || 0})
+                </Badge>
+                <span className="text-xs text-gray-400">
+                  {showStructures ? 'Visible' : 'Hidden'}
+                </span>
+              </div>
             )}
             
             {/* Background Loading Progress */}

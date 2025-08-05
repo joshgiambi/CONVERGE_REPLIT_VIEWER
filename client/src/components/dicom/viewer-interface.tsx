@@ -341,9 +341,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
+    console.log('handleStructureVisibilityChange called:', { 
+      structureId, 
+      visible,
+      allStructuresVisible 
+    });
+    
     setStructureVisibility(prev => {
       const next = new Map(prev);
       next.set(structureId, visible);
+      console.log('Updated structureVisibility map:', Array.from(next.entries()));
       return next;
     });
   };
