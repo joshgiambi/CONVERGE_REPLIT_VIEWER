@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -38,7 +39,10 @@ import {
   FolderDown,
   Merge,
   CheckSquare,
-  Trash2
+  Trash2,
+  Star,
+  Clock,
+  Import
 } from "lucide-react";
 
 interface Patient {
@@ -123,6 +127,11 @@ export default function PatientManager() {
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
+  
+  // New state for favorites and recent patients
+  const [favoritePatients, setFavoritePatients] = useState<Set<number>>(new Set());
+  const [recentlyOpenedPatients, setRecentlyOpenedPatients] = useState<number[]>([]);
+  const [recentlyImportedPatients, setRecentlyImportedPatients] = useState<number[]>([]);
   const [hasPendingData, setHasPendingData] = useState(false);
   const [selectedPatients, setSelectedPatients] = useState<Set<number>>(new Set());
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -132,6 +141,57 @@ export default function PatientManager() {
   const hasActiveParsingSession = useParsingSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Toggle favorite status for a patient
+  const toggleFavorite = (patientId: number) => {
+    setFavoritePatients(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(patientId)) {
+        newSet.delete(patientId);
+      } else {
+        newSet.add(patientId);
+      }
+      // Save to localStorage
+      localStorage.setItem('favoritePatients', JSON.stringify(Array.from(newSet)));
+      return newSet;
+    });
+  };
+
+  // Track when a patient is opened
+  const trackPatientOpened = (patientId: number) => {
+    setRecentlyOpenedPatients(prev => {
+      const newList = [patientId, ...prev.filter(id => id !== patientId)].slice(0, 10);
+      localStorage.setItem('recentlyOpenedPatients', JSON.stringify(newList));
+      return newList;
+    });
+  };
+
+  // Track when a patient is imported
+  const trackPatientImported = (patientId: number) => {
+    setRecentlyImportedPatients(prev => {
+      const newList = [patientId, ...prev.filter(id => id !== patientId)].slice(0, 10);
+      localStorage.setItem('recentlyImportedPatients', JSON.stringify(newList));
+      return newList;
+    });
+  };
+
+  // Load saved data from localStorage on mount
+  useEffect(() => {
+    const savedFavorites = localStorage.getItem('favoritePatients');
+    if (savedFavorites) {
+      setFavoritePatients(new Set(JSON.parse(savedFavorites)));
+    }
+
+    const savedRecentlyOpened = localStorage.getItem('recentlyOpenedPatients');
+    if (savedRecentlyOpened) {
+      setRecentlyOpenedPatients(JSON.parse(savedRecentlyOpened));
+    }
+
+    const savedRecentlyImported = localStorage.getItem('recentlyImportedPatients');
+    if (savedRecentlyImported) {
+      setRecentlyImportedPatients(JSON.parse(savedRecentlyImported));
+    }
+  }, []);
 
   // Auto-populate demo data on component mount
   useEffect(() => {
@@ -539,10 +599,9 @@ export default function PatientManager() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="container mx-auto px-4 pt-24 pb-8">
-        {/* Header matching viewer interface */}
-        <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
+    <div className="min-h-screen bg-black text-white overflow-y-auto">
+      {/* Header matching viewer interface */}
+      <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center space-x-4">
               <div>
@@ -601,8 +660,114 @@ export default function PatientManager() {
           </div>
         </header>
 
-        {/* Search Bar with dark styling */}
-        <div className="mb-6 space-y-4">
+      {/* Main layout with sidebar and content */}
+      <div className="flex h-screen pt-20">
+        {/* Left Sidebar */}
+        <div className="w-80 bg-gray-950/90 backdrop-blur-xl border-r border-gray-600/60 p-4 overflow-y-auto">
+          <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-2">
+            {/* Recently Opened */}
+            <AccordionItem value="recently-opened" className="border-gray-700">
+              <AccordionTrigger className="text-white hover:text-gray-300">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Recently Opened
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {recentlyOpenedPatients.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No recently opened patients</p>
+                  ) : (
+                    recentlyOpenedPatients.map(patientId => {
+                      const patient = patients.find(p => p.id === patientId);
+                      return patient ? (
+                        <Link 
+                          key={patientId}
+                          href={`/viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          onClick={() => trackPatientOpened(patientId)}
+                        >
+                          <div className="text-white text-sm">{patient.patientName}</div>
+                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                        </Link>
+                      ) : null;
+                    })
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Favorites */}
+            <AccordionItem value="favorites" className="border-gray-700">
+              <AccordionTrigger className="text-white hover:text-gray-300">
+                <div className="flex items-center gap-2">
+                  <Star className="h-4 w-4" />
+                  Favorites
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {favoritePatients.size === 0 ? (
+                    <p className="text-gray-500 text-sm">No favorite patients</p>
+                  ) : (
+                    Array.from(favoritePatients).map(patientId => {
+                      const patient = patients.find(p => p.id === patientId);
+                      return patient ? (
+                        <Link 
+                          key={patientId}
+                          href={`/viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          onClick={() => trackPatientOpened(patientId)}
+                        >
+                          <div className="text-white text-sm">{patient.patientName}</div>
+                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                        </Link>
+                      ) : null;
+                    })
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Recently Imported */}
+            <AccordionItem value="recently-imported" className="border-gray-700">
+              <AccordionTrigger className="text-white hover:text-gray-300">
+                <div className="flex items-center gap-2">
+                  <Import className="h-4 w-4" />
+                  Recently Imported
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {recentlyImportedPatients.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No recently imported patients</p>
+                  ) : (
+                    recentlyImportedPatients.map(patientId => {
+                      const patient = patients.find(p => p.id === patientId);
+                      return patient ? (
+                        <Link 
+                          key={patientId}
+                          href={`/viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          onClick={() => trackPatientOpened(patientId)}
+                        >
+                          <div className="text-white text-sm">{patient.patientName}</div>
+                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                        </Link>
+                      ) : null;
+                    })
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="container mx-auto px-4 py-8">
+            {/* Search Bar with dark styling */}
+            <div className="mb-6 space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <Input
@@ -784,6 +949,9 @@ export default function PatientManager() {
                         queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
                         queryClient.invalidateQueries({ queryKey: ["/api/series"] });
                       }}
+                      isFavorite={favoritePatients.has(patient.id)}
+                      onToggleFavorite={() => toggleFavorite(patient.id)}
+                      onPatientOpened={() => trackPatientOpened(patient.id)}
                     />
                   );
                 })}
@@ -1128,6 +1296,8 @@ export default function PatientManager() {
             <MetadataViewer />
           </TabsContent>
         </Tabs>
+          </div>
+        </div>
       </div>
 
       {/* Export Dialog */}

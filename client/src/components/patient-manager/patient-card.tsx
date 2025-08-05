@@ -3,7 +3,7 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
@@ -17,9 +17,12 @@ interface PatientCardProps {
   isSelected?: boolean;
   onSelectionChange?: (selected: boolean) => void;
   onUpdate?: () => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
+  onPatientOpened?: () => void;
 }
 
-export function PatientCard({ patient, studies, series, isSelectable, isSelected, onSelectionChange, onUpdate }: PatientCardProps) {
+export function PatientCard({ patient, studies, series, isSelectable, isSelected, onSelectionChange, onUpdate, isFavorite, onToggleFavorite, onPatientOpened }: PatientCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
@@ -212,14 +215,26 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               </div>
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setShowEditDialog(true)}
-            className="h-8 w-8 p-0 ml-4"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {onToggleFavorite && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onToggleFavorite}
+                className={`h-8 w-8 p-0 transition-colors ${isFavorite ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-400 hover:text-white'}`}
+              >
+                <Star className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowEditDialog(true)}
+              className="h-8 w-8 p-0"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       
@@ -414,6 +429,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               <Button 
                 size="sm" 
                 className="bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500"
+                onClick={onPatientOpened}
               >
                 <Eye className="h-4 w-4 mr-1" />
                 Advanced Viewer
