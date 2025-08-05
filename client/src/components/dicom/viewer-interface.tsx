@@ -318,6 +318,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureSelection = (structureId: number, selected: boolean) => {
+    console.log('handleStructureSelection called:', { structureId, selected, currentSelected: Array.from(selectedStructures) });
+    
     const newSelection = new Set(selectedStructures);
     if (selected) {
       newSelection.add(structureId);
@@ -325,6 +327,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       newSelection.delete(structureId);
     }
     setSelectedStructures(newSelection);
+    
+    console.log('Updated selectedStructures:', Array.from(newSelection));
     
     // Update selected structure colors for viewer border
     if (rtStructures?.structures) {
@@ -658,6 +662,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   rtStructures={rtStructures}
                   onRTStructureUpdate={handleContourUpdate}
                   allStructuresVisible={allStructuresVisible}
+                  selectedStructures={selectedStructures}
                   onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
                   imageCache={imageCache}
                 />
