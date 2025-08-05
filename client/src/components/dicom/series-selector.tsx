@@ -281,7 +281,16 @@ export function SeriesSelector({
   };
 
   const handleStructureVisibilityToggle = (structureId: number) => {
-    const newVisibility = !structureVisibility.get(structureId);
+    const currentVisibility = structureVisibility.get(structureId);
+    const newVisibility = currentVisibility === undefined ? true : !currentVisibility;
+    
+    console.log('Eye icon clicked:', { 
+      structureId, 
+      currentVisibility, 
+      newVisibility,
+      allVisible 
+    });
+    
     setStructureVisibility(prev => new Map(prev.set(structureId, newVisibility)));
     
     if (onStructureVisibilityChange) {
