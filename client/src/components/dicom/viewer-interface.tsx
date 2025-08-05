@@ -74,7 +74,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
-  const [showLocalizationTool, setShowLocalizationTool] = useState(false);
+  const [showLocalizationTool, setShowLocalizationTool] = useState(true);
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -734,8 +734,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             // Close margin toolbar when opening contour edit
             setShowMarginToolbar(false);
-            // Close localization tool when opening contour edit
-            setShowLocalizationTool(false);
             
             // If no structure is selected, select the first one or last loaded
             if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
@@ -751,8 +749,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setIsContourEditMode(false);
             // Close margin toolbar when opening boolean operations
             setShowMarginToolbar(false);
-            // Close localization tool when opening boolean operations
-            setShowLocalizationTool(false);
             setShowBooleanOperations(true);
           }}
           onAdvancedMarginTool={() => {
@@ -760,8 +756,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setIsContourEditMode(false);
             // Close boolean operations toolbar when opening margin toolbar
             setShowBooleanOperations(false);
-            // Close localization tool when opening margin toolbar
-            setShowLocalizationTool(false);
             setShowMarginToolbar(true);
           }}
           onMPRToggle={() => {
