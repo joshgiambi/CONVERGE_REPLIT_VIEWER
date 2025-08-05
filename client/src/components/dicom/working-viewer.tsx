@@ -3754,15 +3754,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Continue to render - these always show
       } else {
         // Priority 2: For non-selected structures, check visibility rules
-        // If all structures are hidden AND individual visibility is not explicitly on, hide it
-        if (!allStructuresVisible && !isVisible) {
+        // If all structures are hidden, only show structures with explicit visibility true
+        if (!allStructuresVisible && isVisible !== true) {
           return;
         }
-        // If individual visibility is explicitly off, hide it (unless all structures visible overrides)
-        if (isVisible === false && !allStructuresVisible) {
-          return;
-        }
-        // If all structures visible but individual visibility is explicitly off, hide it
+        // If all structures visible, hide only those explicitly set to false
         if (allStructuresVisible && isVisible === false) {
           return;
         }
