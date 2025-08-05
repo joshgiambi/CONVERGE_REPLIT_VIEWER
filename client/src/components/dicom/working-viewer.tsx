@@ -3286,7 +3286,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       // Render RT structure overlays if available
-      if (localRTStructures && showStructures) {
+      if (localRTStructures) {
         try {
           // Pass currentImage with its metadata attached
           const imageWithMetadata = {
