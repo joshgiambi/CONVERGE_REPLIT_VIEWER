@@ -974,22 +974,6 @@ export function SeriesSelector({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          // Cycle through sort modes: az -> za -> position -> az
-                          const nextMode = sortMode === 'az' ? 'za' : sortMode === 'za' ? 'position' : 'az';
-                          setSortMode(nextMode);
-                        }}
-                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title={`Sort: ${sortMode === 'az' ? 'A-Z' : sortMode === 'za' ? 'Z-A' : 'By Position'}`}
-                      >
-                        {sortMode === 'az' ? <ArrowDown className="w-4 h-4" /> : 
-                         sortMode === 'za' ? <ArrowUp className="w-4 h-4" /> : 
-                         <ArrowUpDown className="w-4 h-4" />}
-                      </Button>
-                      
-                      <Button
-                        variant="ghost"
-                        size="sm"
                         onClick={toggleGrouping}
                         className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
@@ -1012,8 +996,24 @@ export function SeriesSelector({
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => {
+                          // Cycle through sort modes: az -> za -> position -> az
+                          const nextMode = sortMode === 'az' ? 'za' : sortMode === 'za' ? 'position' : 'az';
+                          setSortMode(nextMode);
+                        }}
+                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200 ml-auto"
+                        title={`Sort: ${sortMode === 'az' ? 'A-Z' : sortMode === 'za' ? 'Z-A' : 'By Position'}`}
+                      >
+                        {sortMode === 'az' ? <ArrowDown className="w-4 h-4" /> : 
+                         sortMode === 'za' ? <ArrowUp className="w-4 h-4" /> : 
+                         <ArrowUpDown className="w-4 h-4" />}
+                      </Button>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setShowNewStructureDialog(true)}
-                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-lg backdrop-blur-sm transition-all duration-200 ml-auto"
+                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title="Create new structure"
                       >
                         <Plus className="w-4 h-4" />
