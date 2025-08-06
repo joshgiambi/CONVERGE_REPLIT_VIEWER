@@ -70,6 +70,7 @@
     "cornerstone-web-image-loader": "^2.1.1",
     "date-fns": "^3.6.0",
     "dcmjs": "^0.41.0",
+    "dcmjs-imaging": "^0.2.2",
     "dicom-dimse": "^0.0.7",
     "dicom-parser": "^1.8.21",
     "dotenv": "^17.2.1",

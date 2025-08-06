@@ -12,55 +12,88 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const loadThumbnail = async () => {
+    const loadThumbnails = async () => {
       try {
         setIsLoading(true);
         setHasError(false);
 
-        // Fetch the middle image thumbnail from the series
-        const response = await fetch(`/api/series/${seriesId}/thumbnail`);
-        if (!response.ok) {
-          // Fallback: try to get regular images and render the middle one
-          const imagesResponse = await fetch(`/api/series/${seriesId}/images`);
-          if (!imagesResponse.ok) throw new Error('Failed to fetch images');
-          
-          const images = await imagesResponse.json();
-          if (!images || images.length === 0) throw new Error('No images found');
+        // Fetch images from the series
+        const imagesResponse = await fetch(`/api/series/${seriesId}/images`);
+        if (!imagesResponse.ok) throw new Error('Failed to fetch images');
+        
+        const images = await imagesResponse.json();
+        if (!images || images.length === 0) throw new Error('No images found');
 
-          // Get the middle image
-          const middleIndex = Math.floor(images.length / 2);
-          const targetImage = images[middleIndex];
-
-          // Try to load as a rendered image
-          setThumbnailUrl(`/api/images/${targetImage.sopInstanceUID}/render?size=thumbnail`);
+        // Calculate which images to load (max 4, evenly distributed)
+        const numPreviewImages = Math.min(4, images.length);
+        const indices: number[] = [];
+        
+        if (images.length <= 4) {
+          // Load all images if 4 or fewer
+          for (let i = 0; i < images.length; i++) {
+            indices.push(i);
+          }
         } else {
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
-          setThumbnailUrl(url);
+          // Select 4 evenly distributed images
+          const step = (images.length - 1) / (numPreviewImages - 1);
+          for (let i = 0; i < numPreviewImages; i++) {
+            indices.push(Math.round(i * step));
+          }
         }
 
+        // Load the selected images with better windowing
+        const urls = indices.map(idx => {
+          const targetImage = images[idx];
+          // Apply modality-specific windowing
+          const windowParams = modality === 'CT' ? 'window=400&level=50' :
+                              modality === 'MR' ? 'window=800&level=400' :
+                              modality === 'PT' ? 'window=auto&level=auto' :
+                              'window=auto&level=auto';
+          return `/api/images/${targetImage.sopInstanceUID}/render?size=thumbnail&${windowParams}`;
+        });
+
+        setThumbnailUrls(urls);
         setIsLoading(false);
       } catch (error) {
-        console.error('Error loading thumbnail:', error);
+        console.error('Error loading thumbnails:', error);
         setHasError(true);
         setIsLoading(false);
       }
     };
 
-    loadThumbnail();
+    loadThumbnails();
 
     // Cleanup
     return () => {
-      if (thumbnailUrl && thumbnailUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(thumbnailUrl);
-      }
+      thumbnailUrls.forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
     };
-  }, [seriesId]);
+  }, [seriesId, modality]);
 
-  if (hasError || !thumbnailUrl) {
+  // Set up image cycling
+  useEffect(() => {
+    if (thumbnailUrls.length > 1) {
+      intervalRef.current = setInterval(() => {
+        setCurrentImageIndex(prev => (prev + 1) % thumbnailUrls.length);
+      }, 2000); // Change image every 2 seconds
+
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+        }
+      };
+    }
+  }, [thumbnailUrls]);
+
+  if (hasError || thumbnailUrls.length === 0) {
     // Fallback to styled placeholder
     const modalityIcon = modality === 'CT' ? '🔷' : 
                          modality === 'MR' ? '🟣' : 
@@ -95,12 +128,34 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <img 
-            src={thumbnailUrl} 
-            alt={`${modality} scan`}
-            className="w-full h-full object-cover"
-            onError={() => setHasError(true)}
-          />
+          <div className="relative w-full h-full">
+            {thumbnailUrls.map((url, index) => (
+              <img
+                key={url}
+                src={url}
+                alt={`${modality} scan ${index + 1}`}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
+                  index === currentImageIndex ? 'opacity-100' : 'opacity-0'
+                }`}
+                onError={() => {
+                  if (index === 0) setHasError(true);
+                }}
+              />
+            ))}
+            {/* Progress dots for multiple images */}
+            {thumbnailUrls.length > 1 && (
+              <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
+                {thumbnailUrls.map((_, index) => (
+                  <div
+                    key={index}
+                    className={`w-1 h-1 rounded-full transition-colors ${
+                      index === currentImageIndex ? 'bg-white' : 'bg-white/30'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
