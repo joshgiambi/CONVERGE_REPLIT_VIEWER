@@ -719,6 +719,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const { structureId, parameters } = payload;
     console.log(`🔹 📊 Generating margin preview for structure ${structureId} with parameters:`, parameters);
+    console.log('🔹 📊 Parameters detail:', JSON.stringify(parameters, null, 2));
 
     try {
       // Find the target structure
@@ -742,6 +743,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         parameters,
         isPreview: true  // Mark as preview
       };
+      
+      console.log('🔹 📊 Margin value from parameters:', parameters.margin);
 
       // Import the margin operation handler
       const { growContourSimple } = await import('@/lib/simple-polygon-operations');
@@ -752,9 +755,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       for (const contour of structure.contours || []) {
         if (contour.points && contour.points.length >= 9) {
           try {
+            // The margin value should be used directly (positive for expansion, negative for contraction)
+            const marginValue = parameters.margin || 5;
+            console.log(`🔹 Applying margin of ${marginValue}mm to contour with ${contour.points.length / 3} points`);
+            
             const expandedContour = growContourSimple(
               contour.points,
-              -(parameters.margin || 5) // Negative value to expand
+              marginValue // Use the margin value directly
             );
             
             if (expandedContour && expandedContour.length >= 9) {
