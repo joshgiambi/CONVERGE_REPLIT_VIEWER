@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -92,6 +92,7 @@ export function SeriesSelector({
   const [showNewStructureDialog, setShowNewStructureDialog] = useState(false);
   const [newStructureName, setNewStructureName] = useState('');
   const [newStructureColor, setNewStructureColor] = useState('#FF0000');
+  const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
   
   // Use external selectedForEdit if provided, otherwise use local state
@@ -503,11 +504,54 @@ export function SeriesSelector({
     return { groups, ungrouped, specialGroups: nonEmptySpecialGroups };
   };
 
+  // Function to sort structures based on current mode
+  const sortStructures = (structures: any[]) => {
+    const sorted = [...structures];
+    
+    switch (sortMode) {
+      case 'az':
+        // Sort A-Z alphabetically
+        return sorted.sort((a, b) => a.structureName.localeCompare(b.structureName));
+      
+      case 'za':
+        // Sort Z-A reverse alphabetically
+        return sorted.sort((a, b) => b.structureName.localeCompare(a.structureName));
+      
+      case 'position':
+        // Sort by most superior Z-slice (highest Z value first)
+        return sorted.sort((a, b) => {
+          // Get the maximum Z position for each structure
+          const getMaxZ = (structure: any) => {
+            if (!structure.contourData || structure.contourData.length === 0) return -Infinity;
+            
+            let maxZ = -Infinity;
+            structure.contourData.forEach((contour: any) => {
+              if (contour.slicePosition && contour.slicePosition > maxZ) {
+                maxZ = contour.slicePosition;
+              }
+            });
+            return maxZ;
+          };
+          
+          const maxZA = getMaxZ(a);
+          const maxZB = getMaxZ(b);
+          
+          // Sort by highest Z first (most superior)
+          return maxZB - maxZA;
+        });
+      
+      default:
+        return sorted;
+    }
+  };
+
   const filteredStructures = rtStructures?.structures?.filter((structure: any) =>
     structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
 
-  const { groups, ungrouped } = groupStructures(filteredStructures);
+  // Apply sorting to filtered structures
+  const sortedStructures = sortStructures(filteredStructures);
+  const { groups, ungrouped } = groupStructures(sortedStructures);
 
   const toggleGrouping = () => {
     setGroupingEnabled(!groupingEnabled);
@@ -930,6 +974,22 @@ export function SeriesSelector({
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => {
+                          // Cycle through sort modes: az -> za -> position -> az
+                          const nextMode = sortMode === 'az' ? 'za' : sortMode === 'za' ? 'position' : 'az';
+                          setSortMode(nextMode);
+                        }}
+                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                        title={`Sort: ${sortMode === 'az' ? 'A-Z' : sortMode === 'za' ? 'Z-A' : 'By Position'}`}
+                      >
+                        {sortMode === 'az' ? <ArrowDown className="w-4 h-4" /> : 
+                         sortMode === 'za' ? <ArrowUp className="w-4 h-4" /> : 
+                         <ArrowUpDown className="w-4 h-4" />}
+                      </Button>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={toggleGrouping}
                         className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
                         title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
@@ -957,16 +1017,6 @@ export function SeriesSelector({
                         title="Create new structure"
                       >
                         <Plus className="w-4 h-4" />
-                      </Button>
-                      
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowContourOperations(!showContourOperations)}
-                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title="Contour Operations"
-                      >
-                        <Edit3 className="w-4 h-4" />
                       </Button>
                       
                       <Button
@@ -1566,45 +1616,49 @@ export function SeriesSelector({
         </CardContent>
       </Card>
 
-      {/* New Structure Dialog */}
+      {/* New Structure Dialog - Glassmorphic Styling */}
       <Dialog open={showNewStructureDialog} onOpenChange={setShowNewStructureDialog}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[425px] bg-gray-900/80 backdrop-blur-xl border border-gray-700/50 shadow-2xl">
           <DialogHeader>
-            <DialogTitle>Create New Structure</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white text-lg font-semibold">Create New Structure</DialogTitle>
+            <DialogDescription className="text-gray-400">
               Add a new anatomical structure to the current RT Structure Set.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="structure-name" className="text-right">
+              <Label htmlFor="structure-name" className="text-right text-gray-300">
                 Name
               </Label>
               <Input
                 id="structure-name"
                 value={newStructureName}
                 onChange={(e) => setNewStructureName(e.target.value)}
-                className="col-span-3"
+                className="col-span-3 bg-gray-800/50 border-gray-600/50 text-white placeholder-gray-500 focus:bg-gray-800/70 focus:border-green-500/50 backdrop-blur-sm"
                 placeholder="e.g., LIVER, HEART, PTV"
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="structure-color" className="text-right">
+              <Label htmlFor="structure-color" className="text-right text-gray-300">
                 Color
               </Label>
               <div className="col-span-3 flex items-center gap-2">
-                <Input
-                  id="structure-color"
-                  type="color"
-                  value={newStructureColor}
-                  onChange={(e) => setNewStructureColor(e.target.value)}
-                  className="w-20 h-10 p-1 cursor-pointer"
-                />
-                <span className="text-sm text-gray-500">{newStructureColor}</span>
+                <div className="relative">
+                  <Input
+                    id="structure-color"
+                    type="color"
+                    value={newStructureColor}
+                    onChange={(e) => setNewStructureColor(e.target.value)}
+                    className="w-20 h-10 p-1 cursor-pointer bg-gray-800/50 border-gray-600/50 rounded-lg"
+                  />
+                </div>
+                <span className="text-sm text-gray-400 bg-gray-800/30 px-3 py-1 rounded-lg backdrop-blur-sm border border-gray-700/30">
+                  {newStructureColor.toUpperCase()}
+                </span>
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => {
@@ -1612,12 +1666,13 @@ export function SeriesSelector({
                 setNewStructureName('');
                 setNewStructureColor('#FF0000');
               }}
+              className="bg-gray-800/50 border-gray-600/50 text-gray-300 hover:bg-gray-700/50 hover:text-white backdrop-blur-sm"
             >
               Cancel
             </Button>
             <Button 
               onClick={handleCreateNewStructure}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-green-600/20 border border-green-500/30 text-green-400 hover:bg-green-600/30 hover:text-green-300 backdrop-blur-sm transition-all duration-200"
             >
               Create Structure
             </Button>
