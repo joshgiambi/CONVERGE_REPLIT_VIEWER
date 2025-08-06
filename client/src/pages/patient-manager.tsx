@@ -701,57 +701,95 @@ export default function PatientManager() {
                   </TabsTrigger>
                 </TabsList>
                 
-                {/* Search and Tags Row */}
-                <div className="flex gap-3 items-start">
-                  {/* Search Bar */}
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Search patients, studies..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-9 h-9 bg-black/30 border border-gray-700/50 text-white placeholder:text-gray-500 
-                               focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 rounded-lg
-                               transition-all duration-200 text-sm"
-                    />
-                  </div>
-                  
-                  {/* Tag Filters */}
-                  {uniqueTags.length > 0 && (
-                    <div className="flex gap-1.5 items-center flex-wrap flex-1">
-                      {uniqueTags.map(tag => {
-                        const isSelected = selectedTags.includes(tag);
-                        return (
-                          <button
-                            key={tag}
-                            onClick={() => {
-                              if (isSelected) {
-                                setSelectedTags(selectedTags.filter(t => t !== tag));
-                              } else {
-                                setSelectedTags([...selectedTags, tag]);
-                              }
-                            }}
-                            className={`px-2.5 py-1 rounded-md border transition-all duration-200 text-xs font-medium ${
-                              isSelected 
-                                ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-200' 
-                                : 'bg-black/20 border-gray-700/40 text-gray-400 hover:text-gray-300 hover:bg-black/30'
-                            }`}
-                          >
-                            {tag}
-                          </button>
-                        );
-                      })}
-                      {selectedTags.length > 0 && (
-                        <button
-                          onClick={() => setSelectedTags([])}
-                          className="text-gray-500 hover:text-gray-300 text-xs ml-1"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  )}
+                {/* Search Bar - Full Width */}
+                <div className="relative w-full mb-2">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search patients, studies, or modalities..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 h-9 w-full bg-black/30 border border-gray-700/50 text-white placeholder:text-gray-500 
+                             focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 rounded-lg
+                             transition-all duration-200 text-sm"
+                  />
                 </div>
+                
+                {/* Tag Filters - Under Search */}
+                {uniqueTags.length > 0 && (
+                  <div className="flex gap-1.5 items-center flex-wrap">
+                    {uniqueTags.map(tag => {
+                      // Define tag colors based on tag type - matching patient card colors
+                      const getTagStyle = (tagName: string) => {
+                        const lower = tagName.toLowerCase();
+                        if (lower.includes('head') || lower.includes('brain')) {
+                          return {
+                            base: 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20',
+                            selected: 'bg-purple-600/30 border-purple-500 text-purple-100 shadow-lg shadow-purple-500/20'
+                          };
+                        } else if (lower.includes('chest') || lower.includes('thorax') || lower.includes('lung')) {
+                          return {
+                            base: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
+                            selected: 'bg-blue-600/30 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20'
+                          };
+                        } else if (lower.includes('abdomen') || lower.includes('pelvis')) {
+                          return {
+                            base: 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20',
+                            selected: 'bg-green-600/30 border-green-500 text-green-100 shadow-lg shadow-green-500/20'
+                          };
+                        } else if (lower.includes('spine') || lower.includes('neck')) {
+                          return {
+                            base: 'bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20',
+                            selected: 'bg-orange-600/30 border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20'
+                          };
+                        } else if (lower.includes('contrast') || lower.includes('gad')) {
+                          return {
+                            base: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20',
+                            selected: 'bg-yellow-600/30 border-yellow-500 text-yellow-100 shadow-lg shadow-yellow-500/20'
+                          };
+                        } else if (lower.includes('emergency') || lower.includes('urgent')) {
+                          return {
+                            base: 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20',
+                            selected: 'bg-red-600/30 border-red-500 text-red-100 shadow-lg shadow-red-500/20'
+                          };
+                        } else {
+                          return {
+                            base: 'bg-gray-500/10 border-gray-500/30 text-gray-300 hover:bg-gray-500/20',
+                            selected: 'bg-indigo-600/30 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-500/20'
+                          };
+                        }
+                      };
+                      
+                      const style = getTagStyle(tag);
+                      const isSelected = selectedTags.includes(tag);
+                      
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedTags(selectedTags.filter(t => t !== tag));
+                            } else {
+                              setSelectedTags([...selectedTags, tag]);
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-md border transition-all duration-200 text-xs font-medium ${
+                            isSelected ? style.selected : style.base
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                    {selectedTags.length > 0 && (
+                      <button
+                        onClick={() => setSelectedTags([])}
+                        className="text-gray-500 hover:text-gray-300 text-xs ml-2"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
           {/* Fixed Tabs */}
