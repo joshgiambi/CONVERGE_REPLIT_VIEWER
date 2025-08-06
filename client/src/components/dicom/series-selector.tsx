@@ -1205,14 +1205,16 @@ export function SeriesSelector({
                     {/* Structures List - Grouped and Individual */}
                     <div className="space-y-1 overflow-y-auto" style={{ height: 'calc(100vh - 600px)', minHeight: '200px' }}>
                       {rtStructures?.structures && (() => {
-                        const filteredStructures = rtStructures.structures.filter((structure: any) =>
+                        // Filter and sort structures
+                        const filtered = rtStructures.structures.filter((structure: any) =>
                           structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
                         );
-                        const { groups, ungrouped, specialGroups } = groupStructures(filteredStructures);
+                        const sorted = sortStructures(filtered);
+                        const { groups, ungrouped, specialGroups } = groupStructures(sorted);
                         
                         if (!groupingEnabled) {
                           // Show all structures as individual rows with reduced height
-                          return filteredStructures.map((structure: any) => (
+                          return sorted.map((structure: any) => (
                             <div 
                               key={structure.roiNumber}
                               className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 backdrop-blur-sm ${
