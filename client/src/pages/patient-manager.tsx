@@ -599,7 +599,7 @@ export default function PatientManager() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white overflow-y-auto">
+    <div className="h-screen bg-black text-white flex flex-col overflow-hidden">
       {/* Header matching viewer interface */}
       <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between w-full">
@@ -661,34 +661,35 @@ export default function PatientManager() {
         </header>
 
       {/* Main layout with sidebar and content */}
-      <div className="flex h-screen pt-20">
-        {/* Left Sidebar */}
-        <div className="w-80 bg-gray-950/90 backdrop-blur-xl border-r border-gray-600/60 p-4 overflow-y-auto">
-          <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-2">
-            {/* Recently Opened */}
-            <AccordionItem value="recently-opened" className="border-gray-700">
-              <AccordionTrigger className="text-white hover:text-gray-300">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Recently Opened
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2">
+      <div className="flex flex-1 pt-20">
+        {/* Left Sidebar - styled like viewer sidebar */}
+        <div className="w-80 flex flex-col h-full">
+          <div className="m-4 space-y-3 overflow-y-auto flex-1">
+            <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-3">
+              {/* Recently Opened - Blue Theme */}
+              <AccordionItem value="recently-opened" className="bg-gray-950/90 backdrop-blur-xl border border-blue-500/30 rounded-xl overflow-hidden">
+                <AccordionTrigger className="px-4 py-3 hover:bg-blue-500/10 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-blue-400" />
+                    <span className="text-white font-medium">Recently Opened</span>
+                  </div>
+                </AccordionTrigger>
+              <AccordionContent className="px-4 pb-4">
+                <div className="space-y-1">
                   {recentlyOpenedPatients.length === 0 ? (
-                    <p className="text-gray-500 text-sm">No recently opened patients</p>
+                    <p className="text-gray-500 text-sm py-2">No recently opened patients</p>
                   ) : (
                     recentlyOpenedPatients.map(patientId => {
                       const patient = patients.find(p => p.id === patientId);
                       return patient ? (
                         <Link 
                           key={patientId}
-                          href={`/viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded-lg hover:bg-blue-500/10 transition-colors border border-transparent hover:border-blue-500/20"
                           onClick={() => trackPatientOpened(patientId)}
                         >
-                          <div className="text-white text-sm">{patient.patientName}</div>
-                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                          <div className="text-blue-400 text-xs">ID: {patient.patientID}</div>
                         </Link>
                       ) : null;
                     })
@@ -697,30 +698,30 @@ export default function PatientManager() {
               </AccordionContent>
             </AccordionItem>
 
-            {/* Favorites */}
-            <AccordionItem value="favorites" className="border-gray-700">
-              <AccordionTrigger className="text-white hover:text-gray-300">
+            {/* Favorites - Yellow Theme */}
+            <AccordionItem value="favorites" className="bg-gray-950/90 backdrop-blur-xl border border-yellow-500/30 rounded-xl overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:bg-yellow-500/10 transition-colors">
                 <div className="flex items-center gap-2">
-                  <Star className="h-4 w-4" />
-                  Favorites
+                  <Star className="h-4 w-4 text-yellow-400" />
+                  <span className="text-white font-medium">Favorites</span>
                 </div>
               </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2">
+              <AccordionContent className="px-4 pb-4">
+                <div className="space-y-1">
                   {favoritePatients.size === 0 ? (
-                    <p className="text-gray-500 text-sm">No favorite patients</p>
+                    <p className="text-gray-500 text-sm py-2">No favorite patients</p>
                   ) : (
                     Array.from(favoritePatients).map(patientId => {
                       const patient = patients.find(p => p.id === patientId);
                       return patient ? (
                         <Link 
                           key={patientId}
-                          href={`/viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded-lg hover:bg-yellow-500/10 transition-colors border border-transparent hover:border-yellow-500/20"
                           onClick={() => trackPatientOpened(patientId)}
                         >
-                          <div className="text-white text-sm">{patient.patientName}</div>
-                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                          <div className="text-yellow-400 text-xs">ID: {patient.patientID}</div>
                         </Link>
                       ) : null;
                     })
@@ -729,30 +730,30 @@ export default function PatientManager() {
               </AccordionContent>
             </AccordionItem>
 
-            {/* Recently Imported */}
-            <AccordionItem value="recently-imported" className="border-gray-700">
-              <AccordionTrigger className="text-white hover:text-gray-300">
+            {/* Recently Imported - Green Theme */}
+            <AccordionItem value="recently-imported" className="bg-gray-950/90 backdrop-blur-xl border border-green-500/30 rounded-xl overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:bg-green-500/10 transition-colors">
                 <div className="flex items-center gap-2">
-                  <Import className="h-4 w-4" />
-                  Recently Imported
+                  <Import className="h-4 w-4 text-green-400" />
+                  <span className="text-white font-medium">Recently Imported</span>
                 </div>
               </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2">
+              <AccordionContent className="px-4 pb-4">
+                <div className="space-y-1">
                   {recentlyImportedPatients.length === 0 ? (
-                    <p className="text-gray-500 text-sm">No recently imported patients</p>
+                    <p className="text-gray-500 text-sm py-2">No recently imported patients</p>
                   ) : (
                     recentlyImportedPatients.map(patientId => {
                       const patient = patients.find(p => p.id === patientId);
                       return patient ? (
                         <Link 
                           key={patientId}
-                          href={`/viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded hover:bg-gray-800/50 transition-colors"
+                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                          className="block p-2 rounded-lg hover:bg-green-500/10 transition-colors border border-transparent hover:border-green-500/20"
                           onClick={() => trackPatientOpened(patientId)}
                         >
-                          <div className="text-white text-sm">{patient.patientName}</div>
-                          <div className="text-gray-500 text-xs">ID: {patient.patientID}</div>
+                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                          <div className="text-green-400 text-xs">ID: {patient.patientID}</div>
                         </Link>
                       ) : null;
                     })
@@ -761,24 +762,26 @@ export default function PatientManager() {
               </AccordionContent>
             </AccordionItem>
           </Accordion>
+          </div>
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="container mx-auto px-4 py-8">
+        <div className="flex-1 flex flex-col h-full">
+          {/* Fixed Search Bar and Tabs */}
+          <div className="p-4 pb-0">
             {/* Search Bar with dark styling */}
-            <div className="mb-6 space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-            <Input
-              placeholder="Search patients, studies, or modalities..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-12 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder:text-gray-500 
-                       focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl shadow-2xl shadow-black/20
-                       transition-all duration-200"
-            />
-          </div>
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                <Input
+                  placeholder="Search patients, studies, or modalities..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 h-12 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder:text-gray-500 
+                           focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl shadow-2xl shadow-black/20
+                           transition-all duration-200"
+                />
+              </div>
           
           {/* Tag Filters */}
           {uniqueTags.length > 0 && (
@@ -817,9 +820,12 @@ export default function PatientManager() {
               )}
             </div>
           )}
-        </div>
+            </div>
+          </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          {/* Fixed Tabs */}
+          <div className="px-4 pb-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
           <TabsList className="grid w-full grid-cols-5 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl p-1 shadow-2xl shadow-black/50">
             <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
               <User className="h-4 w-4" />
@@ -850,8 +856,10 @@ export default function PatientManager() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Patients Tab */}
-          <TabsContent value="patients" className="space-y-4">
+          {/* Scrollable Content Area */}
+          <div className="flex-1 overflow-y-auto mt-4">
+            {/* Patients Tab */}
+            <TabsContent value="patients" className="space-y-4 p-4">
             {/* Selection Actions Bar */}
             {selectedPatients.size > 0 && (
               <div className="flex items-center justify-between p-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl shadow-2xl shadow-black/50 animate-in slide-in-from-top-2 duration-200">
@@ -961,8 +969,8 @@ export default function PatientManager() {
 
 
 
-          {/* Import DICOM Tab */}
-          <TabsContent value="import" className="space-y-4">
+            {/* Import DICOM Tab */}
+            <TabsContent value="import" className="space-y-4 p-4">
             <Card className="bg-gray-900/80 border border-gray-700/50 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-white">
@@ -980,8 +988,8 @@ export default function PatientManager() {
             </Card>
           </TabsContent>
 
-          {/* PACS Tab */}
-          <TabsContent value="pacs" className="space-y-4">
+            {/* PACS Tab */}
+            <TabsContent value="pacs" className="space-y-4 p-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">PACS Connections</h3>
               <Dialog>
@@ -1147,8 +1155,8 @@ export default function PatientManager() {
             )}
           </TabsContent>
 
-          {/* Query Tab */}
-          <TabsContent value="query" className="space-y-4">
+            {/* Query Tab */}
+            <TabsContent value="query" className="space-y-4 p-4">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
@@ -1291,10 +1299,11 @@ export default function PatientManager() {
               </Card>
             </div>
           </TabsContent>
-          {/* Metadata Tab */}
-          <TabsContent value="metadata" className="space-y-4">
-            <MetadataViewer />
-          </TabsContent>
+            {/* Metadata Tab */}
+            <TabsContent value="metadata" className="space-y-4 p-4">
+              <MetadataViewer />
+            </TabsContent>
+          </div>
         </Tabs>
           </div>
         </div>
