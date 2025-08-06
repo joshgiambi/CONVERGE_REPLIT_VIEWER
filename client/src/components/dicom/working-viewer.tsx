@@ -578,7 +578,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       let updatedPoints: number[];
       
       if (direction === 'all') {
-        // Use new simple polygon grow/shrink algorithm for better results
+        // For single slice operations, still use 2D for speed
+        // But note this is a single-slice operation, not volumetric
         updatedPoints = growContourSimple(contour.points, distance);
       } else {
         // Use directional grow/shrink
@@ -718,7 +719,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     const { structureId, parameters } = payload;
-    console.log(`🔹 📊 Generating margin preview for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Generating 3D volumetric margin preview for structure ${structureId} with parameters:`, parameters);
     console.log('🔹 📊 Parameters detail:', JSON.stringify(parameters, null, 2));
 
     try {
@@ -736,53 +737,40 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Clear any existing preview
       setPreviewContours([]);
 
-      // Execute the actual margin operation
-      const marginPayload = {
-        action: "apply_margin",
-        structureId,
-        parameters,
-        isPreview: true  // Mark as preview
-      };
-      
-      console.log('🔹 📊 Margin value from parameters:', parameters.margin);
+      const marginValue = parameters.margin || 5;
+      console.log('🔹 📊 Applying 3D margin value:', marginValue);
 
-      // Import the margin operation handler
-      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+      // Import the 3D volumetric margin operation handler
+      const { apply3DMargin } = await import('@/lib/volumetric-margin-operations');
       
-      // Process all contours and create preview
-      const previewContoursWithSlices: any[] = [];
+      // Get pixel spacing from image metadata
+      const pixelSpacing: [number, number, number] = imageMetadata?.pixelSpacing 
+        ? [imageMetadata.pixelSpacing[0], imageMetadata.pixelSpacing[1], imageMetadata.sliceThickness || 2]
+        : [1, 1, 2];
       
-      for (const contour of structure.contours || []) {
-        if (contour.points && contour.points.length >= 9) {
-          try {
-            // The margin value should be used directly (positive for expansion, negative for contraction)
-            const marginValue = parameters.margin || 5;
-            console.log(`🔹 Applying margin of ${marginValue}mm to contour with ${contour.points.length / 3} points`);
-            
-            const expandedContour = growContourSimple(
-              contour.points,
-              marginValue // Use the margin value directly
-            );
-            
-            if (expandedContour && expandedContour.length >= 9) {
-              previewContoursWithSlices.push({
-                points: expandedContour,
-                slicePosition: contour.slicePosition,
-                isPreview: true,
-                previewColor: '#FFFF00'  // Yellow for preview
-              });
-            }
-          } catch (error) {
-            console.error('Error expanding contour:', error);
-          }
-        }
-      }
-
-      // Set preview contours to be rendered
-      console.log(`🔹 ✅ Created ${previewContoursWithSlices.length} preview contours`);
+      console.log('🔹 Using pixel spacing for 3D operation:', pixelSpacing);
+      
+      // Apply 3D volumetric margin
+      const modifiedContours = await apply3DMargin(
+        structure.contours,
+        marginValue,
+        pixelSpacing
+      );
+      
+      // Create preview contours
+      const previewContoursWithSlices: any[] = modifiedContours.map((contour: any) => ({
+        points: contour.points,
+        slicePosition: contour.slicePosition,
+        isPreview: true,
+        previewColor: '#FFFF00'  // Yellow for preview
+      }));
+      
+      console.log(`🔹 ✅ Generated ${previewContoursWithSlices.length} preview contours using 3D volumetric operation`);
+      
+      // Set the preview contours
       setPreviewContours(previewContoursWithSlices);
     } catch (error) {
-      console.error('🔹 ❌ Margin preview failed:', error);
+      console.error('🔹 ❌ 3D margin preview failed:', error);
       setPreviewContours([]);
     }
   };
@@ -801,7 +789,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const { structureId, parameters } = payload;
     
-    console.log(`🔹 📊 Executing margin operation for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Executing 3D volumetric margin operation for structure ${structureId} with parameters:`, parameters);
     
     try {
       // Create a deep copy of RT structures
@@ -817,48 +805,45 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       
-      // Import the margin operation handler
-      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+      // Import the 3D volumetric margin operation handler
+      const { apply3DMargin } = await import('@/lib/volumetric-margin-operations');
       
-      // Apply margin to all contours
+      // Get pixel spacing from image metadata
+      const pixelSpacing: [number, number, number] = imageMetadata?.pixelSpacing 
+        ? [imageMetadata.pixelSpacing[0], imageMetadata.pixelSpacing[1], imageMetadata.sliceThickness || 2]
+        : [1, 1, 2];
+      
       const marginValue = parameters.margin || 5;
-      console.log(`🔹 Applying margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
+      console.log(`🔹 Applying 3D volumetric margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
+      console.log('🔹 Using pixel spacing:', pixelSpacing);
       
-      for (const contour of structure.contours || []) {
-        if (contour.points && contour.points.length >= 9) {
-          try {
-            const expandedContour = growContourSimple(
-              contour.points,
-              marginValue
-            );
-            
-            if (expandedContour && expandedContour.length >= 9) {
-              contour.points = expandedContour;
-              contour.numberOfPoints = expandedContour.length / 3;
-            }
-          } catch (error) {
-            console.error('Error expanding contour:', error);
-          }
-        }
-      }
+      // Apply 3D volumetric margin
+      const modifiedContours = await apply3DMargin(
+        structure.contours,
+        marginValue,
+        pixelSpacing
+      );
       
-      console.log(`🔹 ✅ Applied margin to ${structure.contours?.length || 0} contours`);
+      // Replace the structure's contours with the modified ones
+      structure.contours = modifiedContours;
+      
+      console.log(`🔹 ✅ Applied 3D volumetric margin, generated ${modifiedContours.length} contours`);
       
       // Clear preview contours
       setPreviewContours([]);
       
       // Update local structures and save
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_margin');
+      saveContourUpdates(updatedRTStructures, 'apply_3d_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
       
-      console.log(`✅ Successfully applied margin to structure ${structureId}`);
+      console.log(`✅ Successfully applied 3D volumetric margin to structure ${structureId}`);
     } catch (error) {
-      console.error("🔹 ❌ Error applying margin operation:", error);
+      console.error("🔹 ❌ Error applying 3D margin operation:", error);
     }
   };
 
