@@ -10,7 +10,7 @@ import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MarginToolbar } from './margin-toolbar';
+import { MarginOperationPanel } from './margin-operation-panel';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -838,18 +838,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Margin Toolbar */}
+      {/* Margin Operation Panel */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
-        <MarginToolbar
-          isVisible={showMarginToolbar}
-          onClose={() => setShowMarginToolbar(false)}
+        <MarginOperationPanel
           selectedStructure={rtStructures.structures?.find((s: any) => s.roiNumber === selectedForEdit) ? {
             id: selectedForEdit,
             structureName: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.structureName || 'Unknown',
-            color: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color ? 
-              `rgb(${rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color.join(',')})` : 
-              undefined
+            color: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color || [255, 255, 255]
           } : undefined}
+          isVisible={showMarginToolbar}
+          onClose={() => setShowMarginToolbar(false)}
           onExecuteOperation={(operation) => {
             // Handle execute operation
             console.log('🔹 🎯 Viewer Interface: Handling margin operation:', operation);

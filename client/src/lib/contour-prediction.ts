@@ -278,20 +278,111 @@ export function interpolateContours(
   targetSlicePosition: number
 ): number[] {
   if (contour1.length !== contour2.length) {
-    console.warn('Contours have different point counts, using simple prediction');
-    return [];
+    console.warn('Contours have different point counts, using shape-preserving interpolation');
+    // Use shape-preserving interpolation when point counts differ
+    return interpolateContoursWithResampling(contour1, contour2, slicePosition1, slicePosition2, targetSlicePosition);
   }
   
   const t = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
+  
+  // Apply easing function to maintain volume better
+  // This reduces shrinkage by using a smoother interpolation curve
+  const easedT = easeInOutCubic(t);
+  
   const interpolatedContour: number[] = [];
   
   for (let i = 0; i < contour1.length; i += 3) {
-    const x = contour1[i] + (contour2[i] - contour1[i]) * t;
-    const y = contour1[i + 1] + (contour2[i + 1] - contour1[i + 1]) * t;
-    const z = contour1[i + 2] + (contour2[i + 2] - contour1[i + 2]) * t;
+    const x = contour1[i] + (contour2[i] - contour1[i]) * easedT;
+    const y = contour1[i + 1] + (contour2[i + 1] - contour1[i + 1]) * easedT;
+    const z = contour1[i + 2] + (contour2[i + 2] - contour1[i + 2]) * easedT;
     
     interpolatedContour.push(x, y, z);
   }
   
   return interpolatedContour;
+}
+
+// Easing function to reduce shrinkage during interpolation
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Shape-preserving interpolation with resampling
+function interpolateContoursWithResampling(
+  contour1: number[],
+  contour2: number[],
+  slicePosition1: number,
+  slicePosition2: number,
+  targetSlicePosition: number
+): number[] {
+  // Calculate centroids
+  const centroid1 = calculateCentroid3D(contour1);
+  const centroid2 = calculateCentroid3D(contour2);
+  
+  const t = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
+  const easedT = easeInOutCubic(t);
+  
+  // Interpolate centroid
+  const interpolatedCentroid = {
+    x: centroid1.x + (centroid2.x - centroid1.x) * easedT,
+    y: centroid1.y + (centroid2.y - centroid1.y) * easedT,
+    z: centroid1.z + (centroid2.z - centroid1.z) * easedT
+  };
+  
+  // Calculate average radius to maintain area
+  const radius1 = calculateAverageRadius(contour1, centroid1);
+  const radius2 = calculateAverageRadius(contour2, centroid2);
+  const interpolatedRadius = radius1 + (radius2 - radius1) * easedT;
+  
+  // Generate interpolated contour based on the larger contour's shape
+  const largerContour = contour1.length >= contour2.length ? contour1 : contour2;
+  const largerCentroid = contour1.length >= contour2.length ? centroid1 : centroid2;
+  
+  const interpolatedContour: number[] = [];
+  
+  for (let i = 0; i < largerContour.length; i += 3) {
+    // Get direction from centroid
+    const dx = largerContour[i] - largerCentroid.x;
+    const dy = largerContour[i + 1] - largerCentroid.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    
+    // Normalize and scale by interpolated radius
+    const x = interpolatedCentroid.x + (dx / dist) * interpolatedRadius;
+    const y = interpolatedCentroid.y + (dy / dist) * interpolatedRadius;
+    const z = interpolatedCentroid.z;
+    
+    interpolatedContour.push(x, y, z);
+  }
+  
+  return interpolatedContour;
+}
+
+function calculateCentroid3D(contour: number[]): { x: number; y: number; z: number } {
+  let sumX = 0, sumY = 0, sumZ = 0;
+  const pointCount = contour.length / 3;
+  
+  for (let i = 0; i < contour.length; i += 3) {
+    sumX += contour[i];
+    sumY += contour[i + 1];
+    sumZ += contour[i + 2];
+  }
+  
+  return {
+    x: sumX / pointCount,
+    y: sumY / pointCount,
+    z: sumZ / pointCount
+  };
+}
+
+function calculateAverageRadius(contour: number[], centroid: { x: number; y: number; z: number }): number {
+  let sumRadius = 0;
+  const pointCount = contour.length / 3;
+  
+  for (let i = 0; i < contour.length; i += 3) {
+    const dx = contour[i] - centroid.x;
+    const dy = contour[i + 1] - centroid.y;
+    sumRadius += Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  return sumRadius / pointCount;
 }

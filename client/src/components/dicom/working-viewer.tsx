@@ -744,7 +744,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       };
 
       // Import the margin operation handler
-      const { expandContour } = await import('@/lib/simple-polygon-operations');
+      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
       
       // Process all contours and create preview
       const previewContoursWithSlices: any[] = [];
@@ -752,9 +752,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       for (const contour of structure.contours || []) {
         if (contour.points && contour.points.length >= 9) {
           try {
-            const expandedContour = expandContour(
+            const expandedContour = growContourSimple(
               contour.points,
-              parameters.marginValues.uniform || 5
+              -(parameters.margin || 5) // Negative value to expand
             );
             
             if (expandedContour && expandedContour.length >= 9) {
@@ -4706,7 +4706,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     });
                   }
                 }}
-                onPreviewUpdate={setPreviewContours}
+                onPreviewUpdate={(contours: any[] | null) => {
+                  setPreviewContours(contours || []);
+                }}
               />
             )}
 
@@ -4757,7 +4759,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     });
                   }
                 }}
-                onPreviewUpdate={setPreviewContours}
+                onPreviewUpdate={(contours: any[] | null) => {
+                  setPreviewContours(contours || []);
+                }}
               />
             )}
 

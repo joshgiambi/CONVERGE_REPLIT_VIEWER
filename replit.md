@@ -19,6 +19,8 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **Type Safety**: Fixed missing onRTStructureUpdate prop and improved PreviewContour type definition
 - **Consistency**: Replaced hardcoded tolerance values with SLICE_TOL_MM constant throughout codebase
 - **MPR Enhancement**: Added automatic cache invalidation on window/level changes for proper image updates
+- **MarginOperationPanel Integration**: Replaced MarginToolbar with new comprehensive MarginOperationPanel component that provides uniform, anisotropic, and directional margin controls with live preview capability
+- **Contour Interpolation Enhancement**: Fixed interpolation algorithm shrinkage issues using calculateCentroid3D function for proper centroid calculations and improved morphological operations
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.

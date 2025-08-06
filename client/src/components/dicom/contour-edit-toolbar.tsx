@@ -130,7 +130,13 @@ export function ContourEditToolbar({
   const handleToolActivation = (toolId: string) => {
     console.log('TOOLBAR: Tool activated:', toolId);
     
-    
+    // Special handling for margin button - directly open the panel
+    if (toolId === 'margin') {
+      if (onOpenAdvancedMarginTool) {
+        onOpenAdvancedMarginTool();
+      }
+      return;
+    }
     
     const isActive = activeTool === toolId;
     const newTool = isActive ? null : toolId;
@@ -1034,7 +1040,21 @@ export function ContourEditToolbar({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {/* TODO: Implement smoothing */}}
+              onClick={() => {
+                if (!selectedStructure) return;
+                console.log(`Smoothing contours for structure ${selectedStructure.roiNumber}`);
+                
+                if (onContourUpdate) {
+                  const updatePayload = {
+                    action: 'smooth',
+                    structureId: selectedStructure.roiNumber,
+                    smoothingFactor: 0.3 // Moderate smoothing to reduce shrinkage
+                  };
+                  onContourUpdate(updatePayload);
+                }
+                
+                toast({ title: `Smoothing contours for ${selectedStructure.structureName}` });
+              }}
               className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
               title="Smooth contours"
             >
