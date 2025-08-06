@@ -2080,6 +2080,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get series thumbnail
+  app.get("/api/series/:id/thumbnail", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.id);
+      const images = await storage.getImagesBySeriesId(seriesId);
+      
+      if (!images || images.length === 0) {
+        return res.status(404).json({ error: 'No images found in series' });
+      }
+
+      // Get the middle image
+      const middleIndex = Math.floor(images.length / 2);
+      const targetImage = images[middleIndex];
+
+      // Return the raw DICOM file for now - client will handle rendering
+      const filePath = targetImage.filePath?.startsWith('storage/') 
+        ? targetImage.filePath 
+        : path.join('storage', targetImage.filePath || '');
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Image file not found' });
+      }
+
+      // For now, just send the DICOM file and let client handle it
+      // In production, you'd render this to a PNG/JPEG thumbnail
+      res.setHeader('Content-Type', 'application/dicom');
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      console.error('Error fetching thumbnail:', error);
+      res.status(500).json({ error: 'Failed to fetch thumbnail' });
+    }
+  });
+
+  // Render image as PNG/JPEG
+  app.get("/api/images/:sopInstanceUID/render", async (req, res) => {
+    try {
+      const { sopInstanceUID } = req.params;
+      const { size } = req.query;
+      
+      // Get the image from storage
+      const images = await db.select()
+        .from(imagesTable)
+        .where(eq(imagesTable.sopInstanceUID, sopInstanceUID))
+        .limit(1);
+
+      if (images.length === 0) {
+        return res.status(404).json({ error: 'Image not found' });
+      }
+
+      const image = images[0];
+      const filePath = image.filePath?.startsWith('storage/') 
+        ? image.filePath 
+        : path.join('storage', image.filePath || '');
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Image file not found' });
+      }
+
+      // For now, return the raw DICOM file
+      // In a production app, you'd use a DICOM rendering library to convert to PNG/JPEG
+      res.setHeader('Content-Type', 'application/dicom');
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      console.error('Error rendering image:', error);
+      res.status(500).json({ error: 'Failed to render image' });
+    }
+  });
+
   // Get pixel data for an image
   app.get('/api/images/:id/pixels', async (req, res) => {
     try {

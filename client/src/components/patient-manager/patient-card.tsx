@@ -7,6 +7,8 @@ import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBra
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
+import { DicomThumbnail } from './dicom-thumbnail';
+import { DicomPreviewModal } from './dicom-preview-modal';
 import { useToast } from '@/hooks/use-toast';
 
 interface PatientCardProps {
@@ -30,6 +32,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [previewSeriesId, setPreviewSeriesId] = useState<number | null>(null);
   const hasLoadedRef = useRef(false);
   const { toast } = useToast();
 
@@ -243,22 +246,14 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         {imageSeries.length > 0 && (
           <div className="flex gap-2 pb-3 border-b border-gray-800">
             {imageSeries.slice(0, 4).map((series) => {
-              const modalityIcon = series.modality === 'CT' ? '🔷' : 
-                                   series.modality === 'MR' ? '🟣' : 
-                                   series.modality === 'PT' ? '🟡' : '⚪';
               return (
-                <div key={series.id} className="relative group hover:scale-105 transition-transform duration-200">
-                  <div className={`w-20 h-20 rounded-lg overflow-hidden border ${
-                    series.modality === 'CT' ? 'bg-gradient-to-br from-blue-950 to-blue-900 border-blue-700' :
-                    series.modality === 'MR' ? 'bg-gradient-to-br from-purple-950 to-purple-900 border-purple-700' :
-                    series.modality === 'PT' ? 'bg-gradient-to-br from-yellow-950 to-yellow-900 border-yellow-700' :
-                    'bg-gradient-to-br from-gray-950 to-gray-900 border-gray-700'
-                  } flex items-center justify-center`}>
-                    <div className="flex flex-col items-center justify-center text-center p-2">
-                      <span className="text-2xl mb-1">{modalityIcon}</span>
-                      <span className="text-xs text-gray-300 font-medium">{series.imageCount}</span>
-                    </div>
-                  </div>
+                <div key={series.id} className="relative group">
+                  <DicomThumbnail 
+                    seriesId={series.id}
+                    modality={series.modality}
+                    imageCount={series.imageCount}
+                    onClick={() => setPreviewSeriesId(series.id)}
+                  />
                   <Badge 
                     variant="secondary" 
                     className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1.5 py-0.5 font-bold`}
@@ -516,6 +511,14 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
           }
         }}
       />
+      
+      {/* DICOM Preview Modal */}
+      {previewSeriesId && (
+        <DicomPreviewModal
+          seriesId={previewSeriesId}
+          onClose={() => setPreviewSeriesId(null)}
+        />
+      )}
     </Card>
   );
 }
