@@ -665,9 +665,9 @@ export default function PatientManager() {
       <div className="flex flex-1 pt-20 overflow-hidden">
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Unified Control Panel */}
-          <div className="px-4 pt-4 pb-2 flex-shrink-0">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+          {/* Unified Control Panel with proper height management */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex-shrink-0">
               {/* Combined Container for Tabs, Search, and Tags */}
               <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-700/50 rounded-2xl shadow-2xl shadow-black/40 p-3 mb-4">
                 {/* Tabs Row */}
@@ -791,9 +791,10 @@ export default function PatientManager() {
                   </div>
                 )}
               </div>
+            </div>
 
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto px-4 pb-4">
             {/* Patients Tab */}
             <TabsContent value="patients" className="space-y-4 pt-4">
             {/* Selection Actions Bar */}
@@ -1262,9 +1263,8 @@ export default function PatientManager() {
             <TabsContent value="metadata" className="space-y-4 p-4">
               <MetadataViewer />
             </TabsContent>
-          </div>
+            </div>
           </Tabs>
-          </div>
         </div>
 
         {/* Right Sidebar with glassmorphic design - increased thickness */}
