@@ -668,7 +668,7 @@ export default function PatientManager() {
           {/* Fixed Tabs at top */}
           <div className="px-4 pt-4 pb-2">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-              <TabsList className="grid w-full grid-cols-5 bg-gray-950/80 backdrop-blur-xl border border-gray-700/50 rounded-xl p-1 shadow-2xl shadow-black/30 mb-4">
+              <TabsList className="grid w-full grid-cols-5 bg-gray-950/80 backdrop-blur-xl border border-gray-700/50 rounded-xl p-2 shadow-2xl shadow-black/30 mb-4">
                 <TabsTrigger value="patients" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <User className="h-4 w-4" />
                   Patients

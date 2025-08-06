@@ -242,35 +242,35 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         {/* Image Thumbnails Preview */}
         {imageSeries.length > 0 && (
           <div className="flex gap-2 pb-3 border-b border-gray-800">
-            {imageSeries.slice(0, 4).map((series) => (
-              <div key={series.id} className="relative group">
-                <div className="w-20 h-20 bg-gray-900 rounded-lg overflow-hidden border border-gray-700">
-                  <img 
-                    src={`/api/series/${series.id}/thumbnail`}
-                    alt={`${series.modality} ${series.seriesNumber}`}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      // Fallback to a placeholder if thumbnail fails
-                      (e.target as HTMLImageElement).style.display = 'none';
-                      (e.target as HTMLImageElement).parentElement!.innerHTML = `
-                        <div class="w-full h-full flex items-center justify-center bg-gray-900">
-                          <span class="text-xs text-gray-500">${series.modality}</span>
-                        </div>
-                      `;
-                    }}
-                  />
+            {imageSeries.slice(0, 4).map((series) => {
+              const modalityIcon = series.modality === 'CT' ? '🔷' : 
+                                   series.modality === 'MR' ? '🟣' : 
+                                   series.modality === 'PT' ? '🟡' : '⚪';
+              return (
+                <div key={series.id} className="relative group hover:scale-105 transition-transform duration-200">
+                  <div className={`w-20 h-20 rounded-lg overflow-hidden border ${
+                    series.modality === 'CT' ? 'bg-gradient-to-br from-blue-950 to-blue-900 border-blue-700' :
+                    series.modality === 'MR' ? 'bg-gradient-to-br from-purple-950 to-purple-900 border-purple-700' :
+                    series.modality === 'PT' ? 'bg-gradient-to-br from-yellow-950 to-yellow-900 border-yellow-700' :
+                    'bg-gradient-to-br from-gray-950 to-gray-900 border-gray-700'
+                  } flex items-center justify-center`}>
+                    <div className="flex flex-col items-center justify-center text-center p-2">
+                      <span className="text-2xl mb-1">{modalityIcon}</span>
+                      <span className="text-xs text-gray-300 font-medium">{series.imageCount}</span>
+                    </div>
+                  </div>
+                  <Badge 
+                    variant="secondary" 
+                    className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1.5 py-0.5 font-bold`}
+                  >
+                    {series.modality}
+                  </Badge>
                 </div>
-                <Badge 
-                  variant="secondary" 
-                  className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1 py-0`}
-                >
-                  {series.modality}
-                </Badge>
-              </div>
-            ))}
+              );
+            })}
             {imageSeries.length > 4 && (
-              <div className="w-20 h-20 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center justify-center">
-                <span className="text-sm text-gray-400">+{imageSeries.length - 4}</span>
+              <div className="w-20 h-20 bg-gray-900/50 backdrop-blur-sm rounded-lg border border-gray-700 flex items-center justify-center hover:bg-gray-900/70 transition-colors duration-200">
+                <span className="text-sm text-gray-300 font-medium">+{imageSeries.length - 4}</span>
               </div>
             )}
           </div>
