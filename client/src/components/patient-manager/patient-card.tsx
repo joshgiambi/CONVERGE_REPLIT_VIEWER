@@ -240,33 +240,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
       </CardHeader>
       
       <CardContent className="space-y-4">
-        {/* Image Thumbnails Preview */}
-        {imageSeries.length > 0 && (
-          <div className="flex gap-2 pb-3 border-b border-gray-800">
-            {imageSeries.slice(0, 4).map((series) => {
-              return (
-                <div key={series.id} className="relative group">
-                  <DicomThumbnail 
-                    seriesId={series.id}
-                    modality={series.modality}
-                    imageCount={series.imageCount}
-                  />
-                  <Badge 
-                    variant="secondary" 
-                    className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1.5 py-0.5 font-bold`}
-                  >
-                    {series.modality}
-                  </Badge>
-                </div>
-              );
-            })}
-            {imageSeries.length > 4 && (
-              <div className="w-16 h-16 bg-gray-900/50 backdrop-blur-sm rounded-lg border border-gray-700 flex items-center justify-center hover:bg-gray-900/70 transition-colors duration-200">
-                <span className="text-xs text-gray-300 font-medium">+{imageSeries.length - 4}</span>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Study Information */}
         {studiesWithSeries.map((study) => (
@@ -345,6 +318,33 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         {/* Expanded Content */}
         {isExpanded && (
           <div className="mt-4 space-y-4 border-t border-gray-700 pt-4">
+            {/* Image Thumbnails */}
+            {imageSeries.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-blue-400 flex items-center gap-2">
+                  <Layers className="h-4 w-4" />
+                  Image Series
+                </h4>
+                <div className="flex gap-2 flex-wrap">
+                  {imageSeries.map((series) => (
+                    <div key={series.id} className="relative group">
+                      <DicomThumbnail 
+                        seriesId={series.id}
+                        modality={series.modality}
+                        imageCount={series.imageCount}
+                      />
+                      <Badge 
+                        variant="secondary" 
+                        className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1.5 py-0.5 font-bold`}
+                      >
+                        {series.modality}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* RT Structures */}
             {rtStructureSeries.map((rtSeries) => (
               <div key={rtSeries.id} className="space-y-2">
