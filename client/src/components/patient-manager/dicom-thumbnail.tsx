@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import * as dicomParser from 'dicom-parser';
 
 interface DicomThumbnailProps {
   seriesId: number;
@@ -9,12 +10,96 @@ interface DicomThumbnailProps {
 }
 
 export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: DicomThumbnailProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [thumbnailUrls, setThumbnailUrls] = useState<string[]>([]);
+  const [canvasCount, setCanvasCount] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Function to render DICOM to canvas
+  const renderDicomToCanvas = async (url: string, canvas: HTMLCanvasElement) => {
+    try {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      const byteArray = new Uint8Array(arrayBuffer);
+      
+      // Parse DICOM
+      const dataSet = dicomParser.parseDicom(byteArray);
+      
+      // Get image dimensions
+      const rows = dataSet.uint16('x00280010') || 512;
+      const columns = dataSet.uint16('x00280011') || 512;
+      const bitsAllocated = dataSet.uint16('x00280100') || 16;
+      const pixelDataElement = dataSet.elements.x7fe00010;
+      
+      if (!pixelDataElement) {
+        throw new Error('No pixel data found');
+      }
+      
+      // Get window/level for this modality
+      let windowWidth = modality === 'CT' ? 400 : modality === 'MR' ? 800 : 2000;
+      let windowCenter = modality === 'CT' ? 50 : modality === 'MR' ? 400 : 1000;
+      
+      // Try to get from DICOM header
+      const wc = dataSet.string('x00281050');
+      const ww = dataSet.string('x00281051');
+      if (wc) windowCenter = parseFloat(wc.split('\\')[0]);
+      if (ww) windowWidth = parseFloat(ww.split('\\')[0]);
+      
+      // Setup canvas
+      canvas.width = 80; // Thumbnail size
+      canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      // Create image data
+      const imageData = ctx.createImageData(80, 80);
+      
+      // Get pixel data
+      const pixelData = new DataView(arrayBuffer, pixelDataElement.dataOffset, pixelDataElement.length);
+      
+      // Calculate scaling
+      const scaleX = columns / 80;
+      const scaleY = rows / 80;
+      
+      // Window/level calculations
+      const minValue = windowCenter - windowWidth / 2;
+      const maxValue = windowCenter + windowWidth / 2;
+      
+      // Render pixels with downsampling
+      for (let y = 0; y < 80; y++) {
+        for (let x = 0; x < 80; x++) {
+          const srcX = Math.floor(x * scaleX);
+          const srcY = Math.floor(y * scaleY);
+          const srcIndex = srcY * columns + srcX;
+          
+          let pixelValue = 0;
+          if (bitsAllocated === 16) {
+            pixelValue = pixelData.getInt16(srcIndex * 2, true);
+          } else if (bitsAllocated === 8) {
+            pixelValue = pixelData.getUint8(srcIndex);
+          }
+          
+          // Apply window/level
+          let intensity = ((pixelValue - minValue) / (maxValue - minValue)) * 255;
+          intensity = Math.max(0, Math.min(255, intensity));
+          
+          const destIndex = (y * 80 + x) * 4;
+          imageData.data[destIndex] = intensity;
+          imageData.data[destIndex + 1] = intensity;
+          imageData.data[destIndex + 2] = intensity;
+          imageData.data[destIndex + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      return true;
+    } catch (error) {
+      console.error('Error rendering DICOM:', error);
+      return false;
+    }
+  };
 
   useEffect(() => {
     const loadThumbnails = async () => {
@@ -46,19 +131,21 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
           }
         }
 
-        // Load the selected images with better windowing
-        const urls = indices.map(idx => {
-          const targetImage = images[idx];
-          // Apply modality-specific windowing
-          const windowParams = modality === 'CT' ? 'window=400&level=50' :
-                              modality === 'MR' ? 'window=800&level=400' :
-                              modality === 'PT' ? 'window=auto&level=auto' :
-                              'window=auto&level=auto';
-          return `/api/images/${targetImage.sopInstanceUID}/render?size=thumbnail&${windowParams}`;
-        });
-
-        setThumbnailUrls(urls);
-        setIsLoading(false);
+        // Set canvas count
+        setCanvasCount(indices.length);
+        
+        // Load and render each image
+        setTimeout(async () => {
+          for (let i = 0; i < indices.length; i++) {
+            const targetImage = images[indices[i]];
+            const url = `/api/images/${targetImage.sopInstanceUID}/render`;
+            const canvas = canvasRefs.current[i];
+            if (canvas) {
+              await renderDicomToCanvas(url, canvas);
+            }
+          }
+          setIsLoading(false);
+        }, 0);
       } catch (error) {
         console.error('Error loading thumbnails:', error);
         setHasError(true);
@@ -67,22 +154,13 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
     };
 
     loadThumbnails();
-
-    // Cleanup
-    return () => {
-      thumbnailUrls.forEach(url => {
-        if (url && url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-    };
   }, [seriesId, modality]);
 
   // Set up image cycling
   useEffect(() => {
-    if (thumbnailUrls.length > 1) {
+    if (canvasCount > 1) {
       intervalRef.current = setInterval(() => {
-        setCurrentImageIndex(prev => (prev + 1) % thumbnailUrls.length);
+        setCurrentImageIndex(prev => (prev + 1) % canvasCount);
       }, 2000); // Change image every 2 seconds
 
       return () => {
@@ -91,9 +169,10 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
         }
       };
     }
-  }, [thumbnailUrls]);
+  }, [canvasCount]);
 
-  if (hasError || thumbnailUrls.length === 0) {
+  // Only show placeholder if we've finished loading and still have an error or no canvases
+  if (!isLoading && (hasError || canvasCount === 0)) {
     // Fallback to styled placeholder
     const modalityIcon = modality === 'CT' ? '🔷' : 
                          modality === 'MR' ? '🟣' : 
@@ -129,23 +208,21 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
           </div>
         ) : (
           <div className="relative w-full h-full">
-            {thumbnailUrls.map((url, index) => (
-              <img
-                key={url}
-                src={url}
-                alt={`${modality} scan ${index + 1}`}
-                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
+            {Array.from({ length: canvasCount }).map((_, index) => (
+              <canvas
+                key={index}
+                ref={(el) => { canvasRefs.current[index] = el; }}
+                className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${
                   index === currentImageIndex ? 'opacity-100' : 'opacity-0'
                 }`}
-                onError={() => {
-                  if (index === 0) setHasError(true);
-                }}
+                width={80}
+                height={80}
               />
             ))}
             {/* Progress dots for multiple images */}
-            {thumbnailUrls.length > 1 && (
+            {canvasCount > 1 && (
               <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
-                {thumbnailUrls.map((_, index) => (
+                {Array.from({ length: canvasCount }).map((_, index) => (
                   <div
                     key={index}
                     className={`w-1 h-1 rounded-full transition-colors ${
