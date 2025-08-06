@@ -699,7 +699,7 @@ export default function PatientManager() {
               </TabsList>
               
               {/* Fixed Search Bar Below Tabs */}
-              <div className="mb-4">
+              <div className="mb-4 mt-6">
             {/* Search Bar with dark styling */}
             <div className="space-y-4">
               <div className="relative">
@@ -716,9 +716,9 @@ export default function PatientManager() {
           
               {/* Tag Filters */}
               {uniqueTags.length > 0 && (
-                <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl p-3 shadow-xl shadow-black/20">
+                <div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-gray-300 text-sm font-medium whitespace-nowrap">Filter by tags:</span>
+                    <span className="text-gray-400 text-sm font-medium whitespace-nowrap">Filter by tags:</span>
                     <div className="flex gap-2 flex-wrap flex-1">
                       {uniqueTags.map(tag => {
                         // Define tag colors based on tag type - matching patient card colors
@@ -1282,12 +1282,10 @@ export default function PatientManager() {
             <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-3">
               {/* Recently Opened - Blue Theme */}
               <AccordionItem value="recently-opened" className="bg-gray-950/95 backdrop-blur-2xl border border-blue-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
-                <AccordionTrigger className="px-5 py-4 hover:bg-blue-500/15 transition-all bg-gradient-to-r from-blue-500/10 to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-blue-500/20 p-2 rounded-lg">
-                      <Clock className="h-5 w-5 text-blue-400" />
-                    </div>
-                    <span className="text-white font-semibold text-base">Recently Opened</span>
+                <AccordionTrigger className="px-4 py-3 hover:bg-blue-500/10 transition-all">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-blue-400" />
+                    <span className="text-white font-medium text-sm">Recently Opened</span>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
@@ -1316,12 +1314,10 @@ export default function PatientManager() {
 
               {/* Favorites - Yellow Theme */}
               <AccordionItem value="favorites" className="bg-gray-950/95 backdrop-blur-2xl border border-yellow-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
-                <AccordionTrigger className="px-5 py-4 hover:bg-yellow-500/15 transition-all bg-gradient-to-r from-yellow-500/10 to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-yellow-500/20 p-2 rounded-lg">
-                      <Star className="h-5 w-5 text-yellow-400" />
-                    </div>
-                    <span className="text-white font-semibold text-base">Favorites</span>
+                <AccordionTrigger className="px-4 py-3 hover:bg-yellow-500/10 transition-all">
+                  <div className="flex items-center gap-2">
+                    <Star className="h-4 w-4 text-yellow-400" />
+                    <span className="text-white font-medium text-sm">Favorites</span>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
@@ -1350,12 +1346,10 @@ export default function PatientManager() {
 
               {/* Recently Imported - Green Theme */}
               <AccordionItem value="recently-imported" className="bg-gray-950/95 backdrop-blur-2xl border border-green-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
-                <AccordionTrigger className="px-5 py-4 hover:bg-green-500/15 transition-all bg-gradient-to-r from-green-500/10 to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-green-500/20 p-2 rounded-lg">
-                      <Import className="h-5 w-5 text-green-400" />
-                    </div>
-                    <span className="text-white font-semibold text-base">Recently Imported</span>
+                <AccordionTrigger className="px-4 py-3 hover:bg-green-500/10 transition-all">
+                  <div className="flex items-center gap-2">
+                    <Import className="h-4 w-4 text-green-400" />
+                    <span className="text-white font-medium text-sm">Recently Imported</span>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
