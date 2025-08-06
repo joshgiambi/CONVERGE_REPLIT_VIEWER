@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
@@ -620,12 +621,13 @@ export function SeriesSelector({
   };
 
   return (
-    <div className="h-full flex flex-col space-y-4">
-      {/* Main Series and Structures Panel */}
-      <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
-        <CardContent className="p-0 h-full flex flex-col">
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+    <TooltipProvider delayDuration={0}>
+      <div className="h-full flex flex-col space-y-4">
+        {/* Main Series and Structures Panel */}
+        <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+          <CardContent className="p-0 h-full flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
             
             {/* Series Section */}
             <AccordionItem value="series" className="border-gray-800/50">
@@ -967,73 +969,109 @@ export function SeriesSelector({
 
                     {/* Control Buttons Row */}
                     <div className="flex space-x-2 mb-4">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={toggleAllVisibility}
-                        className="bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title={allVisible ? 'Hide all structures' : 'Show all structures'}
-                      >
-                        {allVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={toggleAllVisibility}
+                            className="bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                          >
+                            {allVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-gradient-to-br from-blue-600/95 via-blue-500/95 to-blue-600/95 border-blue-400/30">
+                          <p>{allVisible ? 'Hide all structures' : 'Show all structures'}</p>
+                        </TooltipContent>
+                      </Tooltip>
                       
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={toggleGrouping}
-                        className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title={groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}
-                      >
-                        <FolderTree className="w-4 h-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={toggleGrouping}
+                            className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                          >
+                            <FolderTree className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-gradient-to-br from-yellow-600/95 via-yellow-500/95 to-yellow-600/95 border-yellow-400/30">
+                          <p>{groupingEnabled ? 'Show flat list' : 'Group by L/R pairs'}</p>
+                        </TooltipContent>
+                      </Tooltip>
                       
                       {groupingEnabled && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={toggleAllExpansion}
-                          className="bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                          title={allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
-                        >
-                          {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={toggleAllExpansion}
+                              className="bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                            >
+                              {allCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent className="bg-gradient-to-br from-gray-600/95 via-gray-500/95 to-gray-600/95 border-gray-400/30">
+                            <p>{allCollapsed ? 'Expand all groups' : 'Collapse all groups'}</p>
+                          </TooltipContent>
+                        </Tooltip>
                       )}
                       
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          // Cycle through sort modes: az -> za -> position -> az
-                          const nextMode = sortMode === 'az' ? 'za' : sortMode === 'za' ? 'position' : 'az';
-                          setSortMode(nextMode);
-                        }}
-                        className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200 ml-auto"
-                        title={`Sort: ${sortMode === 'az' ? 'A-Z' : sortMode === 'za' ? 'Z-A' : 'By Position'}`}
-                      >
-                        {sortMode === 'az' ? <ArrowDown className="w-4 h-4" /> : 
-                         sortMode === 'za' ? <ArrowUp className="w-4 h-4" /> : 
-                         <ArrowUpDown className="w-4 h-4" />}
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              // Cycle through sort modes: az -> za -> position -> az
+                              const nextMode = sortMode === 'az' ? 'za' : sortMode === 'za' ? 'position' : 'az';
+                              setSortMode(nextMode);
+                            }}
+                            className="bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 rounded-lg backdrop-blur-sm transition-all duration-200 ml-auto"
+                          >
+                            {sortMode === 'az' ? <ArrowDown className="w-4 h-4" /> : 
+                             sortMode === 'za' ? <ArrowUp className="w-4 h-4" /> : 
+                             <ArrowUpDown className="w-4 h-4" />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-gradient-to-br from-orange-600/95 via-orange-500/95 to-orange-600/95 border-orange-400/30">
+                          <p>Sort: {sortMode === 'az' ? 'A-Z' : sortMode === 'za' ? 'Z-A' : 'By Position'}</p>
+                        </TooltipContent>
+                      </Tooltip>
                       
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowNewStructureDialog(true)}
-                        className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title="Create new structure"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowNewStructureDialog(true)}
+                            className="bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-gradient-to-br from-green-600/95 via-green-500/95 to-green-600/95 border-green-400/30">
+                          <p>Create new structure</p>
+                        </TooltipContent>
+                      </Tooltip>
                       
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowStructureSettings(!showStructureSettings)}
-                        className="bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
-                        title="Structure Settings"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowStructureSettings(!showStructureSettings)}
+                            className="bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 rounded-lg backdrop-blur-sm transition-all duration-200"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-gradient-to-br from-purple-600/95 via-purple-500/95 to-purple-600/95 border-purple-400/30">
+                          <p>Structure Settings</p>
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
 
                     {/* Structure Settings Panel */}
@@ -1688,5 +1726,6 @@ export function SeriesSelector({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

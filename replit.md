@@ -4,6 +4,9 @@
 Superbeam is a full-stack DICOM medical imaging application built with React, Express.js, and PostgreSQL. It enables users to upload, manage, and view medical images with advanced DICOM metadata handling and contour editing capabilities, functioning as a PACS-like interface for medical imaging workflows. The project aims to provide a robust, high-performance system for medical image analysis and manipulation, with a focus on accurate multi-modal fusion.
 
 ## Recent Changes (August 1-6, 2025)
+- **Enhanced Tooltip System**: Redesigned tooltips with glassmorphic design featuring gradient backgrounds, backdrop blur, and instant display (0ms delay). Each tooltip now has vibrant color-coded gradients matching the button theme (blue for visibility, yellow for nesting, orange for sorting, etc.)
+- **Special Groups Support**: Extended expand/collapse functionality to work with special groups (zzAvoidance, zzRingLo, zzRingHi) in addition to regular L/R paired groups
+- **Structure Sorting**: Completed three-mode sorting system (A-Z, Z-A, By Position) with proper icon indicators and rendering logic fixes
 - **Server-Side Thumbnail Generation**: Implemented robust server-side thumbnail and preview generation system using sharp and ffmpeg. Generates JPG thumbnails and GIF animations from DICOM files, stored in PostgreSQL with mediaPreviews table. Addresses client-side rendering issues with reliable server-generated media
 - **RT Structure Selection Fix**: Fixed issue where RT structure sets weren't showing as selected in series selector when auto-loaded. Added loadedRTSeriesId tracking to ensure proper selection state synchronization
 - **Structure Visibility Fix**: Resolved critical RT button and show/hide all synchronization issue by consolidating state control. Individual eye icons now properly override show/hide all state when needed
