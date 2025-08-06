@@ -10,7 +10,7 @@ import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MarginOperationPanel } from './margin-operation-panel';
+import { MarginToolbar } from './margin-toolbar';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -678,7 +678,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   rtStructures={rtStructures}
                   onRTStructureUpdate={handleContourUpdate}
                   allStructuresVisible={allStructuresVisible}
-                  selectedStructures={selectedStructures}
                   onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
                   imageCache={imageCache}
                 />
@@ -838,14 +837,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Margin Operation Panel */}
+      {/* Margin Toolbar */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
-        <MarginOperationPanel
+        <MarginToolbar
           selectedStructure={rtStructures.structures?.find((s: any) => s.roiNumber === selectedForEdit) ? {
             id: selectedForEdit,
             structureName: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.structureName || 'Unknown',
-            color: rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color || [255, 255, 255]
-          } : undefined}
+            color: `rgb(${rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit)?.color?.join(',') || '255,255,255'})`
+          } : null}
           isVisible={showMarginToolbar}
           onClose={() => setShowMarginToolbar(false)}
           onExecuteOperation={(operation) => {

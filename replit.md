@@ -11,15 +11,15 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **RT Structure Selection Fix**: Fixed issue where RT structure sets weren't showing as selected in series selector when auto-loaded. Added loadedRTSeriesId tracking to ensure proper selection state synchronization
 - **Structure Visibility Fix**: Resolved critical RT button and show/hide all synchronization issue by consolidating state control. Individual eye icons now properly override show/hide all state when needed
 - **Anisotropic Margin Operations**: Implemented radiotherapy-grade anisotropic margin operations using morphological dilation/erosion based on Slicer forum recommendations. Supports both uniform expansion (same margin in all directions) and anisotropic expansion (different margin values in X, Y, Z directions based on 3D tumor movement patterns)
-- **Compact Margin Toolbar**: Redesigned margin operations UI to match contour edit toolbar with minimal real estate. New floating toolbar features icon-based mode selection (Uniform, X,Y,Z, Directional) with expandable settings panels
+- **Margin Toolbar Design**: User prefers the original MarginToolbar component design over MarginOperationPanel. Restored MarginToolbar with its compact floating design and icon-based mode selection (Uniform, X,Y,Z, Directional)
+- **Margin Operations Fix**: Fixed margin operation execution to properly apply transformations to RT structures. Now correctly uses growContourSimple for direct contour expansion instead of relying on preview contours
 - **Morphological Operations**: Replaced simple polygon buffering with iterative morphological operations for better margin accuracy in radiotherapy applications
 - **Performance Optimizations**: Implemented cached LUT (Look-Up Table) and reusable offscreen canvas for render16BitImage function
 - **Memory Improvements**: Replaced all JSON.parse(JSON.stringify) with structuredClone API for better performance
 - **Code Quality**: Added DEBUG flag to control excessive logging output
-- **Type Safety**: Fixed missing onRTStructureUpdate prop and improved PreviewContour type definition
+- **Type Safety**: Fixed missing onRTStructureUpdate prop and improved PreviewContour type definition. Removed selectedStructures prop from MultiViewport to fix type errors
 - **Consistency**: Replaced hardcoded tolerance values with SLICE_TOL_MM constant throughout codebase
 - **MPR Enhancement**: Added automatic cache invalidation on window/level changes for proper image updates
-- **MarginOperationPanel Integration**: Replaced MarginToolbar with new comprehensive MarginOperationPanel component that provides uniform, anisotropic, and directional margin controls with live preview capability
 - **Contour Interpolation Enhancement**: Fixed interpolation algorithm shrinkage issues using calculateCentroid3D function for proper centroid calculations and improved morphological operations
 
 ## User Preferences

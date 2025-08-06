@@ -791,22 +791,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleAdvancedMarginExecution = async (payload: any) => {
     console.log('🔹 🎯 Working Viewer: handleAdvancedMarginExecution called with payload:', payload);
     
-    // Check if we have preview contours to apply
-    if (!previewContours || previewContours.length === 0) {
-      console.error("🔹 ❌ No preview contours available to execute");
-      return;
-    }
-    
     // Use local structures or props structures
-    if (!localRTStructures && !rtStructures) {
+    const structures = localRTStructures || rtStructures;
+    
+    if (!structures) {
       console.error("🔹 ❌ RT structures not available for margin execution");
       return;
     }
     
-    const structures = localRTStructures || rtStructures;
-    const { structureId } = payload;
+    const { structureId, parameters } = payload;
     
-    console.log(`🔹 📊 Executing margin operation for structure ${structureId} - applying ${previewContours.length} preview contours`);
+    console.log(`🔹 📊 Executing margin operation for structure ${structureId} with parameters:`, parameters);
     
     try {
       // Create a deep copy of RT structures
@@ -822,14 +817,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       
-      // Replace structure contours with preview contours (removing the preview properties)
-      structure.contours = previewContours.map((preview: any) => ({
-        slicePosition: preview.slicePosition,
-        points: preview.points,
-        numberOfPoints: preview.points.length / 3
-      }));
+      // Import the margin operation handler
+      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
       
-      console.log(`🔹 ✅ Replaced ${structure.contours.length} contours with expanded contours`);
+      // Apply margin to all contours
+      const marginValue = parameters.margin || 5;
+      console.log(`🔹 Applying margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
+      
+      for (const contour of structure.contours || []) {
+        if (contour.points && contour.points.length >= 9) {
+          try {
+            const expandedContour = growContourSimple(
+              contour.points,
+              marginValue
+            );
+            
+            if (expandedContour && expandedContour.length >= 9) {
+              contour.points = expandedContour;
+              contour.numberOfPoints = expandedContour.length / 3;
+            }
+          } catch (error) {
+            console.error('Error expanding contour:', error);
+          }
+        }
+      }
+      
+      console.log(`🔹 ✅ Applied margin to ${structure.contours?.length || 0} contours`);
       
       // Clear preview contours
       setPreviewContours([]);
