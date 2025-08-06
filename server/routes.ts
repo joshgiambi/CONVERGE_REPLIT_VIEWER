@@ -1813,6 +1813,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
+  // Get series thumbnail
+  app.get("/api/series/:seriesId/thumbnail", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const images = await storage.getImagesBySeriesId(seriesId);
+      
+      if (!images || images.length === 0) {
+        return res.status(404).json({ error: 'No images found for series' });
+      }
+      
+      // Get the middle image for better representation
+      const middleIndex = Math.floor(images.length / 2);
+      const targetImage = images[middleIndex];
+      
+      if (!targetImage.filePath || !fs.existsSync(targetImage.filePath)) {
+        return res.status(404).json({ error: 'Image file not found' });
+      }
+      
+      // Read and send the DICOM file with proper headers for browser caching
+      const buffer = await fs.promises.readFile(targetImage.filePath);
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Error fetching series thumbnail:', error);
+      res.status(500).json({ error: 'Failed to fetch thumbnail' });
+    }
+  });
+
   // Debug Frame of Reference UID matching
   app.get("/api/studies/:studyId/frame-references", async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -239,6 +239,43 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
       </CardHeader>
       
       <CardContent className="space-y-4">
+        {/* Image Thumbnails Preview */}
+        {imageSeries.length > 0 && (
+          <div className="flex gap-2 pb-3 border-b border-gray-800">
+            {imageSeries.slice(0, 4).map((series) => (
+              <div key={series.id} className="relative group">
+                <div className="w-20 h-20 bg-gray-900 rounded-lg overflow-hidden border border-gray-700">
+                  <img 
+                    src={`/api/series/${series.id}/thumbnail`}
+                    alt={`${series.modality} ${series.seriesNumber}`}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      // Fallback to a placeholder if thumbnail fails
+                      (e.target as HTMLImageElement).style.display = 'none';
+                      (e.target as HTMLImageElement).parentElement!.innerHTML = `
+                        <div class="w-full h-full flex items-center justify-center bg-gray-900">
+                          <span class="text-xs text-gray-500">${series.modality}</span>
+                        </div>
+                      `;
+                    }}
+                  />
+                </div>
+                <Badge 
+                  variant="secondary" 
+                  className={`absolute -top-1 -right-1 ${getModalityColor(series.modality)} text-xs px-1 py-0`}
+                >
+                  {series.modality}
+                </Badge>
+              </div>
+            ))}
+            {imageSeries.length > 4 && (
+              <div className="w-20 h-20 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center justify-center">
+                <span className="text-sm text-gray-400">+{imageSeries.length - 4}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Study Information */}
         {studiesWithSeries.map((study) => (
           <div key={study.id} className="space-y-2">
@@ -432,7 +469,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 onClick={onPatientOpened}
               >
                 <Eye className="h-4 w-4 mr-1" />
-                Advanced Viewer
+                View
               </Button>
             </Link>
           </div>
