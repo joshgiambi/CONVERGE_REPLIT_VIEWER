@@ -434,13 +434,19 @@ export function SeriesSelector({
     const filteredStructures = rtStructures.structures.filter((structure: any) =>
       structure.structureName.toLowerCase().includes(searchTerm.toLowerCase())
     );
-    const { groups } = groupStructures(filteredStructures);
+    const { groups, specialGroups } = groupStructures(filteredStructures);
     
     setExpandedGroups(prev => {
       const newMap = new Map(prev);
       const shouldExpand = allCollapsed;
       
+      // Add regular groups
       Array.from(groups.keys()).forEach(groupName => {
+        newMap.set(groupName, shouldExpand);
+      });
+      
+      // Add special groups
+      Array.from(specialGroups.keys()).forEach(groupName => {
         newMap.set(groupName, shouldExpand);
       });
       
