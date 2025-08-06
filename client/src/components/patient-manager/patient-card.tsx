@@ -8,7 +8,6 @@ import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
 import { DicomThumbnail } from './dicom-thumbnail';
-import { DicomPreviewModal } from './dicom-preview-modal';
 import { useToast } from '@/hooks/use-toast';
 
 interface PatientCardProps {
@@ -32,7 +31,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [previewSeriesId, setPreviewSeriesId] = useState<number | null>(null);
   const hasLoadedRef = useRef(false);
   const { toast } = useToast();
 
@@ -191,8 +189,8 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 />
               )}
               <div>
-                <h3 className="text-xl font-semibold text-white">{patient.patientName}</h3>
-                <p className="text-base font-medium text-gray-400">{patient.patientID}</p>
+                <h3 className="text-base font-bold text-white">{patient.patientName}</h3>
+                <p className="text-sm font-semibold text-gray-400">{patient.patientID}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge 
@@ -252,7 +250,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                     seriesId={series.id}
                     modality={series.modality}
                     imageCount={series.imageCount}
-                    onClick={() => setPreviewSeriesId(series.id)}
                   />
                   <Badge 
                     variant="secondary" 
@@ -264,8 +261,8 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               );
             })}
             {imageSeries.length > 4 && (
-              <div className="w-20 h-20 bg-gray-900/50 backdrop-blur-sm rounded-lg border border-gray-700 flex items-center justify-center hover:bg-gray-900/70 transition-colors duration-200">
-                <span className="text-sm text-gray-300 font-medium">+{imageSeries.length - 4}</span>
+              <div className="w-16 h-16 bg-gray-900/50 backdrop-blur-sm rounded-lg border border-gray-700 flex items-center justify-center hover:bg-gray-900/70 transition-colors duration-200">
+                <span className="text-xs text-gray-300 font-medium">+{imageSeries.length - 4}</span>
               </div>
             )}
           </div>
@@ -511,14 +508,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
           }
         }}
       />
-      
-      {/* DICOM Preview Modal */}
-      {previewSeriesId && (
-        <DicomPreviewModal
-          seriesId={previewSeriesId}
-          onClose={() => setPreviewSeriesId(null)}
-        />
-      )}
     </Card>
   );
 }

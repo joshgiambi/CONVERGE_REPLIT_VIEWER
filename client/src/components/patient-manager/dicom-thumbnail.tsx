@@ -68,15 +68,15 @@ export function DicomThumbnail({ seriesId, modality, imageCount }: DicomThumbnai
     
     return (
       <div 
-        className={`w-20 h-20 rounded-lg overflow-hidden border ${
+        className={`w-16 h-16 rounded-lg overflow-hidden border ${
           modality === 'CT' ? 'bg-gradient-to-br from-blue-950 to-blue-900 border-blue-700' :
           modality === 'MR' ? 'bg-gradient-to-br from-purple-950 to-purple-900 border-purple-700' :
           modality === 'PT' ? 'bg-gradient-to-br from-yellow-950 to-yellow-900 border-yellow-700' :
           'bg-gradient-to-br from-gray-950 to-gray-900 border-gray-700'
         } flex items-center justify-center`}
       >
-        <div className="flex flex-col items-center justify-center text-center p-2">
-          <span className="text-2xl mb-1">{modalityIcon}</span>
+        <div className="flex flex-col items-center justify-center text-center p-1">
+          <span className="text-xl mb-0.5">{modalityIcon}</span>
           <span className="text-xs text-gray-300 font-medium">{imageCount}</span>
         </div>
       </div>
@@ -86,11 +86,11 @@ export function DicomThumbnail({ seriesId, modality, imageCount }: DicomThumbnai
   return (
     <div className="relative group">
       <div 
-        className="w-20 h-20 bg-black rounded-lg overflow-hidden border border-gray-700"
+        className="w-16 h-16 bg-black rounded-lg overflow-hidden border border-gray-700"
       >
         {isLoading ? (
           <div className="w-full h-full flex items-center justify-center bg-gray-900">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
           </div>
         ) : (
           <img 

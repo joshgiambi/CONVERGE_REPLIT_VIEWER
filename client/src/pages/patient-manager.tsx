@@ -662,11 +662,11 @@ export default function PatientManager() {
         </header>
 
       {/* Main layout with content and sidebar */}
-      <div className="flex flex-1 pt-20">
+      <div className="flex flex-1 pt-20 overflow-hidden">
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col h-full">
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Unified Control Panel */}
-          <div className="px-4 pt-4 pb-2">
+          <div className="px-4 pt-4 pb-2 flex-shrink-0">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
               {/* Combined Container for Tabs, Search, and Tags */}
               <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-700/50 rounded-2xl shadow-2xl shadow-black/40 p-3 mb-4">
@@ -792,10 +792,10 @@ export default function PatientManager() {
                 )}
               </div>
 
-          {/* Fixed Tabs */}
-          <div className="px-4 pb-4 flex-1 overflow-y-auto">
+          {/* Scrollable Content Area */}
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
             {/* Patients Tab */}
-            <TabsContent value="patients" className="space-y-4 p-4">
+            <TabsContent value="patients" className="space-y-4 pt-4">
             {/* Selection Actions Bar */}
             {selectedPatients.size > 0 && (
               <div className="mb-4 animate-in slide-in-from-top-2 duration-200">
