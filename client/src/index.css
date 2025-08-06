@@ -224,6 +224,19 @@
     transition: all 0.3s ease;
   }
 
+  /* Custom Tab Alignment Fix */
+  [role="tablist"] {
+    display: grid !important;
+    align-items: stretch !important;
+  }
+
+  [role="tab"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 2.5rem !important;
+  }
+
   .upload-zone:hover {
     background: linear-gradient(145deg, hsl(var(--dicom-darker)), hsl(var(--dicom-gray)));
     transform: translateY(-2px);
