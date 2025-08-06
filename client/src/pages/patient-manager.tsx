@@ -783,43 +783,90 @@ export default function PatientManager() {
                 />
               </div>
           
-          {/* Tag Filters */}
-          {uniqueTags.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <span className="text-sm text-gray-400 self-center mr-2">Filter by tags:</span>
-              {uniqueTags.map(tag => (
-                <Button
-                  key={tag}
-                  variant={selectedTags.includes(tag) ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    if (selectedTags.includes(tag)) {
-                      setSelectedTags(selectedTags.filter(t => t !== tag));
-                    } else {
-                      setSelectedTags([...selectedTags, tag]);
-                    }
-                  }}
-                  className={`text-xs transition-all ${
-                    selectedTags.includes(tag)
-                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500'
-                      : 'bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 border-gray-600'
-                  }`}
-                >
-                  {tag}
-                </Button>
-              ))}
-              {selectedTags.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedTags([])}
-                  className="text-xs text-gray-400 hover:text-white"
-                >
-                  Clear filters
-                </Button>
+              {/* Tag Filters */}
+              {uniqueTags.length > 0 && (
+                <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl p-3 shadow-xl shadow-black/20">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-gray-300 text-sm font-medium whitespace-nowrap">Filter by tags:</span>
+                    <div className="flex gap-2 flex-wrap flex-1">
+                      {uniqueTags.map(tag => {
+                        // Define tag colors based on tag type - matching patient card colors
+                        const getTagStyle = (tagName: string) => {
+                          const lower = tagName.toLowerCase();
+                          if (lower.includes('head') || lower.includes('brain')) {
+                            return {
+                              base: 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20',
+                              selected: 'bg-purple-600/30 border-purple-500 text-purple-100 shadow-lg shadow-purple-500/20'
+                            };
+                          } else if (lower.includes('chest') || lower.includes('thorax') || lower.includes('lung')) {
+                            return {
+                              base: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
+                              selected: 'bg-blue-600/30 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20'
+                            };
+                          } else if (lower.includes('abdomen') || lower.includes('pelvis')) {
+                            return {
+                              base: 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20',
+                              selected: 'bg-green-600/30 border-green-500 text-green-100 shadow-lg shadow-green-500/20'
+                            };
+                          } else if (lower.includes('spine') || lower.includes('neck')) {
+                            return {
+                              base: 'bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20',
+                              selected: 'bg-orange-600/30 border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20'
+                            };
+                          } else if (lower.includes('contrast') || lower.includes('gad')) {
+                            return {
+                              base: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20',
+                              selected: 'bg-yellow-600/30 border-yellow-500 text-yellow-100 shadow-lg shadow-yellow-500/20'
+                            };
+                          } else if (lower.includes('emergency') || lower.includes('urgent')) {
+                            return {
+                              base: 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20',
+                              selected: 'bg-red-600/30 border-red-500 text-red-100 shadow-lg shadow-red-500/20'
+                            };
+                          } else {
+                            return {
+                              base: 'bg-gray-500/10 border-gray-500/30 text-gray-300 hover:bg-gray-500/20',
+                              selected: 'bg-indigo-600/30 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-500/20'
+                            };
+                          }
+                        };
+                        
+                        const style = getTagStyle(tag);
+                        const isSelected = selectedTags.includes(tag);
+                        
+                        return (
+                          <button
+                            key={tag}
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedTags(selectedTags.filter(t => t !== tag));
+                              } else {
+                                setSelectedTags([...selectedTags, tag]);
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg border transition-all duration-200 text-xs font-medium ${
+                              isSelected ? style.selected : style.base
+                            }`}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedTags.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedTags([])}
+                        className="text-gray-400 hover:text-white h-7 px-2 whitespace-nowrap"
+                      >
+                        <X className="h-3 w-3 mr-1" />
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
               )}
-            </div>
-          )}
             </div>
           </div>
 
@@ -862,67 +909,90 @@ export default function PatientManager() {
             <TabsContent value="patients" className="space-y-4 p-4">
             {/* Selection Actions Bar */}
             {selectedPatients.size > 0 && (
-              <div className="flex items-center justify-between p-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl shadow-2xl shadow-black/50 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center gap-2">
-                  <CheckSquare className="h-5 w-5 text-indigo-400" />
-                  <span className="text-white font-medium">
-                    {selectedPatients.size} patient{selectedPatients.size !== 1 ? 's' : ''} selected
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleExport}
-                    className="border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/20"
-                  >
-                    <FolderDown className="h-4 w-4 mr-2" />
-                    Export
-                  </Button>
-                  {selectedPatients.size >= 2 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleMerge}
-                      className="border-purple-500/50 text-purple-400 hover:bg-purple-500/20"
-                    >
-                      <Merge className="h-4 w-4 mr-2" />
-                      Merge
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDeleteSelected}
-                    className="border-red-500/50 text-red-400 hover:bg-red-500/20"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedPatients(new Set())}
-                    className="text-gray-400 hover:text-white"
-                  >
-                    Clear
-                  </Button>
+              <div className="mb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="bg-gradient-to-r from-indigo-600/10 to-purple-600/10 backdrop-blur-xl border border-indigo-500/30 rounded-xl p-4 shadow-2xl shadow-black/50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-indigo-500/20 p-2 rounded-lg">
+                        <CheckSquare className="h-5 w-5 text-indigo-400" />
+                      </div>
+                      <div>
+                        <span className="text-white font-semibold text-sm">
+                          {selectedPatients.size} patient{selectedPatients.size !== 1 ? 's' : ''} selected
+                        </span>
+                        <p className="text-gray-400 text-xs">Choose an action below</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleExport}
+                        className="bg-black/30 border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/20 hover:text-indigo-200 transition-all"
+                      >
+                        <FolderDown className="h-4 w-4 mr-2" />
+                        Export
+                      </Button>
+                      {selectedPatients.size >= 2 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleMerge}
+                          className="bg-black/30 border-purple-500/50 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 transition-all"
+                        >
+                          <Merge className="h-4 w-4 mr-2" />
+                          Merge
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDeleteSelected}
+                        className="bg-black/30 border-red-500/50 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-all"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </Button>
+                      <div className="w-px h-6 bg-gray-600/50 mx-1" />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedPatients(new Set())}
+                        className="text-gray-400 hover:text-white hover:bg-gray-800/50"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
             
             {patientsLoading ? (
-              <div className="text-center py-8">Loading patients...</div>
+              <div className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <svg className="h-12 w-12 animate-spin text-indigo-500 mx-auto mb-4" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.64 5.64L4.22 4.22M19.78 19.78l-1.42-1.42M5.64 18.36L4.22 19.78M19.78 4.22l-1.42 1.42" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                  <p className="text-gray-400">Loading patients...</p>
+                </div>
+              </div>
             ) : filteredPatients.length === 0 ? (
-              <Card className="bg-gray-900/60 border-gray-700/50">
-                <CardContent className="text-center py-12">
-                  <User className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-400 text-lg">No patients found</p>
-                  <p className="text-gray-500 text-sm mt-2">Upload DICOM files to get started</p>
+              <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 shadow-2xl shadow-black/50">
+                <CardContent className="text-center py-16">
+                  <div className="bg-gray-800/30 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <User className="h-12 w-12 text-gray-500" />
+                  </div>
+                  <p className="text-gray-300 text-lg font-medium">No patients found</p>
+                  <p className="text-gray-500 text-sm mt-2">
+                    {searchTerm || selectedTags.length > 0 
+                      ? "Try adjusting your search or filters" 
+                      : "Upload DICOM files to get started"}
+                  </p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 {filteredPatients.map((patient) => {
                   // Get studies and series for this patient
                   const patientStudies = studies.filter(study => study.patientId === patient.id);
