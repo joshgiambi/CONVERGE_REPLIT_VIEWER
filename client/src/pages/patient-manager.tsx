@@ -663,14 +663,16 @@ export default function PatientManager() {
       {/* Main layout with sidebar and content */}
       <div className="flex h-screen pt-20">
         {/* Left Sidebar */}
-        <div className="w-80 bg-gray-950/90 backdrop-blur-xl border-r border-gray-600/60 p-4 overflow-y-auto">
-          <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-2">
+        <div className="w-80 p-4 overflow-y-auto">
+          <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl p-4 shadow-2xl shadow-black/50">
+            <h2 className="text-lg font-semibold text-white mb-4 px-2">Quick Access</h2>
+            <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-3">
             {/* Recently Opened */}
-            <AccordionItem value="recently-opened" className="border-gray-700">
-              <AccordionTrigger className="text-white hover:text-gray-300">
+            <AccordionItem value="recently-opened" className="border border-blue-600/30 rounded-lg overflow-hidden bg-blue-900/10">
+              <AccordionTrigger className="text-white hover:text-blue-300 px-4 py-3 hover:bg-blue-900/20 transition-all">
                 <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Recently Opened
+                  <Clock className="h-4 w-4 text-blue-400" />
+                  <span className="font-medium">Recently Opened</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
@@ -698,11 +700,11 @@ export default function PatientManager() {
             </AccordionItem>
 
             {/* Favorites */}
-            <AccordionItem value="favorites" className="border-gray-700">
-              <AccordionTrigger className="text-white hover:text-gray-300">
+            <AccordionItem value="favorites" className="border border-yellow-600/30 rounded-lg overflow-hidden bg-yellow-900/10">
+              <AccordionTrigger className="text-white hover:text-yellow-300 px-4 py-3 hover:bg-yellow-900/20 transition-all">
                 <div className="flex items-center gap-2">
-                  <Star className="h-4 w-4" />
-                  Favorites
+                  <Star className="h-4 w-4 text-yellow-400" />
+                  <span className="font-medium">Favorites</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
@@ -761,13 +763,15 @@ export default function PatientManager() {
               </AccordionContent>
             </AccordionItem>
           </Accordion>
+          </div>
         </div>
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto">
-          <div className="container mx-auto px-4 py-8">
-            {/* Search Bar with dark styling */}
-            <div className="mb-6 space-y-4">
+          <div className="container mx-auto px-4">
+            {/* Sticky Search Bar and Tabs Container */}
+            <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm py-6 -mx-4 px-4 border-b border-gray-700/50">
+              <div className="space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <Input
