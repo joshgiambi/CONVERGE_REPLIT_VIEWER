@@ -661,115 +661,45 @@ export default function PatientManager() {
           </div>
         </header>
 
-      {/* Main layout with sidebar and content */}
+      {/* Main layout with content and sidebar */}
       <div className="flex flex-1 pt-20">
-        {/* Left Sidebar - styled like viewer sidebar */}
-        <div className="w-80 flex flex-col h-full">
-          <div className="m-4 space-y-3 overflow-y-auto flex-1">
-            <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-3">
-              {/* Recently Opened - Blue Theme */}
-              <AccordionItem value="recently-opened" className="bg-gray-950/90 backdrop-blur-xl border border-blue-500/30 rounded-xl overflow-hidden">
-                <AccordionTrigger className="px-4 py-3 hover:bg-blue-500/10 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-blue-400" />
-                    <span className="text-white font-medium">Recently Opened</span>
-                  </div>
-                </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
-                <div className="space-y-1">
-                  {recentlyOpenedPatients.length === 0 ? (
-                    <p className="text-gray-500 text-sm py-2">No recently opened patients</p>
-                  ) : (
-                    recentlyOpenedPatients.map(patientId => {
-                      const patient = patients.find(p => p.id === patientId);
-                      return patient ? (
-                        <Link 
-                          key={patientId}
-                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded-lg hover:bg-blue-500/10 transition-colors border border-transparent hover:border-blue-500/20"
-                          onClick={() => trackPatientOpened(patientId)}
-                        >
-                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
-                          <div className="text-blue-400 text-xs">ID: {patient.patientID}</div>
-                        </Link>
-                      ) : null;
-                    })
-                  )}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            {/* Favorites - Yellow Theme */}
-            <AccordionItem value="favorites" className="bg-gray-950/90 backdrop-blur-xl border border-yellow-500/30 rounded-xl overflow-hidden">
-              <AccordionTrigger className="px-4 py-3 hover:bg-yellow-500/10 transition-colors">
-                <div className="flex items-center gap-2">
-                  <Star className="h-4 w-4 text-yellow-400" />
-                  <span className="text-white font-medium">Favorites</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
-                <div className="space-y-1">
-                  {favoritePatients.size === 0 ? (
-                    <p className="text-gray-500 text-sm py-2">No favorite patients</p>
-                  ) : (
-                    Array.from(favoritePatients).map(patientId => {
-                      const patient = patients.find(p => p.id === patientId);
-                      return patient ? (
-                        <Link 
-                          key={patientId}
-                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded-lg hover:bg-yellow-500/10 transition-colors border border-transparent hover:border-yellow-500/20"
-                          onClick={() => trackPatientOpened(patientId)}
-                        >
-                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
-                          <div className="text-yellow-400 text-xs">ID: {patient.patientID}</div>
-                        </Link>
-                      ) : null;
-                    })
-                  )}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            {/* Recently Imported - Green Theme */}
-            <AccordionItem value="recently-imported" className="bg-gray-950/90 backdrop-blur-xl border border-green-500/30 rounded-xl overflow-hidden">
-              <AccordionTrigger className="px-4 py-3 hover:bg-green-500/10 transition-colors">
-                <div className="flex items-center gap-2">
-                  <Import className="h-4 w-4 text-green-400" />
-                  <span className="text-white font-medium">Recently Imported</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
-                <div className="space-y-1">
-                  {recentlyImportedPatients.length === 0 ? (
-                    <p className="text-gray-500 text-sm py-2">No recently imported patients</p>
-                  ) : (
-                    recentlyImportedPatients.map(patientId => {
-                      const patient = patients.find(p => p.id === patientId);
-                      return patient ? (
-                        <Link 
-                          key={patientId}
-                          href={`/enhanced-viewer?patientId=${patient.patientID}`}
-                          className="block p-2 rounded-lg hover:bg-green-500/10 transition-colors border border-transparent hover:border-green-500/20"
-                          onClick={() => trackPatientOpened(patientId)}
-                        >
-                          <div className="text-white text-sm font-medium">{patient.patientName}</div>
-                          <div className="text-green-400 text-xs">ID: {patient.patientID}</div>
-                        </Link>
-                      ) : null;
-                    })
-                  )}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-          </div>
-        </div>
-
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col h-full">
-          {/* Fixed Search Bar and Tabs */}
-          <div className="p-4 pb-0">
+          {/* Fixed Tabs at top */}
+          <div className="px-4 pt-4 pb-2">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+              <TabsList className="grid w-full grid-cols-5 bg-gray-950/95 backdrop-blur-2xl border border-gray-600/40 rounded-2xl p-1.5 shadow-2xl shadow-black/50 mb-4">
+                <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                  <User className="h-4 w-4" />
+                  Patients
+                </TabsTrigger>
+                <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                  <Upload className="h-4 w-4" />
+                  Import DICOM
+                  {hasActiveParsingSession ? (
+                    <svg className="h-4 w-4 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
+                      <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
+                    </svg>
+                  ) : hasPendingData ? (
+                    <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                  <Network className="h-4 w-4" />
+                  PACS
+                </TabsTrigger>
+                <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                  <Database className="h-4 w-4" />
+                  Query
+                </TabsTrigger>
+                <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                  <FileText className="h-4 w-4" />
+                  Metadata
+                </TabsTrigger>
+              </TabsList>
+              
+              {/* Fixed Search Bar Below Tabs */}
+              <div className="mb-4">
             {/* Search Bar with dark styling */}
             <div className="space-y-4">
               <div className="relative">
@@ -872,40 +802,7 @@ export default function PatientManager() {
           </div>
 
           {/* Fixed Tabs */}
-          <div className="px-4 pb-4">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-          <TabsList className="grid w-full grid-cols-5 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl p-1 shadow-2xl shadow-black/50">
-            <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
-              <User className="h-4 w-4" />
-              Patients
-            </TabsTrigger>
-            <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
-              <Upload className="h-4 w-4" />
-              Import DICOM
-              {hasActiveParsingSession ? (
-                <svg className="h-4 w-4 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
-                  <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
-                </svg>
-              ) : hasPendingData ? (
-                <AlertTriangle className="h-4 w-4 text-yellow-400" />
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
-              <Network className="h-4 w-4" />
-              PACS
-            </TabsTrigger>
-            <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
-              <Database className="h-4 w-4" />
-              Query
-            </TabsTrigger>
-            <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/20 data-[state=active]:to-indigo-700/20 data-[state=active]:text-white text-gray-400 rounded-lg transition-all">
-              <FileText className="h-4 w-4" />
-              Metadata
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto mt-4">
+          <div className="px-4 pb-4 flex-1 overflow-y-auto">
             {/* Patients Tab */}
             <TabsContent value="patients" className="space-y-4 p-4">
             {/* Selection Actions Bar */}
@@ -1375,7 +1272,116 @@ export default function PatientManager() {
               <MetadataViewer />
             </TabsContent>
           </div>
-        </Tabs>
+          </Tabs>
+          </div>
+        </div>
+
+        {/* Right Sidebar with glassmorphic design - increased thickness */}
+        <div className="w-96 flex flex-col h-full">
+          <div className="m-4 space-y-3 overflow-y-auto flex-1">
+            <Accordion type="multiple" defaultValue={["recently-opened", "favorites", "recently-imported"]} className="space-y-3">
+              {/* Recently Opened - Blue Theme */}
+              <AccordionItem value="recently-opened" className="bg-gray-950/95 backdrop-blur-2xl border border-blue-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+                <AccordionTrigger className="px-5 py-4 hover:bg-blue-500/15 transition-all bg-gradient-to-r from-blue-500/10 to-transparent">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-500/20 p-2 rounded-lg">
+                      <Clock className="h-5 w-5 text-blue-400" />
+                    </div>
+                    <span className="text-white font-semibold text-base">Recently Opened</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-2">
+                    {recentlyOpenedPatients.length === 0 ? (
+                      <p className="text-gray-500 text-sm py-3 px-3">No recently opened patients</p>
+                    ) : (
+                      recentlyOpenedPatients.map(patientId => {
+                        const patient = patients.find(p => p.id === patientId);
+                        return patient ? (
+                          <Link 
+                            key={patientId}
+                            href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                            className="block p-3 rounded-lg bg-blue-500/5 hover:bg-blue-500/15 transition-all border border-blue-500/20 hover:border-blue-500/30 hover:shadow-lg hover:shadow-blue-500/10"
+                            onClick={() => trackPatientOpened(patientId)}
+                          >
+                            <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                            <div className="text-blue-400 text-xs mt-1">ID: {patient.patientID}</div>
+                          </Link>
+                        ) : null;
+                      })
+                    )}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Favorites - Yellow Theme */}
+              <AccordionItem value="favorites" className="bg-gray-950/95 backdrop-blur-2xl border border-yellow-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+                <AccordionTrigger className="px-5 py-4 hover:bg-yellow-500/15 transition-all bg-gradient-to-r from-yellow-500/10 to-transparent">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-yellow-500/20 p-2 rounded-lg">
+                      <Star className="h-5 w-5 text-yellow-400" />
+                    </div>
+                    <span className="text-white font-semibold text-base">Favorites</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-2">
+                    {favoritePatients.size === 0 ? (
+                      <p className="text-gray-500 text-sm py-3 px-3">No favorite patients</p>
+                    ) : (
+                      Array.from(favoritePatients).map(patientId => {
+                        const patient = patients.find(p => p.id === patientId);
+                        return patient ? (
+                          <Link 
+                            key={patientId}
+                            href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                            className="block p-3 rounded-lg bg-yellow-500/5 hover:bg-yellow-500/15 transition-all border border-yellow-500/20 hover:border-yellow-500/30 hover:shadow-lg hover:shadow-yellow-500/10"
+                            onClick={() => trackPatientOpened(patientId)}
+                          >
+                            <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                            <div className="text-yellow-400 text-xs mt-1">ID: {patient.patientID}</div>
+                          </Link>
+                        ) : null;
+                      })
+                    )}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Recently Imported - Green Theme */}
+              <AccordionItem value="recently-imported" className="bg-gray-950/95 backdrop-blur-2xl border border-green-500/40 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+                <AccordionTrigger className="px-5 py-4 hover:bg-green-500/15 transition-all bg-gradient-to-r from-green-500/10 to-transparent">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-green-500/20 p-2 rounded-lg">
+                      <Import className="h-5 w-5 text-green-400" />
+                    </div>
+                    <span className="text-white font-semibold text-base">Recently Imported</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-2">
+                    {recentlyImportedPatients.length === 0 ? (
+                      <p className="text-gray-500 text-sm py-3 px-3">No recently imported patients</p>
+                    ) : (
+                      recentlyImportedPatients.map(patientId => {
+                        const patient = patients.find(p => p.id === patientId);
+                        return patient ? (
+                          <Link 
+                            key={patientId}
+                            href={`/enhanced-viewer?patientId=${patient.patientID}`}
+                            className="block p-3 rounded-lg bg-green-500/5 hover:bg-green-500/15 transition-all border border-green-500/20 hover:border-green-500/30 hover:shadow-lg hover:shadow-green-500/10"
+                            onClick={() => trackPatientOpened(patientId)}
+                          >
+                            <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                            <div className="text-green-400 text-xs mt-1">ID: {patient.patientID}</div>
+                          </Link>
+                        ) : null;
+                      })
+                    )}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
         </div>
       </div>
