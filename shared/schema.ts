@@ -72,12 +72,38 @@ export const images = pgTable("images", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Media preview storage for thumbnails and movies
+export const mediaPreviews = pgTable("media_previews", {
+  id: serial("id").primaryKey(),
+  seriesId: integer("series_id").references(() => series.id).notNull(),
+  type: text("type").notNull(), // 'thumbnail' or 'movie'
+  format: text("format").notNull(), // 'png', 'jpg', 'mp4', 'gif'
+  filePath: text("file_path").notNull(),
+  url: text("url"), // For cloud storage URLs
+  width: integer("width"),
+  height: integer("height"),
+  frameCount: integer("frame_count"), // For movies
+  fileSize: integer("file_size"),
+  status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+  error: text("error"),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const seriesRelations = relations(series, ({ one, many }) => ({
   study: one(studies, {
     fields: [series.studyId],
     references: [studies.id],
   }),
   images: many(images),
+  mediaPreviews: many(mediaPreviews),
+}));
+
+export const mediaPreviewsRelations = relations(mediaPreviews, ({ one }) => ({
+  series: one(series, {
+    fields: [mediaPreviews.seriesId],
+    references: [series.id],
+  }),
 }));
 
 export const imagesRelations = relations(images, ({ one }) => ({
@@ -107,14 +133,22 @@ export const insertImageSchema = createInsertSchema(images).omit({
   createdAt: true,
 });
 
+export const insertMediaPreviewSchema = createInsertSchema(mediaPreviews).omit({
+  id: true,
+  createdAt: true,
+  processedAt: true,
+});
+
 export type Patient = typeof patients.$inferSelect;
 export type Study = typeof studies.$inferSelect;
 export type Series = typeof series.$inferSelect;
 export type DicomImage = typeof images.$inferSelect;
+export type MediaPreview = typeof mediaPreviews.$inferSelect;
 export type InsertPatient = z.infer<typeof insertPatientSchema>;
 export type InsertStudy = z.infer<typeof insertStudySchema>;
 export type InsertSeries = z.infer<typeof insertSeriesSchema>;
 export type InsertImage = z.infer<typeof insertImageSchema>;
+export type InsertMediaPreview = z.infer<typeof insertMediaPreviewSchema>;
 
 // DICOM Network Configuration
 export const pacsConnections = pgTable("pacs_connections", {

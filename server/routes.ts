@@ -1813,32 +1813,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
-  // Get series thumbnail
+  // Get series thumbnail - either pre-generated or generate on demand
   app.get("/api/series/:seriesId/thumbnail", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const seriesId = parseInt(req.params.seriesId);
-      const images = await storage.getImagesBySeriesId(seriesId);
+      const { mediaGenerator } = await import('./media-generator');
       
-      if (!images || images.length === 0) {
-        return res.status(404).json({ error: 'No images found for series' });
+      // Try to get or generate thumbnail
+      const preview = await mediaGenerator.getOrGeneratePreview(seriesId, 'thumbnail');
+      
+      if (!preview || !preview.filePath) {
+        // Fallback to returning middle DICOM image
+        const images = await storage.getImagesBySeriesId(seriesId);
+        
+        if (!images || images.length === 0) {
+          return res.status(404).json({ error: 'No images found for series' });
+        }
+        
+        // Get the middle image for better representation
+        const middleIndex = Math.floor(images.length / 2);
+        const targetImage = images[middleIndex];
+        
+        if (!targetImage.filePath || !fs.existsSync(targetImage.filePath)) {
+          return res.status(404).json({ error: 'Image file not found' });
+        }
+        
+        // Read and send the DICOM file with proper headers for browser caching
+        const buffer = await fs.promises.readFile(targetImage.filePath);
+        res.setHeader('Content-Type', 'application/dicom');
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.send(buffer);
+      } else {
+        // Send the pre-generated thumbnail
+        if (!fs.existsSync(preview.filePath)) {
+          return res.status(404).json({ error: 'Thumbnail file not found' });
+        }
+        
+        const buffer = await fs.promises.readFile(preview.filePath);
+        res.setHeader('Content-Type', `image/${preview.format}`);
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        res.send(buffer);
       }
-      
-      // Get the middle image for better representation
-      const middleIndex = Math.floor(images.length / 2);
-      const targetImage = images[middleIndex];
-      
-      if (!targetImage.filePath || !fs.existsSync(targetImage.filePath)) {
-        return res.status(404).json({ error: 'Image file not found' });
-      }
-      
-      // Read and send the DICOM file with proper headers for browser caching
-      const buffer = await fs.promises.readFile(targetImage.filePath);
-      res.setHeader('Content-Type', 'application/dicom');
-      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-      res.send(buffer);
     } catch (error: any) {
       console.error('Error fetching series thumbnail:', error);
       res.status(500).json({ error: 'Failed to fetch thumbnail' });
+    }
+  });
+
+  // Get series preview movie (GIF animation)
+  app.get("/api/series/:seriesId/preview", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const { mediaGenerator } = await import('./media-generator');
+      
+      // Try to get or generate animated preview
+      const preview = await mediaGenerator.getOrGeneratePreview(seriesId, 'movie');
+      
+      if (!preview || !preview.filePath) {
+        return res.status(404).json({ error: 'Failed to generate preview' });
+      }
+      
+      if (!fs.existsSync(preview.filePath)) {
+        return res.status(404).json({ error: 'Preview file not found' });
+      }
+      
+      const buffer = await fs.promises.readFile(preview.filePath);
+      res.setHeader('Content-Type', `image/${preview.format}`);
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Error fetching series preview:', error);
+      res.status(500).json({ error: 'Failed to fetch preview' });
+    }
+  });
+
+  // Trigger background thumbnail generation for all series
+  app.post("/api/generate-thumbnails", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { mediaGenerator } = await import('./media-generator');
+      
+      // Start processing in the background
+      mediaGenerator.processAllPendingSeries().catch(console.error);
+      
+      res.json({ message: 'Thumbnail generation started in background' });
+    } catch (error: any) {
+      console.error('Error starting thumbnail generation:', error);
+      res.status(500).json({ error: 'Failed to start thumbnail generation' });
     }
   });
 
