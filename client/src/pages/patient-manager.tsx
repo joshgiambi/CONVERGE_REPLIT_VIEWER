@@ -669,9 +669,9 @@ export default function PatientManager() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full overflow-hidden">
             <div className="px-4 pt-4 pb-2 flex-shrink-0">
               {/* Combined Container for Tabs, Search, and Tags */}
-              <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-700/50 rounded-2xl shadow-2xl shadow-black/40 p-3 mb-4">
+              <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/70 rounded-2xl shadow-2xl shadow-black/40 p-3 mb-4">
                 {/* Tabs Row */}
-                <TabsList className="grid w-full grid-cols-5 bg-black/40 rounded-xl p-1 mb-3">
+                <TabsList className="grid w-full grid-cols-5 bg-black/40 rounded-xl p-1 mb-4">
                   <TabsTrigger value="patients" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500/20 data-[state=active]:to-purple-500/20 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/10 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                     <User className="h-4 w-4" />
                     Patients
@@ -702,7 +702,7 @@ export default function PatientManager() {
                 </TabsList>
                 
                 {/* Search Bar - Full Width */}
-                <div className="relative w-full mb-2">
+                <div className="relative w-full mb-3">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
                     placeholder="Search patients, studies, or modalities..."
