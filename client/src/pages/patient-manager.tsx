@@ -668,12 +668,12 @@ export default function PatientManager() {
           {/* Fixed Tabs at top */}
           <div className="px-4 pt-4 pb-2">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-              <TabsList className="grid w-full grid-cols-5 bg-gray-950/95 backdrop-blur-2xl border border-gray-600/40 rounded-2xl p-1.5 shadow-2xl shadow-black/50 mb-4">
-                <TabsTrigger value="patients" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+              <TabsList className="grid w-full grid-cols-5 bg-gradient-to-r from-purple-900/40 via-indigo-900/40 to-blue-900/40 backdrop-blur-2xl border border-indigo-500/30 rounded-2xl p-2 shadow-2xl shadow-indigo-900/30 mb-4 gap-1">
+                <TabsTrigger value="patients" className="flex items-center justify-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/40 data-[state=active]:border-0 text-gray-300 hover:text-white rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5">
                   <User className="h-4 w-4" />
                   Patients
                 </TabsTrigger>
-                <TabsTrigger value="import" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                <TabsTrigger value="import" className="flex items-center justify-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-green-500/40 data-[state=active]:border-0 text-gray-300 hover:text-white rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5">
                   <Upload className="h-4 w-4" />
                   Import DICOM
                   {hasActiveParsingSession ? (
@@ -684,15 +684,15 @@ export default function PatientManager() {
                     <AlertTriangle className="h-4 w-4 text-yellow-400" />
                   ) : null}
                 </TabsTrigger>
-                <TabsTrigger value="pacs" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                <TabsTrigger value="pacs" className="flex items-center justify-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-cyan-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/40 data-[state=active]:border-0 text-gray-300 hover:text-white rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5">
                   <Network className="h-4 w-4" />
                   PACS
                 </TabsTrigger>
-                <TabsTrigger value="query" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                <TabsTrigger value="query" className="flex items-center justify-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-600 data-[state=active]:to-amber-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-orange-500/40 data-[state=active]:border-0 text-gray-300 hover:text-white rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5">
                   <Database className="h-4 w-4" />
                   Query
                 </TabsTrigger>
-                <TabsTrigger value="metadata" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600/30 data-[state=active]:to-indigo-700/30 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-indigo-500/20 text-gray-400 rounded-xl transition-all duration-200 py-2.5">
+                <TabsTrigger value="metadata" className="flex items-center justify-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-pink-600 data-[state=active]:to-rose-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-pink-500/40 data-[state=active]:border-0 text-gray-300 hover:text-white rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5">
                   <FileText className="h-4 w-4" />
                   Metadata
                 </TabsTrigger>
