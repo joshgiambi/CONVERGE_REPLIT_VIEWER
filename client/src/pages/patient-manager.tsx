@@ -42,7 +42,8 @@ import {
   Trash2,
   Star,
   Clock,
-  Import
+  Import,
+  X
 } from "lucide-react";
 
 interface Patient {
@@ -992,7 +993,7 @@ export default function PatientManager() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="space-y-4">
                 {filteredPatients.map((patient) => {
                   // Get studies and series for this patient
                   const patientStudies = studies.filter(study => study.patientId === patient.id);
