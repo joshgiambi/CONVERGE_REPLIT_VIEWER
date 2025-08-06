@@ -668,128 +668,126 @@ export default function PatientManager() {
           {/* Fixed Tabs at top */}
           <div className="px-4 pt-4 pb-2">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-              <TabsList className="grid w-full grid-cols-5 bg-gray-950/80 backdrop-blur-xl border border-gray-700/50 rounded-xl p-1.5 shadow-2xl shadow-black/30 mb-4 items-center">
-                <TabsTrigger value="patients" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5 text-sm font-medium h-full">
+              <TabsList className="grid w-full grid-cols-5 bg-gray-950/80 backdrop-blur-xl border border-gray-700/50 rounded-xl p-1 shadow-2xl shadow-black/30 mb-4">
+                <TabsTrigger value="patients" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <User className="h-4 w-4" />
                   Patients
                 </TabsTrigger>
-                <TabsTrigger value="import" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5 text-sm font-medium h-full">
+                <TabsTrigger value="import" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <Upload className="h-4 w-4" />
-                  Import DICOM
+                  <span>Import DICOM</span>
                   {hasActiveParsingSession ? (
-                    <svg className="h-3.5 w-3.5 animate-spin text-green-400" viewBox="0 0 24 24" fill="none">
+                    <svg className="h-3.5 w-3.5 animate-spin text-green-400 ml-1" viewBox="0 0 24 24" fill="none">
                       <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"/>
                     </svg>
                   ) : hasPendingData ? (
-                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-400" />
+                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 ml-1" />
                   ) : null}
                 </TabsTrigger>
-                <TabsTrigger value="pacs" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5 text-sm font-medium h-full">
+                <TabsTrigger value="pacs" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <Network className="h-4 w-4" />
                   PACS
                 </TabsTrigger>
-                <TabsTrigger value="query" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5 text-sm font-medium h-full">
+                <TabsTrigger value="query" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <Database className="h-4 w-4" />
                   Query
                 </TabsTrigger>
-                <TabsTrigger value="metadata" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2.5 px-3 hover:bg-white/5 text-sm font-medium h-full">
+                <TabsTrigger value="metadata" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/20 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                   <FileText className="h-4 w-4" />
                   Metadata
                 </TabsTrigger>
               </TabsList>
               
               {/* Fixed Search Bar Below Tabs */}
-              <div className="mb-4 mt-6">
+              <div className="mb-4 mt-2">
             {/* Search Bar with dark styling */}
-            <div className="space-y-4">
-              <div className="relative">
+            <div className="space-y-3">
+              <div className="relative max-w-2xl">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
                 <Input
                   placeholder="Search patients, studies, or modalities..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 h-12 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder:text-gray-500 
+                  className="pl-10 h-11 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 text-white placeholder:text-gray-500 
                            focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 rounded-xl shadow-2xl shadow-black/20
-                           transition-all duration-200"
+                           transition-all duration-200 w-full"
                 />
               </div>
           
               {/* Tag Filters */}
               {uniqueTags.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-gray-400 text-sm font-medium whitespace-nowrap">Filter by tags:</span>
-                    <div className="flex gap-2 flex-wrap flex-1">
-                      {uniqueTags.map(tag => {
-                        // Define tag colors based on tag type - matching patient card colors
-                        const getTagStyle = (tagName: string) => {
-                          const lower = tagName.toLowerCase();
-                          if (lower.includes('head') || lower.includes('brain')) {
-                            return {
-                              base: 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20',
-                              selected: 'bg-purple-600/30 border-purple-500 text-purple-100 shadow-lg shadow-purple-500/20'
-                            };
-                          } else if (lower.includes('chest') || lower.includes('thorax') || lower.includes('lung')) {
-                            return {
-                              base: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
-                              selected: 'bg-blue-600/30 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20'
-                            };
-                          } else if (lower.includes('abdomen') || lower.includes('pelvis')) {
-                            return {
-                              base: 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20',
-                              selected: 'bg-green-600/30 border-green-500 text-green-100 shadow-lg shadow-green-500/20'
-                            };
-                          } else if (lower.includes('spine') || lower.includes('neck')) {
-                            return {
-                              base: 'bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20',
-                              selected: 'bg-orange-600/30 border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20'
-                            };
-                          } else if (lower.includes('contrast') || lower.includes('gad')) {
-                            return {
-                              base: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20',
-                              selected: 'bg-yellow-600/30 border-yellow-500 text-yellow-100 shadow-lg shadow-yellow-500/20'
-                            };
-                          } else if (lower.includes('emergency') || lower.includes('urgent')) {
-                            return {
-                              base: 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20',
-                              selected: 'bg-red-600/30 border-red-500 text-red-100 shadow-lg shadow-red-500/20'
-                            };
-                          } else {
-                            return {
-                              base: 'bg-gray-500/10 border-gray-500/30 text-gray-300 hover:bg-gray-500/20',
-                              selected: 'bg-indigo-600/30 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-500/20'
-                            };
-                          }
-                        };
-                        
-                        const style = getTagStyle(tag);
-                        const isSelected = selectedTags.includes(tag);
-                        
-                        return (
-                          <button
-                            key={tag}
-                            onClick={() => {
-                              if (isSelected) {
-                                setSelectedTags(selectedTags.filter(t => t !== tag));
-                              } else {
-                                setSelectedTags([...selectedTags, tag]);
-                              }
-                            }}
-                            className={`px-3 py-1.5 rounded-lg border transition-all duration-200 text-xs font-medium ${
-                              isSelected ? style.selected : style.base
-                            }`}
-                          >
-                            {tag}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div className="space-y-2">
+                  <span className="text-gray-400 text-xs font-medium">Filter by tags:</span>
+                  <div className="flex gap-2 flex-wrap">
+                    {uniqueTags.map(tag => {
+                      // Define tag colors based on tag type - matching patient card colors
+                      const getTagStyle = (tagName: string) => {
+                        const lower = tagName.toLowerCase();
+                        if (lower.includes('head') || lower.includes('brain')) {
+                          return {
+                            base: 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20',
+                            selected: 'bg-purple-600/30 border-purple-500 text-purple-100 shadow-lg shadow-purple-500/20'
+                          };
+                        } else if (lower.includes('chest') || lower.includes('thorax') || lower.includes('lung')) {
+                          return {
+                            base: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
+                            selected: 'bg-blue-600/30 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20'
+                          };
+                        } else if (lower.includes('abdomen') || lower.includes('pelvis')) {
+                          return {
+                            base: 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20',
+                            selected: 'bg-green-600/30 border-green-500 text-green-100 shadow-lg shadow-green-500/20'
+                          };
+                        } else if (lower.includes('spine') || lower.includes('neck')) {
+                          return {
+                            base: 'bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20',
+                            selected: 'bg-orange-600/30 border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20'
+                          };
+                        } else if (lower.includes('contrast') || lower.includes('gad')) {
+                          return {
+                            base: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20',
+                            selected: 'bg-yellow-600/30 border-yellow-500 text-yellow-100 shadow-lg shadow-yellow-500/20'
+                          };
+                        } else if (lower.includes('emergency') || lower.includes('urgent')) {
+                          return {
+                            base: 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20',
+                            selected: 'bg-red-600/30 border-red-500 text-red-100 shadow-lg shadow-red-500/20'
+                          };
+                        } else {
+                          return {
+                            base: 'bg-gray-500/10 border-gray-500/30 text-gray-300 hover:bg-gray-500/20',
+                            selected: 'bg-indigo-600/30 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-500/20'
+                          };
+                        }
+                      };
+                      
+                      const style = getTagStyle(tag);
+                      const isSelected = selectedTags.includes(tag);
+                      
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedTags(selectedTags.filter(t => t !== tag));
+                            } else {
+                              setSelectedTags([...selectedTags, tag]);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg border transition-all duration-200 text-xs font-medium ${
+                            isSelected ? style.selected : style.base
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
                     {selectedTags.length > 0 && (
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => setSelectedTags([])}
-                        className="text-gray-400 hover:text-white h-7 px-2 whitespace-nowrap"
+                        className="text-gray-400 hover:text-white h-7 px-2 whitespace-nowrap ml-2"
                       >
                         <X className="h-3 w-3 mr-1" />
                         Clear

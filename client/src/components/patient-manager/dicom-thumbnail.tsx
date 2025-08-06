@@ -8,7 +8,7 @@ interface DicomThumbnailProps {
   onClick?: () => void;
 }
 
-export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: DicomThumbnailProps) {
+export function DicomThumbnail({ seriesId, modality, imageCount }: DicomThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -68,13 +68,12 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
     
     return (
       <div 
-        className={`w-20 h-20 rounded-lg overflow-hidden border cursor-pointer hover:scale-105 transition-transform duration-200 ${
+        className={`w-20 h-20 rounded-lg overflow-hidden border ${
           modality === 'CT' ? 'bg-gradient-to-br from-blue-950 to-blue-900 border-blue-700' :
           modality === 'MR' ? 'bg-gradient-to-br from-purple-950 to-purple-900 border-purple-700' :
           modality === 'PT' ? 'bg-gradient-to-br from-yellow-950 to-yellow-900 border-yellow-700' :
           'bg-gradient-to-br from-gray-950 to-gray-900 border-gray-700'
         } flex items-center justify-center`}
-        onClick={onClick}
       >
         <div className="flex flex-col items-center justify-center text-center p-2">
           <span className="text-2xl mb-1">{modalityIcon}</span>
@@ -87,8 +86,7 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
   return (
     <div className="relative group">
       <div 
-        className="w-20 h-20 bg-black rounded-lg overflow-hidden border border-gray-700 cursor-pointer hover:scale-105 transition-transform duration-200"
-        onClick={onClick}
+        className="w-20 h-20 bg-black rounded-lg overflow-hidden border border-gray-700"
       >
         {isLoading ? (
           <div className="w-full h-full flex items-center justify-center bg-gray-900">
@@ -99,6 +97,7 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
             src={thumbnailUrl} 
             alt={`${modality} scan`}
             className="w-full h-full object-cover"
+            style={{ filter: 'brightness(1.2) contrast(1.1)' }}
             onError={() => setHasError(true)}
           />
         )}
