@@ -9,13 +9,10 @@ interface DicomThumbnailProps {
 }
 
 export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: DicomThumbnailProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-
 
   useEffect(() => {
     const loadThumbnail = async () => {
@@ -23,15 +20,28 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
         setIsLoading(true);
         setHasError(false);
 
-        // Get the thumbnail directly from server
+        // Fetch the middle image thumbnail from the series
         const response = await fetch(`/api/series/${seriesId}/thumbnail`);
-        if (!response.ok) throw new Error('Failed to fetch thumbnail');
-        
-        // The server returns raw DICOM, so we use it as blob URL
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        setThumbnailUrl(url);
-        
+        if (!response.ok) {
+          // Fallback: try to get regular images and render the middle one
+          const imagesResponse = await fetch(`/api/series/${seriesId}/images`);
+          if (!imagesResponse.ok) throw new Error('Failed to fetch images');
+          
+          const images = await imagesResponse.json();
+          if (!images || images.length === 0) throw new Error('No images found');
+
+          // Get the middle image
+          const middleIndex = Math.floor(images.length / 2);
+          const targetImage = images[middleIndex];
+
+          // Try to load as a rendered image
+          setThumbnailUrl(`/api/images/${targetImage.sopInstanceUID}/render?size=thumbnail`);
+        } else {
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          setThumbnailUrl(url);
+        }
+
         setIsLoading(false);
       } catch (error) {
         console.error('Error loading thumbnail:', error);
@@ -44,14 +54,13 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
 
     // Cleanup
     return () => {
-      if (thumbnailUrl) {
+      if (thumbnailUrl && thumbnailUrl.startsWith('blob:')) {
         URL.revokeObjectURL(thumbnailUrl);
       }
     };
   }, [seriesId]);
 
-  // Only show placeholder if we've finished loading and still have an error
-  if (!isLoading && (hasError || !thumbnailUrl)) {
+  if (hasError || !thumbnailUrl) {
     // Fallback to styled placeholder
     const modalityIcon = modality === 'CT' ? '🔷' : 
                          modality === 'MR' ? '🟣' : 
@@ -85,16 +94,13 @@ export function DicomThumbnail({ seriesId, modality, imageCount, onClick }: Dico
           <div className="w-full h-full flex items-center justify-center bg-gray-900">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           </div>
-        ) : thumbnailUrl ? (
-          <img 
-            src={thumbnailUrl}
-            alt={`${modality} thumbnail`}
-            className="w-full h-full object-cover"
-          />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-900">
-            <span className="text-xs text-gray-400">{modality}</span>
-          </div>
+          <img 
+            src={thumbnailUrl} 
+            alt={`${modality} scan`}
+            className="w-full h-full object-cover"
+            onError={() => setHasError(true)}
+          />
         )}
       </div>
     </div>
