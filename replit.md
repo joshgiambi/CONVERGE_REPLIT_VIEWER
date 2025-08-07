@@ -29,8 +29,6 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **Fixed Fast 3D Algorithm Crashes**: Completely rewrote fast-3d-margin-operations.ts to fix TypeScript compilation errors causing app crashes. Removed duplicate function implementations, fixed syntax errors, and simplified the algorithm to focus on reliable slice interpolation approach. System now generates new contours above and below structures for true 3D superior/inferior expansion without RangeError or ReferenceError crashes
 - **Boolean Operations Toolbar**: Added real-time syntax validation for unknown structures and unbalanced parentheses to prevent misconfigured boolean expressions. Error indicator now displays helpful messages.
 - **Faster Scan Loading**: Introduced client-side metadata caching so repeated slice navigation reuses previously fetched DICOM metadata, reducing redundant network requests and improving responsiveness.
-- **Boolean Execution**: Toolbar expressions now evaluate union, intersection, subtraction, and XOR across structures, with results saved to existing or new ROIs.
-- **MPR Viewer**: Added sagittal and coronal views with shared window/level, contour cross-sections, and click-to-place crosshair synchronization.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
