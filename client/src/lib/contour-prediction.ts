@@ -283,8 +283,10 @@ export function interpolateContours(
     return interpolateContoursWithResampling(contour1, contour2, slicePosition1, slicePosition2, targetSlicePosition);
   }
   
-  const t = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
-  
+  // Normalize target position to [0,1] range
+  const tRaw = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
+  const t = Math.min(Math.max(tRaw, 0), 1);
+
   // Apply easing function to maintain volume better
   // This reduces shrinkage by using a smoother interpolation curve
   const easedT = easeInOutCubic(t);
@@ -319,7 +321,8 @@ function interpolateContoursWithResampling(
   const centroid1 = calculateCentroid3D(contour1);
   const centroid2 = calculateCentroid3D(contour2);
   
-  const t = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
+  const tRaw = (targetSlicePosition - slicePosition1) / (slicePosition2 - slicePosition1);
+  const t = Math.min(Math.max(tRaw, 0), 1);
   const easedT = easeInOutCubic(t);
   
   // Interpolate centroid

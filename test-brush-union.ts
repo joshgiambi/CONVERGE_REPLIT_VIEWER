@@ -1,5 +1,5 @@
 // Test the brush tool polygon union functionality
-import { polygonUnion } from './client/src/lib/polygon-union.js';
+import { polygonUnion } from './client/src/lib/polygon-union';
 
 // Create three overlapping circles
 function createCircle(centerX, centerY, radius, z = 0) {
@@ -53,5 +53,5 @@ try {
     }
   }
 } catch (error) {
-  console.error('❌ Error during union:', error.message);
+  console.error('❌ Error during union:', (error as Error).message);
 }
