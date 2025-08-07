@@ -24,6 +24,7 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **3D Volumetric Margin Operations**: Successfully implemented true 3D volumetric dilation/erosion algorithms with optimized performance for medical-grade radiotherapy planning. Created volumetric-margin-operations-optimized.ts to address performance bottlenecks in real-time preview
 - **Margin Toolbar UI Improvements**: Removed settings button, made margin distances visible on launch with uniform expansion as default mode. Added Target Structure field allowing users to apply margins to existing/different/new structures
 - **Simplified Contour Smoothing**: Implemented gaussianSmoothContour function using weighted moving average for more predictable smoothing results compared to morphological operations
+- **Margin Operations Architecture**: Completed comprehensive three-layer margin system with MarginToolbar (UI) → WorkingViewer (routing) → Simple-polygon-operations (algorithm). Fixed critical direction logic where positive values now expand and negative values shrink contours correctly. User testing confirms margin expansion works excellently with current simple polygon approach, though uniform mode may have limited superior/inferior expansion due to 2D slice-by-slice processing rather than true 3D volumetric operations
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
