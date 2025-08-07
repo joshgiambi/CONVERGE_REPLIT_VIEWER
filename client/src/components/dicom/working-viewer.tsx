@@ -638,8 +638,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       contourCount: s.contours?.length || 0
     })));
 
-    const { structureId, distance, direction = 'all' } = payload;
-    console.log(`🔹 Generating structure preview for ${structureId} by ${distance}mm on ALL slices`);
+    const { structureId, targetStructureId, parameters } = payload;
+    const marginValue = parameters?.marginValues?.uniform || parameters?.margin || 5;
+    console.log(`🔹 Generating simple margin preview for structure ${structureId} by ${marginValue}mm`);
+    console.log(`🔹 Target structure: ${targetStructureId || 'same structure'}`);
 
     // Find the target structure
     const structure = localRTStructures.structures?.find(
@@ -678,15 +680,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         
         let previewPoints: number[];
         
-        if (distance > 0) {
-          // Growing - use simple operations with enhanced smoothing
-          const { growContourSimple } = await import('@/lib/simple-polygon-operations');
-          previewPoints = growContourSimple(contour.points, distance);
-        } else {
-          // For shrinking, also use growContourSimple for consistency
-          const { growContourSimple } = await import('@/lib/simple-polygon-operations');
-          previewPoints = growContourSimple(contour.points, distance);
-        }
+        // Use simple grow operation for consistent results
+        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+        previewPoints = growContourSimple(contour.points, marginValue);
         
         // Store preview contour with slice position metadata
         previewContoursWithSlices.push({
@@ -789,67 +785,83 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-    const { structureId, parameters } = payload;
+    const { structureId, targetStructureId, parameters } = payload;
     
-    console.log(`🔹 📊 Executing 3D volumetric margin operation for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Executing simple margin operation for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 Target structure ID: ${targetStructureId || 'same structure'}`);
     
     try {
       // Create a deep copy of RT structures
       const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
       
-      // Find the target structure
-      const structure = updatedRTStructures.structures?.find(
+      // Find the source structure
+      const sourceStructure = updatedRTStructures.structures?.find(
         (s: any) => s.roiNumber === structureId,
       );
       
-      if (!structure) {
-        console.error(`Structure ${structureId} not found`);
+      if (!sourceStructure) {
+        console.error(`Source structure ${structureId} not found`);
         return;
       }
       
-      // Import the optimized 3D volumetric margin operation handler
-      const { apply3DMarginOptimized, clearGridCache } = await import('@/lib/volumetric-margin-operations-optimized');
+      // Determine target structure
+      let targetStructure = sourceStructure;
+      if (targetStructureId && targetStructureId !== structureId) {
+        targetStructure = updatedRTStructures.structures?.find(
+          (s: any) => s.roiNumber === targetStructureId,
+        );
+        if (!targetStructure) {
+          console.error(`Target structure ${targetStructureId} not found`);
+          return;
+        }
+      }
       
-      // Get pixel spacing from image metadata
-      const pixelSpacing: [number, number, number] = imageMetadata?.pixelSpacing 
-        ? [imageMetadata.pixelSpacing[0], imageMetadata.pixelSpacing[1], imageMetadata.sliceThickness || 2]
-        : [1, 1, 2];
+      const marginValue = parameters.marginValues?.uniform || parameters.margin || 5;
+      console.log(`🔹 Applying simple margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
       
-      const marginValue = parameters.margin || 5;
-      console.log(`🔹 Applying optimized 3D volumetric margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
-      console.log('🔹 Using pixel spacing:', pixelSpacing);
+      // Import the simple grow operation
+      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
       
-      // Apply optimized 3D volumetric margin (don't use cache for execution)
-      const modifiedContours = await apply3DMarginOptimized(
-        structure.contours,
-        marginValue,
-        pixelSpacing,
-        false // Don't use cache for final execution
-      );
+      // Process each contour using the simple algorithm
+      const processedContours = [];
+      for (const contour of sourceStructure.contours || []) {
+        if (!contour.points || contour.points.length < 9) {
+          continue;
+        }
+        
+        try {
+          const expandedPoints = growContourSimple(contour.points, marginValue);
+          
+          processedContours.push({
+            slicePosition: contour.slicePosition,
+            points: expandedPoints,
+            numberOfPoints: expandedPoints.length / 3
+          });
+        } catch (error) {
+          console.warn(`Failed to process contour at slice ${contour.slicePosition}:`, error);
+        }
+      }
       
-      // Clear cache after execution to free memory
-      clearGridCache();
+      // Apply results to target structure
+      targetStructure.contours = processedContours;
       
-      // Replace the structure's contours with the modified ones
-      structure.contours = modifiedContours;
-      
-      console.log(`🔹 ✅ Applied 3D volumetric margin, generated ${modifiedContours.length} contours`);
+      console.log(`🔹 ✅ Applied simple margin, generated ${processedContours.length} contours`);
       
       // Clear preview contours
       setPreviewContours([]);
       
       // Update local structures and save
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_3d_margin');
+      saveContourUpdates(updatedRTStructures, 'apply_simple_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedRTStructures);
       }
       
-      console.log(`✅ Successfully applied 3D volumetric margin to structure ${structureId}`);
+      console.log(`✅ Successfully applied simple margin to structure ${targetStructure.roiNumber}`);
     } catch (error) {
-      console.error("🔹 ❌ Error applying 3D margin operation:", error);
+      console.error("🔹 ❌ Error applying simple margin operation:", error);
     }
   };
 
@@ -1000,6 +1012,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = async (payload: any) => {
+    // Handle margin toolbar operations
+    if (payload && payload.type && payload.type.includes('margin')) {
+      if (payload.preview) {
+        console.log("🔹 Margin preview request from toolbar:", payload);
+        await handlePreviewGrowStructure({
+          structureId: payload.structureId,
+          targetStructureId: payload.targetStructureId,
+          parameters: payload.parameters
+        });
+        return;
+      } else {
+        console.log("🔹 Margin execution request from toolbar:", payload);
+        await handleSimpleMarginExecution({
+          structureId: payload.structureId,
+          targetStructureId: payload.targetStructureId,
+          parameters: payload.parameters
+        });
+        return;
+      }
+    }
+
     // Handle refresh action from undo/redo
     if (payload && payload.action === 'refresh' && payload.rtStructures) {
       console.log('Refreshing RT structures from undo/redo');

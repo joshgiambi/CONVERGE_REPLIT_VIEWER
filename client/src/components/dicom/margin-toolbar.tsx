@@ -103,7 +103,7 @@ export function MarginToolbar({
             'directional_margin',
       parameters,
       structureId: selectedStructure.id,
-      targetStructureId: targetStructure === 'different' ? selectedTargetId : undefined,
+      targetStructureId: targetStructure === 'different' ? selectedTargetId : (targetStructure === 'new' ? 'new' : undefined),
       preview: true
     });
 
