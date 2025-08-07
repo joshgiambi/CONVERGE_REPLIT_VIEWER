@@ -756,9 +756,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
         
         // Get image metadata for 3D processing
-        const currentImage = images?.[currentImageIndex];
-        const imgPixelSpacing = currentImage?.pixelSpacing || [1, 1];
-        const sliceThickness = 2; // Default slice thickness
+        const imgPixelSpacing = imageMetadata?.pixelSpacing || [1, 1];
+        const sliceThickness = imageMetadata?.sliceThickness || 2;
         
         const fast3DResults = await applyFast3DMargin(
           structure.contours,
@@ -874,9 +873,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
           
           // Get image metadata for 3D processing
-          const currentImage = images?.[currentImageIndex];
-          const pixelSpacing = currentImage?.pixelSpacing || [1, 1];
-          const sliceThickness = 2; // Default slice thickness
+          const pixelSpacing = imageMetadata?.pixelSpacing || [1, 1];
+          const sliceThickness = imageMetadata?.sliceThickness || 2;
           
           const fast3DResults = await applyFast3DMargin(
             sourceStructure.contours || [],
