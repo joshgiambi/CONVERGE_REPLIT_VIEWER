@@ -284,9 +284,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     const { operation, sourceStructureId, targetStructureId, slicePosition } = payload;
-    if (DEBUG) console.log(
-      `Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`,
-    );
+    console.log(`🔶 Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`);
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -323,37 +321,64 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     try {
-      let resultPoints: number[];
+      let resultContours: number[][];
+
+      // Import the boolean operations
+      const { combineContours, subtractContours } = await import('@/lib/clipper-boolean-operations');
 
       if (operation === 'combine') {
         // Combine the two contours
-        resultPoints = await combineContours(sourceContour.points, targetContour.points);
+        resultContours = await combineContours(sourceContour.points, targetContour.points);
+        console.log(`🔶 Combine operation returned ${resultContours.length} contours`);
       } else if (operation === 'subtract') {
         // Subtract target from source
-        resultPoints = await subtractContours(sourceContour.points, targetContour.points);
+        resultContours = await subtractContours(sourceContour.points, targetContour.points);
+        console.log(`🔶 Subtract operation returned ${resultContours.length} contours`);
       } else {
         console.error(`Unknown boolean operation: ${operation}`);
         return;
       }
 
-      if (resultPoints.length >= 9) {
-        // Update the source contour with the result
-        sourceContour.points = resultPoints;
-        sourceContour.numberOfPoints = resultPoints.length / 3;
-
-        // Update local structures and save to server
-        setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures, 'boolean_operation');
-        
-        // Pass the updated structures up to parent component
-        if (onContourUpdate) {
-          onContourUpdate(updatedRTStructures);
-        }
-
-        console.log(`Successfully performed ${operation} operation`);
-      } else {
-        console.warn("Boolean operation resulted in invalid contour");
+      // Remove the source contour from current slice
+      const sourceContourIndex = sourceStructure.contours.findIndex(
+        (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM
+      );
+      
+      if (sourceContourIndex >= 0) {
+        sourceStructure.contours.splice(sourceContourIndex, 1);
       }
+
+      // Add all result contours
+      if (resultContours && resultContours.length > 0) {
+        resultContours.forEach((contourPoints: number[]) => {
+          if (contourPoints.length >= 9) {
+            sourceStructure.contours.push({
+              slicePosition: slicePosition,
+              points: contourPoints,
+              numberOfPoints: contourPoints.length / 3,
+            });
+          }
+        });
+        
+        console.log(`✅ Boolean ${operation} operation completed: ${resultContours.length} result contours`);
+      } else {
+        console.log(`✅ Boolean ${operation} operation completed: no result contours (empty result)`);
+      }
+
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'boolean_operation');
+      
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      // Save state to undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'boolean_operation', sourceStructureId, updatedRTStructures);
+      }
+
     } catch (error) {
       console.error(`Error performing ${operation} operation:`, error);
     }
@@ -2118,6 +2143,53 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'clear_above');
+    } else if (payload.action === "smooth") {
+      // Handle contour smoothing
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) {
+        console.error(`Structure ${payload.structureId} not found`);
+        return;
+      }
+
+      // Apply smoothing to all contours in the structure
+      const { smoothContour } = await import('@/lib/contour-smooth-simple');
+      const smoothingFactor = payload.smoothingFactor || 0.15;
+      
+      structure.contours = structure.contours.map((contour: any) => {
+        if (contour.points && contour.points.length >= 9) {
+          const smoothedContour = smoothContour(
+            {
+              points: contour.points,
+              slicePosition: contour.slicePosition
+            },
+            smoothingFactor
+          );
+          
+          return {
+            ...contour,
+            points: smoothedContour.points,
+            numberOfPoints: smoothedContour.points.length / 3
+          };
+        }
+        return contour;
+      });
+
+      console.log(`Applied smoothing to structure ${payload.structureId} with factor ${smoothingFactor}`);
+      
+      setLocalRTStructures(updatedStructures);
+      
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+
+      // Save state to undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'smooth', payload.structureId, updatedStructures);
+      }
+      saveContourUpdates(updatedStructures, 'smooth');
     }
   };
 

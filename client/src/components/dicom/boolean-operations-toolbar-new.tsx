@@ -311,35 +311,34 @@ export function BooleanOperationsToolbar({
 
             {/* Main text input field with syntax highlighting overlay */}
             <div className="flex-1 relative">
-              {/* Input field with transparent text for cursor positioning */}
+              {/* Input field with proper cursor positioning */}
               <Input
                 ref={inputRef}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
-                placeholder=""
-                className="w-full h-8 bg-white/10 border-white/30 text-transparent text-sm rounded-lg caret-white relative z-20 font-sans transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
+                placeholder="Enter boolean expression (e.g., A ∪ B - C)"
+                className="w-full h-8 bg-white/10 border-white/30 text-white text-sm rounded-lg caret-white relative z-30 font-sans transition-all duration-200 focus:outline-none focus:ring-0 focus:border-blue-500/60 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 hover:border-white/50"
                 style={{ 
                   caretColor: 'white',
                   letterSpacing: 'normal',
                   lineHeight: '1.25rem',
-                  WebkitTapHighlightColor: 'transparent'
+                  WebkitTapHighlightColor: 'transparent',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)'
                 }}
               />
               
-              {/* Visual overlay with syntax highlighting - positioned behind input */}
-              <div 
-                className="absolute inset-0 pointer-events-none flex items-center text-sm z-10 font-sans px-3"
-                style={{ 
-                  letterSpacing: 'normal',
-                  lineHeight: '1.25rem'
-                }}
-              >
-                {expression ? (
-                  renderExpressionWithPills()
-                ) : (
-                  <span className="text-white/50">Enter boolean expression (e.g., A ∪ B - C)</span>
-                )}
-              </div>
+              {/* Visual overlay with syntax highlighting - positioned behind input when focused */}
+              {expression && (
+                <div 
+                  className="absolute inset-0 pointer-events-none flex items-center text-sm z-20 font-sans px-3 opacity-60"
+                  style={{ 
+                    letterSpacing: 'normal',
+                    lineHeight: '1.25rem'
+                  }}
+                >
+                  {renderExpressionWithPills()}
+                </div>
+              )}
               
               {/* Syntax validation indicator */}
               {syntaxErrors.length > 0 && (
