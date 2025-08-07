@@ -847,6 +847,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           } : null}
           isVisible={showMarginToolbar}
           onClose={() => setShowMarginToolbar(false)}
+          availableStructures={rtStructures.structures?.map((s: any) => ({
+            id: s.roiNumber,
+            name: s.structureName
+          })) || []}
+          onCreateNewStructure={(basedOnId) => {
+            // Create a new structure based on the selected one
+            const baseStructure = rtStructures.structures?.find((s: any) => s.roiNumber === basedOnId);
+            if (baseStructure) {
+              const newName = `${baseStructure.structureName}_margin`;
+              console.log('Creating new structure:', newName, 'based on:', baseStructure.structureName);
+              // TODO: Implement actual structure creation
+              alert(`Creating new structure: ${newName}`);
+            }
+          }}
           onExecuteOperation={(operation) => {
             // Handle execute operation
             console.log('🔹 🎯 Viewer Interface: Handling margin operation:', operation);
@@ -862,6 +876,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 workingViewerRef.current.handleContourUpdate({
                   action: 'execute_margin',
                   structureId: operation.structureId,
+                  targetStructureId: operation.targetStructureId,
                   parameters: operation.parameters
                 });
                 setShowMarginToolbar(false);

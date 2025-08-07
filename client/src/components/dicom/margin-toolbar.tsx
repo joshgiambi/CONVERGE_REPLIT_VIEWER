@@ -3,6 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { 
   Expand,
   Move,
@@ -11,8 +18,7 @@ import {
   Eye,
   EyeOff,
   X,
-  Settings2,
-  ChevronDown
+  Plus
 } from 'lucide-react';
 
 interface MarginToolbarProps {
@@ -27,9 +33,12 @@ interface MarginToolbarProps {
     type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
     parameters: any;
     structureId: number;
+    targetStructureId?: number | 'new';
     preview?: boolean;
   }) => void;
   onPreviewClear?: () => void;
+  availableStructures?: Array<{ id: number; name: string }>;
+  onCreateNewStructure?: (basedOn: number) => void;
 }
 
 export function MarginToolbar({ 
@@ -37,11 +46,15 @@ export function MarginToolbar({
   isVisible, 
   onClose,
   onExecuteOperation,
-  onPreviewClear
+  onPreviewClear,
+  availableStructures = [],
+  onCreateNewStructure
 }: MarginToolbarProps) {
   const [activeMode, setActiveMode] = useState<'uniform' | 'directional' | 'anisotropic'>('uniform');
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true); // Show settings by default
   const [isPreviewActive, setIsPreviewActive] = useState(false);
+  const [targetStructure, setTargetStructure] = useState<'same' | 'different' | 'new'>('same');
+  const [selectedTargetId, setSelectedTargetId] = useState<number | null>(null);
   
   // Margin values
   const [uniformMargin, setUniformMargin] = useState(5);
@@ -59,16 +72,21 @@ export function MarginToolbar({
 
   const handleModeChange = (mode: 'uniform' | 'directional' | 'anisotropic') => {
     setActiveMode(mode);
-    setShowSettings(true);
+    // Settings always visible, no toggle needed
   };
 
   const handlePreview = () => {
     if (!selectedStructure) return;
 
+    // For preview, use single slice only for performance
     const parameters: any = {
+      margin: activeMode === 'uniform' ? uniformMargin : 
+              activeMode === 'anisotropic' ? anisotropicMargins.x : // Use X for preview
+              directionalMargins.superior, // Use one value for preview
       marginType: activeMode.toUpperCase(),
       marginValues: {},
-      preview: { enabled: true, opacity: 0.5, color: '#FFFF00' }
+      preview: { enabled: true, opacity: 0.5, color: '#FFFF00' },
+      singleSlice: true // Optimize for preview
     };
 
     if (activeMode === 'uniform') {
@@ -85,6 +103,7 @@ export function MarginToolbar({
             'directional_margin',
       parameters,
       structureId: selectedStructure.id,
+      targetStructureId: targetStructure === 'different' ? selectedTargetId : undefined,
       preview: true
     });
 
@@ -94,7 +113,17 @@ export function MarginToolbar({
   const handleExecute = () => {
     if (!selectedStructure) return;
 
+    // Handle new structure creation
+    if (targetStructure === 'new' && onCreateNewStructure) {
+      onCreateNewStructure(selectedStructure.id);
+      // The creation will trigger the margin operation separately
+      return;
+    }
+
     const parameters: any = {
+      margin: activeMode === 'uniform' ? uniformMargin : 
+              activeMode === 'anisotropic' ? Math.max(anisotropicMargins.x, anisotropicMargins.y, anisotropicMargins.z) :
+              Math.max(...Object.values(directionalMargins)),
       marginType: activeMode.toUpperCase(),
       marginValues: {},
       preview: { enabled: false }
@@ -108,12 +137,17 @@ export function MarginToolbar({
       parameters.marginValues = directionalMargins;
     }
 
+    const targetId = targetStructure === 'same' ? selectedStructure.id :
+                     targetStructure === 'different' ? selectedTargetId :
+                     'new';
+
     onExecuteOperation({
       type: activeMode === 'uniform' ? 'uniform_margin' : 
             activeMode === 'anisotropic' ? 'anisotropic_margin' : 
             'directional_margin',
       parameters,
       structureId: selectedStructure.id,
+      targetStructureId: targetId || undefined,
       preview: false
     });
 
@@ -287,16 +321,6 @@ export function MarginToolbar({
                 <span className="text-xs font-medium">Directional</span>
               </Button>
               
-              {/* Settings toggle */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSettings(!showSettings)}
-                className="h-7 w-7 p-0 bg-white/10 border-2 border-white/30 text-white hover:bg-white/20 rounded-lg backdrop-blur-sm shadow-sm"
-              >
-                <Settings2 className="w-3 h-3" />
-              </Button>
-              
               {/* Separator */}
               <div className="w-px h-6 bg-white/30 mx-2" />
               
@@ -346,14 +370,55 @@ export function MarginToolbar({
             </Button>
           </div>
           
-          {/* Settings panel */}
-          {showSettings && (
-            <div className="mt-3 border-t border-white/20 pt-2">
-              {activeMode === 'uniform' && renderUniformSettings()}
-              {activeMode === 'anisotropic' && renderAnisotropicSettings()}
-              {activeMode === 'directional' && renderDirectionalSettings()}
+          {/* Settings panel - always visible */}
+          <div className="mt-3 border-t border-white/20 pt-2">
+            {/* Target Structure Selector */}
+            <div className="flex items-center space-x-3 p-3 mb-2">
+              <Label className="text-xs text-white/70">Target Structure:</Label>
+              <Select value={targetStructure} onValueChange={(value: 'same' | 'different' | 'new') => setTargetStructure(value)}>
+                <SelectTrigger className="w-48 h-7 bg-white/10 border-white/30 text-white text-xs">
+                  <SelectValue placeholder="Select target" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-gray-700">
+                  <SelectItem value="same" className="text-white text-xs hover:bg-gray-800">
+                    Same Structure (Modify)
+                  </SelectItem>
+                  <SelectItem value="different" className="text-white text-xs hover:bg-gray-800">
+                    Different Structure
+                  </SelectItem>
+                  <SelectItem value="new" className="text-white text-xs hover:bg-gray-800">
+                    <div className="flex items-center">
+                      <Plus className="w-3 h-3 mr-1" />
+                      New Structure
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {targetStructure === 'different' && (
+                <Select value={selectedTargetId?.toString()} onValueChange={(value) => setSelectedTargetId(parseInt(value))}>
+                  <SelectTrigger className="w-40 h-7 bg-white/10 border-white/30 text-white text-xs">
+                    <SelectValue placeholder="Select structure" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700">
+                    {availableStructures
+                      .filter(s => s.id !== selectedStructure.id)
+                      .map(structure => (
+                        <SelectItem key={structure.id} value={structure.id.toString()} className="text-white text-xs hover:bg-gray-800">
+                          {structure.name}
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              )}
             </div>
-          )}
+            
+            {/* Mode-specific settings */}
+            {activeMode === 'uniform' && renderUniformSettings()}
+            {activeMode === 'anisotropic' && renderAnisotropicSettings()}
+            {activeMode === 'directional' && renderDirectionalSettings()}
+          </div>
           
           {/* Preview status */}
           {isPreviewActive && (

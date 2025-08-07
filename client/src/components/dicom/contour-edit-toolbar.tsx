@@ -53,7 +53,7 @@ interface ContourEditToolbarProps {
   onClose: () => void;
   onStructureNameChange: (name: string) => void;
   onStructureColorChange: (color: string) => void;
-  onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean; predictionEnabled?: boolean }) => void;
+  onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean; predictionEnabled?: boolean; smartBrushEnabled?: boolean }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
   onAutoZoomSettingsChange?: (settings: {

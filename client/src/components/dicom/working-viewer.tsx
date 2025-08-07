@@ -12,7 +12,8 @@ import PenToolV2 from "./pen-tool-v2";
 import { FusionControlPanel } from "./fusion-control-panel";
 import { MeasurementTool } from "./measurement-tool";
 import { BrushOperation } from "@shared/schema";
-import { growContour, smoothContour } from "@/lib/contour-grow";
+import { growContour } from "@/lib/contour-grow";
+import { gaussianSmoothContour as smoothContour } from "@/lib/contour-smooth-simple";
 import {
   addBrushToContour,
   eraseBrushFromContour,
@@ -740,21 +741,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const marginValue = parameters.margin || 5;
       console.log('🔹 📊 Applying 3D margin value:', marginValue);
 
-      // Import the 3D volumetric margin operation handler
-      const { apply3DMargin } = await import('@/lib/volumetric-margin-operations');
+      // Import the optimized 3D volumetric margin operation handler
+      const { apply3DMarginOptimized } = await import('@/lib/volumetric-margin-operations-optimized');
       
       // Get pixel spacing from image metadata
       const pixelSpacing: [number, number, number] = imageMetadata?.pixelSpacing 
         ? [imageMetadata.pixelSpacing[0], imageMetadata.pixelSpacing[1], imageMetadata.sliceThickness || 2]
         : [1, 1, 2];
       
-      console.log('🔹 Using pixel spacing for 3D operation:', pixelSpacing);
+      console.log('🔹 Using pixel spacing for optimized 3D operation:', pixelSpacing);
       
-      // Apply 3D volumetric margin
-      const modifiedContours = await apply3DMargin(
+      // Apply optimized 3D volumetric margin with caching
+      const modifiedContours = await apply3DMarginOptimized(
         structure.contours,
         marginValue,
-        pixelSpacing
+        pixelSpacing,
+        true // Use cache for preview
       );
       
       // Create preview contours
@@ -805,8 +807,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       
-      // Import the 3D volumetric margin operation handler
-      const { apply3DMargin } = await import('@/lib/volumetric-margin-operations');
+      // Import the optimized 3D volumetric margin operation handler
+      const { apply3DMarginOptimized, clearGridCache } = await import('@/lib/volumetric-margin-operations-optimized');
       
       // Get pixel spacing from image metadata
       const pixelSpacing: [number, number, number] = imageMetadata?.pixelSpacing 
@@ -814,15 +816,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         : [1, 1, 2];
       
       const marginValue = parameters.margin || 5;
-      console.log(`🔹 Applying 3D volumetric margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
+      console.log(`🔹 Applying optimized 3D volumetric margin of ${marginValue}mm to ${structure.contours?.length || 0} contours`);
       console.log('🔹 Using pixel spacing:', pixelSpacing);
       
-      // Apply 3D volumetric margin
-      const modifiedContours = await apply3DMargin(
+      // Apply optimized 3D volumetric margin (don't use cache for execution)
+      const modifiedContours = await apply3DMarginOptimized(
         structure.contours,
         marginValue,
-        pixelSpacing
+        pixelSpacing,
+        false // Don't use cache for final execution
       );
+      
+      // Clear cache after execution to free memory
+      clearGridCache();
       
       // Replace the structure's contours with the modified ones
       structure.contours = modifiedContours;

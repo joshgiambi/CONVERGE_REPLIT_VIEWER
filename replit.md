@@ -3,7 +3,7 @@
 ## Overview
 Superbeam is a full-stack DICOM medical imaging application built with React, Express.js, and PostgreSQL. It enables users to upload, manage, and view medical images with advanced DICOM metadata handling and contour editing capabilities, functioning as a PACS-like interface for medical imaging workflows. The project aims to provide a robust, high-performance system for medical image analysis and manipulation, with a focus on accurate multi-modal fusion.
 
-## Recent Changes (August 1-6, 2025)
+## Recent Changes (August 1-7, 2025)
 - **Enhanced Tooltip System**: Redesigned tooltips with glassmorphic design featuring gradient backgrounds, backdrop blur, and instant display (0ms delay). Each tooltip now has vibrant color-coded gradients matching the button theme (blue for visibility, yellow for nesting, orange for sorting, etc.)
 - **Special Groups Support**: Extended expand/collapse functionality to work with special groups (zzAvoidance, zzRingLo, zzRingHi) in addition to regular L/R paired groups
 - **Structure Sorting**: Completed three-mode sorting system (A-Z, Z-A, By Position) with proper icon indicators and rendering logic fixes
@@ -21,6 +21,9 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **Consistency**: Replaced hardcoded tolerance values with SLICE_TOL_MM constant throughout codebase
 - **MPR Enhancement**: Added automatic cache invalidation on window/level changes for proper image updates
 - **Contour Interpolation Enhancement**: Fixed interpolation algorithm shrinkage issues using calculateCentroid3D function for proper centroid calculations and improved morphological operations
+- **3D Volumetric Margin Operations**: Successfully implemented true 3D volumetric dilation/erosion algorithms with optimized performance for medical-grade radiotherapy planning. Created volumetric-margin-operations-optimized.ts to address performance bottlenecks in real-time preview
+- **Margin Toolbar UI Improvements**: Removed settings button, made margin distances visible on launch with uniform expansion as default mode. Added Target Structure field allowing users to apply margins to existing/different/new structures
+- **Simplified Contour Smoothing**: Implemented gaussianSmoothContour function using weighted moving average for more predictable smoothing results compared to morphological operations
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
