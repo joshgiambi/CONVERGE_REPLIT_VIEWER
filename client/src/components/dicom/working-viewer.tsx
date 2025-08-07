@@ -864,7 +864,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Choose algorithm based on margin parameters and structure size
       let use3D = Math.abs(marginValue) > 2 || (sourceStructure.contours?.length || 0) > 5;
-      let processedContours = [];
+      let processedContours: any[] = [];
       
       if (use3D) {
         console.log(`🚀 Using fast 3D margin algorithm for ${marginValue}mm margin`);
@@ -1113,7 +1113,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       } else {
         console.log("🔹 Margin execution request from toolbar:", payload);
-        await handleSimpleMarginExecution({
+        await handleAdvancedMarginExecution({
+          action: 'execute_margin',
           structureId: payload.structureId,
           targetStructureId: payload.targetStructureId,
           parameters: payload.parameters
