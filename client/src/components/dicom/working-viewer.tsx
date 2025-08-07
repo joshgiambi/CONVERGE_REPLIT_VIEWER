@@ -747,26 +747,70 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       console.log('🔹 Using pixel spacing for optimized 3D operation:', pixelSpacing);
       
-      // Apply optimized 3D volumetric margin with caching
-      const modifiedContours = await apply3DMarginOptimized(
-        structure.contours,
-        marginValue,
-        pixelSpacing,
-        true // Use cache for preview
-      );
+      // Use fast 3D algorithm for preview if margin is large enough
+      const useFast3D = Math.abs(marginValue) > 1;
       
-      // Create preview contours
-      const previewContoursWithSlices: any[] = modifiedContours.map((contour: any) => ({
-        points: contour.points,
-        slicePosition: contour.slicePosition,
-        isPreview: true,
-        previewColor: '#FFFF00'  // Yellow for preview
-      }));
-      
-      console.log(`🔹 ✅ Generated ${previewContoursWithSlices.length} preview contours using 3D volumetric operation`);
-      
-      // Set the preview contours
-      setPreviewContours(previewContoursWithSlices);
+      if (useFast3D) {
+        console.log(`🚀 Using fast 3D preview for ${marginValue}mm margin`);
+        
+        const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
+        
+        // Get image metadata for 3D processing
+        const currentImage = images?.[currentImageIndex];
+        const imgPixelSpacing = currentImage?.pixelSpacing || [1, 1];
+        const sliceThickness = 2; // Default slice thickness
+        
+        const fast3DResults = await applyFast3DMargin(
+          structure.contours,
+          {
+            marginMm: marginValue,
+            pixelSpacing: [imgPixelSpacing[0], imgPixelSpacing[1], sliceThickness],
+            imageMetadata: {
+              imagePosition: [0, 0, 0], // Will be calculated from contours
+              imageSize: { width: 512, height: 512, depth: 100 }
+            },
+            useOptimizedAlgorithm: true,
+            maxProcessingTime: 5000 // 5 seconds max for preview
+          }
+        );
+        
+        // Create preview contours
+        const previewContoursWithSlices: any[] = fast3DResults.map((contour: any) => ({
+          points: contour.points,
+          slicePosition: contour.slicePosition,
+          isPreview: true,
+          previewColor: '#FFFF00'  // Yellow for preview
+        }));
+        
+        console.log(`🚀 ✅ Generated ${previewContoursWithSlices.length} fast 3D preview contours`);
+        setPreviewContours(previewContoursWithSlices);
+        
+      } else {
+        // Use existing simple 2D preview for small margins
+        console.log(`🔹 Using 2D preview for small ${marginValue}mm margin`);
+        
+        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+        const previewContoursWithSlices: any[] = [];
+        
+        for (const contour of structure.contours) {
+          if (!contour.points || contour.points.length < 9) continue;
+          
+          try {
+            const expandedPoints = growContourSimple(contour.points, marginValue);
+            previewContoursWithSlices.push({
+              points: expandedPoints,
+              slicePosition: contour.slicePosition,
+              isPreview: true,
+              previewColor: '#FFFF00'  // Yellow for preview
+            });
+          } catch (error) {
+            console.warn(`Preview failed for contour at slice ${contour.slicePosition}:`, error);
+          }
+        }
+        
+        console.log(`🔹 ✅ Generated ${previewContoursWithSlices.length} 2D preview contours`);
+        setPreviewContours(previewContoursWithSlices);
+      }
     } catch (error) {
       console.error('🔹 ❌ 3D margin preview failed:', error);
       setPreviewContours([]);
@@ -819,26 +863,73 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const marginValue = parameters.marginValues?.uniform || parameters.margin || 5;
       console.log(`🔹 Applying simple margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
       
-      // Import the simple grow operation
-      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+      // Choose algorithm based on margin parameters and structure size
+      let use3D = Math.abs(marginValue) > 2 || (sourceStructure.contours?.length || 0) > 5;
+      let processedContours = [];
       
-      // Process each contour using the simple algorithm
-      const processedContours = [];
-      for (const contour of sourceStructure.contours || []) {
-        if (!contour.points || contour.points.length < 9) {
-          continue;
-        }
-        
+      if (use3D) {
+        console.log(`🚀 Using fast 3D margin algorithm for ${marginValue}mm margin`);
         try {
-          const expandedPoints = growContourSimple(contour.points, marginValue);
+          // Use fast 3D algorithm for true volumetric expansion
+          const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
           
-          processedContours.push({
+          // Get image metadata for 3D processing
+          const currentImage = images?.[currentImageIndex];
+          const pixelSpacing = currentImage?.pixelSpacing || [1, 1];
+          const sliceThickness = 2; // Default slice thickness
+          
+          const fast3DResults = await applyFast3DMargin(
+            sourceStructure.contours || [],
+            {
+              marginMm: marginValue,
+              pixelSpacing: [pixelSpacing[0], pixelSpacing[1], sliceThickness],
+              imageMetadata: {
+                imagePosition: [0, 0, 0], // Will be calculated from contours
+                imageSize: { width: 512, height: 512, depth: 100 }
+              },
+              useOptimizedAlgorithm: true,
+              maxProcessingTime: 15000 // 15 seconds max
+            }
+          );
+          
+          processedContours = fast3DResults.map(contour => ({
             slicePosition: contour.slicePosition,
-            points: expandedPoints,
-            numberOfPoints: expandedPoints.length / 3
-          });
+            points: contour.points,
+            numberOfPoints: contour.numberOfPoints || contour.points.length / 3
+          }));
+          
+          console.log(`🚀 ✅ Fast 3D margin generated ${processedContours.length} contours`);
+          
         } catch (error) {
-          console.warn(`Failed to process contour at slice ${contour.slicePosition}:`, error);
+          console.warn('🚀 ⚠️ Fast 3D margin failed, falling back to 2D:', error);
+          use3D = false; // Fall back to 2D
+        }
+      }
+      
+      if (!use3D || processedContours.length === 0) {
+        console.log(`🔹 Using 2D simple algorithm for ${marginValue}mm margin`);
+        
+        // Import the simple grow operation
+        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+        
+        // Process each contour using the simple algorithm
+        processedContours = [];
+        for (const contour of sourceStructure.contours || []) {
+          if (!contour.points || contour.points.length < 9) {
+            continue;
+          }
+          
+          try {
+            const expandedPoints = growContourSimple(contour.points, marginValue);
+            
+            processedContours.push({
+              slicePosition: contour.slicePosition,
+              points: expandedPoints,
+              numberOfPoints: expandedPoints.length / 3
+            });
+          } catch (error) {
+            console.warn(`Failed to process contour at slice ${contour.slicePosition}:`, error);
+          }
         }
       }
       
