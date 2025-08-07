@@ -116,31 +116,37 @@ async function applyFastSliceInterpolation(
   const sliceSpacing = Math.abs(pixelSpacing[2]);
   const newSlicesNeeded = Math.ceil(Math.abs(marginMm) / sliceSpacing);
   
-  // Add superior slices (above)
+  // Add superior/inferior expansion with more clinical accuracy
+  // Use a distance-based scaling that mimics 3D morphological dilation
   for (let i = 1; i <= newSlicesNeeded; i++) {
-    const newSlicePosition = maxSlice + (i * sliceSpacing);
-    const scaleFactor = Math.max(0.2, 0.8 - (i * 0.15)); // Gradually shrink but keep minimum size
-    const interpolatedContours = interpolateSliceContours(
+    const distanceFromOriginal = i * sliceSpacing;
+    const remainingMargin = Math.max(0, Math.abs(marginMm) - distanceFromOriginal);
+    
+    // Use remaining margin to calculate scale factor - more clinically accurate
+    const scaleFactor = remainingMargin > 0 ? 
+      Math.min(1.0, remainingMargin / Math.abs(marginMm)) : 
+      0.1; // Keep small contour even when margin is exceeded
+    
+    // Add superior slice (above)
+    const newSlicePositionSup = maxSlice + (i * sliceSpacing);
+    const interpolatedContoursSup = await interpolateSliceContours(
       processedSlices.get(maxSlice) || [],
-      newSlicePosition,
+      newSlicePositionSup,
       scaleFactor
     );
-    if (interpolatedContours.length > 0) {
-      processedSlices.set(newSlicePosition, interpolatedContours);
+    if (interpolatedContoursSup.length > 0) {
+      processedSlices.set(newSlicePositionSup, interpolatedContoursSup);
     }
-  }
-  
-  // Add inferior slices (below)
-  for (let i = 1; i <= newSlicesNeeded; i++) {
-    const newSlicePosition = minSlice - (i * sliceSpacing);
-    const scaleFactor = Math.max(0.2, 0.8 - (i * 0.15)); // Gradually shrink but keep minimum size
-    const interpolatedContours = interpolateSliceContours(
+    
+    // Add inferior slice (below) 
+    const newSlicePositionInf = minSlice - (i * sliceSpacing);
+    const interpolatedContoursInf = await interpolateSliceContours(
       processedSlices.get(minSlice) || [],
-      newSlicePosition,
+      newSlicePositionInf,
       scaleFactor
     );
-    if (interpolatedContours.length > 0) {
-      processedSlices.set(newSlicePosition, interpolatedContours);
+    if (interpolatedContoursInf.length > 0) {
+      processedSlices.set(newSlicePositionInf, interpolatedContoursInf);
     }
   }
   
@@ -157,40 +163,58 @@ async function applyFastSliceInterpolation(
 /**
  * Simple contour interpolation for new slices
  */
-function interpolateSliceContours(
+async function interpolateSliceContours(
   sourceContours: FastContour3D[],
   newSlicePosition: number,
   scaleFactor: number = 1.0
-): FastContour3D[] {
+): Promise<FastContour3D[]> {
   const interpolatedContours: FastContour3D[] = [];
   
   for (const sourceContour of sourceContours) {
     if (!sourceContour.points || sourceContour.points.length < 9) continue; // Need at least 3 points
     
     try {
-      // Calculate centroid for proper scaling
-      let centerX = 0, centerY = 0;
-      const numPoints = sourceContour.points.length / 3;
-      
-      for (let i = 0; i < sourceContour.points.length; i += 3) {
-        centerX += sourceContour.points[i];
-        centerY += sourceContour.points[i + 1];
-      }
-      centerX /= numPoints;
-      centerY /= numPoints;
-      
+      // Use more sophisticated interpolation that mimics 3D morphological operations
       const newPoints: number[] = [];
       
-      // Scale points around centroid
-      for (let i = 0; i < sourceContour.points.length; i += 3) {
-        const x = sourceContour.points[i];
-        const y = sourceContour.points[i + 1];
+      // If scaling down significantly, apply 2D shrinking first for better accuracy
+      if (scaleFactor < 0.8) {
+        // Import the growContourSimple function to apply negative margin (shrink)
+        const { growContourSimple } = await import('./simple-polygon-operations');
+        const shrinkAmount = -(1.0 - scaleFactor) * 2.0; // Convert scale to negative margin
         
-        // Scale towards/away from centroid
-        const scaledX = centerX + (x - centerX) * scaleFactor;
-        const scaledY = centerY + (y - centerY) * scaleFactor;
+        try {
+          const shrunkPoints = growContourSimple(sourceContour.points, shrinkAmount);
+          // Update Z coordinate to new slice position
+          for (let i = 0; i < shrunkPoints.length; i += 3) {
+            newPoints.push(shrunkPoints[i], shrunkPoints[i + 1], newSlicePosition);
+          }
+        } catch (error) {
+          // Fallback to centroid scaling if shrinking fails
+          console.warn('Shrinking failed, using centroid scaling:', error);
+          const centerX = sourceContour.points.reduce((sum, _, i) => i % 3 === 0 ? sum + sourceContour.points[i] : sum, 0) / (sourceContour.points.length / 3);
+          const centerY = sourceContour.points.reduce((sum, _, i) => i % 3 === 1 ? sum + sourceContour.points[i] : sum, 0) / (sourceContour.points.length / 3);
+          
+          for (let i = 0; i < sourceContour.points.length; i += 3) {
+            const x = sourceContour.points[i];
+            const y = sourceContour.points[i + 1];
+            const scaledX = centerX + (x - centerX) * scaleFactor;
+            const scaledY = centerY + (y - centerY) * scaleFactor;
+            newPoints.push(scaledX, scaledY, newSlicePosition);
+          }
+        }
+      } else {
+        // For mild scaling, use simple centroid-based approach
+        const centerX = sourceContour.points.reduce((sum, _, i) => i % 3 === 0 ? sum + sourceContour.points[i] : sum, 0) / (sourceContour.points.length / 3);
+        const centerY = sourceContour.points.reduce((sum, _, i) => i % 3 === 1 ? sum + sourceContour.points[i] : sum, 0) / (sourceContour.points.length / 3);
         
-        newPoints.push(scaledX, scaledY, newSlicePosition);
+        for (let i = 0; i < sourceContour.points.length; i += 3) {
+          const x = sourceContour.points[i];
+          const y = sourceContour.points[i + 1];
+          const scaledX = centerX + (x - centerX) * scaleFactor;
+          const scaledY = centerY + (y - centerY) * scaleFactor;
+          newPoints.push(scaledX, scaledY, newSlicePosition);
+        }
       }
       
       if (newPoints.length >= 9) {
