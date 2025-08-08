@@ -759,6 +759,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           onMPRToggle={() => {
             setMprVisible(!mprVisible);
+            setViewMode(prevMode => prevMode === 'single' ? 'mpr' : 'single');
           }}
           isMPRActive={mprVisible}
           isPanActive={activeToolMode === 'pan'}
