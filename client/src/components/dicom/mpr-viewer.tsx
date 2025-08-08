@@ -6,8 +6,6 @@ import { ChevronLeft, ChevronRight, RotateCw, ZoomIn, ZoomOut } from 'lucide-rea
 
 interface MPRViewerProps {
   seriesId: number;
-  rtStructures?: any;
-  structureVisibility?: Map<number, boolean>;
 }
 
 interface VolumeData {
@@ -19,7 +17,7 @@ interface VolumeData {
   origin: [number, number, number];
 }
 
-export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRViewerProps) {
+export function MPRViewer({ seriesId }: MPRViewerProps) {
   const axialCanvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -77,17 +75,11 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
       // Get pixel spacing and slice thickness
       const pixelSpacing = firstDataSet.string('x00280030')?.split('\\') || ['1', '1'];
       const sliceThickness = parseFloat(firstDataSet.string('x00180050') || '1');
-      const imagePosition = firstDataSet.string('x00200032')?.split('\\') || ['0', '0', '0'];
-
+      
       const spacing: [number, number, number] = [
         parseFloat(pixelSpacing[0]),
         parseFloat(pixelSpacing[1]),
         sliceThickness
-      ];
-      const origin: [number, number, number] = [
-        parseFloat(imagePosition[0]),
-        parseFloat(imagePosition[1]),
-        parseFloat(imagePosition[2])
       ];
       
       // Initialize volume data
@@ -118,7 +110,7 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
         depth,
         data: volumeArray,
         spacing,
-        origin
+        origin: [0, 0, 0]
       };
       
       setVolumeData(volume);
@@ -190,17 +182,16 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
     }
     
     ctx.putImageData(imageData, 0, 0);
-    drawAxialContours(ctx);
     drawCrosshair(ctx, crosshair.x, crosshair.y, 'red');
   };
 
   const renderSagittalView = () => {
     const canvas = sagittalCanvasRef.current;
     if (!canvas || !volumeData) return;
-
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
+    
     canvas.width = volumeData.depth;
     canvas.height = volumeData.height;
     
@@ -223,7 +214,6 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
     }
     
     ctx.putImageData(imageData, 0, 0);
-    drawSagittalContours(ctx);
     drawCrosshair(ctx, crosshair.z, crosshair.y, 'green');
   };
 
@@ -256,7 +246,6 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
     }
     
     ctx.putImageData(imageData, 0, 0);
-    drawCoronalContours(ctx);
     drawCrosshair(ctx, crosshair.x, crosshair.z, 'blue');
   };
 
@@ -289,103 +278,6 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
     ctx.stroke();
     
     ctx.setLineDash([]);
-  };
-
-  const drawAxialContours = (ctx: CanvasRenderingContext2D) => {
-    if (!rtStructures || !volumeData) return;
-    const zPos = crosshair.z;
-    const sliceZ = volumeData.origin[2] + zPos * volumeData.spacing[2];
-    for (const structure of rtStructures.structures || []) {
-      if (structureVisibility && !structureVisibility.get(structure.roiNumber)) continue;
-      ctx.strokeStyle = `rgb(${structure.color.join(',')})`;
-      ctx.lineWidth = 1;
-      for (const contour of structure.contours) {
-        if (Math.abs(contour.slicePosition - sliceZ) > volumeData.spacing[2] / 2) continue;
-        ctx.beginPath();
-        const pts = contour.points;
-        for (let i = 0; i < pts.length; i += 3) {
-          const x = (pts[i] - volumeData.origin[0]) / volumeData.spacing[0];
-          const y = (pts[i + 1] - volumeData.origin[1]) / volumeData.spacing[1];
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.stroke();
-      }
-    }
-  };
-
-  const drawSagittalContours = (ctx: CanvasRenderingContext2D) => {
-    if (!rtStructures || !volumeData) return;
-    const planeX = crosshair.x * volumeData.spacing[0] + volumeData.origin[0];
-    for (const structure of rtStructures.structures || []) {
-      if (structureVisibility && !structureVisibility.get(structure.roiNumber)) continue;
-      ctx.strokeStyle = `rgb(${structure.color.join(',')})`;
-      ctx.lineWidth = 1;
-      for (const contour of structure.contours) {
-        const pts = contour.points;
-        const zIndex = Math.round((contour.slicePosition - volumeData.origin[2]) / volumeData.spacing[2]);
-        const intersections: number[] = [];
-        for (let i = 0; i < pts.length; i += 3) {
-          const x1 = pts[i];
-          const y1 = pts[i + 1];
-          const x2 = pts[(i + 3) % pts.length];
-          const y2 = pts[(i + 4) % pts.length];
-          if ((x1 <= planeX && x2 >= planeX) || (x2 <= planeX && x1 >= planeX)) {
-            const t = (planeX - x1) / (x2 - x1);
-            const y = y1 + t * (y2 - y1);
-            const yPix = (y - volumeData.origin[1]) / volumeData.spacing[1];
-            intersections.push(yPix);
-          }
-        }
-        intersections.sort((a, b) => a - b);
-        for (let k = 0; k < intersections.length; k += 2) {
-          const y1 = intersections[k];
-          const y2 = intersections[k + 1];
-          if (y2 === undefined) continue;
-          ctx.beginPath();
-          ctx.moveTo(zIndex, y1);
-          ctx.lineTo(zIndex, y2);
-          ctx.stroke();
-        }
-      }
-    }
-  };
-
-  const drawCoronalContours = (ctx: CanvasRenderingContext2D) => {
-    if (!rtStructures || !volumeData) return;
-    const planeY = crosshair.y * volumeData.spacing[1] + volumeData.origin[1];
-    for (const structure of rtStructures.structures || []) {
-      if (structureVisibility && !structureVisibility.get(structure.roiNumber)) continue;
-      ctx.strokeStyle = `rgb(${structure.color.join(',')})`;
-      ctx.lineWidth = 1;
-      for (const contour of structure.contours) {
-        const pts = contour.points;
-        const zIndex = Math.round((contour.slicePosition - volumeData.origin[2]) / volumeData.spacing[2]);
-        const intersections: number[] = [];
-        for (let i = 0; i < pts.length; i += 3) {
-          const x1 = pts[i];
-          const y1 = pts[i + 1];
-          const x2 = pts[(i + 3) % pts.length];
-          const y2 = pts[(i + 4) % pts.length];
-          if ((y1 <= planeY && y2 >= planeY) || (y2 <= planeY && y1 >= planeY)) {
-            const t = (planeY - y1) / (y2 - y1);
-            const x = x1 + t * (x2 - x1);
-            const xPix = (x - volumeData.origin[0]) / volumeData.spacing[0];
-            intersections.push(xPix);
-          }
-        }
-        intersections.sort((a, b) => a - b);
-        for (let k = 0; k < intersections.length; k += 2) {
-          const x1 = intersections[k];
-          const x2 = intersections[k + 1];
-          if (x2 === undefined) continue;
-          ctx.beginPath();
-          ctx.moveTo(x1, zIndex);
-          ctx.lineTo(x2, zIndex);
-          ctx.stroke();
-        }
-      }
-    }
   };
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>, view: 'axial' | 'sagittal' | 'coronal') => {
@@ -489,52 +381,32 @@ export function MPRViewer({ seriesId, rtStructures, structureVisibility }: MPRVi
         </div>
       </div>
 
+      {/* Axial View Only */}
       <div className="flex-1 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
-          {/* Axial View */}
-          <div className="relative bg-black border border-indigo-700 rounded">
-            <div className="absolute top-2 left-2 z-10">
-              <Badge className="bg-red-900 text-red-200">Axial View</Badge>
-            </div>
-            <canvas
-              ref={axialCanvasRef}
-              onClick={(e) => handleCanvasClick(e, 'axial')}
-              className="w-full h-full object-contain cursor-crosshair"
-              style={{ imageRendering: 'pixelated' }}
-            />
+        <div className="relative bg-black border border-indigo-700 rounded h-full">
+          <div className="absolute top-2 left-2 z-10">
+            <Badge className="bg-red-900 text-red-200">Axial View</Badge>
           </div>
-
-          {/* Sagittal View */}
-          <div className="relative bg-black border border-indigo-700 rounded hidden md:block">
-            <div className="absolute top-2 left-2 z-10">
-              <Badge className="bg-green-900 text-green-200">Sagittal View</Badge>
-            </div>
-            <canvas
-              ref={sagittalCanvasRef}
-              onClick={(e) => handleCanvasClick(e, 'sagittal')}
-              className="w-full h-full object-contain cursor-crosshair"
-              style={{ imageRendering: 'pixelated' }}
-            />
+          <div className="absolute top-2 right-2 z-10">
+            <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+              Slice {crosshair.z + 1} / {volumeData?.depth || 0}
+            </Badge>
           </div>
-
-          {/* Coronal View */}
-          <div className="relative bg-black border border-indigo-700 rounded hidden md:block">
-            <div className="absolute top-2 left-2 z-10">
-              <Badge className="bg-blue-900 text-blue-200">Coronal View</Badge>
+          <canvas
+            ref={axialCanvasRef}
+            onClick={(e) => handleCanvasClick(e, 'axial')}
+            className="w-full h-full object-contain cursor-crosshair"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          
+          {/* Volume Info Overlay */}
+          {volumeData && (
+            <div className="absolute bottom-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
+              <div>Size: {volumeData.width} × {volumeData.height} × {volumeData.depth}</div>
+              <div>Spacing: {volumeData.spacing.map(s => s.toFixed(1)).join(' × ')} mm</div>
             </div>
-            <canvas
-              ref={coronalCanvasRef}
-              onClick={(e) => handleCanvasClick(e, 'coronal')}
-              className="w-full h-full object-contain cursor-crosshair"
-              style={{ imageRendering: 'pixelated' }}
-            />
-          </div>
+          )}
         </div>
-        {volumeData && (
-          <div className="mt-2 text-xs text-indigo-300">
-            Size: {volumeData.width} × {volumeData.height} × {volumeData.depth} | Spacing: {volumeData.spacing.map(s => s.toFixed(1)).join(' × ')} mm
-          </div>
-        )}
       </div>
     </Card>
   );

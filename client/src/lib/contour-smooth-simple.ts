@@ -25,9 +25,8 @@ export function smoothContour(
     points2D.push([points[i], points[i + 1]]);
   }
   
-  // Clamp smoothing factor to valid range and apply weighted moving average
-  const safeFactor = Math.min(Math.max(smoothingFactor, 0), 1);
-  const smoothed2D = smoothPoints2D(points2D, safeFactor);
+  // Apply weighted moving average
+  const smoothed2D = smoothPoints2D(points2D, smoothingFactor);
   
   // Convert back to 3D points
   const smoothedPoints: number[] = [];

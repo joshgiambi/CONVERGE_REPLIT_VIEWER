@@ -206,7 +206,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const mprCacheRef = useRef<Map<string, { data: Uint16Array; width: number; height: number }>>(new Map());
-  const metadataCacheRef = useRef<Map<number, any>>(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
@@ -2555,7 +2554,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const loadImages = async () => {
     try {
-      metadataCacheRef.current.clear();
       // Check if images are already cached
       if (imageCache?.current.has(seriesId.toString())) {
         const cached = imageCache.current.get(seriesId.toString());
@@ -2985,24 +2983,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const loadImageMetadata = async (imageId: number) => {
-    // Return cached metadata if available
-    const cached = metadataCacheRef.current.get(imageId);
-    if (cached) {
-      setImageMetadata(cached);
-      if (onImageMetadataChange) {
-        onImageMetadataChange(cached);
-      }
-      return;
-    }
-
     try {
       const response = await fetch(`/api/images/${imageId}/metadata`);
       if (response.ok) {
         const metadata = await response.json();
-        metadataCacheRef.current.set(imageId, metadata);
         console.log("Image metadata:", metadata);
         setImageMetadata(metadata);
-
+        
         // Notify parent component of metadata change
         if (onImageMetadataChange) {
           onImageMetadataChange(metadata);

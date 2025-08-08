@@ -61,7 +61,7 @@ export function BooleanOperationsToolbar({
 
     // Extract potential structure names (letters, numbers, underscores)
     const potentialStructures = expr.match(/[A-Za-z][A-Za-z0-9_#-]*/g) || [];
-
+    
     // Check for unknown structures
     const unknownStructures = potentialStructures.filter(name => {
       // Skip operators and keywords
@@ -70,23 +70,7 @@ export function BooleanOperationsToolbar({
     });
 
     if (unknownStructures.length > 0) {
-      unknownStructures.forEach(name => errors.push(`Unknown structure: ${name}`));
-    }
-
-    // Basic parentheses balance check
-    let balance = 0;
-    for (const ch of expr) {
-      if (ch === '(') balance++;
-      else if (ch === ')') {
-        balance--;
-        if (balance < 0) {
-          errors.push('Unmatched closing parenthesis');
-          break;
-        }
-      }
-    }
-    if (balance > 0) {
-      errors.push('Unmatched opening parenthesis');
+      errors.push(...unknownStructures);
     }
 
     setSyntaxErrors(errors);
@@ -358,10 +342,7 @@ export function BooleanOperationsToolbar({
               
               {/* Syntax validation indicator */}
               {syntaxErrors.length > 0 && (
-                <div
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400 z-30"
-                  title={syntaxErrors[0]}
-                >
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-red-400 z-30">
                   <span className="text-xs">⚠</span>
                 </div>
               )}

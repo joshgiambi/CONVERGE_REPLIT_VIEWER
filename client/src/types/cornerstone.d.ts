@@ -48,7 +48,7 @@ declare module 'cornerstone-wado-image-loader' {
   };
 
   export function configure(options: any): void;
-  export const webWorkerManager: {
+  export function webWorkerManager: {
     initialize: (config: any) => void;
   };
 }

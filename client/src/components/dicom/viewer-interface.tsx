@@ -759,7 +759,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           onMPRToggle={() => {
             setMprVisible(!mprVisible);
-            setViewMode(prevMode => prevMode === 'single' ? 'mpr' : 'single');
           }}
           isMPRActive={mprVisible}
           isPanActive={activeToolMode === 'pan'}
@@ -827,45 +826,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           isVisible={showBooleanOperations}
           onClose={() => setShowBooleanOperations(false)}
           availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
-          onExecuteOperation={async (expression, newStructure) => {
-            if (!rtStructures) return;
-
-            // Support optional assignment using '=' syntax
-            let targetName: string | undefined;
-            let expr = expression;
-            if (expression.includes('=')) {
-              const parts = expression.split('=');
-              targetName = parts[0].trim();
-              expr = parts.slice(1).join('=').trim();
+          onExecuteOperation={(expression, newStructure) => {
+            console.log('Executing boolean operation:', expression, newStructure);
+            // TODO: Implement boolean operation execution
+            if (newStructure?.createNewStructure) {
+              console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
             }
-
-            try {
-              const { evaluateBooleanExpression } = await import('@/lib/boolean-expression');
-              const resultContours = await evaluateBooleanExpression(expr, rtStructures.structures);
-
-              const name = targetName || newStructure?.name || 'Result';
-              const colorHex = newStructure?.color || '#FFFFFF';
-              const rgb: [number, number, number] = [
-                parseInt(colorHex.slice(1, 3), 16),
-                parseInt(colorHex.slice(3, 5), 16),
-                parseInt(colorHex.slice(5, 7), 16)
-              ];
-
-              let structure = rtStructures.structures.find((s: any) => s.structureName === name);
-              if (!structure) {
-                const newId = Math.max(0, ...rtStructures.structures.map((s: any) => s.roiNumber)) + 1;
-                structure = { roiNumber: newId, structureName: name, color: rgb, contours: [] };
-                rtStructures.structures.push(structure);
-              }
-
-              structure.color = rgb;
-              structure.contours = resultContours;
-              setRTStructures({ ...rtStructures });
-            } catch (err) {
-              console.error('Boolean operation failed', err);
-            } finally {
-              setShowBooleanOperations(false);
-            }
+            setShowBooleanOperations(false);
           }}
         />
       )}
