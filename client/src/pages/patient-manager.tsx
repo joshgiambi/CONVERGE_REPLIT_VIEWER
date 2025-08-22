@@ -604,7 +604,7 @@ export default function PatientManager() {
       {/* Header matching viewer interface */}
       <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between w-full">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
               <div>
                 <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                   <span style={{
@@ -656,6 +656,19 @@ export default function PatientManager() {
                     fontWeight: '900'
                   }}>M</span>
                 </h1>
+              </div>
+              
+              {/* Quick Actions */}
+              <div className="flex items-center gap-3">
+                <Link href="/upload">
+                  <Button 
+                    className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-lg transition-all duration-200 hover:shadow-purple-500/25"
+                    size="sm"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload DICOM Files
+                  </Button>
+                </Link>
               </div>
             </div>
           </div>

@@ -7,11 +7,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Viewer from "@/pages/viewer";
 import PatientManager from "@/pages/patient-manager";
 import NotFound from "@/pages/not-found";
+import UploadPage from "@/pages/upload";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={PatientManager} />
+      <Route path="/upload" component={UploadPage} />
       <Route path="/viewer" component={Viewer} />
       <Route path="/dicom-viewer" component={Viewer} />
       <Route path="/enhanced-viewer" component={Viewer} />

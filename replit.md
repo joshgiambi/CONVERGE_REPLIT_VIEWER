@@ -3,7 +3,7 @@
 ## Overview
 Superbeam is a full-stack DICOM medical imaging application built with React, Express.js, and PostgreSQL. It enables users to upload, manage, and view medical images with advanced DICOM metadata handling and contour editing capabilities, functioning as a PACS-like interface for medical imaging workflows. The project aims to provide a robust, high-performance system for medical image analysis and manipulation, with a focus on accurate multi-modal fusion.
 
-## Recent Changes (August 1-7, 2025)
+## Recent Changes (August 1-22, 2025)
 - **Enhanced Tooltip System**: Redesigned tooltips with glassmorphic design featuring gradient backgrounds, backdrop blur, and instant display (0ms delay). Each tooltip now has vibrant color-coded gradients matching the button theme (blue for visibility, yellow for nesting, orange for sorting, etc.)
 - **Special Groups Support**: Extended expand/collapse functionality to work with special groups (zzAvoidance, zzRingLo, zzRingHi) in addition to regular L/R paired groups
 - **Structure Sorting**: Completed three-mode sorting system (A-Z, Z-A, By Position) with proper icon indicators and rendering logic fixes
@@ -27,6 +27,8 @@ Superbeam is a full-stack DICOM medical imaging application built with React, Ex
 - **Margin Operations Architecture**: Completed comprehensive three-layer margin system with MarginToolbar (UI) → WorkingViewer (routing) → Simple-polygon-operations (algorithm). Fixed critical direction logic where positive values now expand and negative values shrink contours correctly. User testing confirms margin expansion works excellently with current simple polygon approach, though uniform mode may have limited superior/inferior expansion due to 2D slice-by-slice processing rather than true 3D volumetric operations
 - **Fast 3D Margin Operations**: Created new fast-3d-margin-operations.ts with optimized hybrid approach for reliable and fast 3D expansion. Integrated fast 3D algorithm into working-viewer.tsx handlers for both preview and execution operations. System automatically chooses between 3D volumetric operations for larger margins (>2mm) and 2D simple operations for smaller margins, with automatic fallback for reliability. Addresses user-identified limitation of missing superior/inferior expansion in uniform mode
 - **Fixed Fast 3D Algorithm Crashes**: Completely rewrote fast-3d-margin-operations.ts to fix TypeScript compilation errors causing app crashes. Removed duplicate function implementations, fixed syntax errors, and simplified the algorithm to focus on reliable slice interpolation approach. System now generates new contours above and below structures for true 3D superior/inferior expansion without RangeError or ReferenceError crashes
+- **Simplified Upload UX**: Created new simplified upload component and dedicated upload page at `/upload` to address user confusion. Features clear status indicators, automatic import after processing, and direct navigation to patient view upon completion. Added prominent "Upload DICOM Files" button in patient manager header for easy access
+- **Backend Storage Recommendations**: Documented comprehensive storage strategy recommending hybrid approach with PostgreSQL for metadata and future object storage for DICOM files. Current filesystem storage is adequate for small-medium deployments but will need migration to object storage at 5-10TB scale for better performance and cost efficiency
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
