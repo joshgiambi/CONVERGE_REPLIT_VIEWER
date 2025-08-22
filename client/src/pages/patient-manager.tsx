@@ -657,19 +657,6 @@ export default function PatientManager() {
                   }}>M</span>
                 </h1>
               </div>
-              
-              {/* Quick Actions */}
-              <div className="flex items-center gap-3">
-                <Link href="/upload">
-                  <Button 
-                    className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-lg transition-all duration-200 hover:shadow-purple-500/25"
-                    size="sm"
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload DICOM Files
-                  </Button>
-                </Link>
-              </div>
             </div>
           </div>
         </header>
