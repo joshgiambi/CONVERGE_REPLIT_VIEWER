@@ -415,16 +415,49 @@ export async function renderFusionOverlay(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   
+  // DEBUG: Log final draw parameters before rendering
+  console.log('🔧 DEBUG - Final draw parameters:', {
+    drawX: drawX?.toFixed(1) || 'undefined',
+    drawY: drawY?.toFixed(1) || 'undefined', 
+    drawW: drawW?.toFixed(1) || 'undefined',
+    drawH: drawH?.toFixed(1) || 'undefined',
+    fusionOpacity,
+    canvasWidth,
+    canvasHeight,
+    isOnScreen: drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined ? 
+      (drawX < canvasWidth && drawY < canvasHeight && (drawX + drawW) > 0 && (drawY + drawH) > 0) : false
+  });
+  
   // Draw the MRI using the already calculated position and size
   if (drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined) {
+    
+    // TEMP: Draw a bright border to see where the MRI should appear
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'lime';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(drawX, drawY, drawW, drawH);
+    ctx.restore();
+    
     ctx.drawImage(temp, drawX, drawY, drawW, drawH);
     console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
+    console.log('🎯 MRI fusion should now be visible with lime border!');
   } else {
     // Fallback to centered positioning if calculations failed
     const centerX = (canvasWidth - w) / 2;
     const centerY = (canvasHeight - h) / 2;
+    
+    // TEMP: Draw a bright border for fallback too
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(centerX, centerY, w, h);
+    ctx.restore();
+    
     ctx.drawImage(temp, centerX, centerY, w, h);
     console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`);
+    console.log('🎯 MRI fusion fallback should now be visible with red border!');
   }
   
   console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
