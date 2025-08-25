@@ -99,38 +99,52 @@ export function SeriesSelector({
   // Auto-parse registration when REG series are available
   useEffect(() => {
     const regSeries = series.filter(s => s.modality === 'REG');
-    if (regSeries.length > 0 && studyId) {
-      // Auto-parse registration file for fusion
-      const parseRegistration = async () => {
-        try {
-          const response = await fetch(`/api/registrations/${studyId}/parse`, {
-            method: 'POST'
-          });
-          if (!response.ok) {
-            console.error('Failed to auto-parse registration:', await response.text());
-          } else {
-            console.log('Auto-parsed registration successfully for fusion');
-            
-            // Auto-activate fusion with CT as primary and PET/MR as secondary
-            const ctSeries = series.find(s => s.modality === 'CT');
-            const petSeries = series.find(s => s.modality === 'PT');
-            const mrSeries = series.find(s => s.modality === 'MR');
-            const secondarySeries = petSeries || mrSeries;
-            
-            if (ctSeries && secondarySeries && onSecondarySeriesSelect) {
-              const modality = secondarySeries.modality === 'PT' ? 'PET' : 'MR';
-              console.log(`Auto-activating fusion: CT(${ctSeries.id}) + ${modality}(${secondarySeries.id})`);
-              onSecondarySeriesSelect(secondarySeries.id);
+    if (regSeries.length > 0 && studyIds && studyIds.length > 0) {
+      // Try parsing registration for each study that might have REG data
+      const parseRegistrations = async () => {
+        for (const sid of studyIds) {
+          try {
+            const response = await fetch(`/api/registrations/${sid}/parse`, {
+              method: 'POST'
+            });
+            if (response.ok) {
+              console.log(`Auto-parsed registration successfully for study ${sid}`);
+              
+              // Find all available series for fusion - be flexible with modalities
+              const availableModalities = series.map(s => s.modality);
+              console.log('Available modalities for fusion:', availableModalities);
+              
+              // Smart fusion logic: prefer CT as primary, but be flexible
+              let primarySeries = series.find(s => s.modality === 'CT');
+              let secondarySeries = null;
+              
+              if (primarySeries) {
+                // CT as primary, find best secondary (PET > MR > other)
+                secondarySeries = series.find(s => s.modality === 'PT') || 
+                                series.find(s => s.modality === 'MR') ||
+                                series.find(s => s.modality !== 'CT' && s.modality !== 'RTSTRUCT');
+              } else {
+                // No CT, try other combinations
+                primarySeries = series.find(s => s.modality === 'MR');
+                secondarySeries = series.find(s => s.modality === 'PT') || 
+                                series.find(s => s.modality !== 'MR' && s.modality !== 'RTSTRUCT');
+              }
+              
+              if (primarySeries && secondarySeries && onSecondarySeriesSelect) {
+                console.log(`Auto-activating fusion: ${primarySeries.modality}(${primarySeries.id}) + ${secondarySeries.modality}(${secondarySeries.id})`);
+                onSecondarySeriesSelect(secondarySeries.id);
+                break; // Success, stop trying other studies
+              }
             }
+          } catch (error) {
+            console.warn(`Failed to parse registration for study ${sid}:`, error);
           }
-        } catch (error) {
-          console.error('Error auto-parsing registration:', error);
         }
       };
       
-      parseRegistration();
+      parseRegistrations();
     }
-  }, [series, studyId, onSecondarySeriesSelect]);
+  }, [series, studyIds, onSecondarySeriesSelect]);
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
