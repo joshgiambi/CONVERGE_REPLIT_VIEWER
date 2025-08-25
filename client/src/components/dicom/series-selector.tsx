@@ -639,7 +639,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-3 pb-3">
                 <div className="space-y-1">
-                  {/* Organize series hierarchically with CT as primary */}
+                  {/* Organize series hierarchically */}
                   {(() => {
                     const ctSeries = series.filter(s => s.modality === 'CT');
                     const mrSeries = series.filter(s => s.modality === 'MR');
@@ -650,10 +650,16 @@ export function SeriesSelector({
                     // Check if we have registration data
                     const hasRegistration = regSeries.length > 0;
                     
+                    // Determine primary series (CT if available, otherwise MR, PT, or others)
+                    const primarySeries = ctSeries.length > 0 ? ctSeries : 
+                                        mrSeries.length > 0 ? mrSeries : 
+                                        ptSeries.length > 0 ? ptSeries : 
+                                        otherSeries;
+                    
                     return (
                       <>
-                        {/* CT Series as Primary */}
-                        {ctSeries.map((seriesItem) => (
+                        {/* Primary Series (CT, MR, PT, or others) */}
+                        {primarySeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`
@@ -833,8 +839,49 @@ export function SeriesSelector({
                           </div>
                         ))}
                         
-                        {/* Other modalities (if any) */}
-                        {otherSeries.map((seriesItem) => (
+                        {/* MR Series as standalone when no CT present */}
+                        {ctSeries.length === 0 && mrSeries.length > 0 && mrSeries.map((seriesItem) => (
+                          <div key={seriesItem.id}>
+                            <div
+                              className={`
+                                p-2 rounded-lg border cursor-pointer transition-all duration-200 backdrop-blur-sm
+                                ${selectedSeries?.id === seriesItem.id
+                                  ? 'bg-purple-500/20 border-purple-400/50 shadow-lg shadow-purple-500/20'
+                                  : 'bg-gray-800/30 border-gray-700/30 hover:border-gray-600/50 hover:bg-gray-700/40'
+                                }
+                              `}
+                              onClick={() => onSeriesSelect(seriesItem)}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`
+                                    text-xs font-semibold
+                                    ${selectedSeries?.id === seriesItem.id
+                                      ? 'border-purple-400 text-purple-400'
+                                      : 'border-purple-500 text-purple-500'
+                                    }
+                                  `}
+                                >
+                                  {seriesItem.modality}
+                                </Badge>
+                                <span className="text-xs text-gray-400">
+                                  {seriesItem.imageCount} images
+                                </span>
+                              </div>
+                              
+                              <h4 className={`
+                                text-sm font-medium truncate
+                                ${selectedSeries?.id === seriesItem.id ? 'text-purple-400' : 'text-white'}
+                              `}>
+                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                              </h4>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {/* Other modalities (if any) - only show if not already displayed as primary */}
+                        {primarySeries !== otherSeries && otherSeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`
