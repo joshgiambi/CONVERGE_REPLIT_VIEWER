@@ -96,6 +96,39 @@ export function SeriesSelector({
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
   
+  // Auto-parse registration when REG series are available
+  useEffect(() => {
+    const regSeries = series.filter(s => s.modality === 'REG');
+    if (regSeries.length > 0 && studyId) {
+      // Auto-parse registration file for fusion
+      const parseRegistration = async () => {
+        try {
+          const response = await fetch(`/api/registrations/${studyId}/parse`, {
+            method: 'POST'
+          });
+          if (!response.ok) {
+            console.error('Failed to auto-parse registration:', await response.text());
+          } else {
+            console.log('Auto-parsed registration successfully for fusion');
+            
+            // Auto-activate fusion with CT as primary and MR as secondary
+            const ctSeries = series.find(s => s.modality === 'CT');
+            const mrSeries = series.find(s => s.modality === 'MR');
+            
+            if (ctSeries && mrSeries && onSecondarySeriesSelect) {
+              console.log(`Auto-activating fusion: CT(${ctSeries.id}) + MR(${mrSeries.id})`);
+              onSecondarySeriesSelect(mrSeries.id);
+            }
+          }
+        } catch (error) {
+          console.error('Error auto-parsing registration:', error);
+        }
+      };
+      
+      parseRegistration();
+    }
+  }, [series, studyId, onSecondarySeriesSelect]);
+  
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
 
