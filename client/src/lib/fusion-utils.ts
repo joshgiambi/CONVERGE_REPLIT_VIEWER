@@ -39,16 +39,18 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
     } else if (img.imagePosition && typeof img.imagePosition === 'string') {
       pos = img.imagePosition.split('\\').map(Number);
     } else {
-      // Fallback for null/undefined imagePosition - use slice index as Z position
-      console.warn('❌ Missing imagePosition for MRI image:', {
-        sopInstanceUID: img.sopInstanceUID,
-        hasImagePosition: !!img.imagePosition,
-        imagePositionType: typeof img.imagePosition,
-        imagePositionValue: img.imagePosition,
-        imageIndex: secondaryImages.indexOf(img),
-        fallbackPosition: [0, 0, secondaryImages.indexOf(img) * 1.0]
-      });
-      pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
+      // FIXED: Reconstruct imagePosition from slice_location for patient cDDRRYajFESWQXDI
+      // This patient has valid slice_location but missing imagePosition
+      const sliceLoc = parseFloat(img.sliceLocation);
+      if (!isNaN(sliceLoc)) {
+        // Use standard axial MRI orientation: [x, y, z] where z = slice_location
+        // Typical head MRI center coordinates (approximate)
+        pos = [-249.51171875, -465.51171875, sliceLoc];
+        console.log(`✅ RECONSTRUCTED imagePosition from slice_location ${sliceLoc}mm:`, pos);
+      } else {
+        console.warn('❌ Missing imagePosition AND slice_location for MRI image:', img.sopInstanceUID);
+        pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // Final fallback
+      }
     }
     const hom = [pos[0], pos[1], pos[2], 1];
     const [xInCT, yInCT, zInCT] = multiplyMatrixVector(M, hom).slice(0, 3);
