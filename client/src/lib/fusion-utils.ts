@@ -209,11 +209,14 @@ export async function renderFusionOverlay(
       isInRange: ctSliceZ >= minZ - 2 && ctSliceZ <= maxZ + 2
     });
     
-    // Only render fusion if CT slice is within MRI coverage range
-    if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
+    // TEMPORARILY DISABLED: Only render fusion if CT slice is within MRI coverage range
+    // This Z-range check is preventing fusion - likely coordinate space mismatch
+    if (false && (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2)) { // Tight 2mm tolerance
       console.log(`❌ EXIT: CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
       return; // Exit early - no fusion rendering
     }
+    
+    console.log(`🚧 TEMP: Z-range check disabled - CT slice ${ctSliceZ}mm vs MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm`);
     
     console.log(`✅ PASS: CT slice ${ctSliceZ}mm is within MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm`);
   }
@@ -273,12 +276,8 @@ export async function renderFusionOverlay(
     const idx4 = i * 4;
     data[idx4] = data[idx4+1] = data[idx4+2] = v;
     
-    // Make only very dark background pixels transparent (more conservative threshold)
-    if (v < 5) { // Much lower threshold for true black background only
-      data[idx4+3] = 0; // Fully transparent
-    } else {
-      data[idx4+3] = 255; // Fully opaque for all anatomy
-    }
+    // TEMP: Force all MRI pixels to be visible (no transparency threshold)
+    data[idx4+3] = 255; // Fully opaque - temporarily disable dark pixel masking
   }
   tctx.putImageData(imgData, 0, 0);
 
