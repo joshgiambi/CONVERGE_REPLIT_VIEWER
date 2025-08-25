@@ -2435,8 +2435,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
+    console.log('🔧 FUSION DEBUG: useEffect triggered for secondary images transformation', {
+      hasRegistrationMatrix: !!registrationMatrix,
+      registrationMatrixLength: registrationMatrix?.length,
+      secondaryImagesLength: secondaryImages.length,
+      secondarySeriesId: secondarySeriesId
+    });
+    
     if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
-      console.log('Both registration matrix and secondary images available, pre-computing transformations...');
+      console.log('✅ Both registration matrix and secondary images available, pre-computing transformations...');
       const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
       transformedMRIPositions.current = transformed;
       
