@@ -264,7 +264,52 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cachedLUTRef = useRef<{ key: string; lut: Uint8Array } | null>(null);
 
+  // Reads MR headers to ensure imagePosition/imageOrientation/pixelSpacing exist
+  const enrichSecondaryImagesWithDicomMetadata = async (images: any[]): Promise<any[]> => {
+    await loadDicomParser();
+    const dicomParser = (window as any).dicomParser;
+    const CONCURRENCY = 6;
 
+    const results: any[] = new Array(images.length);
+
+    const work = async (i: number) => {
+      const img = images[i];
+      try {
+        const res = await fetch(`/api/images/${img.sopInstanceUID}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const ab = await res.arrayBuffer();
+        const data = dicomParser.parseDicom(new DataView(ab));
+
+        const s = (tag: string) => data.string(tag);
+        const ip = s('x00200032'); // ImagePositionPatient
+        const io = s('x00200037'); // ImageOrientationPatient
+        const ps = s('x00280030'); // PixelSpacing
+        const th = s('x00180050'); // SliceThickness
+        const sb = s('x00180088'); // SpacingBetweenSlices
+        const fo = s('x00200052'); // FrameOfReferenceUID
+
+        results[i] = {
+          ...img,
+          imagePosition: ip ?? img.imagePosition,
+          imageOrientation: io ?? img.imageOrientation,
+          pixelSpacing: ps ?? img.pixelSpacing,
+          sliceThickness: th ?? img.sliceThickness,
+          spacingBetweenSlices: sb ?? img.spacingBetweenSlices,
+          frameOfReferenceUID: fo ?? img.frameOfReferenceUID,
+        };
+      } catch (e) {
+        console.warn('⚠️ Failed to enrich MRI image metadata', img?.sopInstanceUID, e);
+        results[i] = { ...img };
+      }
+    };
+
+    for (let i = 0; i < images.length; i += CONCURRENCY) {
+      const end = Math.min(images.length, i + CONCURRENCY);
+      await Promise.all(Array.from({ length: end - i }, (_, k) => work(i + k)));
+    }
+
+    return results;
+  };
 
   // Save contour updates using debounced save
   const saveContourUpdates = (updatedStructures: any, action?: string) => {
@@ -2521,9 +2566,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           return aSliceLoc - bSliceLoc;
         });
 
-        setSecondaryImages(sortedImages);
+        // Enrich images with DICOM metadata for proper fusion
+        const enrichedImages = await enrichSecondaryImagesWithDicomMetadata(sortedImages);
+        setSecondaryImages(enrichedImages);
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
-        console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
+        console.log(`Loaded ${enrichedImages.length} enriched secondary images for fusion (have IPP/IOP/PS)`);
         console.log("Secondary series ID:", secondarySeriesId);
         console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
         
