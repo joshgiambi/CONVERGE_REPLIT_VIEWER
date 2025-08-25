@@ -181,18 +181,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Auto-select secondary series for fusion
+            console.log('Setting secondary series for fusion:', secondarySeriesForFusion.id);
             setSecondarySeriesId(secondarySeriesForFusion.id);
-            
-            // Force working viewer to reload registration by briefly toggling the series
-            // This ensures the working viewer fetches the newly parsed registration data
-            setTimeout(() => {
-              console.log('Triggering registration data reload in working viewer...');
-              setSecondarySeriesId(null);
-              setTimeout(() => {
-                console.log('Re-enabling fusion with updated registration');
-                setSecondarySeriesId(secondarySeriesForFusion.id);
-              }, 100);
-            }, 1000);
           }
         }).catch(error => {
           console.error('Error parsing registration for auto-fusion:', error);
@@ -889,14 +879,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       )}
 
       {/* Fusion Control Panel */}
-      {showFusionPanel && secondarySeriesId && (
+      {showFusionPanel && secondarySeriesId && selectedSeries && studyData?.studies?.[0] && (
         <FusionControlPanel
-          fusionOpacity={fusionOpacity}
-          onFusionOpacityChange={setFusionOpacity}
-          onClose={() => {
-            setShowFusionPanel(false);
-            setSecondarySeriesId(null);
-          }}
+          primarySeriesId={selectedSeries.id}
+          studyId={studyData.studies[0].id}
+          onSecondarySeriesSelect={setSecondarySeriesId}
+          opacity={fusionOpacity}
+          onOpacityChange={setFusionOpacity}
+          isVisible={true}
+          selectedSecondaryId={secondarySeriesId}
         />
       )}
 
