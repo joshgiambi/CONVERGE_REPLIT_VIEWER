@@ -2314,10 +2314,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         } else {
           console.log(`❌ No registration in study ${studyId}, checking related studies...`);
           
-          // If no registration in current study, check all available studies
+          // If no registration in current study, check all studies for this patient
           // This handles the case where MRI is in study 18 but registration is in study 17
-          const studiesRes = await fetch('/api/studies');
-          const studiesData = await studiesRes.json();
+          // First get the patient ID for this study
+          const studyRes = await fetch(`/api/studies/${studyId}`);
+          const studyData = await studyRes.json();
+          const patientId = studyData?.patientId;
+          
+          if (!patientId) {
+            console.log('❌ Could not determine patient ID');
+            return;
+          }
+          
+          // Get all studies for this patient
+          const patientsRes = await fetch(`/api/patients/${patientId}`);
+          const patientData = await patientsRes.json();
+          const studiesData = patientData?.studies || [];
+          
+          console.log(`🔍 Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map(s => s.id));
           
           for (const study of studiesData || []) {
             if (study.id !== studyId) {
