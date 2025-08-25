@@ -1601,6 +1601,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get patient by DICOM patient ID (for cross-study fusion)
+  // This route must come BEFORE the general :id route to be matched correctly
+  app.get("/api/patients/dicom/:patientID", async (req, res) => {
+    try {
+      const patientID = req.params.patientID;
+      console.log(`Fetching patient by DICOM ID: ${patientID}`);
+      // Find patient by DICOM patient ID
+      const patients = await storage.getAllPatients();
+      const patient = patients.find(p => p.patientID === patientID);
+      
+      if (!patient) {
+        console.log(`Patient not found with DICOM ID: ${patientID}`);
+        return res.status(404).json({ message: "Patient not found" });
+      }
+      
+      // Get all studies for this patient
+      const studies = await storage.getStudiesByPatient(patient.id);
+      console.log(`Found ${studies.length} studies for patient ${patient.patientName}`);
+      
+      res.json({ ...patient, studies });
+    } catch (error) {
+      console.error('Error fetching patient by DICOM ID:', error);
+      res.status(500).json({ message: "Failed to fetch patient" });
+    }
+  });
+
   app.get("/api/patients/:id", async (req, res) => {
     try {
       const patient = await storage.getPatient(parseInt(req.params.id));
@@ -1610,28 +1636,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(patient);
     } catch (error) {
       console.error('Error fetching patient:', error);
-      res.status(500).json({ message: "Failed to fetch patient" });
-    }
-  });
-
-  // Get patient by DICOM patient ID (for cross-study fusion)
-  app.get("/api/patients/dicom/:patientID", async (req, res) => {
-    try {
-      const patientID = req.params.patientID;
-      // Find patient by DICOM patient ID
-      const patients = await storage.getAllPatients();
-      const patient = patients.find(p => p.patientID === patientID);
-      
-      if (!patient) {
-        return res.status(404).json({ message: "Patient not found" });
-      }
-      
-      // Get all studies for this patient
-      const studies = await storage.getStudiesByPatientId(patient.id);
-      
-      res.json({ ...patient, studies });
-    } catch (error) {
-      console.error('Error fetching patient by DICOM ID:', error);
       res.status(500).json({ message: "Failed to fetch patient" });
     }
   });
