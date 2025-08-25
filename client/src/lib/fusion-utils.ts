@@ -187,6 +187,13 @@ export async function renderFusionOverlay(
 ) {
   // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
   console.log('🎯 Rendering fusion overlay in CT coordinate space');
+  console.log('🔧 DEBUG - fusion-utils renderFusionOverlay called with:', {
+    ctSliceZ,
+    fusionOpacity,
+    transformedMRILength: transformedMRI.length,
+    canvasSize: `${canvasWidth}x${canvasHeight}`,
+    hasRegistrationMatrix: !!registrationMatrix
+  });
 
   // STRICT Z-range check: Only render fusion within actual MRI coverage
   if (transformedMRI.length > 0) {
@@ -194,16 +201,44 @@ export async function renderFusionOverlay(
     const minZ = Math.min(...zValues);
     const maxZ = Math.max(...zValues);
     
+    console.log('🔧 DEBUG - Z-range check:', {
+      ctSliceZ,
+      minZ: minZ.toFixed(1),
+      maxZ: maxZ.toFixed(1),
+      tolerance: 2,
+      isInRange: ctSliceZ >= minZ - 2 && ctSliceZ <= maxZ + 2
+    });
+    
     // Only render fusion if CT slice is within MRI coverage range
     if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
-      console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
+      console.log(`❌ EXIT: CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
       return; // Exit early - no fusion rendering
     }
+    
+    console.log(`✅ PASS: CT slice ${ctSliceZ}mm is within MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm`);
   }
 
   // Get the interpolated MRI data for this CT slice
+  console.log('🔧 DEBUG - About to call interpolateMRI with:', {
+    ctSliceZ,
+    transformedMRILength: transformedMRI.length,
+    cacheSize: secondaryImageCache.size
+  });
+  
   const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache);
-  if (!mriData) return; // nothing to draw
+  
+  console.log('🔧 DEBUG - interpolateMRI returned:', {
+    hasMriData: !!mriData,
+    mriDataWidth: mriData?.width,
+    mriDataHeight: mriData?.height,
+    hasDataArray: !!mriData?.data,
+    dataLength: mriData?.data?.length
+  });
+  
+  if (!mriData) {
+    console.log('❌ EXIT: No MRI data returned from interpolateMRI');
+    return; // nothing to draw
+  }
 
   // Create temp canvas
   const temp = document.createElement('canvas');
