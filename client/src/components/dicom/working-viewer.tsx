@@ -2296,13 +2296,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!studyId) return;
       
       console.log(`🔍 Looking for registration matrix starting with study ${studyId}`);
+      console.log('🔍 FUSION DEBUG: Starting registration search');
+      console.log('🔍 FUSION DEBUG: Current study ID:', studyId);
       
       // Try the current study first
       let registrationData = null;
       
       try {
+        console.log(`🔍 FUSION DEBUG: Fetching /api/registrations/${studyId}`);
         const res = await fetch(`/api/registrations/${studyId}`);
         const data = await res.json();
+        console.log(`🔍 FUSION DEBUG: Registration response from study ${studyId}:`, data);
         
         // Handle both direct registration data and wrapped format
         if (data && data.transformationMatrix) {
@@ -2313,31 +2317,37 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           registrationData = data.registration;
         } else {
           console.log(`❌ No registration in study ${studyId}, checking related studies...`);
+          console.log('🔍 FUSION DEBUG: No registration in current study, starting cross-study search');
           
           // If no registration in current study, check all studies for this patient
           // This handles the case where MRI is in study 18 but registration is in study 17
           // First get the patient ID for this study
+          console.log(`🔍 FUSION DEBUG: Fetching study info from /api/studies/${studyId}`);
           const studyRes = await fetch(`/api/studies/${studyId}`);
           const studyData = await studyRes.json();
+          console.log('🔍 FUSION DEBUG: Study data:', studyData);
           const patientId = studyData?.patientId;
           
           if (!patientId) {
-            console.log('❌ Could not determine patient ID');
+            console.log('❌ FUSION DEBUG: Could not determine patient ID from study data');
             return;
           }
           
+          console.log(`🔍 FUSION DEBUG: Patient ID is ${patientId}, fetching patient data...`);
           // Get all studies for this patient
           const patientsRes = await fetch(`/api/patients/${patientId}`);
           const patientData = await patientsRes.json();
+          console.log('🔍 FUSION DEBUG: Patient data response:', patientData);
           const studiesData = patientData?.studies || [];
           
-          console.log(`🔍 Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map(s => s.id));
+          console.log(`🔍 FUSION DEBUG: Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map(s => s.id));
           
           for (const study of studiesData || []) {
             if (study.id !== studyId) {
-              console.log(`🔍 Checking study ${study.id} for registration...`);
+              console.log(`🔍 FUSION DEBUG: Checking study ${study.id} for registration...`);
               const otherRes = await fetch(`/api/registrations/${study.id}`);
               const otherData = await otherRes.json();
+              console.log(`🔍 FUSION DEBUG: Registration response from study ${study.id}:`, otherData);
               
               // Handle both direct registration data and wrapped format
               if (otherData && otherData.transformationMatrix) {
@@ -2391,13 +2401,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
-    console.log('🔥 Registration matrix useEffect:', {
+    console.log('🔥 FUSION DEBUG: Registration matrix useEffect triggered');
+    console.log('🔥 FUSION DEBUG: Registration matrix:', registrationMatrix);
+    console.log('🔥 FUSION DEBUG: State check:', {
       hasMatrix: !!registrationMatrix,
       matrixLength: registrationMatrix?.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
       imagesLength: images.length,
-      secondaryImagesLength: secondaryImages.length
+      secondaryImagesLength: secondaryImages.length,
+      fusionOpacity
     });
     
     if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
@@ -3795,13 +3808,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    console.log('🎯 renderFusionOverlayNew called:', {
+    console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
+    console.log('🎯 FUSION RENDER DEBUG: Full state:', {
       secondaryImagesLength: secondaryImages.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
       fusionOpacity,
       hasRegistrationMatrix: !!registrationMatrix,
-      hasTransformedPositions: !!transformedMRIPositions.current?.length
+      registrationMatrixLength: registrationMatrix?.length,
+      hasTransformedPositions: !!transformedMRIPositions.current?.length,
+      transformedPositionsLength: transformedMRIPositions.current?.length || 0
     });
     
     if (!secondaryImages.length || !secondarySeriesId) {
