@@ -162,11 +162,26 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         // Parse registration if needed
         fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, {
           method: 'POST'
-        }).then(response => {
+        }).then(async response => {
           if (response.ok) {
             console.log('Registration parsed successfully for auto-fusion');
+            
+            // Wait a moment for database to update
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Auto-select secondary series for fusion
             setSecondarySeriesId(secondarySeriesForFusion.id);
+            
+            // Force working viewer to reload registration by briefly toggling the series
+            // This ensures the working viewer fetches the newly parsed registration data
+            setTimeout(() => {
+              console.log('Triggering registration data reload in working viewer...');
+              setSecondarySeriesId(null);
+              setTimeout(() => {
+                console.log('Re-enabling fusion with updated registration');
+                setSecondarySeriesId(secondarySeriesForFusion.id);
+              }, 100);
+            }, 1000);
           }
         }).catch(error => {
           console.error('Error parsing registration for auto-fusion:', error);
