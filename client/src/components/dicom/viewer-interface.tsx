@@ -658,6 +658,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
                   studyId={studyData.studies[0]?.id}
+                  studyIds={studyData.studies?.map((s: DICOMStudy) => s.id) || []}
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}

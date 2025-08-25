@@ -51,6 +51,7 @@ type PreviewContour = {
 interface WorkingViewerProps {
   seriesId: number;
   studyId?: number;
+  studyIds?: number[]; // Array of all available study IDs for registration search
   windowLevel?: { window: number; level: number };
   onWindowLevelChange?: (windowLevel: {
     window: number;
@@ -101,6 +102,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const {
     seriesId,
     studyId,
+    studyIds,
     windowLevel: externalWindowLevel,
     onWindowLevelChange,
     onZoomIn,
@@ -2290,14 +2292,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
-  // Load registration matrix when study changes
+  // Load registration matrix when study changes or fusion is activated
   useEffect(() => {
-    if (studyId) {
-      fetch(`/api/registrations/${studyId}`)
-        .then(res => res.json())
-        .then(data => {
+    const loadRegistrationMatrix = async () => {
+      // If fusion is not active, clear registration matrix
+      if (!secondarySeriesId) {
+        setRegistrationMatrix(null);
+        registrationMatrixRef.current = null;
+        return;
+      }
+
+      // Try to load registration from all available studies
+      const allStudyIds = studyIds || [studyId].filter(Boolean);
+      console.log('🔍 Searching for registration matrix in studies:', allStudyIds);
+      
+      let foundMatrix = null;
+      for (const sid of allStudyIds) {
+        try {
+          const response = await fetch(`/api/registrations/${sid}`);
+          const data = await response.json();
+          
           if (data && data.transformationMatrix) {
-            console.log(`Loaded registration matrix for study ${studyId}:`, data);
+            console.log(`✅ Found registration matrix in study ${sid}:`, data);
+            
             // Parse the transformation matrix if it's a string
             let matrix = data.transformationMatrix;
             if (typeof matrix === 'string') {
@@ -2306,23 +2323,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 console.log('Parsed registration matrix:', matrix);
               } catch (e) {
                 console.error('Failed to parse registration matrix:', e);
-                matrix = null;
+                continue;
               }
             }
-            setRegistrationMatrix(matrix);
-            registrationMatrixRef.current = matrix;
-          } else {
-            console.log(`No registration found for study ${studyId}`);
-            setRegistrationMatrix(null);
-            registrationMatrixRef.current = null;
+            
+            if (matrix && Array.isArray(matrix) && matrix.length === 16) {
+              foundMatrix = matrix;
+              console.log(`🎯 Using registration matrix from study ${sid}`);
+              break;
+            }
           }
-        })
-        .catch(error => {
-          console.error('Error loading registration:', error);
-          setRegistrationMatrix(null);
-        });
-    }
-  }, [studyId]);
+        } catch (error) {
+          console.warn(`Failed to load registration from study ${sid}:`, error);
+        }
+      }
+      
+      if (foundMatrix) {
+        setRegistrationMatrix(foundMatrix);
+        registrationMatrixRef.current = foundMatrix;
+      } else {
+        console.warn('❌ No valid registration matrix found in any study');
+        setRegistrationMatrix(null);
+        registrationMatrixRef.current = null;
+      }
+    };
+
+    loadRegistrationMatrix();
+  }, [secondarySeriesId]);
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
