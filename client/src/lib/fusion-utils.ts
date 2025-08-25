@@ -31,7 +31,18 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
     [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
   ];
 
-  const transformed = secondaryImages.map(img => {
+  const transformed = secondaryImages.map((img, index) => {
+    // DEBUG: Log each image's metadata
+    if (index < 3) { // Log first 3 images
+      console.log(`🔍 MRI Image ${index}:`, {
+        sopInstanceUID: img.sopInstanceUID,
+        hasImagePosition: !!img.imagePosition,
+        imagePositionType: typeof img.imagePosition,
+        imagePositionValue: img.imagePosition,
+        sliceLocation: img.sliceLocation
+      });
+    }
+    
     // Parse imagePosition into [x,y,z] with null safety
     let pos;
     if (Array.isArray(img.imagePosition)) {
