@@ -2514,37 +2514,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (registrationSequence && registrationSequence.items && registrationSequence.items.length > 0) {
           console.log('📊 Found Registration Sequence with', registrationSequence.items.length, 'items');
           
-          const regItem = registrationSequence.items[0];
-          
-          // Look for Matrix Registration Sequence (0070,0309)
-          const matrixRegSeq = regItem.dataSet.elements['x00700309'];
-          if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
-            console.log('📊 Found Matrix Registration Sequence');
+          // Check ALL registration items to find the one with actual transformation
+          for (let regIdx = 0; regIdx < registrationSequence.items.length; regIdx++) {
+            const regItem = registrationSequence.items[regIdx];
+            console.log(`📊 Checking Registration Item ${regIdx}...`);
             
-            const matrixItem = matrixRegSeq.items[0];
-            
-            // Get the transformation matrix (0070,030C)
-            const matrixData = matrixItem.dataSet.elements['x0070030c'];
-            if (matrixData) {
-              console.log('📊 Found Transformation Matrix data');
+            // Look for Matrix Registration Sequence (0070,0309)
+            const matrixRegSeq = regItem.dataSet.elements['x00700309'];
+            if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
+              console.log(`📊 Found Matrix Registration Sequence in item ${regIdx}`);
               
-              // Parse the matrix values (should be 16 float values)
-              const matrixValues = [];
-              for (let i = 0; i < matrixData.length && matrixValues.length < 16; i += 8) {
-                const view = new DataView(matrixData.buffer, matrixData.byteOffset + i, 8);
-                const value = view.getFloat64(0, true); // little endian
-                matrixValues.push(value);
+              const matrixItem = matrixRegSeq.items[0];
+              
+              // Check for MatrixSequence (0070,030A) - another level of nesting in Eclipse files
+              let matrixString = null;
+              const matrixSeq = matrixItem.dataSet.elements['x0070030a'];
+              if (matrixSeq && matrixSeq.items && matrixSeq.items.length > 0) {
+                console.log(`📊 Found MatrixSequence in registration item ${regIdx}`);
+                const seqItem = matrixSeq.items[0];
+                // Try Eclipse's tag (3006,00C6) - Frame of Reference Transformation Matrix
+                matrixString = seqItem.dataSet.string('x300600c6');
               }
               
-              if (matrixValues.length === 16) {
-                // Convert flat array to 4x4 matrix
-                transformationMatrix = [
-                  matrixValues.slice(0, 4),
-                  matrixValues.slice(4, 8),
-                  matrixValues.slice(8, 12),
-                  matrixValues.slice(12, 16)
-                ];
-                console.log('✅ Extracted transformation matrix:', transformationMatrix);
+              // Fallback: try directly on matrixItem if not found in MatrixSequence
+              if (!matrixString) {
+                matrixString = matrixItem.dataSet.string('x300600c6');
+              }
+              
+              // Fallback to standard tag (0070,030C) if Eclipse tag not found
+              if (!matrixString) {
+                const matrixData = matrixItem.dataSet.elements['x0070030c'];
+                if (matrixData) {
+                  // Parse the matrix values (should be 16 float values)
+                  const matrixValues = [];
+                  for (let i = 0; i < matrixData.length && matrixValues.length < 16; i += 8) {
+                    const view = new DataView(matrixData.buffer, matrixData.byteOffset + i, 8);
+                    const value = view.getFloat64(0, true); // little endian
+                    matrixValues.push(value);
+                  }
+                  
+                  if (matrixValues.length === 16) {
+                    // Convert flat array to 4x4 matrix
+                    const candidateMatrix = [
+                      matrixValues.slice(0, 4),
+                      matrixValues.slice(4, 8),
+                      matrixValues.slice(8, 12),
+                      matrixValues.slice(12, 16)
+                    ];
+                    
+                    // Skip identity matrices - keep looking for actual transformation
+                    if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
+                        candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
+                      transformationMatrix = candidateMatrix;
+                      console.log(`✅ Found non-identity transformation matrix in item ${regIdx}:`, transformationMatrix);
+                      break; // Found a good matrix, stop looking
+                    } else {
+                      console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
+                    }
+                  }
+                }
+              } else {
+                // Parse Eclipse format matrix string
+                const values = matrixString.split('\\').map(v => parseFloat(v));
+                if (values.length === 16) {
+                  const candidateMatrix = [
+                    values.slice(0, 4),
+                    values.slice(4, 8),
+                    values.slice(8, 12),
+                    values.slice(12, 16)
+                  ];
+                  
+                  // Skip identity matrices - keep looking for actual transformation
+                  if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
+                      candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
+                    transformationMatrix = candidateMatrix;
+                    console.log(`✅ Found Eclipse transformation matrix in item ${regIdx}:`, transformationMatrix);
+                    break; // Found a good matrix, stop looking
+                  } else {
+                    console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
+                  }
+                }
               }
             }
           }
