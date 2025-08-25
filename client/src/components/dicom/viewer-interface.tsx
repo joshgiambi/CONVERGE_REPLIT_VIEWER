@@ -147,6 +147,31 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setRTStructures(null);
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
+      
+      // Auto-activate fusion when REG files are present
+      const regSeries = seriesData.find((s: any) => s.modality === 'REG');
+      const ctSeriesForFusion = seriesData.find((s: any) => s.modality === 'CT');
+      const mrSeries = seriesData.find((s: any) => s.modality === 'MR');
+      const ptSeries = seriesData.find((s: any) => s.modality === 'PT');
+      
+      if (regSeries && ctSeriesForFusion && (mrSeries || ptSeries)) {
+        console.log('Auto-activating fusion: REG detected with CT and secondary series');
+        // Prefer MR over PT for fusion
+        const secondarySeriesForFusion = mrSeries || ptSeries;
+        
+        // Parse registration if needed
+        fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, {
+          method: 'POST'
+        }).then(response => {
+          if (response.ok) {
+            console.log('Registration parsed successfully for auto-fusion');
+            // Auto-select secondary series for fusion
+            setSecondarySeriesId(secondarySeriesForFusion.id);
+          }
+        }).catch(error => {
+          console.error('Error parsing registration for auto-fusion:', error);
+        });
+      }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 

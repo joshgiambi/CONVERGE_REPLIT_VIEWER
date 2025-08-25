@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -756,7 +756,7 @@ export function SeriesSelector({
                                     <div
                                       key={mrS.id}
                                       className={`
-                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
+                                        w-full p-2 text-left text-xs rounded-lg transition-all
                                         ${secondarySeriesId === mrS.id
                                           ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
                                           : selectedSeries?.id === mrS.id
@@ -766,32 +766,54 @@ export function SeriesSelector({
                                           : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
                                         } border
                                       `}
-                                      onClick={() => {
-                                        // When clicking MRI in series list:
-                                        // 1. Select it as primary series to view MRI alone
-                                        onSeriesSelect(mrS);
-                                        // 2. If we have fusion callback and CT is selected, also activate fusion
-                                        if (onSecondarySeriesSelect && selectedSeries?.modality === 'CT') {
-                                          onSecondarySeriesSelect(mrS.id);
-                                        }
-                                      }}
                                     >
-                                      <div className="flex items-center space-x-2">
-                                        <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                          MR
-                                        </Badge>
-                                        <span className="truncate text-xs">
-                                          {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
-                                        </span>
-                                        {secondarySeriesId === mrS.id ? (
-                                          <Badge className="ml-auto bg-purple-500 text-white text-xs animate-pulse">
-                                            Fusion
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-2 flex-1">
+                                          <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                            MR
                                           </Badge>
-                                        ) : (
-                                          <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
-                                            Fusion Ready
-                                          </Badge>
-                                        )}
+                                          <span className="truncate text-xs">
+                                            {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6 hover:bg-purple-700/30"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              // Open MRI as primary series (view standalone)
+                                              onSeriesSelect(mrS);
+                                              // Clear secondary series
+                                              if (onSecondarySeriesSelect) {
+                                                onSecondarySeriesSelect(null);
+                                              }
+                                            }}
+                                            title="View MRI standalone"
+                                          >
+                                            <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
+                                          </Button>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className={`h-6 w-6 hover:bg-green-700/30 ${
+                                              secondarySeriesId === mrS.id ? 'bg-green-700/40' : ''
+                                            }`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              // Toggle fusion with this MRI
+                                              if (onSecondarySeriesSelect) {
+                                                onSecondarySeriesSelect(
+                                                  secondarySeriesId === mrS.id ? null : mrS.id
+                                                );
+                                              }
+                                            }}
+                                            title="Toggle fusion overlay"
+                                          >
+                                            <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                          </Button>
+                                        </div>
                                       </div>
                                     </div>
                                   ))}
@@ -813,23 +835,64 @@ export function SeriesSelector({
                                     <div
                                       key={ptS.id}
                                       className={`
-                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
-                                        ${selectedSeries?.id === ptS.id
+                                        w-full p-2 text-left text-xs rounded-lg transition-all
+                                        ${secondarySeriesId === ptS.id
+                                          ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
+                                          : selectedSeries?.id === ptS.id
                                           ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
                                           : hoveredRegSeries
                                           ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                           : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
                                         } border
                                       `}
-                                      onClick={() => onSeriesSelect(ptS)}
                                     >
-                                      <div className="flex items-center space-x-2">
-                                        <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
-                                          PT
-                                        </Badge>
-                                        <span className="truncate text-xs">
-                                          {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
-                                        </span>
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-2 flex-1">
+                                          <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
+                                            PT
+                                          </Badge>
+                                          <span className="truncate text-xs">
+                                            {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6 hover:bg-yellow-700/30"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              // Open PT as primary series (view standalone)
+                                              onSeriesSelect(ptS);
+                                              // Clear secondary series
+                                              if (onSecondarySeriesSelect) {
+                                                onSecondarySeriesSelect(null);
+                                              }
+                                            }}
+                                            title="View PET standalone"
+                                          >
+                                            <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
+                                          </Button>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className={`h-6 w-6 hover:bg-green-700/30 ${
+                                              secondarySeriesId === ptS.id ? 'bg-green-700/40' : ''
+                                            }`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              // Toggle fusion with this PT
+                                              if (onSecondarySeriesSelect) {
+                                                onSecondarySeriesSelect(
+                                                  secondarySeriesId === ptS.id ? null : ptS.id
+                                                );
+                                              }
+                                            }}
+                                            title="Toggle fusion overlay"
+                                          >
+                                            <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                          </Button>
+                                        </div>
                                       </div>
                                     </div>
                                   ))}
