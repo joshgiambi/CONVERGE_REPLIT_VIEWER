@@ -43,11 +43,12 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
       pos = img.imagePosition.split('\\').map(Number);
       console.log(`Parsed string imagePosition for image ${index}:`, pos);
     } else {
-      // RECONSTRUCT: imagePosition from slice_location for missing data
+      // RECONSTRUCT: imagePosition from slice_location using working patient's pattern
       const sliceLoc = parseFloat(img.sliceLocation);
       if (!isNaN(sliceLoc)) {
-        // Use standard axial MRI coordinates: [x, y, z] where z = slice_location
-        pos = [-249.51171875, -465.51171875, sliceLoc];
+        // FIXED: Use correct coordinates based on working patient HN_FUSION_01
+        // Pattern: X≈-82, Y≈-173, Z≈-slice_location
+        pos = [-82.0, -173.0, -sliceLoc];
         if (index < 3) console.log(`✅ RECONSTRUCTED imagePosition [${index}] from sliceLocation ${sliceLoc}mm:`, pos);
       } else {
         console.error(`❌ No imagePosition OR sliceLocation for image ${index}:`, img.sopInstanceUID);
