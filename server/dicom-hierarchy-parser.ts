@@ -310,16 +310,16 @@ export class DICOMHierarchyParser {
   /**
    * Get array of numbers from DICOM element
    */
-  private static getNumberArray(dataSet: any, tag: string, expectedLength?: number): number[] | null {
+  private static getNumberArray(dataSet: any, tag: string, expectedLength?: number): number[] | undefined {
     const element = dataSet.elements[tag];
-    if (!element) return null; // FIXED: Return null instead of undefined to match routes.ts behavior
+    if (!element) return undefined;
     try {
       const value = dataSet.string(tag);
       const numbers = value.split('\\').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-      if (expectedLength && numbers.length !== expectedLength) return null; // FIXED: Return null
-      return numbers.length > 0 ? numbers : null; // FIXED: Return null
+      if (expectedLength && numbers.length !== expectedLength) return undefined;
+      return numbers.length > 0 ? numbers : undefined;
     } catch {
-      return null; // FIXED: Return null
+      return undefined;
     }
   }
 

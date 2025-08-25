@@ -2,8 +2,9 @@ import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Upload, FileCheck, AlertCircle, X, Download, Database, CheckCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Upload, FileCheck, AlertCircle, X, Download, Database, CheckCircle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { PatientPreviewCard } from './patient-preview-card';
@@ -74,26 +75,8 @@ interface UnprocessedFile {
   path: string;
 }
 
-// Step types for the upload process
-type UploadStep = 'upload' | 'parse' | 'triage' | 'import' | 'complete';
-
-interface StepInfo {
-  step: UploadStep;
-  label: string;
-  status: 'pending' | 'active' | 'complete' | 'error';
-  detail?: string;
-}
-
 export function DICOMUploader() {
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState<UploadStep | null>(null);
-  const [stepStatuses, setStepStatuses] = useState<Record<UploadStep, StepInfo>>({
-    upload: { step: 'upload', label: 'Upload Files', status: 'pending' },
-    parse: { step: 'parse', label: 'Extract Metadata', status: 'pending' },
-    triage: { step: 'triage', label: 'Review Files', status: 'pending' },
-    import: { step: 'import', label: 'Import to Database', status: 'pending' },
-    complete: { step: 'complete', label: 'Complete', status: 'pending' }
-  });
   const [isUploading, setIsUploading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
@@ -108,17 +91,6 @@ export function DICOMUploader() {
   const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
-
-  // Helper function to update step status
-  const updateStepStatus = (step: UploadStep, status: 'pending' | 'active' | 'complete' | 'error', detail?: string) => {
-    setStepStatuses(prev => ({
-      ...prev,
-      [step]: { ...prev[step], status, detail }
-    }));
-    if (status === 'active') {
-      setCurrentStep(step);
-    }
-  };
 
   // Poll for session status (not using useCallback to avoid dependency issues)
   const pollSessionStatus = async (sessionId: string) => {
@@ -293,8 +265,6 @@ export function DICOMUploader() {
 
     setIsImporting(true);
     setError(null);
-    updateStepStatus('triage', 'complete');
-    updateStepStatus('import', 'active', 'Importing to database...');
     setImportMessage('Starting import process...');
 
     try {
@@ -329,10 +299,6 @@ export function DICOMUploader() {
           
           console.log('Triage import successful');
           
-          // Update step status
-          updateStepStatus('import', 'complete', `${parseResult.data?.length || 0} images imported`);
-          updateStepStatus('complete', 'complete');
-          
           // Show success toast
           toast({
             title: "Import successful",
@@ -358,10 +324,6 @@ export function DICOMUploader() {
         rtstructDetails: parseResult.rtstructDetails
       });
 
-      // Update step status
-      updateStepStatus('import', 'complete', 'Import completed');
-      updateStepStatus('complete', 'complete');
-      
       // Show success toast
       toast({
         title: "Import successful",
@@ -513,10 +475,6 @@ export function DICOMUploader() {
       
       console.log('Triage import successful');
       
-      // Update step status
-      updateStepStatus('import', 'complete', 'Import completed');
-      updateStepStatus('complete', 'complete');
-      
       // Show success toast
       toast({
         title: "Import successful",
@@ -614,77 +572,37 @@ export function DICOMUploader() {
           <Upload className={`w-12 h-12 mx-auto mb-4 ${isDragActive ? 'text-indigo-400' : 'text-indigo-500'}`} />
           
           {isUploading ? (
-            <div className="space-y-6">
+            <div className="space-y-4">
               <p className="text-lg text-white">
-                Processing DICOM Data
+                {parseSession?.currentFile ? 'Processing DICOM files...' : 'Uploading files...'}
               </p>
-              
-              {/* Step-based Progress Indicator */}
-              <div className="w-full max-w-2xl mx-auto">
-                <div className="relative">
-                  {/* Progress Line */}
-                  <div className="absolute top-5 left-0 right-0 h-0.5 bg-gray-700"></div>
-                  <div 
-                    className="absolute top-5 left-0 h-0.5 bg-indigo-500 transition-all duration-300"
-                    style={{ 
-                      width: `${currentStep === 'upload' ? '0%' : 
-                               currentStep === 'parse' ? '25%' : 
-                               currentStep === 'triage' ? '50%' : 
-                               currentStep === 'import' ? '75%' : 
-                               currentStep === 'complete' ? '100%' : '0%'}` 
-                    }}
-                  ></div>
-                  
-                  {/* Steps */}
-                  <div className="relative flex justify-between">
-                    {Object.values(stepStatuses).map((stepInfo, index) => (
-                      <div key={stepInfo.step} className="flex flex-col items-center">
-                        <div className={`
-                          w-10 h-10 rounded-full flex items-center justify-center text-white font-medium
-                          ${stepInfo.status === 'complete' ? 'bg-green-500' : 
-                            stepInfo.status === 'active' ? 'bg-indigo-500 animate-pulse' : 
-                            stepInfo.status === 'error' ? 'bg-red-500' : 
-                            'bg-gray-700'}
-                        `}>
-                          {stepInfo.status === 'complete' ? (
-                            <CheckCircle2 className="w-5 h-5" />
-                          ) : stepInfo.status === 'active' ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                          ) : stepInfo.status === 'error' ? (
-                            <AlertCircle className="w-5 h-5" />
-                          ) : (
-                            <span className="text-xs">{index + 1}</span>
-                          )}
-                        </div>
-                        <span className={`
-                          mt-2 text-xs font-medium
-                          ${stepInfo.status === 'active' ? 'text-indigo-400' : 
-                            stepInfo.status === 'complete' ? 'text-green-400' : 
-                            'text-gray-500'}
-                        `}>
-                          {stepInfo.label}
-                        </span>
-                        {stepInfo.detail && stepInfo.status === 'active' && (
-                          <span className="text-xs text-gray-400 mt-1">
-                            {stepInfo.detail}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              
-              {/* Current Status Message */}
-              {processingMessage && (
-                <div className="space-y-2 text-center">
+              <Progress value={uploadProgress} className="w-full max-w-md mx-auto" />
+              {processingMessage ? (
+                <div className="space-y-2">
                   <p className="text-sm text-gray-300">
                     {processingMessage}
                   </p>
+                  <p className="text-xs text-gray-400">
+                    {uploadProgress}% complete
+                  </p>
                   <p className="text-xs text-gray-500 italic">
-                    You can navigate away - processing continues in background
+                    You can navigate away - parsing continues in background
                   </p>
                 </div>
+              ) : parseSession?.currentFile ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-400">
+                    File {parseSession.progress} of {parseSession.total} ({uploadProgress}%)
+                  </p>
+                  <p className="text-xs text-gray-500 truncate max-w-md mx-auto">
+                    {parseSession.currentFile}
+                  </p>
+                  <p className="text-xs text-gray-500 italic">
+                    You can navigate away - parsing continues in background
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">{uploadProgress}% complete</p>
               )}
             </div>
           ) : (

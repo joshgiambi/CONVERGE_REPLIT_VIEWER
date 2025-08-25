@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -119,13 +119,13 @@ export function SeriesSelector({
       setLocalSelectedForEdit(newSelected);
     }
     
-    // Enable auto-localize when selecting a structure for editing
-    if (newSelected && rtStructures?.structures) {
-      const structure = rtStructures.structures.find((s: any) => s.roiNumber === newSelected);
-      if (structure && (autoZoomEnabled || autoLocalizeEnabled)) {
-        applyAutoZoomAndLocalize(structure);
-      }
-    }
+    // Auto-zoom and auto-localize disabled per user request
+    // if (newSelected && rtStructures?.structures) {
+    //   const structure = rtStructures.structures.find((s: any) => s.roiNumber === newSelected);
+    //   if (structure && (autoZoomEnabled || autoLocalizeEnabled)) {
+    //     applyAutoZoomAndLocalize(structure);
+    //   }
+    // }
   };
 
   // Calculate contour centroid and apply auto-zoom/localize
@@ -639,7 +639,7 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-3 pb-3">
                 <div className="space-y-1">
-                  {/* Organize series hierarchically */}
+                  {/* Organize series hierarchically with CT as primary */}
                   {(() => {
                     const ctSeries = series.filter(s => s.modality === 'CT');
                     const mrSeries = series.filter(s => s.modality === 'MR');
@@ -650,16 +650,10 @@ export function SeriesSelector({
                     // Check if we have registration data
                     const hasRegistration = regSeries.length > 0;
                     
-                    // Determine primary series (CT if available, otherwise MR, PT, or others)
-                    const primarySeries = ctSeries.length > 0 ? ctSeries : 
-                                        mrSeries.length > 0 ? mrSeries : 
-                                        ptSeries.length > 0 ? ptSeries : 
-                                        otherSeries;
-                    
                     return (
                       <>
-                        {/* Primary Series (CT, MR, PT, or others) */}
-                        {primarySeries.map((seriesItem) => (
+                        {/* CT Series as Primary */}
+                        {ctSeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`
@@ -756,7 +750,7 @@ export function SeriesSelector({
                                     <div
                                       key={mrS.id}
                                       className={`
-                                        w-full p-2 text-left text-xs rounded-lg transition-all
+                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
                                         ${secondarySeriesId === mrS.id
                                           ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
                                           : selectedSeries?.id === mrS.id
@@ -766,88 +760,32 @@ export function SeriesSelector({
                                           : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
                                         } border
                                       `}
+                                      onClick={() => {
+                                        // When clicking MRI in series list:
+                                        // 1. Select it as primary series to view MRI alone
+                                        onSeriesSelect(mrS);
+                                        // 2. If we have fusion callback and CT is selected, also activate fusion
+                                        if (onSecondarySeriesSelect && selectedSeries?.modality === 'CT') {
+                                          onSecondarySeriesSelect(mrS.id);
+                                        }
+                                      }}
                                     >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-2 flex-1">
-                                          <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                            MR
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                          MR
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                        </span>
+                                        {secondarySeriesId === mrS.id ? (
+                                          <Badge className="ml-auto bg-purple-500 text-white text-xs animate-pulse">
+                                            Fusion
                                           </Badge>
-                                          <span className="truncate text-xs">
-                                            {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6 hover:bg-purple-700/30"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Open MRI as primary series (view standalone)
-                                              onSeriesSelect(mrS);
-                                              // Clear secondary series
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(null);
-                                              }
-                                            }}
-                                            title="View MRI standalone"
-                                          >
-                                            <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
-                                          </Button>
-                                          {secondarySeriesId === mrS.id ? (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion off
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(null);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-white" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                  <p className="font-medium">Fusion Active - Click to disable</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          ) : (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 hover:bg-green-700/30"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
-                                                      // Toggle fusion on
-                                                      if (onSecondarySeriesSelect) {
-                                                        console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
-                                                        onSecondarySeriesSelect(mrS.id);
-                                                      } else {
-                                                        console.error('❌ onSecondarySeriesSelect is not defined!');
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                  <p className="font-medium">Enable fusion overlay</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          )}
-                                        </div>
+                                        ) : (
+                                          <Badge variant="outline" className="ml-auto border-purple-400/50 text-purple-300 text-xs">
+                                            Fusion Ready
+                                          </Badge>
+                                        )}
                                       </div>
                                     </div>
                                   ))}
@@ -869,94 +807,23 @@ export function SeriesSelector({
                                     <div
                                       key={ptS.id}
                                       className={`
-                                        w-full p-2 text-left text-xs rounded-lg transition-all
-                                        ${secondarySeriesId === ptS.id
-                                          ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
-                                          : selectedSeries?.id === ptS.id
+                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
+                                        ${selectedSeries?.id === ptS.id
                                           ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
                                           : hoveredRegSeries
                                           ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                           : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
                                         } border
                                       `}
+                                      onClick={() => onSeriesSelect(ptS)}
                                     >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-2 flex-1">
-                                          <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
-                                            PT
-                                          </Badge>
-                                          <span className="truncate text-xs">
-                                            {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6 hover:bg-yellow-700/30"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Open PT as primary series (view standalone)
-                                              onSeriesSelect(ptS);
-                                              // Clear secondary series
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(null);
-                                              }
-                                            }}
-                                            title="View PET standalone"
-                                          >
-                                            <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
-                                          </Button>
-                                          {secondarySeriesId === ptS.id ? (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion off
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(null);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-white" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 backdrop-blur-xl border-yellow-400/50 text-white">
-                                                  <p className="font-medium">Fusion Active - Click to disable</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          ) : (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 hover:bg-green-700/30"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion on
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(ptS.id);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 backdrop-blur-xl border-yellow-400/50 text-white">
-                                                  <p className="font-medium">Enable PET fusion overlay</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          )}
-                                        </div>
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
+                                          PT
+                                        </Badge>
+                                        <span className="truncate text-xs">
+                                          {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
+                                        </span>
                                       </div>
                                     </div>
                                   ))}
@@ -966,49 +833,8 @@ export function SeriesSelector({
                           </div>
                         ))}
                         
-                        {/* MR Series as standalone when no CT present */}
-                        {ctSeries.length === 0 && mrSeries.length > 0 && mrSeries.map((seriesItem) => (
-                          <div key={seriesItem.id}>
-                            <div
-                              className={`
-                                p-2 rounded-lg border cursor-pointer transition-all duration-200 backdrop-blur-sm
-                                ${selectedSeries?.id === seriesItem.id
-                                  ? 'bg-purple-500/20 border-purple-400/50 shadow-lg shadow-purple-500/20'
-                                  : 'bg-gray-800/30 border-gray-700/30 hover:border-gray-600/50 hover:bg-gray-700/40'
-                                }
-                              `}
-                              onClick={() => onSeriesSelect(seriesItem)}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <Badge 
-                                  variant="outline" 
-                                  className={`
-                                    text-xs font-semibold
-                                    ${selectedSeries?.id === seriesItem.id
-                                      ? 'border-purple-400 text-purple-400'
-                                      : 'border-purple-500 text-purple-500'
-                                    }
-                                  `}
-                                >
-                                  {seriesItem.modality}
-                                </Badge>
-                                <span className="text-xs text-gray-400">
-                                  {seriesItem.imageCount} images
-                                </span>
-                              </div>
-                              
-                              <h4 className={`
-                                text-sm font-medium truncate
-                                ${selectedSeries?.id === seriesItem.id ? 'text-purple-400' : 'text-white'}
-                              `}>
-                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
-                              </h4>
-                            </div>
-                          </div>
-                        ))}
-                        
-                        {/* Other modalities (if any) - only show if not already displayed as primary */}
-                        {primarySeries !== otherSeries && otherSeries.map((seriesItem) => (
+                        {/* Other modalities (if any) */}
+                        {otherSeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`

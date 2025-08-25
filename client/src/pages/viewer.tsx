@@ -51,41 +51,40 @@ export default function Viewer() {
           study = studies.find((s: any) => s.id === parseInt(studyId));
           console.log('Found study by ID:', study);
         } else if (patientId) {
-          // Find ALL studies for this patient
+          // Find patient and all their studies
           
-          // First try exact match on patientID - get ALL matching studies
-          const matchingStudiesByPatientID = studies.filter((s: any) => s.patientID === patientId);
-          console.log('Found studies by exact patientID match:', matchingStudiesByPatientID);
+          // First try exact match on patientID
+          study = studies.find((s: any) => s.patientID === patientId);
+          console.log('Found study by exact patientID match:', study);
           
-          if (matchingStudiesByPatientID.length > 0) {
-            // Found studies directly by patientID
-            console.log('Setting studyData with all matching studies:', matchingStudiesByPatientID);
-            setStudyData({ studies: matchingStudiesByPatientID });
-            study = matchingStudiesByPatientID[0]; // Set first for compatibility
-          } else {
-            // If not found, try to find by patient database ID
+          // If not found, try to find by patient name containing the ID (for fusion dataset)
+          if (!study) {
             const patientQuery = await fetch('/api/patients').then(res => res.json());
             patient = patientQuery.find((p: any) => p.patientID === patientId);
             console.log('Found patient with patientID:', patientId, 'patient:', patient);
             
             if (patient) {
-              const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
-              console.log('Found all studies by patient database ID:', patientStudies);
-              if (patientStudies.length > 0) {
-                setStudyData({ studies: patientStudies, patient });
-                study = patientStudies[0];
-              }
+              study = studies.find((s: any) => s.patientId === patient.id);
+              console.log('Looking for study with patientId (FK):', patient.id);
+              console.log('Found study by patient database ID:', study);
             }
           }
         } else {
           study = studies[0];
           console.log('Using first study:', study);
-          if (study) {
-            setStudyData({ studies: [study] });
-          }
         }
         
-        if (!study && !studyData) {
+        if (study) {
+          // If we found a study by patient, get ALL studies for that patient
+          if (patientId && patient) {
+            const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
+            console.log('Found all studies for patient:', patientStudies);
+            setStudyData({ studies: patientStudies, patient });
+          } else {
+            console.log('Setting studyData with single study:', study);
+            setStudyData({ studies: [study] });
+          }
+        } else {
           console.log('NO STUDY FOUND!');
         }
       }
