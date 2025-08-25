@@ -2433,7 +2433,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [registrationMatrix, secondaryImages]);
   
-
+  // Re-render current image when secondary images are loaded
+  useEffect(() => {
+    if (secondaryImages.length > 0 && images.length > 0) {
+      console.log('Secondary images loaded, triggering re-render for fusion');
+      displayCurrentImage();
+    }
+  }, [secondaryImages]);
 
   // Load secondary series images for fusion
   useEffect(() => {
@@ -2540,6 +2546,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         
         // Store cache reference to avoid closure issues
         (window as any).secondaryImageCacheRef = newCache;
+        
+        // Trigger re-render of current image to show fusion
+        // Note: The current image will be re-rendered automatically when secondary images state changes
+        console.log('Secondary images loaded, fusion should now be available');
         
         // Pre-compute MRI positions in CT space if registration matrix is available
         if (registrationMatrix && registrationMatrix.length === 16) {
@@ -3529,6 +3539,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
+      console.log('Fusion check:', {
+        secondarySeriesId,
+        secondaryImagesLength: secondaryImages.length,
+        condition: !!(secondarySeriesId && secondaryImages.length > 0)
+      });
+      
       if (secondarySeriesId && secondaryImages.length > 0) {
         console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
