@@ -2514,7 +2514,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (registrationSequence && registrationSequence.items && registrationSequence.items.length > 0) {
           console.log('📊 Found Registration Sequence with', registrationSequence.items.length, 'items');
           
-          // Check ALL registration items to find the one with actual transformation
+          // For Eclipse TPS, collect all valid matrices and use the LAST non-identity one
+          // (Eclipse typically puts the final registration last)
+          let candidateMatrices = [];
+          
           for (let regIdx = 0; regIdx < registrationSequence.items.length; regIdx++) {
             const regItem = registrationSequence.items[regIdx];
             console.log(`📊 Checking Registration Item ${regIdx}...`);
@@ -2562,12 +2565,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       matrixValues.slice(12, 16)
                     ];
                     
-                    // Skip identity matrices - keep looking for actual transformation
+                    // Check if non-identity matrix
                     if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
                         candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
-                      transformationMatrix = candidateMatrix;
-                      console.log(`✅ Found non-identity transformation matrix in item ${regIdx}:`, transformationMatrix);
-                      break; // Found a good matrix, stop looking
+                      candidateMatrices.push({index: regIdx, matrix: candidateMatrix});
+                      console.log(`📊 Found non-identity matrix in item ${regIdx}`);
                     } else {
                       console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
                     }
@@ -2584,18 +2586,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     values.slice(12, 16)
                   ];
                   
-                  // Skip identity matrices - keep looking for actual transformation
+                  // Check if non-identity matrix
                   if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
                       candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
-                    transformationMatrix = candidateMatrix;
-                    console.log(`✅ Found Eclipse transformation matrix in item ${regIdx}:`, transformationMatrix);
-                    break; // Found a good matrix, stop looking
+                    candidateMatrices.push({index: regIdx, matrix: candidateMatrix});
+                    console.log(`📊 Found Eclipse matrix in item ${regIdx}`);
                   } else {
                     console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
                   }
                 }
               }
             }
+          }
+          
+          // Use the LAST non-identity matrix found (Eclipse puts final registration last)
+          if (candidateMatrices.length > 0) {
+            const selected = candidateMatrices[candidateMatrices.length - 1];
+            transformationMatrix = selected.matrix;
+            console.log(`✅ Selected transformation matrix from item ${selected.index} (last of ${candidateMatrices.length} valid matrices):`, transformationMatrix);
+          } else {
+            console.log(`⚠️ No valid non-identity matrices found in registration sequence`);
           }
         }
         

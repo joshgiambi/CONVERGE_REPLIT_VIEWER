@@ -2319,7 +2319,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const studiesRes = await fetch('/api/studies');
           const studiesData = await studiesRes.json();
           
-          for (const study of studiesData.studies || []) {
+          for (const study of studiesData || []) {
             if (study.id !== studyId) {
               console.log(`🔍 Checking study ${study.id} for registration...`);
               const otherRes = await fetch(`/api/registrations/${study.id}`);
