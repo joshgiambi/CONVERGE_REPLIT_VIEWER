@@ -31,36 +31,27 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
     [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
   ];
 
+  console.log(`🔍 FUSION: Processing ${secondaryImages.length} MRI images for transformation`);
+  
   const transformed = secondaryImages.map((img, index) => {
-    // DEBUG: Log each image's metadata
-    if (index < 3) { // Log first 3 images
-      console.log(`🔍 MRI Image ${index}:`, {
-        sopInstanceUID: img.sopInstanceUID,
-        hasImagePosition: !!img.imagePosition,
-        imagePositionType: typeof img.imagePosition,
-        imagePositionValue: img.imagePosition,
-        sliceLocation: img.sliceLocation
-      });
-    }
-    
     // Parse imagePosition into [x,y,z] with null safety
     let pos;
     if (Array.isArray(img.imagePosition)) {
       pos = img.imagePosition.map(Number);
+      console.log(`Using existing imagePosition for image ${index}:`, pos);
     } else if (img.imagePosition && typeof img.imagePosition === 'string') {
       pos = img.imagePosition.split('\\').map(Number);
+      console.log(`Parsed string imagePosition for image ${index}:`, pos);
     } else {
-      // FIXED: Reconstruct imagePosition from slice_location for patient cDDRRYajFESWQXDI
-      // This patient has valid slice_location but missing imagePosition
+      // RECONSTRUCT: imagePosition from slice_location for missing data
       const sliceLoc = parseFloat(img.sliceLocation);
       if (!isNaN(sliceLoc)) {
-        // Use standard axial MRI orientation: [x, y, z] where z = slice_location
-        // Typical head MRI center coordinates (approximate)
+        // Use standard axial MRI coordinates: [x, y, z] where z = slice_location
         pos = [-249.51171875, -465.51171875, sliceLoc];
-        console.log(`✅ RECONSTRUCTED imagePosition from slice_location ${sliceLoc}mm:`, pos);
+        if (index < 3) console.log(`✅ RECONSTRUCTED imagePosition [${index}] from sliceLocation ${sliceLoc}mm:`, pos);
       } else {
-        console.warn('❌ Missing imagePosition AND slice_location for MRI image:', img.sopInstanceUID);
-        pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // Final fallback
+        console.error(`❌ No imagePosition OR sliceLocation for image ${index}:`, img.sopInstanceUID);
+        pos = [0, 0, index * 1.0]; // Final fallback
       }
     }
     const hom = [pos[0], pos[1], pos[2], 1];
