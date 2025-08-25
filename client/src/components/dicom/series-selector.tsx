@@ -111,13 +111,16 @@ export function SeriesSelector({
           } else {
             console.log('Auto-parsed registration successfully for fusion');
             
-            // Auto-activate fusion with CT as primary and MR as secondary
+            // Auto-activate fusion with CT as primary and PET/MR as secondary
             const ctSeries = series.find(s => s.modality === 'CT');
+            const petSeries = series.find(s => s.modality === 'PT');
             const mrSeries = series.find(s => s.modality === 'MR');
+            const secondarySeries = petSeries || mrSeries;
             
-            if (ctSeries && mrSeries && onSecondarySeriesSelect) {
-              console.log(`Auto-activating fusion: CT(${ctSeries.id}) + MR(${mrSeries.id})`);
-              onSecondarySeriesSelect(mrSeries.id);
+            if (ctSeries && secondarySeries && onSecondarySeriesSelect) {
+              const modality = secondarySeries.modality === 'PT' ? 'PET' : 'MR';
+              console.log(`Auto-activating fusion: CT(${ctSeries.id}) + ${modality}(${secondarySeries.id})`);
+              onSecondarySeriesSelect(secondarySeries.id);
             }
           }
         } catch (error) {
