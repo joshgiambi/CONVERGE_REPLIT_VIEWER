@@ -2532,7 +2532,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const CONCURRENT_LIMIT = 4;
         let successCount = 0;
         let failureCount = 0;
-        console.log(`🚀 CACHE START: About to cache ${sortedImages.length} MRI images for series ${secondarySeriesId}`);
+        console.log(`
+
+=== 🔥🔥🔥 MRI CACHE START 🔥🔥🔥 ===`);
+        console.log(`Series ID: ${secondarySeriesId}`);
+        console.log(`Images to cache: ${sortedImages.length}`);
+        console.log(`=================================\n`);
         
         // Process secondary images in chunks
         for (let i = 0; i < sortedImages.length; i += CONCURRENT_LIMIT) {
@@ -2573,17 +2578,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
         
         secondaryImageCacheRef.current = newCache;
-        console.log(`🎯 CACHE FINAL: ${newCache.size} MRI images cached (success: ${successCount}, fail: ${failureCount})`);
-        console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
+        console.log(`\n\n=== 🎯🎯🎯 MRI CACHE RESULT 🎯🎯🎯 ===`);
+        console.log(`CACHED: ${newCache.size} images`);
+        console.log(`SUCCESS: ${successCount}`);
+        console.log(`FAILURES: ${failureCount}`);
+        console.log(`CACHE KEYS:`, Array.from(newCache.keys()).slice(0, 3));
         
         if (newCache.size === 0) {
-          console.error('🚨 CRITICAL FAILURE: NO MRI IMAGES CACHED! Fusion will not work.');
-          console.error('Debug info:', {
-            totalImages: sortedImages.length,
-            successes: successCount,
-            failures: failureCount,
-            seriesId: secondarySeriesId
-          });
+          console.log(`\n❌❌❌ CRITICAL: ZERO MRI IMAGES CACHED ❌❌❌`);
+          console.log(`This is why fusion shows green border but no MRI overlay!`);
+          console.log(`===================================\n\n`);
+        } else {
+          console.log(`✅ MRI images successfully cached for fusion!`);
+          console.log(`===================================\n\n`);
         }
         
         // Store cache reference to avoid closure issues
