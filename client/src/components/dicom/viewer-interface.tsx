@@ -150,6 +150,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 
+  // Control fusion panel visibility based on secondary series selection
+  useEffect(() => {
+    if (secondarySeriesId) {
+      console.log('Secondary series selected, showing fusion panel');
+      setShowFusionPanel(true);
+    } else {
+      console.log('No secondary series, hiding fusion panel');
+      setShowFusionPanel(false);
+    }
+  }, [secondarySeriesId]);
+
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
       // Fetch images for the selected series
