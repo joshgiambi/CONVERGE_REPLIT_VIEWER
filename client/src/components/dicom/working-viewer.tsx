@@ -2290,38 +2290,80 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
-  // Load registration matrix when study changes
+  // Load registration matrix for fusion - check multiple studies
   useEffect(() => {
-    if (studyId) {
-      fetch(`/api/registrations/${studyId}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.transformationMatrix) {
-            console.log(`Loaded registration matrix for study ${studyId}:`, data);
-            // Parse the transformation matrix if it's a string
-            let matrix = data.transformationMatrix;
-            if (typeof matrix === 'string') {
-              try {
-                matrix = JSON.parse(matrix);
-                console.log('Parsed registration matrix:', matrix);
-              } catch (e) {
-                console.error('Failed to parse registration matrix:', e);
-                matrix = null;
+    const loadRegistration = async () => {
+      if (!studyId) return;
+      
+      console.log(`🔍 Looking for registration matrix starting with study ${studyId}`);
+      
+      // Try the current study first
+      let registrationData = null;
+      
+      try {
+        const res = await fetch(`/api/registrations/${studyId}`);
+        const data = await res.json();
+        
+        if (data && data.registration && data.registration.transformationMatrix) {
+          console.log(`✅ Found registration in current study ${studyId}`);
+          registrationData = data.registration;
+        } else {
+          console.log(`❌ No registration in study ${studyId}, checking related studies...`);
+          
+          // If no registration in current study, check all available studies
+          // This handles the case where MRI is in study 18 but registration is in study 17
+          const studiesRes = await fetch('/api/studies');
+          const studiesData = await studiesRes.json();
+          
+          for (const study of studiesData.studies || []) {
+            if (study.id !== studyId) {
+              console.log(`🔍 Checking study ${study.id} for registration...`);
+              const otherRes = await fetch(`/api/registrations/${study.id}`);
+              const otherData = await otherRes.json();
+              
+              if (otherData && otherData.registration && otherData.registration.transformationMatrix) {
+                console.log(`✅ Found registration in related study ${study.id}`);
+                registrationData = otherData.registration;
+                break;
               }
             }
-            setRegistrationMatrix(matrix);
-            registrationMatrixRef.current = matrix;
-          } else {
-            console.log(`No registration found for study ${studyId}`);
-            setRegistrationMatrix(null);
-            registrationMatrixRef.current = null;
           }
-        })
-        .catch(error => {
-          console.error('Error loading registration:', error);
+        }
+        
+        if (registrationData && registrationData.transformationMatrix) {
+          console.log(`📊 Registration data:`, registrationData);
+          
+          // Parse the transformation matrix if it's a string
+          let matrix = registrationData.transformationMatrix;
+          if (typeof matrix === 'string') {
+            try {
+              const parsed = JSON.parse(matrix);
+              if (Array.isArray(parsed) && parsed.length === 4) {
+                matrix = parsed.flat();
+              } else if (parsed['0'] && parsed['1'] && parsed['2'] && parsed['3']) {
+                matrix = [...parsed['0'], ...parsed['1'], ...parsed['2'], ...parsed['3']];
+              }
+              console.log('✅ Parsed registration matrix:', matrix);
+            } catch (e) {
+              console.error('Failed to parse registration matrix:', e);
+              matrix = null;
+            }
+          }
+          setRegistrationMatrix(matrix);
+          registrationMatrixRef.current = matrix;
+        } else {
+          console.log(`❌ No registration found in any study`);
           setRegistrationMatrix(null);
-        });
-    }
+          registrationMatrixRef.current = null;
+        }
+      } catch (error) {
+        console.error('❌ Error loading registration:', error);
+        setRegistrationMatrix(null);
+        registrationMatrixRef.current = null;
+      }
+    };
+    
+    loadRegistration();
   }, [studyId]);
   
   // Re-render fusion overlay when registration matrix is loaded
@@ -2387,8 +2429,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Load secondary series images for fusion
   useEffect(() => {
     const loadSecondaryImages = async () => {
-      // Check if secondarySeriesId is valid (not null, not 'none', and a valid number)
-      if (!secondarySeriesId || isNaN(Number(secondarySeriesId))) {
+      // Check if secondarySeriesId is valid (not null)
+      if (!secondarySeriesId) {
         setSecondaryImages([]);
         secondaryImageCacheRef.current = new Map();
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
@@ -3719,7 +3761,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       hasTransformedPositions: !!transformedMRIPositions.current?.length
     });
     
-    if (!secondaryImages.length || !secondarySeriesId || typeof secondarySeriesId !== 'number') {
+    if (!secondaryImages.length || !secondarySeriesId) {
       console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
       return;
     }
