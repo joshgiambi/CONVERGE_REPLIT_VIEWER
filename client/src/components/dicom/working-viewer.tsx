@@ -278,7 +278,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const res = await fetch(`/api/images/${img.sopInstanceUID}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const ab = await res.arrayBuffer();
-        const data = dicomParser.parseDicom(new DataView(ab));
+        const data = dicomParser.parseDicom(new Uint8Array(ab));
 
         const s = (tag: string) => data.string(tag);
         const ip = s('x00200032'); // ImagePositionPatient
