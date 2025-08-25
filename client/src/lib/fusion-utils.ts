@@ -40,7 +40,14 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
       pos = img.imagePosition.split('\\').map(Number);
     } else {
       // Fallback for null/undefined imagePosition - use slice index as Z position
-      console.warn('Missing imagePosition for image, using fallback position');
+      console.warn('❌ Missing imagePosition for MRI image:', {
+        sopInstanceUID: img.sopInstanceUID,
+        hasImagePosition: !!img.imagePosition,
+        imagePositionType: typeof img.imagePosition,
+        imagePositionValue: img.imagePosition,
+        imageIndex: secondaryImages.indexOf(img),
+        fallbackPosition: [0, 0, secondaryImages.indexOf(img) * 1.0]
+      });
       pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
     }
     const hom = [pos[0], pos[1], pos[2], 1];
