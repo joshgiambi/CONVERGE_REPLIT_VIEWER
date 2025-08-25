@@ -2335,12 +2335,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
           
           const patientData = await patientsRes.json();
+          console.log('🔍 Full patient data response:', patientData);
           const studiesData = patientData?.studies || [];
           
-          console.log(`🔍 Found ${studiesData.length} studies for patient:`, studiesData.map(s => s.id));
+          console.log(`🔍 Found ${studiesData.length} studies for DICOM patient ${dicomPatientId}:`, studiesData.map(s => s.id));
           
           for (const study of studiesData || []) {
-            if (study.id !== studyId) {
+            // Compare as numbers since study.id is a number but studyId is a string
+            if (study.id !== parseInt(studyId)) {
               console.log(`🔍 Checking study ${study.id} for registration...`);
               const otherRes = await fetch(`/api/registrations/${study.id}`);
               const otherData = await otherRes.json();
