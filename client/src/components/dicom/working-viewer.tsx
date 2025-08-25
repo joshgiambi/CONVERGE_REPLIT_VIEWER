@@ -3812,27 +3812,50 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       hasTransformedPositions: !!transformedMRIPositions.current?.length
     });
     
+    console.log('🔧 DEBUG - Full validation state:', {
+      secondaryImagesLength: secondaryImages.length,
+      hasSecondarySeriesId: !!secondarySeriesId,
+      secondarySeriesId: secondarySeriesId,
+      fusionOpacity: fusionOpacity,
+      registrationMatrixLength: registrationMatrix?.length || 0,
+      transformedMRIPositionsLength: transformedMRIPositions.current?.length || 0
+    });
+    
     if (!secondaryImages.length || !secondarySeriesId) {
-      console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
+      console.log("❌ EXIT: Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
       return;
     }
+    
+    console.log('✅ PASS: Secondary images and series ID validated');
     
     // If opacity is 0, skip rendering entirely
     if (fusionOpacity === 0) {
-      console.log("❌ Fusion opacity is 0, skipping overlay render");
+      console.log("❌ EXIT: Fusion opacity is 0, skipping overlay render");
       return;
     }
     
+    console.log('✅ PASS: Fusion opacity check passed:', fusionOpacity);
+    
     if (!registrationMatrix || registrationMatrix.length !== 16) {
-      console.error("CRITICAL: No registration matrix available - fusion cannot be displayed");
+      console.error("❌ EXIT: No registration matrix available - fusion cannot be displayed", {
+        hasMatrix: !!registrationMatrix,
+        matrixLength: registrationMatrix?.length || 0
+      });
       setFusionAvailable(false);
       return;
     }
     
+    console.log('✅ PASS: Registration matrix validated');
+    
     if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
-      console.log("No transformed MRI positions available");
+      console.log("❌ EXIT: No transformed MRI positions available", {
+        hasTransformedPositions: !!transformedMRIPositions.current,
+        transformedPositionsLength: transformedMRIPositions.current?.length || 0
+      });
       return;
     }
+    
+    console.log('✅ PASS: All validation checks passed - proceeding to render fusion');
     
     // Get CT slice Z position
     let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
@@ -3867,6 +3890,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
+    console.log('🔧 DEBUG - renderFusionOverlay parameters:', {
+      hasCtx: !!ctx,
+      hasPrimaryImage: !!primaryImage,
+      hasTransformedMRI: !!transformedMRIPositions.current,
+      hasCacheRef: !!actualCache,
+      hasRegistrationMatrix: !!registrationMatrix,
+      hasCtTransform: !!ctTransform.current
+    });
+    
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
     // DO NOT apply transform here - fusion-utils handles its own transforms
     await renderFusionOverlay(
@@ -3884,7 +3916,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctTransform.current
     );
     
-    console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
+    console.log(`✅ SUCCESS: Fusion overlay completed: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
+    
+    // Additional success validation
+    console.log('🎉 Fusion rendering pipeline completed successfully');
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied
