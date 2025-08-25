@@ -184,10 +184,20 @@ function interpolateMRI(targetZ: number, transformedMRI: any[], secondaryImageCa
     return null;
   }
 
+  // Handle cached MRI image structure vs original DICOM structure  
+  const width = mriImage.width || mriImage.columns;
+  const height = mriImage.height || mriImage.rows;
+  const pixelData = mriImage.data || (mriImage.getPixelData && mriImage.getPixelData());
+  
+  if (!pixelData) {
+    console.error('❌ No pixel data found in MRI image:', Object.keys(mriImage));
+    return null;
+  }
+
   return {
-    width: mriImage.columns,
-    height: mriImage.rows, 
-    data: mriImage.getPixelData(),
+    width,
+    height, 
+    data: pixelData,
     pixelSpacing: closest.image?.pixelSpacing,
     imagePosition: [closest.xInCT, closest.yInCT, closest.zInCT]
   };
