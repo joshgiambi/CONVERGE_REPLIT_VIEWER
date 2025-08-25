@@ -817,9 +817,13 @@ export function SeriesSelector({
                                               className="h-6 w-6 hover:bg-green-700/30"
                                               onClick={(e) => {
                                                 e.stopPropagation();
+                                                console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
                                                 // Toggle fusion on
                                                 if (onSecondarySeriesSelect) {
+                                                  console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
                                                   onSecondarySeriesSelect(mrS.id);
+                                                } else {
+                                                  console.error('❌ onSecondarySeriesSelect is not defined!');
                                                 }
                                               }}
                                               title="Enable fusion overlay"

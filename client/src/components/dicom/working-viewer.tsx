@@ -2304,8 +2304,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const res = await fetch(`/api/registrations/${studyId}`);
         const data = await res.json();
         
-        if (data && data.registration && data.registration.transformationMatrix) {
-          console.log(`✅ Found registration in current study ${studyId}`);
+        // Handle both direct registration data and wrapped format
+        if (data && data.transformationMatrix) {
+          console.log(`✅ Found registration in current study ${studyId} (direct format)`);
+          registrationData = data;
+        } else if (data && data.registration && data.registration.transformationMatrix) {
+          console.log(`✅ Found registration in current study ${studyId} (wrapped format)`);
           registrationData = data.registration;
         } else {
           console.log(`❌ No registration in study ${studyId}, checking related studies...`);
@@ -2321,8 +2325,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const otherRes = await fetch(`/api/registrations/${study.id}`);
               const otherData = await otherRes.json();
               
-              if (otherData && otherData.registration && otherData.registration.transformationMatrix) {
-                console.log(`✅ Found registration in related study ${study.id}`);
+              // Handle both direct registration data and wrapped format
+              if (otherData && otherData.transformationMatrix) {
+                console.log(`✅ Found registration in related study ${study.id} (direct format)`);
+                registrationData = otherData;
+                break;
+              } else if (otherData && otherData.registration && otherData.registration.transformationMatrix) {
+                console.log(`✅ Found registration in related study ${study.id} (wrapped format)`);
                 registrationData = otherData.registration;
                 break;
               }
@@ -2428,9 +2437,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Load secondary series images for fusion
   useEffect(() => {
+    console.log('🎯 secondarySeriesId changed to:', secondarySeriesId, 'Type:', typeof secondarySeriesId);
+    
     const loadSecondaryImages = async () => {
       // Check if secondarySeriesId is valid (not null)
       if (!secondarySeriesId) {
+        console.log('❌ No secondary series ID, clearing secondary images');
         setSecondaryImages([]);
         secondaryImageCacheRef.current = new Map();
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
@@ -2438,6 +2450,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
 
+      console.log('✅ Loading secondary series images for series:', secondarySeriesId);
       try {
         // First fetch series info to get modality
         const seriesResponse = await fetch(`/api/series/${secondarySeriesId}`);
