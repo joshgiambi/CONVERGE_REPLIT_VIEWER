@@ -71,6 +71,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
   
+  // Watch for secondary series changes to show/hide fusion panel
+  useEffect(() => {
+    if (secondarySeriesId !== null) {
+      console.log('Secondary series selected, showing fusion panel');
+      setShowFusionPanel(true);
+    } else {
+      console.log('No secondary series, hiding fusion panel');
+      setShowFusionPanel(false);
+    }
+  }, [secondarySeriesId]);
+  
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
@@ -873,6 +884,18 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
             }
             setShowBooleanOperations(false);
+          }}
+        />
+      )}
+
+      {/* Fusion Control Panel */}
+      {showFusionPanel && secondarySeriesId && (
+        <FusionControlPanel
+          fusionOpacity={fusionOpacity}
+          onFusionOpacityChange={setFusionOpacity}
+          onClose={() => {
+            setShowFusionPanel(false);
+            setSecondarySeriesId(null);
           }}
         />
       )}
