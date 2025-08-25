@@ -2321,21 +2321,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // If no registration in current study, check all studies for this patient
           // This handles the case where MRI is in study 18 but registration is in study 17
-          // First get the patient ID for this study
+          // First get the DICOM patient ID for this study
           console.log(`🔍 FUSION DEBUG: Fetching study info from /api/studies/${studyId}`);
           const studyRes = await fetch(`/api/studies/${studyId}`);
           const studyData = await studyRes.json();
           console.log('🔍 FUSION DEBUG: Study data:', studyData);
-          const patientId = studyData?.patientId;
+          const dicomPatientId = studyData?.patientID; // Use DICOM patient ID, not database ID
           
-          if (!patientId) {
-            console.log('❌ FUSION DEBUG: Could not determine patient ID from study data');
+          if (!dicomPatientId) {
+            console.log('❌ FUSION DEBUG: Could not determine DICOM patient ID from study data');
             return;
           }
           
-          console.log(`🔍 FUSION DEBUG: Patient ID is ${patientId}, fetching patient data...`);
-          // Get all studies for this patient
-          const patientsRes = await fetch(`/api/patients/${patientId}`);
+          console.log(`🔍 FUSION DEBUG: DICOM Patient ID is ${dicomPatientId}, fetching patient data...`);
+          // Get all studies for this patient using DICOM patient ID
+          const patientsRes = await fetch(`/api/patients/dicom/${dicomPatientId}`);
           const patientData = await patientsRes.json();
           console.log('🔍 FUSION DEBUG: Patient data response:', patientData);
           const studiesData = patientData?.studies || [];
