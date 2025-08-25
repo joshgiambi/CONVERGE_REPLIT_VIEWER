@@ -2530,6 +2530,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Preload secondary images with concurrency limits
         const newCache = new Map();
         const CONCURRENT_LIMIT = 4;
+        let successCount = 0;
+        let failureCount = 0;
+        console.log(`🚀 CACHE START: About to cache ${sortedImages.length} MRI images for series ${secondarySeriesId}`);
         
         // Process secondary images in chunks
         for (let i = 0; i < sortedImages.length; i += CONCURRENT_LIMIT) {
@@ -2539,9 +2542,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             const index = i + chunkIndex;
             try {
               // Create a dedicated fetch for secondary images
+              if (index < 3) {
+                console.log(`🚀 Fetching MRI ${index}: ${image.sopInstanceUID}`);
+              }
               const response = await fetch(`/api/images/${image.sopInstanceUID}`);
               if (!response.ok) {
-                console.error(`Failed to fetch secondary image ${index}:`, response.status);
+                console.error(`❌ FETCH FAIL ${index}: status ${response.status} for ${image.sopInstanceUID}`);
+                failureCount++;
                 return;
               }
               
@@ -2550,21 +2557,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               
               if (imageData) {
                 newCache.set(image.sopInstanceUID, imageData);
+                successCount++;
                 if (index < 3) {
-                  console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
+                  console.log(`✅ CACHE SUCCESS ${index}: ${image.sopInstanceUID}`);
                 }
               } else {
-                console.error(`Failed to parse secondary image ${index}`);
+                console.error(`❌ PARSE FAIL ${index}: ${image.sopInstanceUID}`);
+                failureCount++;
               }
             } catch (error) {
-              console.warn(`Failed to preload secondary image ${index}:`, error);
+              console.warn(`❌ EXCEPTION ${index}: ${image.sopInstanceUID}:`, error);
+              failureCount++;
             }
           }));
         }
         
         secondaryImageCacheRef.current = newCache;
-        console.log(`Preloaded ${newCache.size} secondary images`);
+        console.log(`🎯 CACHE FINAL: ${newCache.size} MRI images cached (success: ${successCount}, fail: ${failureCount})`);
         console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
+        
+        if (newCache.size === 0) {
+          console.error('🚨 CRITICAL FAILURE: NO MRI IMAGES CACHED! Fusion will not work.');
+          console.error('Debug info:', {
+            totalImages: sortedImages.length,
+            successes: successCount,
+            failures: failureCount,
+            seriesId: secondarySeriesId
+          });
+        }
         
         // Store cache reference to avoid closure issues
         (window as any).secondaryImageCacheRef = newCache;
