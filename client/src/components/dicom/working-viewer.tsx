@@ -5072,7 +5072,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {/* Removed overlaid text - now in titlebar */}
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
+          {studyId && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}

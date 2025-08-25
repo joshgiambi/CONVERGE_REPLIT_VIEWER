@@ -794,25 +794,39 @@ export function SeriesSelector({
                                           >
                                             <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
                                           </Button>
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className={`h-6 w-6 hover:bg-green-700/30 ${
-                                              secondarySeriesId === mrS.id ? 'bg-green-700/40' : ''
-                                            }`}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Toggle fusion with this MRI
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(
-                                                  secondarySeriesId === mrS.id ? null : mrS.id
-                                                );
-                                              }
-                                            }}
-                                            title="Toggle fusion overlay"
-                                          >
-                                            <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                          </Button>
+                                          {secondarySeriesId === mrS.id ? (
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Toggle fusion off
+                                                if (onSecondarySeriesSelect) {
+                                                  onSecondarySeriesSelect(null);
+                                                }
+                                              }}
+                                              title="Fusion Active - Click to disable"
+                                            >
+                                              <Anchor className="h-3.5 w-3.5 text-white" />
+                                            </Button>
+                                          ) : (
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 hover:bg-green-700/30"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Toggle fusion on
+                                                if (onSecondarySeriesSelect) {
+                                                  onSecondarySeriesSelect(mrS.id);
+                                                }
+                                              }}
+                                              title="Enable fusion overlay"
+                                            >
+                                              <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                            </Button>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
@@ -873,25 +887,39 @@ export function SeriesSelector({
                                           >
                                             <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
                                           </Button>
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className={`h-6 w-6 hover:bg-green-700/30 ${
-                                              secondarySeriesId === ptS.id ? 'bg-green-700/40' : ''
-                                            }`}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Toggle fusion with this PT
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(
-                                                  secondarySeriesId === ptS.id ? null : ptS.id
-                                                );
-                                              }
-                                            }}
-                                            title="Toggle fusion overlay"
-                                          >
-                                            <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                          </Button>
+                                          {secondarySeriesId === ptS.id ? (
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Toggle fusion off
+                                                if (onSecondarySeriesSelect) {
+                                                  onSecondarySeriesSelect(null);
+                                                }
+                                              }}
+                                              title="Fusion Active - Click to disable"
+                                            >
+                                              <Anchor className="h-3.5 w-3.5 text-white" />
+                                            </Button>
+                                          ) : (
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 hover:bg-green-700/30"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Toggle fusion on
+                                                if (onSecondarySeriesSelect) {
+                                                  onSecondarySeriesSelect(ptS.id);
+                                                }
+                                              }}
+                                              title="Enable fusion overlay"
+                                            >
+                                              <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                            </Button>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
