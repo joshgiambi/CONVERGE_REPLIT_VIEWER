@@ -228,6 +228,19 @@ export async function renderFusionOverlay(
     cacheSize: secondaryImageCache.size
   });
   
+  // DEBUG: Log cache keys and requested keys
+  console.log('🔧 DEBUG - Cache contents:', {
+    cacheKeys: Array.from(secondaryImageCache.keys()),
+    cacheSize: secondaryImageCache.size
+  });
+  
+  // DEBUG: Log what MRI images will be requested
+  const requestedUIDs = transformedMRI.map(t => t.image?.sopInstanceUID).filter(Boolean);
+  console.log('🔧 DEBUG - MRI images being requested:', {
+    requestedUIDs: requestedUIDs.slice(0, 5), // First 5 to avoid spam
+    totalRequested: requestedUIDs.length
+  });
+  
   const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache);
   
   console.log('🔧 DEBUG - interpolateMRI returned:', {
