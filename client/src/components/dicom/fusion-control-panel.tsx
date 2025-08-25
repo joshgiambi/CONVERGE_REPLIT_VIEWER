@@ -93,7 +93,7 @@ export function FusionControlPanel({
   // Minimized view - with floating MRI selection buttons
   if (isMinimized) {
     return (
-      <div className="fixed bottom-20 right-8 z-50 flex flex-col items-end gap-3">
+      <div className="fixed bottom-4 right-8 z-50 flex flex-col items-end gap-3">
         {/* Floating MRI selection buttons */}
         <div className="flex gap-2">
           {mrSeries.map((series: any, index: number) => (
@@ -193,7 +193,7 @@ export function FusionControlPanel({
   
   // Expanded view with enhanced glassmorphic design
   return (
-    <div className="fixed bottom-20 right-8 z-50">
+    <div className="fixed bottom-4 right-8 z-50">
       <Card className="bg-gradient-to-br from-black/70 to-purple-900/20 backdrop-blur-xl border border-purple-500/40 p-4 w-80 shadow-2xl shadow-purple-900/30">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
