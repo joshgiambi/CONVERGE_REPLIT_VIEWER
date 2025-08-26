@@ -3575,7 +3575,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
-        console.log(`Rendering fusion for CT slice ${currentIndex}`);
+        console.log(`🔍 Checking fusion conditions for CT slice ${currentIndex}:`, {
+          hasSecondarySeriesId: !!secondarySeriesId,
+          secondaryImagesCount: secondaryImages.length,
+          fusionOpacity,
+          hasRegistrationMatrix: !!registrationMatrix,
+          registrationMatrixLength: registrationMatrix?.length,
+          hasTransformedPositions: !!transformedMRIPositions.current?.length,
+          transformedPositionsCount: transformedMRIPositions.current?.length || 0
+        });
+        
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
@@ -3588,6 +3597,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             fusionOpacity
           });
           // Continue without fusion rather than failing entire image display
+        }
+      } else {
+        if (currentIndex % 10 === 0) { // Log every 10th slice to avoid spam
+          console.log(`❌ Fusion not rendered on slice ${currentIndex}:`, {
+            secondarySeriesId,
+            secondaryImagesLength: secondaryImages.length,
+            reason: !secondarySeriesId ? 'No secondary series selected' : 'No secondary images loaded'
+          });
         }
       }
 
@@ -3825,11 +3842,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       secondarySeriesType: typeof secondarySeriesId,
       fusionOpacity,
       hasRegistrationMatrix: !!registrationMatrix,
-      hasTransformedPositions: !!transformedMRIPositions.current?.length
+      hasTransformedPositions: !!transformedMRIPositions.current?.length,
+      transformedCount: transformedMRIPositions.current?.length || 0
     });
     
     if (!secondaryImages.length || !secondarySeriesId || typeof secondarySeriesId !== 'number') {
-      console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
+      console.log("❌ Fusion not rendered - missing requirements:", {
+        secondaryImages: secondaryImages.length, 
+        secondarySeriesId, 
+        type: typeof secondarySeriesId
+      });
       return;
     }
     
@@ -3888,7 +3910,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Compute CT plane distance for current slice
       const ctPlaneD = computeCTPlaneD(primaryImage, primaryGeometry.current);
       
-      console.log('🎯 Using new geometrically correct fusion renderer:', {
+      console.log('✅ USING NEW FUSION RENDERER:', {
         ctPlaneD,
         transformedSecondaryCount: transformedSecondaryPositions.current.length,
         hasGeometry: !!primaryGeometry.current

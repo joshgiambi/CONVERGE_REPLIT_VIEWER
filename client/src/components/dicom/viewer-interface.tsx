@@ -177,7 +177,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           
           if (preferredSeries) {
             setSecondarySeriesId(preferredSeries.id);
-            console.log('Fusion auto-activated with secondary series:', preferredSeries.id);
+            console.log('🚀 FUSION AUTO-ACTIVATED:', {
+              secondarySeriesId: preferredSeries.id,
+              modality: preferredSeries.modality,
+              description: preferredSeries.seriesDescription,
+              fusionOpacity
+            });
           }
         }
       }

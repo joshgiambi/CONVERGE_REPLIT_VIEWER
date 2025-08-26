@@ -64,13 +64,13 @@ export function renderFusionOverlayNew(opts: RenderOptions): void {
   const minD = transformedSecondary[0].dCT;
   const maxD = transformedSecondary[transformedSecondary.length - 1].dCT;
   
-  console.log(`📍 MRI fusion check: CT slice at ${ctPlaneD.toFixed(1)}mm, MRI covers ${minD.toFixed(1)}mm to ${maxD.toFixed(1)}mm`);
+  console.log(`📍 MRI FUSION CHECK: CT at ${ctPlaneD.toFixed(1)}mm | MRI covers ${minD.toFixed(1)}mm to ${maxD.toFixed(1)}mm`);
   
   if (ctPlaneD < (minD - 2) || ctPlaneD > (maxD + 2)) {
-    console.log(`❌ CT slice ${ctPlaneD.toFixed(1)}mm is outside MRI coverage`);
+    console.log(`❌ CT slice ${ctPlaneD.toFixed(1)}mm is OUTSIDE MRI coverage`);
     return;
   }
-  console.log(`✅ CT slice ${ctPlaneD.toFixed(1)}mm is within MRI coverage, rendering fusion...`);
+  console.log(`✅ CT slice ${ctPlaneD.toFixed(1)}mm is WITHIN MRI coverage, rendering fusion overlay now...`);
 
   // Ensure registration direction
   let M = registrationMatrix && registrationMatrix.length === 16
