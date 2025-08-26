@@ -2589,7 +2589,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
           
           // Compute transformed MRI positions and store in ref
-          const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
+          const transformed = computeTransformedMRIPositionsOld(sortedImages, registrationMatrix);
           transformedMRIPositions.current = transformed;
           console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
           
@@ -2610,8 +2610,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             scheduleRender();
           }, 100);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error loading secondary images:", err);
+        console.error("Error details:", {
+          message: err?.message,
+          stack: err?.stack,
+          secondarySeriesId,
+          registrationMatrix: registrationMatrix?.length
+        });
       }
     };
 
