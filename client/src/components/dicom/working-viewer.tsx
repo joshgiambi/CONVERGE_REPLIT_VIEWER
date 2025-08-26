@@ -1085,19 +1085,35 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const debouncedSaveRef = useRef<any>(null);
   const lastSavedHashRef = useRef<string>("");
   
+  // Hash function that detects actual content changes (not just counts)
+  const hashStructures = (structures: any): string => {
+    let h = 2166136261 >>> 0; // FNV-1a hash initialization
+    for (const s of structures.structures ?? []) {
+      h ^= s.roiNumber; h = Math.imul(h, 16777619);
+      for (const c of s.contours ?? []) {
+        // Include slicePosition and sample points plus length
+        h ^= Math.fround(c.slicePosition) * 1e3 | 0; h = Math.imul(h, 16777619);
+        h ^= (c.points?.length ?? 0); h = Math.imul(h, 16777619);
+        const pts = c.points ?? [];
+        // Sample start/middle/end without hashing all points every time
+        for (const idx of [0, (pts.length>>1)-((pts.length>>1)%3), pts.length-3]) {
+          if (idx >= 0 && idx < pts.length) {
+            h ^= Math.fround(pts[idx]) * 1e3 | 0; h = Math.imul(h, 16777619);
+            h ^= Math.fround(pts[idx+1]) * 1e3 | 0; h = Math.imul(h, 16777619);
+          }
+        }
+      }
+    }
+    return (h >>> 0).toString(36);
+  };
+
   // Initialize debounced save on mount
   useEffect(() => {
     const saveToServer = async (structures: any) => {
       if (!structures) return;
       
-      // Create hash of structures to check for changes
-      const structuresHash = JSON.stringify({
-        count: structures.structures?.length || 0,
-        contourCounts: structures.structures?.map((s: any) => ({
-          id: s.roiNumber,
-          count: s.contours?.length || 0
-        }))
-      });
+      // Use proper hash to detect actual content changes
+      const structuresHash = hashStructures(structures);
       
       // Skip if no changes since last save
       if (structuresHash === lastSavedHashRef.current) {
@@ -3295,10 +3311,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Calculate scale to fit canvas while preserving physical aspect ratio
       // Both sagittal and coronal should have the same display height
       
-      // Use default pixel spacing for aspect ratio calculation
-      const pixelSpacingX = 0.9765625;
-      const pixelSpacingY = 0.9765625;
-      const sliceThickness = 2.0; // Typical slice thickness for CT
+      // Use actual pixel spacing from image metadata for correct geometry
+      const pixelSpacingStr = reconstructedImage.pixelSpacing || imageMetadata?.pixelSpacing || "1.0\\1.0";
+      const [rowSpacing, colSpacing] = pixelSpacingStr.split('\\').map(parseFloat);
+      const pixelSpacingX = colSpacing || 1.0;
+      const pixelSpacingY = rowSpacing || 1.0;
+      const sliceThickness = parseFloat(reconstructedImage.sliceThickness || imageMetadata?.sliceThickness || "2.0");
       
       // Calculate physical dimensions in mm
       let physicalWidth, physicalHeight;
