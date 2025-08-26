@@ -18,9 +18,6 @@ function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
 
 /**
  * Precompute and sort MRI slice positions in CT coordinates.
- * CRITICAL: The REG file transformation matrix is the ABSOLUTE TRUTH for coordinate transformations.
- * No fallbacks or approximations are allowed if the REG file is unavailable or invalid.
- * 
  * @param secondaryImages Array of MRI image metadata objects (must include imagePosition)
  * @param registrationMatrix Flat length-16 array representing 4x4 DICOM registration matrix
  * @returns Array of { zInCT: number, image } sorted by zInCT ascending
@@ -33,20 +30,6 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
     [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
     [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
   ];
-  
-  // Check if this is an identity matrix (no transformation)
-  const isIdentityMatrix = 
-    M[0][0] === 1 && M[0][1] === 0 && M[0][2] === 0 && M[0][3] === 0 &&
-    M[1][0] === 0 && M[1][1] === 1 && M[1][2] === 0 && M[1][3] === 0 &&
-    M[2][0] === 0 && M[2][1] === 0 && M[2][2] === 1 && M[2][3] === 0 &&
-    M[3][0] === 0 && M[3][1] === 0 && M[3][2] === 0 && M[3][3] === 1;
-  
-  if (isIdentityMatrix) {
-    console.error('❌ CRITICAL: REG file contains an identity matrix - no coordinate transformation available.');
-    console.error('The REG file is not providing the necessary transformation between coordinate spaces.');
-    console.error('Fusion CANNOT be displayed without a proper transformation matrix from the REG file.');
-    console.error('Please ensure you have the correct REG file that maps between the CT and PET/MRI coordinate spaces.');
-  }
 
   const transformed = secondaryImages.map(img => {
     // Parse imagePosition into [x,y,z] with null safety
@@ -68,21 +51,15 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
   // Sort ascending by zInCT
   transformed.sort((a, b) => a.zInCT - b.zInCT);
   
-  // Debug: Log sample transformed coordinates and check for overlap issues
+  // Debug: Log sample transformed coordinates
   if (transformed.length > 0) {
     const first = transformed[0];
     const middle = transformed[Math.floor(transformed.length / 2)];
     const last = transformed[transformed.length - 1];
-    console.log(`🔍 Sample secondary→primary coordinate transformations:`);
-    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in primary space`);
-    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in primary space`);
-    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in primary space`);
-    
-    // Check if this is an identity matrix with non-overlapping regions
-    if (isIdentityMatrix) {
-      console.warn('⚠️ Identity matrix detected - checking for anatomical overlap...');
-      console.log(`Secondary image Z range: ${first.zInCT.toFixed(1)}mm to ${last.zInCT.toFixed(1)}mm`);
-    }
+    console.log(`🔍 Sample MRI→CT coordinate transformations:`);
+    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in CT space`);
   }
   
   return transformed;
@@ -211,21 +188,18 @@ export async function renderFusionOverlay(
   // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
   console.log('🎯 Rendering fusion overlay in CT coordinate space');
 
-  // CRITICAL: No z-range checks! CT and secondary (MRI/PET) have independent coordinate spaces.
-  // The REG file transformation matrix handles ALL coordinate mapping between spaces.
-  // We should NEVER skip fusion based on z-coordinate ranges.
-  
-  if (transformedMRI.length === 0) {
-    console.log('No transformed secondary images available for fusion');
-    return;
+  // STRICT Z-range check: Only render fusion within actual MRI coverage
+  if (transformedMRI.length > 0) {
+    const zValues = transformedMRI.map(t => t.zInCT);
+    const minZ = Math.min(...zValues);
+    const maxZ = Math.max(...zValues);
+    
+    // Only render fusion if CT slice is within MRI coverage range
+    if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) { // Tight 2mm tolerance
+      console.log(`CT slice ${ctSliceZ}mm outside MRI range ${minZ.toFixed(1)}-${maxZ.toFixed(1)}mm, skipping fusion to prevent slice repetition`);
+      return; // Exit early - no fusion rendering
+    }
   }
-  
-  // Log the transformed range for debugging only
-  const zValues = transformedMRI.map(t => t.zInCT);
-  const minZ = Math.min(...zValues);
-  const maxZ = Math.max(...zValues);
-  console.log(`Secondary images transformed to CT space: Z-range ${minZ.toFixed(1)} to ${maxZ.toFixed(1)}mm`);
-  console.log(`Current CT slice: ${ctSliceZ}mm`);
 
   // Get the interpolated MRI data for this CT slice
   const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache);

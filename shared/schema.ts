@@ -200,21 +200,15 @@ export type InsertNetworkQuery = z.infer<typeof insertNetworkQuerySchema>;
 export const registrations = pgTable("registrations", {
   id: serial("id").primaryKey(),
   studyId: integer("study_id").references(() => studies.id),
-  regSopInstanceUid: text("reg_sop_instance_uid").notNull(), // The REG SOP Instance that defined the transform
-  sourceFrameOfReferenceUid: text("source_frame_of_reference_uid").notNull(), // From registration item/referenced images
-  registeredFrameOfReferenceUid: text("registered_frame_of_reference_uid").notNull(), // The "target/registered" RCS
-  sopClassUid: text("sop_class_uid"), // Spatial vs Deformable registration
-  transformationMatrix: jsonb("transformation_matrix").notNull(), // Row-major 16-element array [M11,M12,M13,M14,M21,...]
-  matrixType: text("matrix_type").notNull(), // RIGID, RIGID_SCALE, AFFINE parsed from (0070,030C)
-  metadata: jsonb("metadata"), // Additional DICOM metadata as JSON
+  seriesInstanceUID: text("series_instance_uid"),
+  sopInstanceUID: text("sop_instance_uid"),
+  sourceFrameOfReferenceUID: text("source_frame_of_reference_uid"),
+  targetFrameOfReferenceUID: text("target_frame_of_reference_uid"),
+  transformationMatrix: text("transformation_matrix"), // JSON array of 16 numbers for 4x4 matrix
+  matrixType: text("matrix_type"), // e.g., 'RIGID'
+  metadata: text("metadata"), // Additional metadata as JSON
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => ({
-  // Unique constraint to prevent duplicate registrations
-  uniqueRegistration: {
-    columns: [table.sourceFrameOfReferenceUid, table.registeredFrameOfReferenceUid, table.regSopInstanceUid],
-    name: "unique_registration"
-  }
-}));
+});
 
 // RT Structure Set table to store metadata and associations
 export const rtStructureSets = pgTable("rt_structure_sets", {
@@ -279,14 +273,6 @@ export const insertRTStructureSchema = createInsertSchema(rtStructures).omit({
 export type InsertRTStructure = z.infer<typeof insertRTStructureSchema>;
 export type RTStructure = typeof rtStructures.$inferSelect;
 
-// Registration type definitions
-export const insertRegistrationSchema = createInsertSchema(registrations).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertRegistration = z.infer<typeof insertRegistrationSchema>;
-export type Registration = typeof registrations.$inferSelect;
-
 export const insertRTStructureContourSchema = createInsertSchema(rtStructureContours).omit({
   id: true,
   createdAt: true,
@@ -301,7 +287,13 @@ export const insertRTStructureHistorySchema = createInsertSchema(rtStructureHist
 export type InsertRTStructureHistory = z.infer<typeof insertRTStructureHistorySchema>;
 export type RTStructureHistory = typeof rtStructureHistory.$inferSelect;
 
+export const insertRegistrationSchema = createInsertSchema(registrations).omit({
+  id: true,
+  createdAt: true,
+});
 
+export type Registration = typeof registrations.$inferSelect;
+export type InsertRegistration = z.infer<typeof insertRegistrationSchema>;
 
 // V2 Professional Contour System - Medical Grade Types
 export interface Point {

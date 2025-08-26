@@ -175,24 +175,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       });
     }
   }, [gpuCheckComplete, isGPUMode, cornerstone3DInitialized]);
-  
-  // Cleanup resources on component unmount
-  useEffect(() => {
-    return () => {
-      // Clean up DICOM worker pool
-      destroyDicomWorkerManager();
-      
-      // Clean up GPU viewports if initialized
-      if (cornerstone3DInitialized) {
-        cleanupGPUViewports();
-      }
-      
-      // Clear any pending renders or animations
-      if (renderRequestId.current) {
-        cancelAnimationFrame(renderRequestId.current);
-      }
-    };
-  }, [cornerstone3DInitialized]);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -1103,35 +1085,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const debouncedSaveRef = useRef<any>(null);
   const lastSavedHashRef = useRef<string>("");
   
-  // Hash function that detects actual content changes (not just counts)
-  const hashStructures = (structures: any): string => {
-    let h = 2166136261 >>> 0; // FNV-1a hash initialization
-    for (const s of structures.structures ?? []) {
-      h ^= s.roiNumber; h = Math.imul(h, 16777619);
-      for (const c of s.contours ?? []) {
-        // Include slicePosition and sample points plus length
-        h ^= Math.fround(c.slicePosition) * 1e3 | 0; h = Math.imul(h, 16777619);
-        h ^= (c.points?.length ?? 0); h = Math.imul(h, 16777619);
-        const pts = c.points ?? [];
-        // Sample start/middle/end without hashing all points every time
-        for (const idx of [0, (pts.length>>1)-((pts.length>>1)%3), pts.length-3]) {
-          if (idx >= 0 && idx < pts.length) {
-            h ^= Math.fround(pts[idx]) * 1e3 | 0; h = Math.imul(h, 16777619);
-            h ^= Math.fround(pts[idx+1]) * 1e3 | 0; h = Math.imul(h, 16777619);
-          }
-        }
-      }
-    }
-    return (h >>> 0).toString(36);
-  };
-
   // Initialize debounced save on mount
   useEffect(() => {
     const saveToServer = async (structures: any) => {
       if (!structures) return;
       
-      // Use proper hash to detect actual content changes
-      const structuresHash = hashStructures(structures);
+      // Create hash of structures to check for changes
+      const structuresHash = JSON.stringify({
+        count: structures.structures?.length || 0,
+        contourCounts: structures.structures?.map((s: any) => ({
+          id: s.roiNumber,
+          count: s.contours?.length || 0
+        }))
+      });
       
       // Skip if no changes since last save
       if (structuresHash === lastSavedHashRef.current) {
@@ -2490,24 +2456,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         const imageList = await response.json();
         
-        // Filter out images with null or invalid positions
-        // Use imagePosition[2] as fallback for images without sliceLocation
+        // Filter out images with null or invalid slice locations
         const validImages = imageList.filter((img: any) => {
           const sliceLoc = parseFloat(img.sliceLocation);
-          const zPos = img.imagePosition?.[2];
-          return (!isNaN(sliceLoc) && sliceLoc !== null) || (!isNaN(zPos) && zPos !== null);
+          return !isNaN(sliceLoc) && sliceLoc !== null;
         });
         
         if (validImages.length === 0) {
-          console.error("No secondary images with valid positions found");
+          console.error("No MRI images with valid slice locations found");
           setSecondaryImages([]);
           return;
         }
         
         const sortedImages = validImages.sort((a: any, b: any) => {
-          // Sort by slice location or Z position
-          const aSliceLoc = parseFloat(a.sliceLocation) || a.imagePosition?.[2];
-          const bSliceLoc = parseFloat(b.sliceLocation) || b.imagePosition?.[2];
+          // Sort by slice location
+          const aSliceLoc = parseFloat(a.sliceLocation);
+          const bSliceLoc = parseFloat(b.sliceLocation);
           return aSliceLoc - bSliceLoc;
         });
 
@@ -2518,11 +2482,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
         
         // Debug log the sorted order
-        console.log('Secondary images sorted order (first 5 and last 5):');
+        console.log('MRI sorted order (first 5 and last 5):');
         const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
         debugImages.forEach((img: any, idx: number) => {
-          const sliceLoc = parseFloat(img.sliceLocation) || img.imagePosition?.[2];
-          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${sliceLoc}`);
+          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
         });
         
         // Preload secondary images with concurrency limits
@@ -2607,15 +2570,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      // Only load metadata for current image when index changes
-      const currentImage = images[currentIndex];
-      if (currentImage?.id) {
-        loadImageMetadata(currentImage.id);
-      }
-      // Trigger render after metadata loads
-      scheduleRender();
+      // Add a small delay to ensure state is stable after contour operations
+      const timeoutId = setTimeout(() => {
+        scheduleRender();
+        // Load metadata for current image
+        const currentImage = images[currentIndex];
+        if (currentImage?.id) {
+          loadImageMetadata(currentImage.id);
+        }
+      }, 10);
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [currentIndex]); // Only trigger on index change, not every render
+  }, [images, currentIndex, isPreloading]); // Removed currentWindowLevel from dependencies to prevent infinite loop
 
   // Separate effect for window level changes - only re-render, don't reload metadata
   useEffect(() => {
@@ -3325,12 +3292,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Calculate scale to fit canvas while preserving physical aspect ratio
       // Both sagittal and coronal should have the same display height
       
-      // Use actual pixel spacing from image metadata for correct geometry
-      const pixelSpacingStr = reconstructedImage.pixelSpacing || imageMetadata?.pixelSpacing || "1.0\\1.0";
-      const [rowSpacing, colSpacing] = pixelSpacingStr.split('\\').map(parseFloat);
-      const pixelSpacingX = colSpacing || 1.0;
-      const pixelSpacingY = rowSpacing || 1.0;
-      const sliceThickness = parseFloat(reconstructedImage.sliceThickness || imageMetadata?.sliceThickness || "2.0");
+      // Use default pixel spacing for aspect ratio calculation
+      const pixelSpacingX = 0.9765625;
+      const pixelSpacingY = 0.9765625;
+      const sliceThickness = 2.0; // Typical slice thickness for CT
       
       // Calculate physical dimensions in mm
       let physicalWidth, physicalHeight;
@@ -3503,8 +3468,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       const cacheKey = currentImage.sopInstanceUID;
 
-      // Don't clear canvas unnecessarily - only clear if needed
-      // Clearing causes flicker during scrolling
+      // Clear canvas
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       let imageData;
       
@@ -3533,9 +3499,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             
             if (reloadedImageData) {
               imageData = reloadedImageData;
-              // Cache the reloaded image to prevent future reloads
-              imageCacheRef.current.set(cacheKey, reloadedImageData);
-              console.log("Successfully reloaded and cached image:", cacheKey);
+              console.log("Successfully reloaded image:", cacheKey);
             } else {
               throw new Error("Failed to parse reloaded image");
             }
@@ -3546,11 +3510,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Ensure canvas has correct size without clearing it
-      if (canvas.width !== 1024 || canvas.height !== 1024) {
-        canvas.width = 1024;
-        canvas.height = 1024;
-      }
+      // Keep fixed canvas size for consistent display
+      canvas.width = 1024;
+      canvas.height = 1024;
 
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
@@ -3630,7 +3592,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
         ctx.beginPath();
         ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
-        ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
+        ctx.fill();
         
         ctx.restore();
       }
@@ -3824,7 +3786,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     // Get CT slice Z position
-    let ctSliceZ: number = 0; // Initialize properly - will be set from metadata
+    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
     
     // Try to get Z position from various sources in priority order
     if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
@@ -4225,10 +4187,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (contour.isPredicted) {
       const originalAlpha = ctx.globalAlpha;
       ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
-      ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
+      ctx.fill();
       ctx.globalAlpha = originalAlpha;
     } else {
-      ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
+      ctx.fill();
     }
     
     ctx.stroke();
@@ -4920,8 +4882,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         <div className="relative w-full h-full flex items-center justify-center">
           <canvas
             ref={canvasRef}
-            width={1024}
-            height={1024}
+            width={1280}
+            height={1280}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={(e) => {
               handleCanvasMouseMove(e);
