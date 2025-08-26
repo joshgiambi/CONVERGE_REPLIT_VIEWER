@@ -2607,19 +2607,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      // Add a small delay to ensure state is stable after contour operations
-      const timeoutId = setTimeout(() => {
-        scheduleRender();
-        // Load metadata for current image
-        const currentImage = images[currentIndex];
-        if (currentImage?.id) {
-          loadImageMetadata(currentImage.id);
-        }
-      }, 10);
-      
-      return () => clearTimeout(timeoutId);
+      // Only load metadata for current image when index changes
+      const currentImage = images[currentIndex];
+      if (currentImage?.id) {
+        loadImageMetadata(currentImage.id);
+      }
+      // Trigger render after metadata loads
+      scheduleRender();
     }
-  }, [images, currentIndex, isPreloading]); // Removed currentWindowLevel from dependencies to prevent infinite loop
+  }, [currentIndex]); // Only trigger on index change, not every render
 
   // Separate effect for window level changes - only re-render, don't reload metadata
   useEffect(() => {
@@ -3507,9 +3503,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       const cacheKey = currentImage.sopInstanceUID;
 
-      // Clear canvas
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Don't clear canvas unnecessarily - only clear if needed
+      // Clearing causes flicker during scrolling
 
       let imageData;
       
@@ -3538,7 +3533,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             
             if (reloadedImageData) {
               imageData = reloadedImageData;
-              console.log("Successfully reloaded image:", cacheKey);
+              // Cache the reloaded image to prevent future reloads
+              imageCacheRef.current.set(cacheKey, reloadedImageData);
+              console.log("Successfully reloaded and cached image:", cacheKey);
             } else {
               throw new Error("Failed to parse reloaded image");
             }
@@ -3549,9 +3546,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Keep fixed canvas size for consistent display
-      // Keep canvas size consistent with JSX attributes - don't resize here
-      // Canvas size is set in JSX as 1280x1280
+      // Ensure canvas has correct size without clearing it
+      if (canvas.width !== 1024 || canvas.height !== 1024) {
+        canvas.width = 1024;
+        canvas.height = 1024;
+      }
 
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
