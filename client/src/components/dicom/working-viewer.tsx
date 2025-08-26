@@ -23,7 +23,20 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
+// Keep old fusion utils for compatibility
+import { computeTransformedMRIPositions as computeTransformedMRIPositionsOld } from "@/lib/fusion-utils";
+// Import new geometrically correct fusion utilities
+import { 
+  computeTransformedSecondaryPositions,
+  buildPrimaryGeometry,
+  PrimaryGeometry,
+  TransformedSecondary
+} from "@/lib/fusion-utils-v2";
+import { 
+  renderFusionOverlayNew,
+  computeCTPlaneD
+} from "@/lib/fusion-overlay-renderer";
+import { getSliceScalarZ } from "@/lib/dicom-geometry-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -228,8 +241,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
   // Pre-computed MRI Z-range in CT space for performance
   const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
-  // Pre-computed transformed MRI positions for fast lookup
+  // Pre-computed transformed MRI positions for fast lookup (legacy)
   const transformedMRIPositions = useRef<Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>>([]); 
+  // Pre-computed transformed secondary positions (new geometry-correct)
+  const transformedSecondaryPositions = useRef<TransformedSecondary[]>([]);
+  // Primary (CT) geometry for fusion calculations
+  const primaryGeometry = useRef<PrimaryGeometry | null>(null);
   // CT transform for fusion coordinate system alignment
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
 
@@ -2384,12 +2401,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
-        transformedMRIPositions.current = transformed;
+        // Use legacy method for compatibility
+        const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
+        transformedMRIPositions.current = transformedLegacy;
+        
+        // Build primary geometry from CT images
+        if (images.length > 0) {
+          const geometry = buildPrimaryGeometry(images);
+          primaryGeometry.current = geometry;
+          
+          // Use new geometry-based transformation
+          const transformedNew = computeTransformedSecondaryPositions(
+            secondaryImages,
+            registrationMatrix,
+            geometry
+          );
+          transformedSecondaryPositions.current = transformedNew;
+        }
         
         // Calculate and store Z-range
-        if (transformed.length > 0) {
-          const zValues = transformed.map(item => item.zInCT);
+        if (transformedLegacy.length > 0) {
+          const zValues = transformedLegacy.map(item => item.zInCT);
           mriZRangeInCTSpace.current = {
             min: Math.min(...zValues),
             max: Math.max(...zValues)
@@ -2406,14 +2438,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0 && images.length > 0) {
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
-      transformedMRIPositions.current = transformed;
+      
+      // Use legacy method for compatibility
+      const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
+      transformedMRIPositions.current = transformedLegacy;
+      
+      // Build primary geometry from CT images and compute new transformations
+      const geometry = buildPrimaryGeometry(images);
+      primaryGeometry.current = geometry;
+      
+      // Use new geometry-based transformation
+      const transformedNew = computeTransformedSecondaryPositions(
+        secondaryImages,
+        registrationMatrix,
+        geometry
+      );
+      transformedSecondaryPositions.current = transformedNew;
       
       // Calculate and store Z-range
-      if (transformed.length > 0) {
-        const zValues = transformed.map(item => item.zInCT);
+      if (transformedLegacy.length > 0) {
+        const zValues = transformedLegacy.map(item => item.zInCT);
         mriZRangeInCTSpace.current = {
           min: Math.min(...zValues),
           max: Math.max(...zValues)
@@ -2424,7 +2470,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Clear cache to force recomputation with new data
       mriSliceMappingCache.current.clear();
     }
-  }, [registrationMatrix, secondaryImages]);
+  }, [registrationMatrix, secondaryImages, images]);
   
 
 
@@ -3818,22 +3864,46 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
-    // Call the new fusion utility function with registration matrix and shared CT coordinate system
-    // DO NOT apply transform here - fusion-utils handles its own transforms
-    await renderFusionOverlay(
-      ctx,
-      primaryImage,
-      transformedMRIPositions.current,
-      actualCache,
-      ctSliceZ,
-      fusionOpacity,
-      panX,
-      panY,
-      canvas.width,
-      canvas.height,
-      registrationMatrix,
-      ctTransform.current
-    );
+    // Use new geometrically correct fusion renderer if we have the primary geometry
+    if (primaryGeometry.current && transformedSecondaryPositions.current.length > 0) {
+      // Compute CT plane distance for current slice
+      const ctPlaneD = computeCTPlaneD(primaryImage, primaryGeometry.current);
+      
+      console.log('🎯 Using new geometrically correct fusion renderer:', {
+        ctPlaneD,
+        transformedSecondaryCount: transformedSecondaryPositions.current.length,
+        hasGeometry: !!primaryGeometry.current
+      });
+      
+      await renderFusionOverlayNew({
+        ctx,
+        primaryImage,
+        primaryGeometry: primaryGeometry.current,
+        transformedSecondary: transformedSecondaryPositions.current,
+        secondaryCache: actualCache,
+        ctPlaneDistance: ctPlaneD || ctSliceZ, // Fallback to ctSliceZ if computation fails
+        fusionOpacity,
+        registrationMatrix
+      });
+    } else {
+      // Fallback to legacy renderer if new geometry isn't available
+      console.log('⚠️ Falling back to legacy fusion renderer');
+      const { renderFusionOverlay: renderFusionOverlayLegacy } = await import('@/lib/fusion-utils');
+      await renderFusionOverlayLegacy(
+        ctx,
+        primaryImage,
+        transformedMRIPositions.current,
+        actualCache,
+        ctSliceZ,
+        fusionOpacity,
+        panX,
+        panY,
+        canvas.width,
+        canvas.height,
+        registrationMatrix,
+        ctTransform.current
+      );
+    }
     
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
