@@ -45,34 +45,49 @@ export function FusionControlPanel({
     enabled: !!studyId
   });
   
-  // Filter for MR series only
-  const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
+  // Filter for fusion-compatible series (MR and PET)
+  const fusionSeries = (availableSeries as any[])?.filter((s: any) => 
+    s.modality === 'MR' || s.modality === 'PT'
+  ) || [];
   
   // Get primary series info
   const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
   
-  // Determine secondary modality label
-  const secondaryModality = mrSeries.length > 0 ? 'MR' : 'Secondary';
+  // Determine secondary modality label based on available fusion series
+  const secondaryModality = fusionSeries.length > 0 ? 
+    (fusionSeries.find(s => s.modality === 'PT') ? 'PET' : 'MR') : 'Secondary';
   
-  // Auto-select first MR series with valid slice locations (only on initial mount)
+  // Auto-select first fusion series with valid slice locations (only on initial mount)
   // Use a ref to track if we've already auto-selected
   const hasAutoSelected = useRef(false);
   
   useEffect(() => {
-    if (mrSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
-      // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
-      const preferredSeries = mrSeries.find((s: any) => 
-        s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-      );
+    if (fusionSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
+      // For MR: prefer series with description containing "AX T1 FS+C" as it has better slice locations
+      // For PET: prefer the first available PET series
+      let preferredSeries;
+      const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
+      const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
       
-      const seriestoSelect = preferredSeries || mrSeries[0];
-      console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
+      if (petSeries) {
+        // PET-CT fusion: auto-select PET series
+        preferredSeries = petSeries;
+        console.log(`Auto-selecting PET series for CT-PET fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription || 'No description'}`);
+      } else if (mrSeries.length > 0) {
+        // MR-CT fusion: prefer specific MR sequence
+        preferredSeries = mrSeries.find((s: any) => 
+          s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
+        ) || mrSeries[0];
+        console.log(`Auto-selecting MR series for CT-MR fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription || 'No description'}`);
+      } else {
+        preferredSeries = fusionSeries[0];
+      }
       
       hasAutoSelected.current = true;
-      onSecondarySeriesSelect(seriestoSelect.id);
+      onSecondarySeriesSelect(preferredSeries.id);
     }
-  }, [mrSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
+  }, [fusionSeries]); // Updated to use fusionSeries instead of mrSeries
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
@@ -159,13 +174,13 @@ export function FusionControlPanel({
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300">Available Fusion Series</Label>
               <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
-                {mrSeries.length} {secondaryModality} series
+                {fusionSeries.length} {secondaryModality} series
               </Badge>
             </div>
             
-            {/* MR Series Buttons - Compact Grid */}
+            {/* Fusion Series Buttons - Compact Grid */}
             <div className="grid grid-cols-3 gap-2">
-              {mrSeries.map((series: any, index: number) => (
+              {fusionSeries.map((series: any, index: number) => (
                 <button
                   key={series.id}
                   onClick={() => handleSecondarySelect(series.id.toString())}
