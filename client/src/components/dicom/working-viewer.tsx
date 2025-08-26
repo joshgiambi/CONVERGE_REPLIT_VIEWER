@@ -3804,7 +3804,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    // Show MRI coverage range
+    if (transformedMRIPositions.current && transformedMRIPositions.current.length > 0) {
+      const mriZPositions = transformedMRIPositions.current.map(pos => pos.transformedZ);
+      const minZ = Math.min(...mriZPositions);
+      const maxZ = Math.max(...mriZPositions);
+      console.log(`📍 MRI coverage: ${minZ.toFixed(1)}mm to ${maxZ.toFixed(1)}mm (${transformedMRIPositions.current.length} slices)`);
+    }
+    
     console.log('🎯 renderFusionOverlayNew called:', {
+      currentCTPosition: primaryImage?.imagePosition,
       secondaryImagesLength: secondaryImages.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
