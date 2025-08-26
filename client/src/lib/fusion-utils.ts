@@ -68,15 +68,21 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
   // Sort ascending by zInCT
   transformed.sort((a, b) => a.zInCT - b.zInCT);
   
-  // Debug: Log sample transformed coordinates
+  // Debug: Log sample transformed coordinates and check for overlap issues
   if (transformed.length > 0) {
     const first = transformed[0];
     const middle = transformed[Math.floor(transformed.length / 2)];
     const last = transformed[transformed.length - 1];
-    console.log(`🔍 Sample MRI→CT coordinate transformations:`);
-    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in CT space`);
-    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in CT space`);
-    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`🔍 Sample secondary→primary coordinate transformations:`);
+    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in primary space`);
+    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in primary space`);
+    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in primary space`);
+    
+    // Check if this is an identity matrix with non-overlapping regions
+    if (isIdentityMatrix) {
+      console.warn('⚠️ Identity matrix detected - checking for anatomical overlap...');
+      console.log(`Secondary image Z range: ${first.zInCT.toFixed(1)}mm to ${last.zInCT.toFixed(1)}mm`);
+    }
   }
   
   return transformed;
