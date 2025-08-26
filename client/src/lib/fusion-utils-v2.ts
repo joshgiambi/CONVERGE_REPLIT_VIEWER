@@ -51,8 +51,21 @@ export function buildPrimaryGeometry(primaryImage: any): PrimaryGeometry | null 
   const sp = parseNums(primaryImage.pixelSpacing, 2);
   
   if (!ip || !io || !sp) {
-    console.warn('Missing spatial metadata in primary image');
-    return null;
+    console.warn('Missing spatial metadata in primary image, using defaults:', {
+      hasPosition: !!ip,
+      hasOrientation: !!io,
+      hasSpacing: !!sp
+    });
+    
+    // Use default axial geometry when metadata is missing
+    return {
+      origin: ip || [0, 0, 0],
+      rowDir: io ? io.slice(0, 3) as Vec3 : [1, 0, 0],
+      colDir: io ? io.slice(3, 6) as Vec3 : [0, 1, 0],
+      rowSpacing: sp ? sp[0] : 1,
+      colSpacing: sp ? sp[1] : 1,
+      normal: io ? cross(io.slice(0, 3) as Vec3, io.slice(3, 6) as Vec3) : [0, 0, 1]
+    };
   }
 
   const rowDir = io.slice(0, 3) as Vec3;
@@ -79,10 +92,16 @@ export function buildPrimaryGeometry(primaryImage: any): PrimaryGeometry | null 
 export function computeTransformedSecondaryPositions(
   secondaryImages: SecondaryImage[],
   registrationMatrix: Mat4x4 | null | undefined,
-  primaryGeom: PrimaryGeometry,
+  primaryGeom: PrimaryGeometry | null,
   invertRegistration = false
 ): TransformedSecondary[] {
-  if (!secondaryImages?.length) return [];
+  if (!secondaryImages?.length || !primaryGeom) {
+    console.warn('Cannot compute transformed secondary positions:', {
+      hasSecondary: !!secondaryImages?.length,
+      hasGeometry: !!primaryGeom
+    });
+    return [];
+  }
 
   let M = registrationMatrix && registrationMatrix.length === 16 
     ? registrationMatrix.slice(0, 16) 

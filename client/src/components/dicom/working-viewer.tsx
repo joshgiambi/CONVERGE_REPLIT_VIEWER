@@ -2405,18 +2405,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
         transformedMRIPositions.current = transformedLegacy;
         
-        // Build primary geometry from CT images
+        // Build primary geometry from first CT image
         if (images.length > 0) {
-          const geometry = buildPrimaryGeometry(images);
+          const geometry = buildPrimaryGeometry(images[0]);
           primaryGeometry.current = geometry;
           
-          // Use new geometry-based transformation
-          const transformedNew = computeTransformedSecondaryPositions(
-            secondaryImages,
-            registrationMatrix,
-            geometry
-          );
-          transformedSecondaryPositions.current = transformedNew;
+          // Use new geometry-based transformation if geometry was built
+          if (geometry) {
+            const transformedNew = computeTransformedSecondaryPositions(
+              secondaryImages,
+              registrationMatrix,
+              geometry
+            );
+            transformedSecondaryPositions.current = transformedNew;
+          }
         }
         
         // Calculate and store Z-range
@@ -2445,17 +2447,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
       transformedMRIPositions.current = transformedLegacy;
       
-      // Build primary geometry from CT images and compute new transformations
-      const geometry = buildPrimaryGeometry(images);
+      // Build primary geometry from first CT image and compute new transformations
+      const geometry = buildPrimaryGeometry(images[0]);
       primaryGeometry.current = geometry;
       
-      // Use new geometry-based transformation
-      const transformedNew = computeTransformedSecondaryPositions(
-        secondaryImages,
-        registrationMatrix,
-        geometry
-      );
-      transformedSecondaryPositions.current = transformedNew;
+      // Use new geometry-based transformation if geometry was built
+      if (geometry) {
+        const transformedNew = computeTransformedSecondaryPositions(
+          secondaryImages,
+          registrationMatrix,
+          geometry
+        );
+        transformedSecondaryPositions.current = transformedNew;
+      }
       
       // Calculate and store Z-range
       if (transformedLegacy.length > 0) {
