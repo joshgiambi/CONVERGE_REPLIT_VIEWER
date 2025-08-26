@@ -2309,11 +2309,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       let foundMatrix = null;
       for (const sid of allStudyIds) {
         try {
+          // First try to get existing registration
           const response = await fetch(`/api/registrations/${sid}`);
           const data = await response.json();
           
           if (data && data.transformationMatrix) {
-            console.log(`✅ Found registration matrix in study ${sid}:`, data);
+            console.log(`✅ Found existing registration matrix in study ${sid}:`, data);
             
             // Parse the transformation matrix if it's a string
             let matrix = data.transformationMatrix;
@@ -2329,8 +2330,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             
             if (matrix && Array.isArray(matrix) && matrix.length === 16) {
               foundMatrix = matrix;
-              console.log(`🎯 Using registration matrix from study ${sid}`);
+              console.log(`🎯 Using existing registration matrix from study ${sid}`);
               break;
+            }
+          } else {
+            // If no existing registration, try to parse from DICOM REG files
+            console.log(`🔄 No existing registration for study ${sid}, attempting to parse from DICOM REG files...`);
+            try {
+              const parseResponse = await fetch(`/api/registrations/${sid}/parse`, { method: 'POST' });
+              if (parseResponse.ok) {
+                const parseData = await parseResponse.json();
+                if (parseData.success && parseData.registration && parseData.registration.transformationMatrix) {
+                  foundMatrix = parseData.registration.transformationMatrix;
+                  console.log(`🎯 Successfully parsed registration matrix from study ${sid}:`, foundMatrix);
+                  break;
+                }
+              }
+            } catch (parseError) {
+              console.warn(`Failed to parse registration from study ${sid}:`, parseError);
             }
           }
         } catch (error) {
