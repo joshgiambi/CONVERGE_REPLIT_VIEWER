@@ -58,36 +58,8 @@ export function FusionControlPanel({
   const secondaryModality = fusionSeries.length > 0 ? 
     (fusionSeries.find(s => s.modality === 'PT') ? 'PET' : 'MR') : 'Secondary';
   
-  // Auto-select first fusion series with valid slice locations (only on initial mount)
-  // Use a ref to track if we've already auto-selected
-  const hasAutoSelected = useRef(false);
-  
-  useEffect(() => {
-    if (fusionSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
-      // For MR: prefer series with description containing "AX T1 FS+C" as it has better slice locations
-      // For PET: prefer the first available PET series
-      let preferredSeries;
-      const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
-      const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
-      
-      if (petSeries) {
-        // PET-CT fusion: auto-select PET series
-        preferredSeries = petSeries;
-        console.log(`Auto-selecting PET series for CT-PET fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription || 'No description'}`);
-      } else if (mrSeries.length > 0) {
-        // MR-CT fusion: prefer specific MR sequence
-        preferredSeries = mrSeries.find((s: any) => 
-          s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-        ) || mrSeries[0];
-        console.log(`Auto-selecting MR series for CT-MR fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription || 'No description'}`);
-      } else {
-        preferredSeries = fusionSeries[0];
-      }
-      
-      hasAutoSelected.current = true;
-      onSecondarySeriesSelect(preferredSeries.id);
-    }
-  }, [fusionSeries]); // Updated to use fusionSeries instead of mrSeries
+  // Auto-selection is now handled at parent level in viewer-interface
+  // This component only displays controls when fusion is active
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);

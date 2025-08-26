@@ -147,6 +147,40 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setRTStructures(null);
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
+      
+      // Auto-activate fusion when registration files are detected
+      const regSeries = seriesData.find((s: any) => s.modality === 'REG');
+      if (regSeries && !secondarySeriesId) {
+        console.log('REG file detected, auto-activating fusion');
+        
+        // Find available fusion series (MR or PT)
+        const fusionSeries = seriesData.filter((s: any) => 
+          s.modality === 'MR' || s.modality === 'PT'
+        );
+        
+        if (fusionSeries.length > 0) {
+          // Prefer PET over MR, then specific MR sequences
+          let preferredSeries;
+          const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
+          const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
+          
+          if (petSeries) {
+            preferredSeries = petSeries;
+            console.log(`Auto-selecting PET series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
+          } else if (mrSeries.length > 0) {
+            // Prefer specific MR sequence
+            preferredSeries = mrSeries.find((s: any) => 
+              s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
+            ) || mrSeries[0];
+            console.log(`Auto-selecting MR series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
+          }
+          
+          if (preferredSeries) {
+            setSecondarySeriesId(preferredSeries.id);
+            console.log('Fusion auto-activated with secondary series:', preferredSeries.id);
+          }
+        }
+      }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 
@@ -676,7 +710,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
+                  hasSecondarySeriesForFusion={series.filter(s => s.modality === 'MR' || s.modality === 'PT').length > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
