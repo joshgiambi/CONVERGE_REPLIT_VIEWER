@@ -39,11 +39,39 @@ export function FusionControlPanel({
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
   
-  // Fetch available MR series for fusion
-  const { data: availableSeries } = useQuery({
-    queryKey: [`/api/studies/${studyId}/series`],
+  // Fetch available series from all studies for fusion (cross-study registration support)
+  const { data: allStudies } = useQuery({
+    queryKey: ['/api/studies'],
+    enabled: true
+  });
+
+  // Get current patient's studies only to limit cross-study search to same patient
+  const { data: currentStudy } = useQuery({
+    queryKey: [`/api/studies/${studyId}`],
     enabled: !!studyId
   });
+
+  // Fetch all series from all studies belonging to the same patient
+  const patientStudies = allStudies?.filter((study: any) => 
+    study.patientId === currentStudy?.patientId
+  ) || [];
+
+  const { data: allPatientSeries } = useQuery({
+    queryKey: ['patient-series', currentStudy?.patientId],
+    queryFn: async () => {
+      if (!patientStudies.length) return [];
+      
+      const seriesPromises = patientStudies.map((study: any) =>
+        fetch(`/api/studies/${study.id}/series`).then(res => res.json())
+      );
+      
+      const allSeriesArrays = await Promise.all(seriesPromises);
+      return allSeriesArrays.flat();
+    },
+    enabled: patientStudies.length > 0
+  });
+
+  const availableSeries = allPatientSeries || [];
   
   // Filter for fusion-compatible series (MR and PET)
   const fusionSeries = (availableSeries as any[])?.filter((s: any) => 

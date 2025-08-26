@@ -13,6 +13,26 @@ import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 
+// Helper function for 4x4 matrix multiplication (DICOM registration matrices)
+function multiplyMatrices4x4(a: number[][], b: number[][]): number[][] {
+  const result = [
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0]
+  ];
+  
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      for (let k = 0; k < 4; k++) {
+        result[i][j] += a[i][k] * b[k][j];
+      }
+    }
+  }
+  
+  return result;
+}
+
 // Helper function to check if two polygons overlap
 function polygonOverlaps(poly1: number[][], poly2: number[][]): boolean {
   // Check if any point of poly1 is inside poly2
@@ -2514,64 +2534,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (registrationSequence && registrationSequence.items && registrationSequence.items.length > 0) {
           console.log('📊 Found Registration Sequence with', registrationSequence.items.length, 'items');
           
-          const regItem = registrationSequence.items[0];
-          
-          // Look for Matrix Registration Sequence (0070,0309)
-          const matrixRegSeq = regItem.dataSet.elements['x00700309'];
-          if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
-            console.log('📊 Found Matrix Registration Sequence');
-            
-            const matrixItem = matrixRegSeq.items[0];
-            
-            // Get the transformation matrix (0070,030C)
-            const matrixData = matrixItem.dataSet.elements['x0070030c'];
-            if (matrixData) {
-              console.log('📊 Found Transformation Matrix data');
+          // Process all registration items (multiple registrations can exist)
+          for (const regItem of registrationSequence.items) {
+            // Look for Matrix Registration Sequence (0070,0309)
+            const matrixRegSeq = regItem.dataSet.elements['x00700309'];
+            if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
+              console.log('📊 Found Matrix Registration Sequence');
               
-              // Parse the matrix values (should be 16 float values)
-              const matrixValues = [];
-              for (let i = 0; i < matrixData.length && matrixValues.length < 16; i += 8) {
-                const view = new DataView(matrixData.buffer, matrixData.byteOffset + i, 8);
-                const value = view.getFloat64(0, true); // little endian
-                matrixValues.push(value);
-              }
+              const matrixRegItem = matrixRegSeq.items[0];
               
-              if (matrixValues.length === 16) {
-                // Convert flat array to 4x4 matrix
-                transformationMatrix = [
-                  matrixValues.slice(0, 4),
-                  matrixValues.slice(4, 8),
-                  matrixValues.slice(8, 12),
-                  matrixValues.slice(12, 16)
+              // Look for Matrix Sequence (0070,030A) - this contains the actual matrices
+              const matrixSequence = matrixRegItem.dataSet.elements['x0070030a'];
+              if (matrixSequence && matrixSequence.items && matrixSequence.items.length > 0) {
+                console.log('📊 Found Matrix Sequence with', matrixSequence.items.length, 'matrix items');
+                
+                // Compose all matrices in order (M = M_n * ... * M_2 * M_1)
+                let composedMatrix = [
+                  [1, 0, 0, 0],
+                  [0, 1, 0, 0],
+                  [0, 0, 1, 0],
+                  [0, 0, 0, 1]
                 ];
-                console.log('✅ Extracted transformation matrix:', transformationMatrix);
+                
+                for (const matrixItem of matrixSequence.items) {
+                  // Get the Frame of Reference Transformation Matrix (3006,00C6) - DS format
+                  const matrixString = matrixItem.dataSet.string('x300600c6');
+                  if (matrixString) {
+                    console.log('📊 Found Frame of Reference Transformation Matrix (3006,00C6)');
+                    
+                    // Parse DS (Decimal String) format - values separated by backslashes
+                    const matrixValues = matrixString.split('\\').map(v => parseFloat(v.trim()));
+                    
+                    if (matrixValues.length === 16) {
+                      // Convert to 4x4 matrix (row-major format)
+                      const currentMatrix = [
+                        matrixValues.slice(0, 4),
+                        matrixValues.slice(4, 8),
+                        matrixValues.slice(8, 12),
+                        matrixValues.slice(12, 16)
+                      ];
+                      
+                      // Validate last row should be [0,0,0,1]
+                      const lastRow = currentMatrix[3];
+                      if (Math.abs(lastRow[0]) > 0.001 || Math.abs(lastRow[1]) > 0.001 || 
+                          Math.abs(lastRow[2]) > 0.001 || Math.abs(lastRow[3] - 1) > 0.001) {
+                        console.warn('⚠️ Invalid transformation matrix - last row is not [0,0,0,1]:', lastRow);
+                        continue;
+                      }
+                      
+                      // Multiply with composed matrix: composedMatrix = currentMatrix * composedMatrix
+                      composedMatrix = multiplyMatrices4x4(currentMatrix, composedMatrix);
+                      console.log('✅ Added matrix to composition:', currentMatrix);
+                    } else {
+                      console.warn('⚠️ Invalid matrix length:', matrixValues.length, 'expected 16');
+                    }
+                  }
+                  
+                  // Get the matrix type from (0070,030C) Frame of Reference Transformation Matrix Type
+                  const matrixType = matrixItem.dataSet.string('x0070030c') || 'UNKNOWN';
+                  console.log('📊 Matrix type:', matrixType);
+                }
+                
+                transformationMatrix = composedMatrix;
+                console.log('✅ Final composed transformation matrix:', transformationMatrix);
+                break; // Use first valid registration
               }
             }
           }
         }
-        
-        // Alternative: Check for Pre-/Post-concatenation matrix (0018,5210, 0018,5212)
-        if (transformationMatrix[0][0] === 1 && transformationMatrix[0][1] === 0) {
-          const preMatrix = dataSet.string('x00185210');
-          const postMatrix = dataSet.string('x00185212');
-          
-          if (preMatrix || postMatrix) {
-            console.log('📊 Found Pre/Post concatenation matrix data');
-            const matrixString = preMatrix || postMatrix;
-            const values = matrixString.split('\\').map(v => parseFloat(v));
-            
-            if (values.length === 16) {
-              transformationMatrix = [
-                values.slice(0, 4),
-                values.slice(4, 8),
-                values.slice(8, 12),
-                values.slice(12, 16)
-              ];
-              console.log('✅ Extracted matrix from Pre/Post concatenation:', transformationMatrix);
-            }
-          }
-        }
-        
+
       } catch (parseError) {
         console.warn('⚠️ Could not parse transformation matrix from REG file:', parseError);
         console.log('Using identity matrix as fallback');
@@ -2587,10 +2618,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create registration entry
       const registration = await storage.createRegistration({
         studyId: studyId,
-        seriesInstanceUid: regSeries.seriesInstanceUID,
-        sopInstanceUid: regImage.sopInstanceUID,
+        regSopInstanceUid: regImage.sopInstanceUID,
         sourceFrameOfReferenceUid: sourceFrameOfRef || 'unknown',
-        targetFrameOfReferenceUid: sourceFrameOfRef || 'unknown',
+        registeredFrameOfReferenceUid: sourceFrameOfRef || 'unknown', // TODO: Extract target frame of reference from DICOM
+        sopClassUid: dataSet.string('x00080016') || 'unknown', // SOP Class UID
         transformationMatrix: transformationMatrix,
         matrixType: 'RIGID',
         metadata: {
