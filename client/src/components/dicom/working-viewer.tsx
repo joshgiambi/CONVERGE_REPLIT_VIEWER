@@ -2456,22 +2456,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         const imageList = await response.json();
         
-        // Filter out images with null or invalid slice locations
+        // Filter out images with null or invalid positions
+        // Use imagePosition[2] as fallback for images without sliceLocation
         const validImages = imageList.filter((img: any) => {
           const sliceLoc = parseFloat(img.sliceLocation);
-          return !isNaN(sliceLoc) && sliceLoc !== null;
+          const zPos = img.imagePosition?.[2];
+          return (!isNaN(sliceLoc) && sliceLoc !== null) || (!isNaN(zPos) && zPos !== null);
         });
         
         if (validImages.length === 0) {
-          console.error("No MRI images with valid slice locations found");
+          console.error("No secondary images with valid positions found");
           setSecondaryImages([]);
           return;
         }
         
         const sortedImages = validImages.sort((a: any, b: any) => {
-          // Sort by slice location
-          const aSliceLoc = parseFloat(a.sliceLocation);
-          const bSliceLoc = parseFloat(b.sliceLocation);
+          // Sort by slice location or Z position
+          const aSliceLoc = parseFloat(a.sliceLocation) || a.imagePosition?.[2];
+          const bSliceLoc = parseFloat(b.sliceLocation) || b.imagePosition?.[2];
           return aSliceLoc - bSliceLoc;
         });
 
@@ -2482,10 +2484,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
         
         // Debug log the sorted order
-        console.log('MRI sorted order (first 5 and last 5):');
+        console.log('Secondary images sorted order (first 5 and last 5):');
         const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
         debugImages.forEach((img: any, idx: number) => {
-          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
+          const sliceLoc = parseFloat(img.sliceLocation) || img.imagePosition?.[2];
+          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${sliceLoc}`);
         });
         
         // Preload secondary images with concurrency limits
