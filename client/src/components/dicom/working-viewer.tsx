@@ -175,6 +175,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       });
     }
   }, [gpuCheckComplete, isGPUMode, cornerstone3DInitialized]);
+  
+  // Cleanup resources on component unmount
+  useEffect(() => {
+    return () => {
+      // Clean up DICOM worker pool
+      destroyDicomWorkerManager();
+      
+      // Clean up GPU viewports if initialized
+      if (cornerstone3DInitialized) {
+        cleanupGPUViewports();
+      }
+      
+      // Clear any pending renders or animations
+      if (renderRequestId.current) {
+        cancelAnimationFrame(renderRequestId.current);
+      }
+    };
+  }, [cornerstone3DInitialized]);
 
   // Update local structures when external ones change
   useEffect(() => {
@@ -3532,8 +3550,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       // Keep fixed canvas size for consistent display
-      canvas.width = 1024;
-      canvas.height = 1024;
+      // Keep canvas size consistent with JSX attributes - don't resize here
+      // Canvas size is set in JSX as 1280x1280
 
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
@@ -3613,7 +3631,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
         ctx.beginPath();
         ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
-        ctx.fill();
+        ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
         
         ctx.restore();
       }
@@ -3807,7 +3825,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     // Get CT slice Z position
-    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
+    let ctSliceZ: number = 0; // Initialize properly - will be set from metadata
     
     // Try to get Z position from various sources in priority order
     if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
@@ -4208,10 +4226,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (contour.isPredicted) {
       const originalAlpha = ctx.globalAlpha;
       ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
-      ctx.fill();
+      ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
       ctx.globalAlpha = originalAlpha;
     } else {
-      ctx.fill();
+      ctx.fill('evenodd'); // Use even-odd rule to properly handle holes in contours
     }
     
     ctx.stroke();
@@ -4903,8 +4921,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         <div className="relative w-full h-full flex items-center justify-center">
           <canvas
             ref={canvasRef}
-            width={1280}
-            height={1280}
+            width={1024}
+            height={1024}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={(e) => {
               handleCanvasMouseMove(e);
