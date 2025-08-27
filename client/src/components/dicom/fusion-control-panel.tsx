@@ -45,8 +45,10 @@ export function FusionControlPanel({
     enabled: !!studyId
   });
   
-  // Filter for MR series only
-  const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
+  // Filter for MR and CT (excluding the primary CT)
+  const seriesList = (availableSeries as any[]) || [];
+  const mrSeries = seriesList.filter((s: any) => s.modality === 'MR');
+  const ctSeries = seriesList.filter((s: any) => s.modality === 'CT' && s.id !== primarySeriesId);
   
   // Get primary series info
   const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
@@ -59,20 +61,7 @@ export function FusionControlPanel({
   // Use a ref to track if we've already auto-selected
   const hasAutoSelected = useRef(false);
   
-  useEffect(() => {
-    if (mrSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
-      // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
-      const preferredSeries = mrSeries.find((s: any) => 
-        s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-      );
-      
-      const seriestoSelect = preferredSeries || mrSeries[0];
-      console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
-      
-      hasAutoSelected.current = true;
-      onSecondarySeriesSelect(seriestoSelect.id);
-    }
-  }, [mrSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
+  // No auto-selection to avoid overriding CT/other manual choices
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
@@ -153,17 +142,17 @@ export function FusionControlPanel({
           </Button>
         </div>
         
-        {/* Thumbnail MR Series Selector */}
+        {/* Thumbnail MR/CT Series Selector */}
         <div className="space-y-3">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300">Available Fusion Series</Label>
               <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
-                {mrSeries.length} {secondaryModality} series
+                {(mrSeries.length + ctSeries.length)} series
               </Badge>
             </div>
             
-            {/* MR Series Buttons - Compact Grid */}
+            {/* MR/CT Series Buttons - Compact Grid */}
             <div className="grid grid-cols-3 gap-2">
               {mrSeries.map((series: any, index: number) => (
                 <button
@@ -188,6 +177,33 @@ export function FusionControlPanel({
                   </p>
                   {selectedSecondaryId === series.id && (
                     <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse mt-1" />
+                  )}
+                  </button>
+              ))}
+
+              {ctSeries.map((series: any, index: number) => (
+                <button
+                  key={series.id}
+                  onClick={() => handleSecondarySelect(series.id.toString())}
+                  className={`
+                    p-2 rounded-lg border-2 transition-all flex flex-col items-center
+                    ${selectedSecondaryId === series.id
+                      ? 'border-blue-400 bg-blue-500/20 shadow-lg shadow-blue-500/20'
+                      : 'border-blue-600/30 bg-blue-900/10 hover:border-blue-500/50 hover:bg-blue-500/10'
+                    }
+                  `}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600/30 to-blue-500/30 flex items-center justify-center mb-1">
+                    <Layers className="w-4 h-4 text-blue-300" />
+                  </div>
+                  <p className="text-xs text-blue-200 font-medium">
+                    CT {index + 1}
+                  </p>
+                  <p className="text-[10px] text-blue-400">
+                    {series.imageCount} imgs
+                  </p>
+                  {selectedSecondaryId === series.id && (
+                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse mt-1" />
                   )}
                 </button>
               ))}

@@ -206,9 +206,7 @@ export default function PatientManager() {
           queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
           queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
         }
-      } catch (error) {
-        console.log("Demo data population skipped:", error);
-      }
+      } catch (error) {}
     };
     populateDemo();
   }, [queryClient]);
@@ -222,9 +220,7 @@ export default function PatientManager() {
           const data = await response.json();
           setHasPendingData(data.files && data.files.length > 0);
         }
-      } catch (error) {
-        console.error('Error checking unprocessed files:', error);
-      }
+      } catch (error) {}
     };
 
     // Check immediately and then every 5 seconds

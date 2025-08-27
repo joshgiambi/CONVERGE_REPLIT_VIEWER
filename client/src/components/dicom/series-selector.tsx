@@ -95,6 +95,91 @@ export function SeriesSelector({
   const [newStructureColor, setNewStructureColor] = useState('#FF0000');
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
+  const [primaryCTSeriesUID, setPrimaryCTSeriesUID] = useState<string | null>(null);
+  const [registrationDetails, setRegistrationDetails] = useState<Record<number, any[]>>({});
+
+  // Determine primary CT via RTSTRUCT reference or Registration (metadata-only)
+  useEffect(() => {
+    const sid = studyId || (Array.isArray(studyIds) && studyIds.length === 1 ? studyIds[0] : null);
+    if (!sid) return;
+    (async () => {
+      try {
+        // 1) Prefer CT referenced by RTSTRUCT that contains meaningful structures (beyond BODY/EXTERNAL)
+        const rtResp = await fetch(`/api/studies/${sid}/rt-structures`);
+        if (rtResp.ok) {
+          const rtList = await rtResp.json();
+          if (Array.isArray(rtList) && rtList.length > 0) {
+            const isPlaceholder = (n: string) => {
+              const x = (n || '').toString().trim().toLowerCase();
+              return x === 'body' || x === 'external' || x === 'skin' || x === 'couch' || x === 'table';
+            };
+            for (const rt of rtList) {
+              const sidRT = rt.id || rt.seriesId || rt.rtSeriesId;
+              if (!sidRT) continue;
+              try {
+                const ctResp = await fetch(`/api/rt-structures/${sidRT}/contours`);
+                if (!ctResp.ok) continue;
+                const data = await ctResp.json();
+                const structs: any[] = data?.structures || [];
+                const meaningful = structs.some(s => s?.structureName && !isPlaceholder(s.structureName));
+                if (meaningful && (rt.referencedSeriesUID)) { setPrimaryCTSeriesUID(rt.referencedSeriesUID); return; }
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+      try {
+        // 2) Else use registration target series if stored
+        const r = await fetch(`/api/registrations/${sid}`);
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.seriesInstanceUID) { setPrimaryCTSeriesUID(data.seriesInstanceUID); return; }
+        }
+      } catch {}
+      setPrimaryCTSeriesUID(null);
+    })();
+  }, [studyId, JSON.stringify(studyIds || [])]);
+
+  // Fetch REG → CT mapping details for display
+  useEffect(() => {
+    const ids = studyIds && studyIds.length > 0 ? studyIds : (studyId ? [studyId] : []);
+    if (!ids || ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const result: Record<number, any[]> = {};
+      for (const id of ids) {
+        try {
+          const r = await fetch(`/api/studies/${id}/registrations/detail`);
+          if (!r.ok) continue;
+          const data = await r.json();
+          result[id] = Array.isArray(data) ? data : [];
+          // Also include stored registration mapping if available
+          try {
+            const rd = await fetch(`/api/registrations/${id}`);
+            if (rd.ok) {
+              const reg = await rd.json();
+              if (reg && reg.transformationMatrix && reg.seriesInstanceUID) {
+                const ct = series.find(s => s.modality === 'CT' && s.seriesInstanceUID === reg.seriesInstanceUID);
+                const entry = {
+                  regSeriesId: null,
+                  regSeriesInstanceUID: null,
+                  regSeriesDescription: 'Stored Registration',
+                  references: {
+                    seriesInstanceUIDs: [reg.seriesInstanceUID],
+                    matchedCTSeries: ct ? [{ id: ct.id, modality: ct.modality, seriesInstanceUID: ct.seriesInstanceUID, seriesDescription: ct.seriesDescription, imageCount: ct.imageCount }] : []
+                  },
+                  frameOfReference: { regFoR: null, ctFoRMatches: [] }
+                };
+                result[id] = [...result[id], entry];
+              }
+            }
+          } catch {}
+        } catch {}
+      }
+      if (!cancelled) setRegistrationDetails(result);
+    })();
+    return () => { cancelled = true; };
+  }, [studyId, JSON.stringify(studyIds || []), series.length]);
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
@@ -627,8 +712,8 @@ export function SeriesSelector({
         <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
           <CardContent className="p-0 h-full flex flex-col">
             <div className="flex-1 overflow-hidden flex flex-col">
-              <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
-            
+            <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+
             {/* Series Section */}
             <AccordionItem value="series" className="border-gray-800/50">
               <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
@@ -653,7 +738,12 @@ export function SeriesSelector({
                     return (
                       <>
                         {/* CT Series as Primary */}
-                        {ctSeries.map((seriesItem) => (
+                        {(() => {
+                          // Determine the primary CT to nest others under
+                          const regCT = primaryCTSeriesUID ? ctSeries.find(s => s.seriesInstanceUID === primaryCTSeriesUID) || null : null;
+                          const primaryCT = regCT || ctSeries[0] || null;
+
+                          return ctSeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`
@@ -691,23 +781,23 @@ export function SeriesSelector({
                               `}>
                                 {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
                               </h4>
+                              {primaryCTSeriesUID && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  {seriesItem.seriesInstanceUID === primaryCTSeriesUID ? (
+                                    <Badge variant="outline" className="text-[10px] border-green-500/60 text-green-400">Primary (Fusion Target)</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] border-purple-500/60 text-purple-300">Co-registered</Badge>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
                               {/* RT Structure Series nested under CT - only show those that reference this CT */}
-                              {rtSeries && rtSeries.length > 0 && rtSeries.filter((rtS: any) => {
-                                // Debug log for RT series filtering
-                                const isMatch = rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1);
-                                console.log('RT Series filter:', {
-                                  rtSeriesId: rtS.id, 
-                                  referencedSeriesId: rtS.referencedSeriesId, 
-                                  ctSeriesId: seriesItem.id,
-                                  isMatch,
-                                  rtSeriesLength: rtSeries.length
-                                });
-                                return isMatch;
-                              }).length > 0 && (
+                              {rtSeries && rtSeries.length > 0 && rtSeries.filter((rtS: any) => (
+                                rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
+                              )).length > 0 && (
                                 <div className="space-y-1 border-l-2 border-green-500/30 pl-3">
                                   {rtSeries.filter((rtS: any) => 
                                     rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
@@ -736,7 +826,7 @@ export function SeriesSelector({
                               )}
                               
                               {/* Registration and MR Series that can be fused */}
-                              {hasRegistration && mrSeries.length > 0 && (
+                              {hasRegistration && mrSeries.length > 0 && (!primaryCTSeriesUID || seriesItem.seriesInstanceUID === primaryCTSeriesUID) && (
                                 <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
                                   <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -829,9 +919,43 @@ export function SeriesSelector({
                                   ))}
                                 </div>
                               )}
+
+                              {/* Co-registered CT options nested under Primary CT */}
+                              {primaryCT && seriesItem.id === primaryCT.id && ctSeries.length > 1 && (
+                                <div className="space-y-1 border-l-2 border-blue-500/30 pl-3">
+                                  <div className="text-xs text-blue-300 mb-1 flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v4m0 8v4m4-12h4M4 12H0" />
+                                    </svg>
+                                    Co-registered CT
+                                  </div>
+                                  {ctSeries.filter(ct => ct.id !== primaryCT.id).map(ct => (
+                                    <div
+                                      key={ct.id}
+                                      className={`
+                                        w-full p-2 text-left text-xs rounded-lg cursor-pointer transition-all
+                                        ${secondarySeriesId === ct.id
+                                          ? 'bg-blue-500/40 border-blue-400 shadow-lg ring-2 ring-blue-400/50'
+                                          : 'bg-blue-600/10 border-blue-500/30 hover:bg-blue-600/20'
+                                        } border
+                                      `}
+                                      onClick={() => {
+                                        // Keep primary CT selected; activate CT→CT fusion as secondary
+                                        onSeriesSelect(primaryCT);
+                                        onSecondarySeriesSelect && onSecondarySeriesSelect(ct.id);
+                                      }}
+                                    >
+                                      <span className="text-blue-200">
+                                        {ct.seriesDescription || `CT Series ${ct.seriesNumber}`} ({ct.imageCount} images)
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
-                        ))}
+                        ));
+                        })()}
                         
                         {/* Other modalities (if any) */}
                         {otherSeries.map((seriesItem) => (
@@ -943,6 +1067,55 @@ export function SeriesSelector({
                 </div>
               </AccordionContent>
             </AccordionItem>
+
+            {/* Registrations Section */}
+            {(studyId || (studyIds && studyIds.length > 0)) && (
+              <AccordionItem value="registrations" className="border-gray-800/50">
+                <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-800/30 backdrop-blur-sm">
+                  <div className="flex items-center text-gray-100 font-medium text-sm">
+                    <Link className="w-4 h-4 mr-2 text-purple-400" />
+                    Registrations
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-3 pb-3">
+                  <div className="space-y-2">
+                    {(studyIds && studyIds.length > 0 ? studyIds : (studyId ? [studyId] : [])).map((sid) => {
+                      const items = registrationDetails[sid] || [];
+                      if (!items.length) return null;
+                      return (
+                        <div key={`reg-${sid}`} className="space-y-2">
+                          {items.map((d, idx) => (
+                            <div key={`reg-${sid}-${idx}`} className="p-2 rounded-lg bg-gray-800/40 border border-gray-700/50">
+                              <div className="flex items-center justify-between mb-1">
+                                <Badge variant="outline" className="text-xs border-purple-500/60 text-purple-300">REG</Badge>
+                                <span className="text-xs text-gray-400">Series ID: {d.regSeriesId}</span>
+                              </div>
+                              <div className="text-xs text-gray-300 truncate mb-1">{d.regSeriesDescription || 'Registration'}</div>
+                              {d.references?.matchedCTSeries?.length > 0 ? (
+                                <div className="text-xs text-gray-400">
+                                  Targets:
+                                  <ul className="mt-1 space-y-1">
+                                    {d.references.matchedCTSeries.map((s: any) => (
+                                      <li key={s.seriesInstanceUID} className="flex items-center gap-2">
+                                        <Badge variant="outline" className="text-[10px] border-blue-500/60 text-blue-300">CT</Badge>
+                                        <span className="truncate">{s.seriesDescription || s.seriesInstanceUID}</span>
+                                        <span className="text-gray-500">({s.imageCount} images)</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-gray-500">No explicit CT references. {d.frameOfReference?.ctFoRMatches?.length ? `${d.frameOfReference.ctFoRMatches.length} CT share FoR` : ''}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            )}
 
             {/* Structures Section */}
             <AccordionItem value="structures" className="border-gray-800/50">

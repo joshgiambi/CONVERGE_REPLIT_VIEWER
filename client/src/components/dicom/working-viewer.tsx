@@ -2297,13 +2297,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         .then(res => res.json())
         .then(data => {
           if (data && data.transformationMatrix) {
-            console.log(`Loaded registration matrix for study ${studyId}:`, data);
             // Parse the transformation matrix if it's a string
             let matrix = data.transformationMatrix;
             if (typeof matrix === 'string') {
               try {
                 matrix = JSON.parse(matrix);
-                console.log('Parsed registration matrix:', matrix);
               } catch (e) {
                 console.error('Failed to parse registration matrix:', e);
                 matrix = null;
@@ -2312,7 +2310,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             setRegistrationMatrix(matrix);
             registrationMatrixRef.current = matrix;
           } else {
-            console.log(`No registration found for study ${studyId}`);
             setRegistrationMatrix(null);
             registrationMatrixRef.current = null;
           }
@@ -2326,21 +2323,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
-    console.log('🔥 Registration matrix useEffect:', {
-      hasMatrix: !!registrationMatrix,
-      matrixLength: registrationMatrix?.length,
-      secondarySeriesId,
-      secondarySeriesType: typeof secondarySeriesId,
-      imagesLength: images.length,
-      secondaryImagesLength: secondaryImages.length
-    });
-    
-    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
-      console.log('Registration matrix loaded, re-rendering fusion overlay');
+    const hasMatrix = registrationMatrix && registrationMatrix.length === 16;
+    const isCTFusion = secondaryModality === 'CT';
+    if ((hasMatrix || isCTFusion) && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+        const matrixToUse = hasMatrix ? registrationMatrix! : [
+          1,0,0,0,
+          0,1,0,0,
+          0,0,1,0,
+          0,0,0,1
+        ];
+        const transformed = computeTransformedMRIPositions(secondaryImages, matrixToUse);
         transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
@@ -2362,9 +2357,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
-      console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+    if ((registrationMatrix && registrationMatrix.length === 16) || secondaryModality === 'CT') {
+      if (secondaryImages.length === 0) return;
+      const matrixToUse = (registrationMatrix && registrationMatrix.length === 16) ? registrationMatrix : [
+        1,0,0,0,
+        0,1,0,0,
+        0,0,1,0,
+        0,0,0,1
+      ];
+      const transformed = computeTransformedMRIPositions(secondaryImages, matrixToUse);
       transformedMRIPositions.current = transformed;
       
       // Calculate and store Z-range
@@ -2374,7 +2375,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           min: Math.min(...zValues),
           max: Math.max(...zValues)
         };
-        console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
       }
       
       // Clear cache to force recomputation with new data
@@ -2411,38 +2411,35 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
 
         const imageList = await response.json();
-        
-        // Filter out images with null or invalid slice locations
-        const validImages = imageList.filter((img: any) => {
-          const sliceLoc = parseFloat(img.sliceLocation);
-          return !isNaN(sliceLoc) && sliceLoc !== null;
+
+        // Prepare images with a derived Z value to sort consistently even when sliceLocation is missing
+        const prepared = imageList.map((img: any, idx: number) => {
+          let z = Number.NaN;
+          if (img.sliceLocation != null) {
+            const s = parseFloat(img.sliceLocation);
+            if (!Number.isNaN(s)) z = s;
+          }
+          if (Number.isNaN(z) && img.imagePosition) {
+            const parts = Array.isArray(img.imagePosition)
+              ? img.imagePosition
+              : (typeof img.imagePosition === 'string' ? img.imagePosition.split('\\') : []);
+            const pv = parseFloat(parts?.[2]);
+            if (!Number.isNaN(pv)) z = pv;
+          }
+          if (Number.isNaN(z)) {
+            // Fallback: instanceNumber or index
+            z = (img.instanceNumber != null ? Number(img.instanceNumber) : idx);
+          }
+          return { ...img, __zSort__: z };
         });
-        
-        if (validImages.length === 0) {
-          console.error("No MRI images with valid slice locations found");
-          setSecondaryImages([]);
-          return;
-        }
-        
-        const sortedImages = validImages.sort((a: any, b: any) => {
-          // Sort by slice location
-          const aSliceLoc = parseFloat(a.sliceLocation);
-          const bSliceLoc = parseFloat(b.sliceLocation);
-          return aSliceLoc - bSliceLoc;
-        });
+
+        const sortedImages = prepared
+          .sort((a: any, b: any) => a.__zSort__ - b.__zSort__)
+          .map(({ __zSort__, ...rest }: any) => rest);
 
         setSecondaryImages(sortedImages);
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
-        console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
-        console.log("Secondary series ID:", secondarySeriesId);
-        console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
-        
-        // Debug log the sorted order
-        console.log('MRI sorted order (first 5 and last 5):');
-        const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
-        debugImages.forEach((img: any, idx: number) => {
-          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
-        });
+        // reduced logging
         
         // Preload secondary images with concurrency limits
         const newCache = new Map();
@@ -2467,21 +2464,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               
               if (imageData) {
                 newCache.set(image.sopInstanceUID, imageData);
-                if (index < 3) {
-                  console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
-                }
+                // reduced logging
               } else {
                 console.error(`Failed to parse secondary image ${index}`);
               }
             } catch (error) {
-              console.warn(`Failed to preload secondary image ${index}:`, error);
+              // silent
             }
           }));
         }
         
         secondaryImageCacheRef.current = newCache;
-        console.log(`Preloaded ${newCache.size} secondary images`);
-        console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
+        // reduced logging
         
         // Store cache reference to avoid closure issues
         (window as any).secondaryImageCacheRef = newCache;
@@ -2492,12 +2486,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           transformedMRIPositions.current = [];
           mriZRangeInCTSpace.current = null;
           mriSliceMappingCache.current.clear();
-          console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
+          // recompute MRI transformations
           
           // Compute transformed MRI positions and store in ref
           const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
           transformedMRIPositions.current = transformed;
-          console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
+          // reduced logging
           
           // Compute Z-range bounds for optimization
           if (transformed.length > 0) {
@@ -3766,13 +3760,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    console.log('🚀 About to call renderFusionOverlay with:', {
-      ctSliceZ,
-      fusionOpacity,
-      canvasSize: `${canvas.width}x${canvas.height}`,
-      actualCacheSize: actualCache.size,
-      transformedMRILength: transformedMRIPositions.current?.length
-    });
+    // reduced logging
     
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
     // DO NOT apply transform here - fusion-utils handles its own transforms
@@ -5072,7 +5060,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {/* Removed overlaid text - now in titlebar */}
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
+          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}
