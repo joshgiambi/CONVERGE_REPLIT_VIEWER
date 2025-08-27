@@ -147,58 +147,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setRTStructures(null);
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
-      
-      // Auto-activate fusion when registration files are detected
-      const regSeries = seriesData.find((s: any) => s.modality === 'REG');
-      if (regSeries && !secondarySeriesId) {
-        console.log('REG file detected, auto-activating fusion');
-        
-        // Find available fusion series (MR or PT)
-        const fusionSeries = seriesData.filter((s: any) => 
-          s.modality === 'MR' || s.modality === 'PT'
-        );
-        
-        if (fusionSeries.length > 0) {
-          // Prefer PET over MR, then specific MR sequences
-          let preferredSeries;
-          const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
-          const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
-          
-          if (petSeries) {
-            preferredSeries = petSeries;
-            console.log(`Auto-selecting PET series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
-          } else if (mrSeries.length > 0) {
-            // Prefer specific MR sequence
-            preferredSeries = mrSeries.find((s: any) => 
-              s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-            ) || mrSeries[0];
-            console.log(`Auto-selecting MR series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
-          }
-          
-          if (preferredSeries) {
-            setSecondarySeriesId(preferredSeries.id);
-            console.log('🚀 FUSION AUTO-ACTIVATED:', {
-              secondarySeriesId: preferredSeries.id,
-              modality: preferredSeries.modality,
-              description: preferredSeries.seriesDescription,
-              fusionOpacity
-            });
-          }
-        }
-      }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
-
-  // Control fusion panel visibility based on secondary series selection
-  useEffect(() => {
-    if (secondarySeriesId) {
-      console.log('Secondary series selected, showing fusion panel');
-      setShowFusionPanel(true);
-    } else {
-      console.log('No secondary series, hiding fusion panel');
-      setShowFusionPanel(false);
-    }
-  }, [secondarySeriesId]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -697,7 +647,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
                   studyId={studyData.studies[0]?.id}
-                  studyIds={studyData.studies?.map((s: DICOMStudy) => s.id) || []}
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}
@@ -715,7 +664,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={series.filter(s => s.modality === 'MR' || s.modality === 'PT').length > 0}
+                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}

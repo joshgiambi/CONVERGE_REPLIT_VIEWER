@@ -45,21 +45,34 @@ export function FusionControlPanel({
     enabled: !!studyId
   });
   
-  // Filter for fusion-compatible series (MR and PET)
-  const fusionSeries = (availableSeries as any[])?.filter((s: any) => 
-    s.modality === 'MR' || s.modality === 'PT'
-  ) || [];
+  // Filter for MR series only
+  const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
   
   // Get primary series info
   const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
   
-  // Determine secondary modality label based on available fusion series
-  const secondaryModality = fusionSeries.length > 0 ? 
-    (fusionSeries.find(s => s.modality === 'PT') ? 'PET' : 'MR') : 'Secondary';
+  // Determine secondary modality label
+  const secondaryModality = mrSeries.length > 0 ? 'MR' : 'Secondary';
   
-  // Auto-selection is now handled at parent level in viewer-interface
-  // This component only displays controls when fusion is active
+  // Auto-select first MR series with valid slice locations (only on initial mount)
+  // Use a ref to track if we've already auto-selected
+  const hasAutoSelected = useRef(false);
+  
+  useEffect(() => {
+    if (mrSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
+      // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
+      const preferredSeries = mrSeries.find((s: any) => 
+        s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
+      );
+      
+      const seriestoSelect = preferredSeries || mrSeries[0];
+      console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
+      
+      hasAutoSelected.current = true;
+      onSecondarySeriesSelect(seriestoSelect.id);
+    }
+  }, [mrSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
@@ -146,13 +159,13 @@ export function FusionControlPanel({
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300">Available Fusion Series</Label>
               <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
-                {fusionSeries.length} {secondaryModality} series
+                {mrSeries.length} {secondaryModality} series
               </Badge>
             </div>
             
-            {/* Fusion Series Buttons - Compact Grid */}
+            {/* MR Series Buttons - Compact Grid */}
             <div className="grid grid-cols-3 gap-2">
-              {fusionSeries.map((series: any, index: number) => (
+              {mrSeries.map((series: any, index: number) => (
                 <button
                   key={series.id}
                   onClick={() => handleSecondarySelect(series.id.toString())}
