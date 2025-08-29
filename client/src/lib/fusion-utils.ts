@@ -22,7 +22,12 @@ function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
  * @param registrationMatrix Flat length-16 array representing 4x4 DICOM registration matrix
  * @returns Array of { zInCT: number, image } sorted by zInCT ascending
  */
-export function computeTransformedMRIPositions(secondaryImages: any[], registrationMatrix: number[]) {
+export function computeTransformedMRIPositions(
+  secondaryImages: any[],
+  registrationMatrix: number[],
+  ctImageOrientation?: string | number[] | null,
+  ctImagePosition?: string | number[] | null
+) {
   // Build 4x4 matrix
   const M = [
     [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2], registrationMatrix[3]],
@@ -30,6 +35,36 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
     [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10], registrationMatrix[11]],
     [registrationMatrix[12], registrationMatrix[13], registrationMatrix[14], registrationMatrix[15]]
   ];
+
+  // Prepare CT orientation normal if provided
+  let ctNormal: [number, number, number] | null = null;
+  let ctOrigin: [number, number, number] | null = null;
+  try {
+    if (ctImageOrientation) {
+      const iop = Array.isArray(ctImageOrientation)
+        ? (ctImageOrientation as number[]).map(Number)
+        : String(ctImageOrientation).split("\\").map(Number);
+      if (iop.length >= 6) {
+        const rx = iop[0], ry = iop[1], rz = iop[2]; // row direction cosines
+        const cx = iop[3], cy = iop[4], cz = iop[5]; // column direction cosines
+        // normal = row x column
+        const nx = ry * cz - rz * cy;
+        const ny = rz * cx - rx * cz;
+        const nz = rx * cy - ry * cx;
+        const len = Math.hypot(nx, ny, nz) || 1;
+        ctNormal = [nx / len, ny / len, nz / len];
+      }
+    }
+    if (ctImagePosition) {
+      const pos = Array.isArray(ctImagePosition)
+        ? (ctImagePosition as number[]).map(Number)
+        : String(ctImagePosition).split("\\").map(Number);
+      if (pos.length >= 3) ctOrigin = [pos[0], pos[1], pos[2]];
+    }
+  } catch (_) {
+    ctNormal = null;
+    ctOrigin = null;
+  }
 
   const transformed = secondaryImages.map(img => {
     // Parse imagePosition into [x,y,z] with null safety
@@ -44,7 +79,15 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
       pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
     }
     const hom = [pos[0], pos[1], pos[2], 1];
-    const [xInCT, yInCT, zInCT] = multiplyMatrixVector(M, hom).slice(0, 3);
+    const [xInCT, yInCT, zInCTRaw] = multiplyMatrixVector(M, hom).slice(0, 3);
+    let zInCT = zInCTRaw;
+    // If CT normal and origin are known, project onto CT slice normal to derive consistent z
+    if (ctNormal && ctOrigin) {
+      const dx = xInCT - ctOrigin[0];
+      const dy = yInCT - ctOrigin[1];
+      const dz = zInCTRaw - ctOrigin[2];
+      zInCT = dx * ctNormal[0] + dy * ctNormal[1] + dz * ctNormal[2];
+    }
     return { xInCT, yInCT, zInCT, image: img };
   });
 

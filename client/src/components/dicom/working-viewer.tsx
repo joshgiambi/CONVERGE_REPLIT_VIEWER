@@ -2418,7 +2418,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+        const transformed = computeTransformedMRIPositions(
+          secondaryImages,
+          registrationMatrix,
+          images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+          images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+        );
         transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
@@ -2442,7 +2447,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+      const transformed = computeTransformedMRIPositions(
+        secondaryImages,
+        registrationMatrix,
+        images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+        images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+      );
       transformedMRIPositions.current = transformed;
       
       // Calculate and store Z-range
@@ -2587,7 +2597,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
           
           // Compute transformed MRI positions and store in ref
-          const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
+          const transformed = computeTransformedMRIPositions(
+            sortedImages,
+            registrationMatrix,
+            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+          );
           transformedMRIPositions.current = transformed;
           console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
           
