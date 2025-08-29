@@ -21,9 +21,9 @@ import {
   brushStrokeToPolishedPolygon,
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
-import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
+import { compareSlicesOrientationAware, getSlicePositionUsingIOP } from "@/lib/dicom-spatial-helpers";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -35,6 +35,15 @@ import {
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
+// Local utility for window/level mapping (avoid missing mpr-utils import)
+function applyWindowLevelToPixel(value: number, slope: number, intercept: number, windowWidth: number, windowCenter: number): number {
+  const hu = value * slope + intercept;
+  const min = windowCenter - windowWidth / 2;
+  const max = windowCenter + windowWidth / 2;
+  if (hu <= min) return 0;
+  if (hu >= max) return 255;
+  return Math.max(0, Math.min(255, Math.round(((hu - min) / windowWidth) * 255)));
+}
 
 // Debug flag - set to true in development, false in production
 const DEBUG = process.env.NODE_ENV !== 'production';
@@ -147,6 +156,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [animationTime, setAnimationTime] = useState(0);
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [previewContours, setPreviewContours] = useState<PreviewContour[]>([]);
+  const [previewHoverInside, setPreviewHoverInside] = useState<boolean>(false);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
@@ -237,7 +248,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [panY, setPanY] = useState(0);
   
   // Crosshair position for MPR views (in pixel coordinates)
-  const [crosshairPos, setCrosshairPos] = useState({ x: 256, y: 256 });
+  const [crosshairPos, setCrosshairPos] = useState({ x: 0, y: 0 });
   const [crosshairMode, setCrosshairMode] = useState(false);
   const [isPanMode, setIsPanMode] = useState(true); // Pan mode is default
   
@@ -810,29 +821,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         setPreviewContours(previewContoursWithSlices);
         
       } else {
-        // Use existing simple 2D preview for small margins
-        console.log(`🔹 Using 2D preview for small ${marginValue}mm margin`);
-        
-        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+        // Use 2D offset preview for small margins
+        console.log(`🔹 Using 2D offset preview for small ${marginValue}mm margin`);
+
+        const { offsetContour } = await import('@/lib/clipper-boolean-operations');
         const previewContoursWithSlices: any[] = [];
-        
+
         for (const contour of structure.contours) {
           if (!contour.points || contour.points.length < 9) continue;
-          
           try {
-            const expandedPoints = growContourSimple(contour.points, marginValue);
-            previewContoursWithSlices.push({
-              points: expandedPoints,
-              slicePosition: contour.slicePosition,
-              isPreview: true,
-              previewColor: '#FFFF00'  // Yellow for preview
-            });
+            const offsetResults = await offsetContour(contour.points, marginValue);
+            for (const res of offsetResults) {
+              if (res.length >= 9) {
+                previewContoursWithSlices.push({
+                  points: res,
+                  slicePosition: contour.slicePosition,
+                  isPreview: true,
+                  previewColor: '#FFFF00'
+                });
+              }
+            }
           } catch (error) {
-            console.warn(`Preview failed for contour at slice ${contour.slicePosition}:`, error);
+            console.warn(`Preview offset failed for slice ${contour.slicePosition}:`, error);
           }
         }
-        
-        console.log(`🔹 ✅ Generated ${previewContoursWithSlices.length} 2D preview contours`);
+
+        console.log(`🔹 ✅ Generated ${previewContoursWithSlices.length} 2D offset preview contours`);
         setPreviewContours(previewContoursWithSlices);
       }
     } catch (error) {
@@ -930,28 +944,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       
       if (!use3D || processedContours.length === 0) {
-        console.log(`🔹 Using 2D simple algorithm for ${marginValue}mm margin`);
-        
-        // Import the simple grow operation
-        const { growContourSimple } = await import('@/lib/simple-polygon-operations');
-        
-        // Process each contour using the simple algorithm
+        console.log(`🔹 Using 2D offset (Clipper) for ${marginValue}mm margin`);
+
+        const { offsetContour } = await import('@/lib/clipper-boolean-operations');
         processedContours = [];
+
         for (const contour of sourceStructure.contours || []) {
-          if (!contour.points || contour.points.length < 9) {
-            continue;
-          }
-          
+          if (!contour.points || contour.points.length < 9) continue;
           try {
-            const expandedPoints = growContourSimple(contour.points, marginValue);
-            
+            const offsetResults = await offsetContour(contour.points, marginValue);
+            for (const res of offsetResults) {
+              if (res.length >= 9) {
+                processedContours.push({
+                  slicePosition: contour.slicePosition,
+                  points: res,
+                  numberOfPoints: res.length / 3,
+                });
+              }
+            }
+          } catch (error) {
+            console.warn(`Offset failed on slice ${contour.slicePosition}, keeping original contour`, error);
             processedContours.push({
               slicePosition: contour.slicePosition,
-              points: expandedPoints,
-              numberOfPoints: expandedPoints.length / 3
+              points: contour.points,
+              numberOfPoints: contour.points.length / 3,
             });
-          } catch (error) {
-            console.warn(`Failed to process contour at slice ${contour.slicePosition}:`, error);
           }
         }
       }
@@ -1808,31 +1825,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             newPolygon.push([payload.points[i], payload.points[i+1]]);
           }
           
-          // Perform subtraction using ClipperLib
-          const subtractResult = subtractContours(
+          // Perform subtraction using robust Clipper (may return 0..N contours)
+          const { subtractContours } = await import('@/lib/clipper-boolean-operations');
+          const subtractResults = await subtractContours(
             existingContour.points,
             payload.points
           );
-          
+
           console.log('📐 Subtraction result:', {
             existingPoints: existingContour.points.length / 3,
             newPoints: payload.points.length / 3,
-            resultPoints: subtractResult.length / 3
+            resultContours: subtractResults.length
           });
-          
+
           // Remove the original contour
           structure.contours.splice(contourIndex, 1);
-          
-          if (subtractResult.length === 0) {
-            console.log('🗑️ Subtraction resulted in empty contour, removed slice');
+
+          if (subtractResults.length === 0) {
+            console.log('🗑️ Subtraction resulted in empty set, removed contour on this slice');
           } else {
-            // Add the subtraction result as new contour
-            structure.contours.push({
-              slicePosition: payload.slicePosition,
-              points: subtractResult,
-              numberOfPoints: subtractResult.length / 3,
-            });
-            console.log(`✅ Pen subtraction completed, replaced contour with ${subtractResult.length / 3} points`);
+            // Add each resulting contour
+            for (const res of subtractResults) {
+              if (res && res.length >= 9) {
+                structure.contours.push({
+                  slicePosition: payload.slicePosition,
+                  points: res,
+                  numberOfPoints: res.length / 3,
+                });
+              }
+            }
+            console.log(`✅ Pen subtraction completed, added ${subtractResults.length} contour(s)`);
           }
         } else {
           console.warn('⚠️ Subtraction operation called but no existing contour found');
@@ -2019,6 +2041,166 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'clear_all');
+    } else if (payload.action === "predict_next_slice") {
+      // Predict next slice contour for a structure and apply as preview or execution
+      if (!payload || !payload.structureId) return;
+      const structureId = payload.structureId as number;
+      const targetDelta = typeof payload.delta === 'number' ? payload.delta : 1; // +1 next, -1 prev
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+      if (!structure || !structure.contours || structure.contours.length === 0) return;
+
+      // Find nearest contour to current slice
+      const currentZ = images.length > 0 && images[currentIndex]
+        ? (images[currentIndex].parsedSliceLocation ?? images[currentIndex].parsedZPosition ?? currentIndex)
+        : 0;
+
+      let nearest = structure.contours[0];
+      let minDiff = Math.abs((nearest.slicePosition ?? 0) - currentZ);
+      for (const c of structure.contours) {
+        const diff = Math.abs((c.slicePosition ?? 0) - currentZ);
+        if (diff < minDiff) {
+          nearest = c; minDiff = diff;
+        }
+      }
+
+      const targetZ = currentZ + targetDelta;
+      const result = predictNextSliceContour({
+        currentContour: nearest.points,
+        currentSlicePosition: currentZ,
+        targetSlicePosition: targetZ,
+        predictionMode: 'simple',
+        confidenceThreshold: 0.2
+      });
+
+      if (!result.predictedContour || result.predictedContour.length === 0) {
+        console.log('Prediction below confidence threshold; skipping');
+        return;
+      }
+
+      const updatedStructures = structuredClone(rtStructures);
+      const targetStructure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+      if (!targetStructure) return;
+
+      // If preview, stash into previewContours; if execute, insert into contours
+      if (payload.preview) {
+        setPreviewContours([
+          {
+            structureId,
+            slicePosition: targetZ,
+            points: result.predictedContour
+          } as any
+        ]);
+      } else {
+        targetStructure.contours.push({
+          slicePosition: targetZ,
+          points: result.predictedContour,
+          numberOfPoints: result.predictedContour.length / 3,
+          isPredicted: true,
+          predictionConfidence: result.confidence
+        });
+        undoRedoManager.saveState(seriesId, 'predict_next_slice', structureId, updatedStructures);
+        saveContourUpdates(updatedStructures, 'predict_next_slice');
+      }
+
+    } else if (payload.action === "smart_segment_suggest") {
+      // Show a dashed preview suggestion for current slice based on nearest contour and prediction
+      if (!payload || !payload.structureId) return;
+      const structureId = payload.structureId as number;
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+      if (!structure || !structure.contours || structure.contours.length === 0) return;
+
+      const currentZ = images.length > 0 && images[currentIndex]
+        ? (images[currentIndex].parsedSliceLocation ?? images[currentIndex].parsedZPosition ?? currentIndex)
+        : 0;
+
+      // Use nearest available contour as seed
+      let nearest = structure.contours[0];
+      let minDiff = Math.abs((nearest.slicePosition ?? 0) - currentZ);
+      for (const c of structure.contours) {
+        const diff = Math.abs((c.slicePosition ?? 0) - currentZ);
+        if (diff < minDiff) {
+          nearest = c; minDiff = diff;
+        }
+      }
+
+      const result = predictNextSliceContour({
+        currentContour: nearest.points,
+        currentSlicePosition: nearest.slicePosition ?? currentZ,
+        targetSlicePosition: currentZ,
+        predictionMode: 'adaptive',
+        confidenceThreshold: 0.1
+      });
+
+      if (!result.predictedContour || result.predictedContour.length === 0) {
+        // fall back to simple if adaptive fails
+        const simple = predictNextSliceContour({
+          currentContour: nearest.points,
+          currentSlicePosition: nearest.slicePosition ?? currentZ,
+          targetSlicePosition: currentZ,
+          predictionMode: 'simple',
+          confidenceThreshold: 0.0
+        });
+        if (!simple.predictedContour || simple.predictedContour.length === 0) return;
+        setPreviewContours([{ slicePosition: currentZ, points: simple.predictedContour } as any]);
+      } else {
+        setPreviewContours([{ slicePosition: currentZ, points: result.predictedContour } as any]);
+      }
+
+    } else if (payload.action === "smart_segment_apply") {
+      // Apply currently previewed contour as an accepted suggestion
+      if (!payload || !payload.structureId) return;
+      const structureId = payload.structureId as number;
+      if (!previewContours || previewContours.length === 0) return;
+      const updatedStructures = structuredClone(rtStructures);
+      const targetStructure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+      if (!targetStructure) return;
+      for (const p of previewContours) {
+        targetStructure.contours.push({
+          slicePosition: (p as any).slicePosition ?? currentIndex,
+          points: (p as any).points,
+          numberOfPoints: ((p as any).points?.length || 0) / 3,
+          isPredicted: true
+        });
+      }
+      undoRedoManager.saveState(seriesId, 'smart_segment_apply', structureId, updatedStructures);
+      saveContourUpdates(updatedStructures, 'smart_segment_apply');
+      setPreviewContours([]);
+
+    } else if (payload.action === "smart_segment_reject") {
+      // Clear preview suggestion
+      setPreviewContours([]);
+
+    } else if (payload.action === "smart_predict_toggle") {
+      // Auto-predict a candidate when toggled on
+      const structureId = payload.structureId as number;
+      const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === structureId);
+      if (!structure || !images || images.length === 0) return;
+      const currentZ = images.length > 0 && images[currentIndex]
+        ? (images[currentIndex].parsedSliceLocation ?? images[currentIndex].parsedZPosition ?? currentIndex)
+        : 0;
+      // Prefer nearest existing contour as seed
+      let seed = structure.contours?.[0];
+      let minDiff = Number.POSITIVE_INFINITY;
+      for (const c of structure.contours || []) {
+        const diff = Math.abs((c.slicePosition ?? 0) - currentZ);
+        if (diff < minDiff) { seed = c; minDiff = diff; }
+      }
+      if (!seed || !seed.points || seed.points.length < 6) return;
+      // Predict same-slice suggestion using existing slice context (simple mode for now)
+      const result = predictNextSliceContour({
+        currentContour: seed.points,
+        currentSlicePosition: seed.slicePosition ?? currentZ,
+        targetSlicePosition: currentZ,
+        predictionMode: 'adaptive',
+        confidenceThreshold: 0.0
+      });
+      if (result.predictedContour?.length > 0) {
+        setPreviewContours([{
+          points: result.predictedContour,
+          slicePosition: currentZ
+        } as any]);
+      }
+
     } else if (payload.action === "interpolate") {
       // Handle interpolate missing slices
       const structure = updatedStructures.structures.find(
@@ -2297,11 +2479,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         .then(res => res.json())
         .then(data => {
           if (data && data.transformationMatrix) {
+            console.log(`Loaded registration matrix for study ${studyId}:`, data);
             // Parse the transformation matrix if it's a string
             let matrix = data.transformationMatrix;
             if (typeof matrix === 'string') {
               try {
                 matrix = JSON.parse(matrix);
+                console.log('Parsed registration matrix:', matrix);
               } catch (e) {
                 console.error('Failed to parse registration matrix:', e);
                 matrix = null;
@@ -2310,6 +2494,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             setRegistrationMatrix(matrix);
             registrationMatrixRef.current = matrix;
           } else {
+            console.log(`No registration found for study ${studyId}`);
             setRegistrationMatrix(null);
             registrationMatrixRef.current = null;
           }
@@ -2323,19 +2508,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
-    const hasMatrix = registrationMatrix && registrationMatrix.length === 16;
-    const isCTFusion = secondaryModality === 'CT';
-    if ((hasMatrix || isCTFusion) && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
+    console.log('🔥 Registration matrix useEffect:', {
+      hasMatrix: !!registrationMatrix,
+      matrixLength: registrationMatrix?.length,
+      secondarySeriesId,
+      secondarySeriesType: typeof secondarySeriesId,
+      imagesLength: images.length,
+      secondaryImagesLength: secondaryImages.length
+    });
+    
+    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
+      console.log('Registration matrix loaded, re-rendering fusion overlay');
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        const matrixToUse = hasMatrix ? registrationMatrix! : [
-          1,0,0,0,
-          0,1,0,0,
-          0,0,1,0,
-          0,0,0,1
-        ];
-        const transformed = computeTransformedMRIPositions(secondaryImages, matrixToUse);
+        const transformed = computeTransformedMRIPositions(
+          secondaryImages,
+          registrationMatrix,
+          images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+          images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+        );
         transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
@@ -2357,15 +2549,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if ((registrationMatrix && registrationMatrix.length === 16) || secondaryModality === 'CT') {
-      if (secondaryImages.length === 0) return;
-      const matrixToUse = (registrationMatrix && registrationMatrix.length === 16) ? registrationMatrix : [
-        1,0,0,0,
-        0,1,0,0,
-        0,0,1,0,
-        0,0,0,1
-      ];
-      const transformed = computeTransformedMRIPositions(secondaryImages, matrixToUse);
+    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
+      console.log('Both registration matrix and secondary images available, pre-computing transformations...');
+      const transformed = computeTransformedMRIPositions(
+        secondaryImages,
+        registrationMatrix,
+        images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+        images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+      );
       transformedMRIPositions.current = transformed;
       
       // Calculate and store Z-range
@@ -2375,6 +2566,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           min: Math.min(...zValues),
           max: Math.max(...zValues)
         };
+        console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
       }
       
       // Clear cache to force recomputation with new data
@@ -2411,35 +2603,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
 
         const imageList = await response.json();
-
-        // Prepare images with a derived Z value to sort consistently even when sliceLocation is missing
-        const prepared = imageList.map((img: any, idx: number) => {
-          let z = Number.NaN;
-          if (img.sliceLocation != null) {
-            const s = parseFloat(img.sliceLocation);
-            if (!Number.isNaN(s)) z = s;
-          }
-          if (Number.isNaN(z) && img.imagePosition) {
-            const parts = Array.isArray(img.imagePosition)
-              ? img.imagePosition
-              : (typeof img.imagePosition === 'string' ? img.imagePosition.split('\\') : []);
-            const pv = parseFloat(parts?.[2]);
-            if (!Number.isNaN(pv)) z = pv;
-          }
-          if (Number.isNaN(z)) {
-            // Fallback: instanceNumber or index
-            z = (img.instanceNumber != null ? Number(img.instanceNumber) : idx);
-          }
-          return { ...img, __zSort__: z };
-        });
-
-        const sortedImages = prepared
-          .sort((a: any, b: any) => a.__zSort__ - b.__zSort__)
-          .map(({ __zSort__, ...rest }: any) => rest);
+        
+        // Do NOT drop images if SliceLocation is missing; keep all and sort orientation-aware
+        const sortedImages = imageList.sort(compareSlicesOrientationAware);
 
         setSecondaryImages(sortedImages);
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
-        // reduced logging
+        console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
+        console.log("Secondary series ID:", secondarySeriesId);
+        console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
+        
+        // Debug log the sorted order
+        console.log('MRI sorted order (first 5 and last 5):');
+        const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
+        debugImages.forEach((img: any, idx: number) => {
+          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
+        });
         
         // Preload secondary images with concurrency limits
         const newCache = new Map();
@@ -2464,18 +2643,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               
               if (imageData) {
                 newCache.set(image.sopInstanceUID, imageData);
-                // reduced logging
+                if (index < 3) {
+                  console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
+                }
               } else {
                 console.error(`Failed to parse secondary image ${index}`);
               }
             } catch (error) {
-              // silent
+              console.warn(`Failed to preload secondary image ${index}:`, error);
             }
           }));
         }
         
         secondaryImageCacheRef.current = newCache;
-        // reduced logging
+        console.log(`Preloaded ${newCache.size} secondary images`);
+        console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
         
         // Store cache reference to avoid closure issues
         (window as any).secondaryImageCacheRef = newCache;
@@ -2486,12 +2668,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           transformedMRIPositions.current = [];
           mriZRangeInCTSpace.current = null;
           mriSliceMappingCache.current.clear();
-          // recompute MRI transformations
+          console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
           
           // Compute transformed MRI positions and store in ref
-          const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
+          const transformed = computeTransformedMRIPositions(
+            sortedImages,
+            registrationMatrix,
+            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+          );
           transformedMRIPositions.current = transformed;
-          // reduced logging
+          console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
           
           // Compute Z-range bounds for optimization
           if (transformed.length > 0) {
@@ -2617,6 +2804,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               parsedSliceLocation: metadata.parsedSliceLocation,
               parsedZPosition: metadata.parsedZPosition,
               parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+              // Attach essential spatial tags for downstream orientation-aware logic
+              imagePosition: metadata.imagePosition ?? img.imagePosition,
+              imageOrientation: metadata.imageOrientation ?? img.imageOrientation,
+              pixelSpacing: metadata.pixelSpacing ?? img.pixelSpacing,
+              sliceThickness: metadata.sliceThickness ?? img.sliceThickness,
+              spacingBetweenSlices: metadata.spacingBetweenSlices ?? img.spacingBetweenSlices,
+              frameOfReferenceUID: metadata.frameOfReferenceUID ?? img.frameOfReferenceUID,
             };
           } catch (error) {
             console.warn(
@@ -2633,30 +2827,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }),
       );
 
-      // Sort by spatial position - prefer slice location, then z-position, then instance number
-      const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
-        // Primary: slice location
-        if (a.parsedSliceLocation !== null && b.parsedSliceLocation !== null) {
-          return a.parsedSliceLocation - b.parsedSliceLocation;
-        }
-
-        // Secondary: z-position from image position
-        if (a.parsedZPosition !== null && b.parsedZPosition !== null) {
-          return a.parsedZPosition - b.parsedZPosition;
-        }
-
-        // Tertiary: instance number
-        if (
-          a.parsedInstanceNumber !== null &&
-          b.parsedInstanceNumber !== null
-        ) {
-          return a.parsedInstanceNumber - b.parsedInstanceNumber;
-        }
-
-        // Final fallback: filename
-        return a.fileName.localeCompare(b.fileName, undefined, {
-          numeric: true,
-        });
+      // Sort using robust DICOM slice ordering: project IPP onto normal; if missing, fall back to InstanceNumber
+      const sortedImages = imagesWithMetadata.slice().sort((a: any, b: any) => {
+        const pa = getSlicePositionUsingIOP(a.imageOrientation || a.imageMetadata?.imageOrientation, a.imagePosition || a.imageMetadata?.imagePosition);
+        const pb = getSlicePositionUsingIOP(b.imageOrientation || b.imageMetadata?.imageOrientation, b.imagePosition || b.imageMetadata?.imagePosition);
+        if (pa != null && pb != null) return pa - pb;
+        const za = getSliceZ(a);
+        const zb = getSliceZ(b);
+        if (Number.isFinite(za) && Number.isFinite(zb)) return za - zb;
+        return (a.parsedInstanceNumber ?? a.instanceNumber ?? 0) - (b.parsedInstanceNumber ?? b.instanceNumber ?? 0);
       });
 
       setImages(sortedImages);
@@ -3014,6 +3193,48 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     });
   };
 
+  // Helper to compute robust slice ordering using IOP/IPPs
+  const sortImagesBySlice = (imgs: any[]): { sorted: any[]; dz: number } => {
+    if (!imgs || imgs.length === 0) return { sorted: [], dz: 1 };
+    // Use first image orientation as reference
+    const first = imgs[0];
+    const iopStr = first.imageOrientation || first?.imageMetadata?.imageOrientation;
+    const ipp0Str = first.imagePosition || first?.imageMetadata?.imagePosition;
+    let n: [number, number, number] = [0, 0, 1];
+    let ipp0: [number, number, number] = [0, 0, 0];
+    try {
+      if (iopStr) {
+        const arr = (typeof iopStr === 'string' ? iopStr.split('\\').map(Number) : iopStr.map(Number));
+        const x: [number, number, number] = [arr[0], arr[1], arr[2]];
+        const y: [number, number, number] = [arr[3], arr[4], arr[5]];
+        n = [x[1]*y[2]-x[2]*y[1], x[2]*y[0]-x[0]*y[2], x[0]*y[1]-x[1]*y[0]];
+        const len = Math.hypot(n[0], n[1], n[2]) || 1; n = [n[0]/len, n[1]/len, n[2]/len];
+      }
+      if (ipp0Str) {
+        const p = (typeof ipp0Str === 'string' ? ipp0Str.split('\\').map(Number) : ipp0Str.map(Number));
+        ipp0 = [p[0], p[1], p[2]];
+      }
+    } catch {}
+    const withS = imgs.map((img: any) => {
+      let ipps = [0, 0, 0];
+      const sIPP = img.imagePosition || img?.imageMetadata?.imagePosition;
+      if (sIPP) {
+        const p = (typeof sIPP === 'string' ? sIPP.split('\\').map(Number) : sIPP.map(Number));
+        ipps = [p[0], p[1], p[2]];
+      }
+      const dv: [number, number, number] = [ipps[0]-ipp0[0], ipps[1]-ipp0[1], ipps[2]-ipp0[2]];
+      const s = dv[0]*n[0] + dv[1]*n[1] + dv[2]*n[2];
+      return { img, s };
+    });
+    withS.sort((a, b) => a.s - b.s);
+    // Estimate dz as median spacing
+    const diffs: number[] = [];
+    for (let i = 1; i < withS.length; i++) diffs.push(Math.abs(withS[i].s - withS[i-1].s));
+    diffs.sort((a,b)=>a-b);
+    const dz = diffs.length ? diffs[Math.floor(diffs.length/2)] : 1;
+    return { sorted: withS.map(w => w.img), dz: dz || 1 };
+  };
+
   // Helper function to reconstruct MPR slice from volume
   const reconstructMPRSlice = async (orientation: string, sliceIndex: number) => {
     if (!images || images.length === 0) return null;
@@ -3032,31 +3253,46 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     
     // For MPR reconstruction, we need all images loaded with pixel data
-    // Sort images by Z position
-    const sortedImages = [...images].sort((a, b) => {
-      const zA = parseFloat(a.parsedZPosition || a.parsedSliceLocation || '0');
-      const zB = parseFloat(b.parsedZPosition || b.parsedSliceLocation || '0');
-      return zA - zB;
-    });
+    // Sort images robustly using IOP/IPP projection
+    const { sorted: sortedImages, dz: dzFromIOP } = sortImagesBySlice(images);
     
-    // Get dimensions from first image - need to load pixel data from cache
-    const firstImageData = imageCacheRef.current.get(sortedImages[0].sopInstanceUID);
-    if (!firstImageData) {
-      console.error("First image not in cache for MPR reconstruction");
-      return null;
+    // Ensure required axial slices are in cache; fetch missing ones in a batch
+    try {
+      const missingUIDs = sortedImages
+        .map((img: any) => img.sopInstanceUID)
+        .filter((uid: string) => !imageCacheRef.current.has(uid));
+      if (missingUIDs.length > 0) {
+        if (DEBUG) console.log(`MPR: fetching ${missingUIDs.length} missing slices for reconstruction`);
+        await fetchBatchImages(missingUIDs, seriesAbortRef.current?.signal);
+      }
+    } catch (e) {
+      console.warn('MPR: batch fetch for missing slices failed or aborted:', e);
     }
     
-    const width = firstImageData.width || 512;
-    const height = firstImageData.height || 512;
+    // Get dimensions from any cached image (don't hard-require the first slice)
+    let width = 512;
+    let height = 512;
+    let sampleImageData: { width: number; height: number } | undefined;
+    const firstLoaded = sortedImages.find((img: any) => imageCacheRef.current.has(img.sopInstanceUID));
+    if (firstLoaded) {
+      const data = imageCacheRef.current.get(firstLoaded.sopInstanceUID);
+      if (data) {
+        sampleImageData = data;
+        width = data.width || width;
+        height = data.height || height;
+      }
+    }
     const numSlices = sortedImages.length;
     
-    // Get pixel spacing and slice thickness for proper aspect ratio
+    // Get pixel spacing and slice thickness for proper aspect ratio (robust to string/array)
     const firstImage = sortedImages[0];
-    const pixelSpacing = firstImage.pixelSpacing?.split('\\').map(parseFloat) || [1, 1];
-    const sliceThickness = parseFloat(firstImage.sliceThickness || '2.0');
+    const spacing = getSpacing(firstImage.imageMetadata || firstImage);
+    const dySpacing = spacing.row || 1; // Δy (row spacing)
+    const dxSpacing = spacing.col || 1; // Δx (column spacing)
+    const sliceThickness = spacing.z || dzFromIOP || parseFloat(firstImage.sliceThickness || '2.0');
     
     console.log(`MPR reconstruction: ${orientation}, slice ${sliceIndex}, volume ${width}x${height}x${numSlices}`);
-    console.log(`Pixel spacing: ${pixelSpacing[0]}x${pixelSpacing[1]}, slice thickness: ${sliceThickness}`);
+    console.log(`Pixel spacing: dy=${dySpacing} dx=${dxSpacing}, slice thickness: ${sliceThickness}`);
     
     // Create synthetic image for MPR view with proper dimensions
     let mprWidth, mprHeight;
@@ -3071,14 +3307,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const mprImage = {
       ...sortedImages[0],
       sopInstanceUID: `mpr-${orientation}-${sliceIndex}`,
-      pixelData: new Uint16Array(mprWidth * mprHeight),
+      // Keep HU as Float32 so we don't lose negative values and avoid double rescale
+      pixelData: new Float32Array(mprWidth * mprHeight),
       columns: mprWidth,
       rows: mprHeight,
       orientation: orientation,
-      // Update pixel spacing for MPR views
+      // Update pixel spacing for MPR views: sagittal columns=Y (Δy), coronal columns=X (Δx)
       pixelSpacing: orientation === 'sagittal' 
-        ? `${pixelSpacing[1]}\\${sliceThickness}` // Y spacing x slice thickness
-        : `${pixelSpacing[0]}\\${sliceThickness}` // X spacing x slice thickness
+        ? `${dySpacing}\\${sliceThickness}`
+        : `${dxSpacing}\\${sliceThickness}`
     };
     
     let pixelsSet = 0;
@@ -3100,11 +3337,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           for (let y = 0; y < height; y++) {
             const srcIndex = y * width + x;
             const dstIndex = z * mprWidth + y;
-            // Convert Float32 to Uint16, handling negative values properly
-            const floatValue = axialImageData.data[srcIndex] || 0;
-            const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
-            mprImage.pixelData[dstIndex] = pixelValue;
-            if (pixelValue > 0) pixelsSet++;
+            // Preserve HU values (Float32) directly
+            const huValue = axialImageData.data[srcIndex] ?? 0;
+            (mprImage.pixelData as Float32Array)[dstIndex] = huValue;
+            if (Number.isFinite(huValue)) pixelsSet++;
           }
         }
       }
@@ -3123,11 +3359,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           for (let x = 0; x < width; x++) {
             const srcIndex = y * width + x;
             const dstIndex = z * mprWidth + x;
-            // Convert Float32 to Uint16, handling negative values properly
-            const floatValue = axialImageData.data[srcIndex] || 0;
-            const pixelValue = Math.max(0, Math.min(65535, Math.round(floatValue)));
-            mprImage.pixelData[dstIndex] = pixelValue;
-            if (pixelValue > 0) pixelsSet++;
+            // Preserve HU values (Float32) directly
+            const huValue = axialImageData.data[srcIndex] ?? 0;
+            (mprImage.pixelData as Float32Array)[dstIndex] = huValue;
+            if (Number.isFinite(huValue)) pixelsSet++;
           }
         }
       }
@@ -3168,7 +3403,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     console.log(`MPR renderMPRCanvas called for ${targetOrientation} at index ${currentSliceIndex}, canvas: ${canvas.width}x${canvas.height}`);
     
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    // Ensure backing store matches displayed size to avoid apparent squish
+    const rect = canvas.getBoundingClientRect();
+    const targetW = Math.max(1, Math.floor(rect.width));
+    const targetH = Math.max(1, Math.floor(rect.height));
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
       console.error(`MPR render failed - no 2D context for ${targetOrientation}`);
       return;
@@ -3186,21 +3429,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Reconstructing ${targetOrientation} slice at index ${currentSliceIndex}`);
       const reconstructedImage = await reconstructMPRSlice(targetOrientation, currentSliceIndex);
       
-      if (!reconstructedImage || !reconstructedImage.pixelData) {
+      if (!reconstructedImage || !reconstructedImage.pixelData || (reconstructedImage.columns === 0 || reconstructedImage.rows === 0)) {
         console.error(`No reconstructed image or pixel data for ${targetOrientation}`);
         return;
       }
       
-      // Get pixel data from reconstructed image
-      const pixelData = reconstructedImage.pixelData;
-      
-      // Fix typescript error and improve performance
-      const pixelArray = pixelData as Uint16Array;
-      let minVal = 65535, maxVal = 0;
+      // Get pixel data from reconstructed image (Float32 HU now)
+      const pixelData = reconstructedImage.pixelData as Float32Array | Uint16Array;
+      const pixelArrayF = (pixelData as any) as Float32Array;
+      let minVal = Number.POSITIVE_INFINITY, maxVal = Number.NEGATIVE_INFINITY;
       let hasData = false;
-      for (let i = 0; i < pixelArray.length; i++) {
-        const val = pixelArray[i];
-        if (val > 0) {
+      for (let i = 0; i < pixelArrayF.length; i++) {
+        const val = pixelArrayF[i];
+        if (Number.isFinite(val)) {
           hasData = true;
           minVal = Math.min(minVal, val);
           maxVal = Math.max(maxVal, val);
@@ -3209,91 +3450,95 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       if (!hasData) {
         console.warn(`MPR ${targetOrientation} has no pixel data!`);
-        minVal = 0;
+        minVal = 0; maxVal = 1;
       }
       
       console.log(`MPR pixel data stats: min=${minVal}, max=${maxVal}, hasData=${hasData}`);
       
-      // Use larger canvas size for better resolution
+      // Ensure a visible canvas size even if CSS hasn't sized it yet
+      if (canvas.width === 0 || canvas.height === 0) {
+        canvas.width = 384;
+        canvas.height = 384;
+      }
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
       const imageData = ctx.createImageData(canvasWidth, canvasHeight);
       const data = imageData.data;
       
-      // Get proper dimensions
-      const sourceWidth = reconstructedImage.columns || 512;
-      const sourceHeight = reconstructedImage.rows || 512;
-      
-      // For sagittal: width=imageHeight (Y), height=numSlices (Z)
-      // For coronal: width=imageWidth (X), height=numSlices (Z)
-      let displayWidth = sourceWidth;
-      let displayHeight = sourceHeight;
-      
-      if (targetOrientation === 'sagittal') {
-        // Sagittal view shows Y (horizontal) x Z (vertical)
-        displayWidth = sourceHeight; // Y dimension (512)
-        displayHeight = images.length; // Z dimension (number of slices)
-      } else if (targetOrientation === 'coronal') {
-        // Coronal view shows X (horizontal) x Z (vertical)
-        displayWidth = sourceWidth; // X dimension (512)
-        displayHeight = images.length; // Z dimension (number of slices)
+      // Dimensions from reconstructed image (already orientation-specific)
+      let sourceWidth = reconstructedImage.columns || 0;  // columns of the MPR slice
+      let sourceHeight = reconstructedImage.rows || 0;     // rows of the MPR slice
+      if ((!sourceWidth || !sourceHeight) && reconstructedImage.pixelData) {
+        // Fallback: infer square-ish dims from pixel data length
+        const len = (reconstructedImage.pixelData as Uint16Array).length;
+        const side = Math.floor(Math.sqrt(len));
+        sourceWidth = side;
+        sourceHeight = Math.max(1, Math.floor(len / Math.max(1, side)));
       }
+      if (!sourceWidth || !sourceHeight) {
+        console.warn('MPR: invalid reconstructed dimensions');
+        return;
+      }
+      
+      // Display size equals reconstructed image size
+      const displayWidth = sourceWidth;
+      const displayHeight = sourceHeight;
       
       // Calculate scale to fit canvas while preserving physical aspect ratio
       // Both sagittal and coronal should have the same display height
       
-      // Use default pixel spacing for aspect ratio calculation
-      const pixelSpacingX = 0.9765625;
-      const pixelSpacingY = 0.9765625;
-      const sliceThickness = 2.0; // Typical slice thickness for CT
+      // Use real pixel spacing for aspect ratio
+      const first = images[0];
+      const spacingStr = first?.pixelSpacing || first?.imageMetadata?.pixelSpacing || '1\\1';
+      const [dy, dx] = (typeof spacingStr === 'string' ? spacingStr.split('\\').map(parseFloat) : spacingStr.map(Number));
+      const dz = parseFloat(first?.spacingBetweenSlices || first?.sliceThickness || first?.imageMetadata?.spacingBetweenSlices || first?.imageMetadata?.sliceThickness || '3');
       
       // Calculate physical dimensions in mm
       let physicalWidth, physicalHeight;
       
       if (targetOrientation === 'sagittal') {
-        // Sagittal: Y (horizontal) x Z (vertical)
-        physicalWidth = displayWidth * pixelSpacingY;
-        physicalHeight = displayHeight * sliceThickness;
+        // Sagittal MPR: columns represent Y, rows represent Z
+        physicalWidth = sourceWidth * dy;
+        physicalHeight = sourceHeight * dz;
       } else if (targetOrientation === 'coronal') {
-        // Coronal: X (horizontal) x Z (vertical)
-        physicalWidth = displayWidth * pixelSpacingX;
-        physicalHeight = displayHeight * sliceThickness;
+        // Coronal MPR: columns represent X, rows represent Z
+        physicalWidth = sourceWidth * dx;
+        physicalHeight = sourceHeight * dz;
       } else {
-        physicalWidth = displayWidth;
-        physicalHeight = displayHeight;
+        physicalWidth = sourceWidth * dx;
+        physicalHeight = sourceHeight * dy;
       }
       
-      // Calculate scale to fill the canvas properly while maintaining aspect ratio
+      // Calculate scale to preserve physical aspect ratio; then apply shared zoom
       const aspectRatio = physicalWidth / physicalHeight;
-      let scaledWidth, scaledHeight, scale;
-      
-      // For sagittal/coronal views, prioritize filling the height (superior-inferior dimension)
-      // This makes the body anatomy display properly in a tall, rectangular format
+      let scaledWidth, scaledHeight;
       if (aspectRatio < (canvasWidth / canvasHeight)) {
-        // Height-constrained (typical for body scans)
+        // Height-constrained first to preserve SI scale
         scaledHeight = canvasHeight;
         scaledWidth = scaledHeight * aspectRatio;
-        scale = canvasHeight / displayHeight;
       } else {
-        // Width-constrained
         scaledWidth = canvasWidth;
         scaledHeight = scaledWidth / aspectRatio;
-        scale = canvasWidth / displayWidth;
       }
+      const zoomFactor = Math.max(0.1, zoom);
+      scaledWidth *= zoomFactor;
+      scaledHeight *= zoomFactor;
+      const scaleX = scaledWidth / displayWidth;
+      const scaleY = scaledHeight / displayHeight;
       
-      // Center the image
-      const offsetX = (canvasWidth - scaledWidth) / 2;
-      const offsetY = (canvasHeight - scaledHeight) / 2;
+      // Center the image and apply same pan offsets used by axial
+      const offsetX = (canvasWidth - scaledWidth) / 2 + panX;
+      const offsetY = (canvasHeight - scaledHeight) / 2 + panY;
       
       // Clear the data array first (ensure black background)
       data.fill(0);
       
-      // Use the same window/level settings as the axial view
-      const min = windowCenter - windowWidth / 2;
-      const max = windowCenter + windowWidth / 2;
+      // Use the same window/level settings as the axial view (after rescale)
+      const meta = images?.[0] || {};
+      const { slope, intercept } = getRescaleParams(meta);
       
       console.log(`MPR ${targetOrientation} using window/level: W=${windowWidth}, C=${windowCenter}`);
-      console.log(`MPR canvas size: ${canvasWidth}x${canvasHeight}, display size: ${displayWidth}x${displayHeight}, scale: ${scale}`);
+      console.log(`MPR canvas size: ${canvasWidth}x${canvasHeight}, display size: ${displayWidth}x${displayHeight}, scaleX: ${scaleX}, scaleY: ${scaleY}`);
       
       // Render pixels with proper scaling and aspect ratio
       for (let y = 0; y < canvasHeight; y++) {
@@ -3303,25 +3548,30 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               y >= offsetY && y < offsetY + scaledHeight) {
             
             // Calculate source coordinates
-            const sourceX = Math.floor(((x - offsetX) / scale));
-            const sourceY = Math.floor(((y - offsetY) / scale));
+            const sourceX = Math.floor((x - offsetX) / scaleX);
+            const sourceY = Math.floor((y - offsetY) / scaleY);
             
             // Ensure source coords are within bounds
             if (sourceX >= 0 && sourceX < displayWidth && 
                 sourceY >= 0 && sourceY < displayHeight) {
               
               const sourceIndex = sourceY * sourceWidth + sourceX;
-              const pixelValue = pixelArray[sourceIndex] || 0;
-              
-              // Apply window/level
-              let normalizedValue;
-              if (pixelValue <= min) {
-                normalizedValue = 0;
-              } else if (pixelValue >= max) {
-                normalizedValue = 255;
-              } else {
-                normalizedValue = Math.round(((pixelValue - min) / windowWidth) * 255);
+              const pixelHU = pixelArrayF[sourceIndex] ?? 0;
+              let w = windowWidth;
+              let c = windowCenter;
+              // If WL is invalid, derive from data directly in HU space
+              if (!Number.isFinite(w) || !Number.isFinite(c) || w <= 1) {
+                const huMin = minVal;
+                const huMax = maxVal;
+                if (Number.isFinite(huMin) && Number.isFinite(huMax) && huMax > huMin) {
+                  w = huMax - huMin;
+                  c = huMin + w / 2;
+                } else {
+                  w = 1000; c = 0; // final fallback
+                }
               }
+              // Since pixelHU is already in HU, use slope=1, intercept=0
+              const normalizedValue = applyWindowLevelToPixel(pixelHU, 1, 0, w, c);
               
               const destIndex = (y * canvasWidth + x) * 4;
               data[destIndex] = normalizedValue;     // R
@@ -3333,6 +3583,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
       
+      // If absolutely no pixels were written, draw a debug gradient to confirm canvas is alive
+      let wrotePixel = false;
+      for (let y = 0; y < canvasHeight && !wrotePixel; y++) {
+        for (let x = 0; x < canvasWidth && !wrotePixel; x++) {
+          const idx = (y * canvasWidth + x) * 4;
+          if (data[idx + 3] !== 0) wrotePixel = true;
+        }
+      }
+      if (!wrotePixel) {
+        for (let y = 0; y < canvasHeight; y++) {
+          for (let x = 0; x < canvasWidth; x++) {
+            const idx = (y * canvasWidth + x) * 4;
+            const v = Math.floor(255 * (x / canvasWidth));
+            data[idx] = v; data[idx + 1] = v; data[idx + 2] = v; data[idx + 3] = 255;
+          }
+        }
+      }
       ctx.putImageData(imageData, 0, 0);
       
       // Draw crosshairs on MPR views
@@ -3345,7 +3612,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           // Draw vertical line at coronal position and horizontal line at axial position
           // Vertical line corresponds to coronal slice position
           const coronalPos = Math.floor(crosshairPos.y);
-          const lineX = offsetX + (coronalPos * scale);
+          const lineX = offsetX + (coronalPos * scaleX);
           
           ctx.beginPath();
           ctx.moveTo(lineX, 0);
@@ -3354,7 +3621,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Horizontal line corresponds to axial slice position (inverted Z)
           const axialPos = displayHeight - 1 - currentIndex;
-          const lineY = offsetY + (axialPos * scale);
+          const lineY = offsetY + (axialPos * scaleY);
           
           ctx.beginPath();
           ctx.moveTo(0, lineY);
@@ -3365,7 +3632,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           // Draw vertical line at sagittal position and horizontal line at axial position
           // Vertical line corresponds to sagittal slice position
           const sagittalPos = Math.floor(crosshairPos.x);
-          const lineX = offsetX + (sagittalPos * scale);
+          const lineX = offsetX + (sagittalPos * scaleX);
           
           ctx.beginPath();
           ctx.moveTo(lineX, 0);
@@ -3374,7 +3641,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Horizontal line corresponds to axial slice position (inverted Z)
           const axialPos = displayHeight - 1 - currentIndex;
-          const lineY = offsetY + (axialPos * scale);
+          const lineY = offsetY + (axialPos * scaleY);
           
           ctx.beginPath();
           ctx.moveTo(0, lineY);
@@ -3465,7 +3732,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.height = 1024;
 
       // Always use CPU rendering for now - GPU integration needs more work
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      // Use HU renderer for MPR Float32 slices; LUT path for axial
+      const isMPRSlice = orientation !== 'axial' && !!(currentImage as any).pixelData;
+      if (isMPRSlice) {
+        renderHUImage(ctx, imageData.data as Float32Array, imageData.width, imageData.height);
+      } else {
+        render16BitImage(ctx, imageData.data as Float32Array, imageData.width, imageData.height);
+      }
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId && secondaryImages.length > 0) {
@@ -3682,6 +3955,85 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
   };
 
+  // Render HU data (Float32) directly with window/level, used for MPR sagittal/coronal slices
+  const renderHUImage = (
+    ctx: CanvasRenderingContext2D,
+    pixelArray: Float32Array,
+    width: number,
+    height: number,
+  ) => {
+    // Use current window/level; if invalid, derive from data range
+    let { width: windowWidth, center: windowCenter } = currentWindowLevel;
+    if (!Number.isFinite(windowWidth) || !Number.isFinite(windowCenter) || windowWidth <= 1) {
+      let minVal = Number.POSITIVE_INFINITY;
+      let maxVal = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < pixelArray.length; i++) {
+        const v = pixelArray[i];
+        if (Number.isFinite(v)) {
+          if (v < minVal) minVal = v;
+          if (v > maxVal) maxVal = v;
+        }
+      }
+      if (Number.isFinite(minVal) && Number.isFinite(maxVal) && maxVal > minVal) {
+        windowWidth = maxVal - minVal;
+        windowCenter = minVal + windowWidth / 2;
+      } else {
+        windowWidth = 1000;
+        windowCenter = 0;
+      }
+    }
+
+    // Create image data at original size
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    // Map HU directly to 8-bit using provided WL (slope=1, intercept=0)
+    for (let i = 0; i < pixelArray.length; i++) {
+      const gray = applyWindowLevelToPixel(pixelArray[i], 1, 0, windowWidth, windowCenter);
+      const idx = i * 4;
+      data[idx] = gray;
+      data[idx + 1] = gray;
+      data[idx + 2] = gray;
+      data[idx + 3] = 255;
+    }
+
+    // Reuse offscreen canvas for scaling and pan/zoom identical to CT path
+    if (!offscreenCanvasRef.current ||
+        offscreenCanvasRef.current.width !== width ||
+        offscreenCanvasRef.current.height !== height) {
+      offscreenCanvasRef.current = document.createElement("canvas");
+      offscreenCanvasRef.current.width = width;
+      offscreenCanvasRef.current.height = height;
+    }
+
+    const tempCanvas = offscreenCanvasRef.current;
+    const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+    if (!tempCtx) return;
+    tempCtx.putImageData(imageData, 0, 0);
+
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
+    const baseScale = Math.min(canvasWidth / width, canvasHeight / height);
+    const totalScale = baseScale * zoom;
+    const scaledWidth = width * totalScale;
+    const scaledHeight = height * totalScale;
+    const x = (canvasWidth - scaledWidth) / 2 + panX;
+    const y = (canvasHeight - scaledHeight) / 2 + panY;
+
+    // Maintain transform for measurement overlay consistency
+    ctTransform.current = {
+      scale: totalScale,
+      offsetX: x,
+      offsetY: y,
+      imageWidth: width,
+      imageHeight: height
+    } as any;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+  };
+
   const render8BitImage = (
     ctx: CanvasRenderingContext2D,
     pixelArray: Uint8Array,
@@ -3739,7 +4091,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
     
     // Try to get Z position from various sources in priority order
-    if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
+    // Priority 1: Orientation-aware projection using IOP/IPPs
+    const projected = getSlicePositionUsingIOP(
+      primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation,
+      primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition
+    );
+    if (projected != null && Number.isFinite(projected)) {
+      ctSliceZ = projected;
+    } else if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
       ctSliceZ = primaryImage.parsedSliceLocation;
     } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
       ctSliceZ = primaryImage.parsedZPosition;
@@ -3760,7 +4119,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // reduced logging
+    console.log('🚀 About to call renderFusionOverlay with:', {
+      ctSliceZ,
+      fusionOpacity,
+      canvasSize: `${canvas.width}x${canvas.height}`,
+      actualCacheSize: actualCache.size,
+      transformedMRILength: transformedMRIPositions.current?.length
+    });
     
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
     // DO NOT apply transform here - fusion-utils handles its own transforms
@@ -4065,12 +4430,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     // Parse DICOM metadata
-    const imagePosition = imgMetadata.imagePosition
-      ?.split("\\")
-      .map(Number) || [-300, -300, 0];
-    const pixelSpacing = imgMetadata.pixelSpacing
-      ?.split("\\")
-      .map(Number) || [1.171875, 1.171875];
+    // Robust metadata parsing for both string and array formats
+    const imagePosition = (typeof imgMetadata.imagePosition === 'string'
+      ? imgMetadata.imagePosition.split("\\").map(Number)
+      : imgMetadata.imagePosition) || [-300, -300, 0];
+    const pixelSpacingArr = (typeof imgMetadata.pixelSpacing === 'string'
+      ? imgMetadata.pixelSpacing.split("\\").map(Number)
+      : imgMetadata.pixelSpacing) || [1.171875, 1.171875];
+    const pixelSpacing: [number, number] = [pixelSpacingArr[0] || 1, pixelSpacingArr[1] || 1];
 
     // Image dimensions
     const imageWidth = 512;
@@ -4831,10 +5198,57 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={(e) => {
               handleCanvasMouseMove(e);
-              // Crosshair position is only updated on click in crosshair mode
-              // Not on mouse move
+              // Track cursor for preview accept/reject feedback
+              const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+              const cx = ((e.clientX - rect.left) / rect.width) * (canvasRef.current?.width || 0);
+              const cy = ((e.clientY - rect.top) / rect.height) * (canvasRef.current?.height || 0);
+              setCursorPos({ x: cx, y: cy });
+              if (previewContours && previewContours.length > 0) {
+                // Build polygon in canvas coords using worldToCanvas
+                const c = previewContours[0] as any;
+                const pts: Array<[number, number]> = [];
+                for (let i = 0; i < c.points.length; i += 3) {
+                  const [wx, wy] = [c.points[i], c.points[i + 1]];
+                  const [px, py] = worldToCanvas(wx, wy);
+                  pts.push([px, py]);
+                }
+                // Ray casting
+                let inside = false;
+                for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+                  const xi = pts[i][0], yi = pts[i][1];
+                  const xj = pts[j][0], yj = pts[j][1];
+                  const intersect = ((yi > cy) !== (yj > cy)) && (cx < (xj - xi) * (cy - yi) / ((yj - yi) || 1e-6) + xi);
+                  if (intersect) inside = !inside;
+                }
+                setPreviewHoverInside(inside);
+              } else {
+                setPreviewHoverInside(false);
+              }
             }}
-            onMouseUp={handleCanvasMouseUp}
+            onMouseUp={(e) => {
+              // Accept or reject smart segment suggestion based on click location
+              if (previewContours && previewContours.length > 0) {
+                const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * canvasRef.current!.width;
+                const y = ((e.clientY - rect.top) / rect.height) * canvasRef.current!.height;
+                // Simple point-in-polygon test on first preview contour (screen space approximate)
+                const p = previewContours[0] as any;
+                const pts = p.points;
+                let inside = false;
+                for (let i = 0, j = pts.length - 3; i < pts.length; j = i, i += 3) {
+                  const xi = pts[i];
+                  const yi = pts[i + 1];
+                  const xj = pts[j];
+                  const yj = pts[j + 1];
+                  const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-6) + xi);
+                  if (intersect) inside = !inside;
+                }
+                const action = inside ? 'smart_segment_apply' : 'smart_segment_reject';
+                handleContourUpdate({ action, structureId: selectedForEdit });
+                return;
+              }
+              handleCanvasMouseUp();
+            }}
             onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
               handleCanvasWheel(e);
@@ -5055,12 +5469,46 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
 
 
-          {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
+          {/* Draw preview contours with dashed stroke */}
+          {previewContours && previewContours.length > 0 && (
+            <svg className="absolute inset-0 pointer-events-none">
+              {previewContours.map((pc: any, idx: number) => {
+                const pathParts: string[] = [];
+                for (let i = 0; i < pc.points.length; i += 3) {
+                  const [wx, wy] = [pc.points[i], pc.points[i + 1]];
+                  const [cx, cy] = worldToCanvas(wx, wy);
+                  pathParts.push(`${i === 0 ? 'M' : 'L'} ${cx} ${cy}`);
+                }
+                pathParts.push('Z');
+                return (
+                  <path
+                    key={idx}
+                    d={pathParts.join(' ')}
+                    strokeDasharray="6,4"
+                    stroke="cyan"
+                    fill={previewHoverInside ? 'rgba(0,255,255,0.10)' : 'rgba(0,255,255,0.04)'}
+                    strokeWidth="2"
+                  />
+                );
+              })}
+            </svg>
+          )}
+
+          {cursorPos && previewContours && previewContours.length > 0 && (
+            <div
+              className="absolute pointer-events-none"
+              style={{ left: cursorPos.x + 8, top: cursorPos.y + 8 }}
+            >
+              <div className={`px-1.5 py-0.5 rounded-md text-xs backdrop-blur-sm border ${previewHoverInside ? 'bg-green-900/70 border-green-500/40 text-green-200' : 'bg-red-900/70 border-red-500/40 text-red-200'}`}>
+                {previewHoverInside ? '✓ Accept' : '✕ Reject'}
+              </div>
+            </div>
+          )}
 
           {/* Removed overlaid text - now in titlebar */}
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
+          {studyId && props.secondarySeriesId !== undefined && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}
@@ -5078,12 +5526,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {orientation === 'axial' && images.length > 0 && mprVisible && (
             <div className="absolute right-4 top-16 flex flex-col gap-3">
               {/* Sagittal view */}
-              <div className="mpr-window">
+              <div className="mpr-window backdrop-blur-md/50 border border-gray-700/60 bg-black/50 shadow-lg rounded-xl">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Sagittal</span>
                   <span className="text-cyan-400">{crosshairPos.x}/{images[0]?.columns || 512}</span>
                 </div>
-                <div className="mpr-canvas-container">
+                <div className="mpr-canvas-container rounded-xl overflow-hidden border border-gray-700/60 bg-black/60">
                   <canvas
                     ref={sagittalCanvasRef}
                     className="mpr-canvas"
@@ -5107,12 +5555,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               </div>
               
               {/* Coronal view */}
-              <div className="mpr-window">
+              <div className="mpr-window backdrop-blur-md/50 border border-gray-700/60 bg-black/50 shadow-lg rounded-xl">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Coronal</span>
                   <span className="text-cyan-400">{crosshairPos.y}/{images[0]?.rows || 512}</span>
                 </div>
-                <div className="mpr-canvas-container">
+                <div className="mpr-canvas-container rounded-xl overflow-hidden border border-gray-700/60 bg-black/60">
                   <canvas
                     ref={coronalCanvasRef}
                     className="mpr-canvas"
