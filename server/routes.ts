@@ -2425,21 +2425,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
       
-      // For now, return hardcoded registration for specific studies
-      if (studyId === 7) {
-        res.json({
-          transformationMatrix: [0.99933547159219, -0.0077344424307, -0.0356201293921, -11.334524593996, 0.00427828866787, 0.99536240009279, -0.0961009298998, -192.87910608354, 0.03619822459314, 0.09588467490592, 0.99473404367926, 643.420715526161, 0, 0, 0, 1],
-          matrixType: 'RIGID'
+      // Auto-parse fallback: if nothing in DB, try to parse current study's REG now
+      const autoParseAndReturn = async () => {
+        // Find registration series for this study
+        const seriesList = await storage.getSeriesByStudyId(studyId);
+        const regSeries = seriesList.find((s: any) => s.modality === 'REG');
+        if (!regSeries) {
+          return null;
+        }
+
+        const regImages = await storage.getImagesBySeriesId(regSeries.id);
+        if (!regImages || regImages.length === 0) {
+          return null;
+        }
+
+        const regImage = regImages[0];
+        const filePath = regImage.filePath;
+        if (!fs.existsSync(filePath)) {
+          return null;
+        }
+
+        // Parse REG and select a non-identity matrix (prefer last)
+        const dicomData = fs.readFileSync(filePath);
+        const dataSet = dicomParser.parseDicom(new Uint8Array(dicomData));
+
+        let transformationMatrix: number[][] = [
+          [1, 0, 0, 0],
+          [0, 1, 0, 0],
+          [0, 0, 1, 0],
+          [0, 0, 0, 1],
+        ];
+
+        const candidates: number[][][] = [];
+        const registrationSequence = (dataSet as any).elements?.['x00700308'];
+        if (registrationSequence?.items?.length) {
+          for (let i = 0; i < registrationSequence.items.length; i++) {
+            const item = registrationSequence.items[i];
+            const matrixRegSeq = item.dataSet?.elements?.['x00700309'];
+            if (matrixRegSeq?.items?.length) {
+              const matrixItem = matrixRegSeq.items[0];
+              const matrixElement = matrixItem.dataSet?.elements?.['x0070030c'];
+              if (matrixElement) {
+                const byteArray: Uint8Array = (matrixItem.dataSet as any).byteArray;
+                const dataOffset: number = (matrixElement as any).dataOffset;
+                const length: number = (matrixElement as any).length;
+                const view = new DataView(byteArray.buffer, byteArray.byteOffset + dataOffset, length);
+                const values: number[] = [];
+                for (let j = 0; j + 8 <= length && values.length < 16; j += 8) {
+                  values.push(view.getFloat64(j, true));
+                }
+                if (values.length === 16) {
+                  const cand = [
+                    values.slice(0, 4),
+                    values.slice(4, 8),
+                    values.slice(8, 12),
+                    values.slice(12, 16),
+                  ];
+                  // Skip identity
+                  if (!(cand[0][0] === 1 && cand[1][1] === 1 && cand[2][2] === 1)) {
+                    candidates.push(cand);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (candidates.length) {
+          transformationMatrix = candidates[candidates.length - 1];
+        } else {
+          // Fallback: pre/post concatenation
+          const pre = dataSet.string?.('x00185210');
+          const post = dataSet.string?.('x00185212');
+          const matrixString = pre || post;
+          if (matrixString) {
+            const values = matrixString.split('\\').map((v: string) => parseFloat(v));
+            if (values.length === 16) {
+              transformationMatrix = [
+                values.slice(0, 4),
+                values.slice(4, 8),
+                values.slice(8, 12),
+                values.slice(12, 16),
+              ];
+            }
+          }
+        }
+
+        // Persist and return flat array
+        await storage.deleteRegistrationByStudyId(studyId).catch(() => {});
+        await storage.createRegistration({
+          studyId,
+          seriesInstanceUid: regSeries.seriesInstanceUID,
+          sopInstanceUid: regImage.sopInstanceUID,
+          sourceFrameOfReferenceUid: dataSet.string?.('x00200052') || 'unknown',
+          targetFrameOfReferenceUid: dataSet.string?.('x00200052') || 'unknown',
+          transformationMatrix,
+          matrixType: 'RIGID',
+          metadata: { seriesDescription: regSeries.seriesDescription, parsedFrom: filePath },
         });
-      } else if (studyId === 5) {
-        // Registration matrix for LIMBIC_57 fusion study
-        res.json({
-          transformationMatrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0, 0, 0, 1],
-          matrixType: 'RIGID'
-        });
-      } else {
-        res.json(null);
+
+        return transformationMatrix.flat();
+      };
+
+      const auto = await autoParseAndReturn();
+      if (auto && Array.isArray(auto) && auto.length === 16) {
+        res.json({ transformationMatrix: auto, matrixType: 'RIGID' });
+        return;
       }
+
+      // Nothing found
+      res.json(null);
     } catch (error) {
       console.error("Error fetching registration:", error);
       res.status(500).json({ error: "Failed to fetch registration" });
