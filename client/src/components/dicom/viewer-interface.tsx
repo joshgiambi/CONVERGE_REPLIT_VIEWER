@@ -71,6 +71,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
   
+  // Watch for secondary series changes to show/hide fusion panel
+  useEffect(() => {
+    if (secondarySeriesId !== null) {
+      console.log('Secondary series selected, showing fusion panel');
+      setShowFusionPanel(true);
+    } else {
+      console.log('No secondary series, hiding fusion panel');
+      setShowFusionPanel(false);
+    }
+  }, [secondarySeriesId]);
+  
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
@@ -148,57 +159,37 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
       
-      // Auto-activate fusion when registration files are detected
+      // Auto-activate fusion when REG files are present
       const regSeries = seriesData.find((s: any) => s.modality === 'REG');
-      if (regSeries && !secondarySeriesId) {
-        console.log('REG file detected, auto-activating fusion');
+      const ctSeriesForFusion = seriesData.find((s: any) => s.modality === 'CT');
+      const mrSeries = seriesData.find((s: any) => s.modality === 'MR');
+      const ptSeries = seriesData.find((s: any) => s.modality === 'PT');
+      
+      if (regSeries && ctSeriesForFusion && (mrSeries || ptSeries)) {
+        console.log('Auto-activating fusion: REG detected with CT and secondary series');
+        // Prefer MR over PT for fusion
+        const secondarySeriesForFusion = mrSeries || ptSeries;
         
-        // Find available fusion series (MR or PT)
-        const fusionSeries = seriesData.filter((s: any) => 
-          s.modality === 'MR' || s.modality === 'PT'
-        );
-        
-        if (fusionSeries.length > 0) {
-          // Prefer PET over MR, then specific MR sequences
-          let preferredSeries;
-          const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
-          const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
-          
-          if (petSeries) {
-            preferredSeries = petSeries;
-            console.log(`Auto-selecting PET series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
-          } else if (mrSeries.length > 0) {
-            // Prefer specific MR sequence
-            preferredSeries = mrSeries.find((s: any) => 
-              s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-            ) || mrSeries[0];
-            console.log(`Auto-selecting MR series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
+        // Parse registration if needed
+        fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, {
+          method: 'POST'
+        }).then(async response => {
+          if (response.ok) {
+            console.log('Registration parsed successfully for auto-fusion');
+            
+            // Wait a moment for database to update
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Auto-select secondary series for fusion
+            console.log('Setting secondary series for fusion:', secondarySeriesForFusion.id);
+            setSecondarySeriesId(secondarySeriesForFusion.id);
           }
-          
-          if (preferredSeries) {
-            setSecondarySeriesId(preferredSeries.id);
-            console.log('🚀 FUSION AUTO-ACTIVATED:', {
-              secondarySeriesId: preferredSeries.id,
-              modality: preferredSeries.modality,
-              description: preferredSeries.seriesDescription,
-              fusionOpacity
-            });
-          }
-        }
+        }).catch(error => {
+          console.error('Error parsing registration for auto-fusion:', error);
+        });
       }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
-
-  // Control fusion panel visibility based on secondary series selection
-  useEffect(() => {
-    if (secondarySeriesId) {
-      console.log('Secondary series selected, showing fusion panel');
-      setShowFusionPanel(true);
-    } else {
-      console.log('No secondary series, hiding fusion panel');
-      setShowFusionPanel(false);
-    }
-  }, [secondarySeriesId]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -697,7 +688,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
                   studyId={studyData.studies[0]?.id}
-                  studyIds={studyData.studies?.map((s: DICOMStudy) => s.id) || []}
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}
@@ -715,7 +705,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={series.filter(s => s.modality === 'MR' || s.modality === 'PT').length > 0}
+                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
@@ -885,6 +875,19 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }
             setShowBooleanOperations(false);
           }}
+        />
+      )}
+
+      {/* Fusion Control Panel */}
+      {showFusionPanel && secondarySeriesId && selectedSeries && studyData?.studies?.[0] && (
+        <FusionControlPanel
+          primarySeriesId={selectedSeries.id}
+          studyId={studyData.studies[0].id}
+          onSecondarySeriesSelect={setSecondarySeriesId}
+          opacity={fusionOpacity}
+          onOpacityChange={setFusionOpacity}
+          isVisible={true}
+          selectedSecondaryId={secondarySeriesId}
         />
       )}
 

@@ -23,20 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-// Keep old fusion utils for compatibility
-import { computeTransformedMRIPositions as computeTransformedMRIPositionsOld } from "@/lib/fusion-utils";
-// Import new geometrically correct fusion utilities
-import { 
-  computeTransformedSecondaryPositions,
-  buildPrimaryGeometry,
-  PrimaryGeometry,
-  TransformedSecondary
-} from "@/lib/fusion-utils-v2";
-import { 
-  renderFusionOverlayNew,
-  computeCTPlaneD
-} from "@/lib/fusion-overlay-renderer";
-import { getSliceScalarZ } from "@/lib/dicom-geometry-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -64,7 +51,6 @@ type PreviewContour = {
 interface WorkingViewerProps {
   seriesId: number;
   studyId?: number;
-  studyIds?: number[]; // Array of all available study IDs for registration search
   windowLevel?: { window: number; level: number };
   onWindowLevelChange?: (windowLevel: {
     window: number;
@@ -115,7 +101,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const {
     seriesId,
     studyId,
-    studyIds,
     windowLevel: externalWindowLevel,
     onWindowLevelChange,
     onZoomIn,
@@ -241,12 +226,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
   // Pre-computed MRI Z-range in CT space for performance
   const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
-  // Pre-computed transformed MRI positions for fast lookup (legacy)
+  // Pre-computed transformed MRI positions for fast lookup
   const transformedMRIPositions = useRef<Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>>([]); 
-  // Pre-computed transformed secondary positions (new geometry-correct)
-  const transformedSecondaryPositions = useRef<TransformedSecondary[]>([]);
-  // Primary (CT) geometry for fusion calculations
-  const primaryGeometry = useRef<PrimaryGeometry | null>(null);
   // CT transform for fusion coordinate system alignment
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
 
@@ -2309,91 +2290,127 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
-  // Load registration matrix when study changes or fusion is activated
+  // Load registration matrix for fusion - check multiple studies
   useEffect(() => {
-    const loadRegistrationMatrix = async () => {
-      // If fusion is not active, clear registration matrix
-      if (!secondarySeriesId) {
-        setRegistrationMatrix(null);
-        registrationMatrixRef.current = null;
-        return;
-      }
-
-      // Try to load registration from all available studies
-      const allStudyIds = studyIds || [studyId].filter(Boolean);
-      console.log('🔍 Searching for registration matrix in studies:', allStudyIds);
+    const loadRegistration = async () => {
+      if (!studyId) return;
       
-      let foundMatrix = null;
-      for (const sid of allStudyIds) {
-        try {
-          // First try to get existing registration
-          const response = await fetch(`/api/registrations/${sid}`);
-          const data = await response.json();
+      console.log(`🔍 Looking for registration matrix starting with study ${studyId}`);
+      console.log('🔍 FUSION DEBUG: Starting registration search');
+      console.log('🔍 FUSION DEBUG: Current study ID:', studyId);
+      
+      // Try the current study first
+      let registrationData = null;
+      
+      try {
+        console.log(`🔍 FUSION DEBUG: Fetching /api/registrations/${studyId}`);
+        const res = await fetch(`/api/registrations/${studyId}`);
+        const data = await res.json();
+        console.log(`🔍 FUSION DEBUG: Registration response from study ${studyId}:`, data);
+        
+        // Handle both direct registration data and wrapped format
+        if (data && data.transformationMatrix) {
+          console.log(`✅ Found registration in current study ${studyId} (direct format)`);
+          registrationData = data;
+        } else if (data && data.registration && data.registration.transformationMatrix) {
+          console.log(`✅ Found registration in current study ${studyId} (wrapped format)`);
+          registrationData = data.registration;
+        } else {
+          console.log(`❌ No registration in study ${studyId}, checking related studies...`);
+          console.log('🔍 FUSION DEBUG: No registration in current study, starting cross-study search');
           
-          if (data && data.transformationMatrix) {
-            console.log(`✅ Found existing registration matrix in study ${sid}:`, data);
-            
-            // Parse the transformation matrix if it's a string
-            let matrix = data.transformationMatrix;
-            if (typeof matrix === 'string') {
-              try {
-                matrix = JSON.parse(matrix);
-                console.log('Parsed registration matrix:', matrix);
-              } catch (e) {
-                console.error('Failed to parse registration matrix:', e);
-                continue;
+          // If no registration in current study, check all studies for this patient
+          // This handles the case where MRI is in study 18 but registration is in study 17
+          // First get the patient ID for this study
+          console.log(`🔍 FUSION DEBUG: Fetching study info from /api/studies/${studyId}`);
+          const studyRes = await fetch(`/api/studies/${studyId}`);
+          const studyData = await studyRes.json();
+          console.log('🔍 FUSION DEBUG: Study data:', studyData);
+          const patientId = studyData?.patientId;
+          
+          if (!patientId) {
+            console.log('❌ FUSION DEBUG: Could not determine patient ID from study data');
+            return;
+          }
+          
+          console.log(`🔍 FUSION DEBUG: Patient ID is ${patientId}, fetching patient data...`);
+          // Get all studies for this patient
+          const patientsRes = await fetch(`/api/patients/${patientId}`);
+          const patientData = await patientsRes.json();
+          console.log('🔍 FUSION DEBUG: Patient data response:', patientData);
+          const studiesData = patientData?.studies || [];
+          
+          console.log(`🔍 FUSION DEBUG: Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map(s => s.id));
+          
+          for (const study of studiesData || []) {
+            if (study.id !== studyId) {
+              console.log(`🔍 FUSION DEBUG: Checking study ${study.id} for registration...`);
+              const otherRes = await fetch(`/api/registrations/${study.id}`);
+              const otherData = await otherRes.json();
+              console.log(`🔍 FUSION DEBUG: Registration response from study ${study.id}:`, otherData);
+              
+              // Handle both direct registration data and wrapped format
+              if (otherData && otherData.transformationMatrix) {
+                console.log(`✅ Found registration in related study ${study.id} (direct format)`);
+                registrationData = otherData;
+                break;
+              } else if (otherData && otherData.registration && otherData.registration.transformationMatrix) {
+                console.log(`✅ Found registration in related study ${study.id} (wrapped format)`);
+                registrationData = otherData.registration;
+                break;
               }
-            }
-            
-            if (matrix && Array.isArray(matrix) && matrix.length === 16) {
-              foundMatrix = matrix;
-              console.log(`🎯 Using existing registration matrix from study ${sid}`);
-              break;
-            }
-          } else {
-            // If no existing registration, try to parse from DICOM REG files
-            console.log(`🔄 No existing registration for study ${sid}, attempting to parse from DICOM REG files...`);
-            try {
-              const parseResponse = await fetch(`/api/registrations/${sid}/parse`, { method: 'POST' });
-              if (parseResponse.ok) {
-                const parseData = await parseResponse.json();
-                if (parseData.success && parseData.registration && parseData.registration.transformationMatrix) {
-                  foundMatrix = parseData.registration.transformationMatrix;
-                  console.log(`🎯 Successfully parsed registration matrix from study ${sid}:`, foundMatrix);
-                  break;
-                }
-              }
-            } catch (parseError) {
-              console.warn(`Failed to parse registration from study ${sid}:`, parseError);
             }
           }
-        } catch (error) {
-          console.warn(`Failed to load registration from study ${sid}:`, error);
         }
-      }
-      
-      if (foundMatrix) {
-        setRegistrationMatrix(foundMatrix);
-        registrationMatrixRef.current = foundMatrix;
-      } else {
-        console.warn('❌ No valid registration matrix found in any study');
+        
+        if (registrationData && registrationData.transformationMatrix) {
+          console.log(`📊 Registration data:`, registrationData);
+          
+          // Parse the transformation matrix if it's a string
+          let matrix = registrationData.transformationMatrix;
+          if (typeof matrix === 'string') {
+            try {
+              const parsed = JSON.parse(matrix);
+              if (Array.isArray(parsed) && parsed.length === 4) {
+                matrix = parsed.flat();
+              } else if (parsed['0'] && parsed['1'] && parsed['2'] && parsed['3']) {
+                matrix = [...parsed['0'], ...parsed['1'], ...parsed['2'], ...parsed['3']];
+              }
+              console.log('✅ Parsed registration matrix:', matrix);
+            } catch (e) {
+              console.error('Failed to parse registration matrix:', e);
+              matrix = null;
+            }
+          }
+          setRegistrationMatrix(matrix);
+          registrationMatrixRef.current = matrix;
+        } else {
+          console.log(`❌ No registration found in any study`);
+          setRegistrationMatrix(null);
+          registrationMatrixRef.current = null;
+        }
+      } catch (error) {
+        console.error('❌ Error loading registration:', error);
         setRegistrationMatrix(null);
         registrationMatrixRef.current = null;
       }
     };
-
-    loadRegistrationMatrix();
-  }, [secondarySeriesId]);
+    
+    loadRegistration();
+  }, [studyId]);
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
-    console.log('🔥 Registration matrix useEffect:', {
+    console.log('🔥 FUSION DEBUG: Registration matrix useEffect triggered');
+    console.log('🔥 FUSION DEBUG: Registration matrix:', registrationMatrix);
+    console.log('🔥 FUSION DEBUG: State check:', {
       hasMatrix: !!registrationMatrix,
       matrixLength: registrationMatrix?.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
       imagesLength: images.length,
-      secondaryImagesLength: secondaryImages.length
+      secondaryImagesLength: secondaryImages.length,
+      fusionOpacity
     });
     
     if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
@@ -2401,29 +2418,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        // Use legacy method for compatibility
-        const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
-        transformedMRIPositions.current = transformedLegacy;
-        
-        // Build primary geometry from first CT image
-        if (images.length > 0) {
-          const geometry = buildPrimaryGeometry(images[0]);
-          primaryGeometry.current = geometry;
-          
-          // Use new geometry-based transformation if geometry was built
-          if (geometry) {
-            const transformedNew = computeTransformedSecondaryPositions(
-              secondaryImages,
-              registrationMatrix,
-              geometry
-            );
-            transformedSecondaryPositions.current = transformedNew;
-          }
-        }
+        const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+        transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
-        if (transformedLegacy.length > 0) {
-          const zValues = transformedLegacy.map(item => item.zInCT);
+        if (transformed.length > 0) {
+          const zValues = transformed.map(item => item.zInCT);
           mriZRangeInCTSpace.current = {
             min: Math.min(...zValues),
             max: Math.max(...zValues)
@@ -2440,30 +2440,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0 && images.length > 0) {
+    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      
-      // Use legacy method for compatibility
-      const transformedLegacy = computeTransformedMRIPositionsOld(secondaryImages, registrationMatrix);
-      transformedMRIPositions.current = transformedLegacy;
-      
-      // Build primary geometry from first CT image and compute new transformations
-      const geometry = buildPrimaryGeometry(images[0]);
-      primaryGeometry.current = geometry;
-      
-      // Use new geometry-based transformation if geometry was built
-      if (geometry) {
-        const transformedNew = computeTransformedSecondaryPositions(
-          secondaryImages,
-          registrationMatrix,
-          geometry
-        );
-        transformedSecondaryPositions.current = transformedNew;
-      }
+      const transformed = computeTransformedMRIPositions(secondaryImages, registrationMatrix);
+      transformedMRIPositions.current = transformed;
       
       // Calculate and store Z-range
-      if (transformedLegacy.length > 0) {
-        const zValues = transformedLegacy.map(item => item.zInCT);
+      if (transformed.length > 0) {
+        const zValues = transformed.map(item => item.zInCT);
         mriZRangeInCTSpace.current = {
           min: Math.min(...zValues),
           max: Math.max(...zValues)
@@ -2474,15 +2458,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Clear cache to force recomputation with new data
       mriSliceMappingCache.current.clear();
     }
-  }, [registrationMatrix, secondaryImages, images]);
+  }, [registrationMatrix, secondaryImages]);
   
-
+  // Re-render current image when secondary images are loaded
+  useEffect(() => {
+    if (secondaryImages.length > 0 && images.length > 0) {
+      console.log('Secondary images loaded, triggering re-render for fusion');
+      displayCurrentImage();
+    }
+  }, [secondaryImages]);
 
   // Load secondary series images for fusion
   useEffect(() => {
+    console.log('🎯 secondarySeriesId changed to:', secondarySeriesId, 'Type:', typeof secondarySeriesId);
+    
     const loadSecondaryImages = async () => {
-      // Check if secondarySeriesId is valid (not null, not 'none', and a valid number)
-      if (!secondarySeriesId || isNaN(Number(secondarySeriesId))) {
+      // Check if secondarySeriesId is valid (not null)
+      if (!secondarySeriesId) {
+        console.log('❌ No secondary series ID, clearing secondary images');
         setSecondaryImages([]);
         secondaryImageCacheRef.current = new Map();
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
@@ -2490,6 +2483,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
 
+      console.log('✅ Loading secondary series images for series:', secondarySeriesId);
       try {
         // First fetch series info to get modality
         const seriesResponse = await fetch(`/api/series/${secondarySeriesId}`);
@@ -2580,6 +2574,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Store cache reference to avoid closure issues
         (window as any).secondaryImageCacheRef = newCache;
         
+        // Trigger re-render of current image to show fusion
+        // Note: The current image will be re-rendered automatically when secondary images state changes
+        console.log('Secondary images loaded, fusion should now be available');
+        
         // Pre-compute MRI positions in CT space if registration matrix is available
         if (registrationMatrix && registrationMatrix.length === 16) {
           // Clear cache to force fresh computation with debug logs
@@ -2589,7 +2587,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
           
           // Compute transformed MRI positions and store in ref
-          const transformed = computeTransformedMRIPositionsOld(sortedImages, registrationMatrix);
+          const transformed = computeTransformedMRIPositions(sortedImages, registrationMatrix);
           transformedMRIPositions.current = transformed;
           console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
           
@@ -2610,14 +2608,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             scheduleRender();
           }, 100);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Error loading secondary images:", err);
-        console.error("Error details:", {
-          message: err?.message,
-          stack: err?.stack,
-          secondarySeriesId,
-          registrationMatrix: registrationMatrix?.length
-        });
       }
     };
 
@@ -3574,17 +3566,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
+      console.log('Fusion check:', {
+        secondarySeriesId,
+        secondaryImagesLength: secondaryImages.length,
+        condition: !!(secondarySeriesId && secondaryImages.length > 0)
+      });
+      
       if (secondarySeriesId && secondaryImages.length > 0) {
-        console.log(`🔍 Checking fusion conditions for CT slice ${currentIndex}:`, {
-          hasSecondarySeriesId: !!secondarySeriesId,
-          secondaryImagesCount: secondaryImages.length,
-          fusionOpacity,
-          hasRegistrationMatrix: !!registrationMatrix,
-          registrationMatrixLength: registrationMatrix?.length,
-          hasTransformedPositions: !!transformedMRIPositions.current?.length,
-          transformedPositionsCount: transformedMRIPositions.current?.length || 0
-        });
-        
+        console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
@@ -3597,14 +3586,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             fusionOpacity
           });
           // Continue without fusion rather than failing entire image display
-        }
-      } else {
-        if (currentIndex % 10 === 0) { // Log every 10th slice to avoid spam
-          console.log(`❌ Fusion not rendered on slice ${currentIndex}:`, {
-            secondarySeriesId,
-            secondaryImagesLength: secondaryImages.length,
-            reason: !secondarySeriesId ? 'No secondary series selected' : 'No secondary images loaded'
-          });
         }
       }
 
@@ -3827,31 +3808,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    // Show MRI coverage range
-    if (transformedMRIPositions.current && transformedMRIPositions.current.length > 0) {
-      const mriZPositions = transformedMRIPositions.current.map(pos => pos.transformedZ);
-      const minZ = Math.min(...mriZPositions);
-      const maxZ = Math.max(...mriZPositions);
-      console.log(`📍 MRI coverage: ${minZ.toFixed(1)}mm to ${maxZ.toFixed(1)}mm (${transformedMRIPositions.current.length} slices)`);
-    }
-    
-    console.log('🎯 renderFusionOverlayNew called:', {
-      currentCTPosition: primaryImage?.imagePosition,
+    console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
+    console.log('🎯 FUSION RENDER DEBUG: Full state:', {
       secondaryImagesLength: secondaryImages.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
       fusionOpacity,
       hasRegistrationMatrix: !!registrationMatrix,
+      registrationMatrixLength: registrationMatrix?.length,
       hasTransformedPositions: !!transformedMRIPositions.current?.length,
-      transformedCount: transformedMRIPositions.current?.length || 0
+      transformedPositionsLength: transformedMRIPositions.current?.length || 0
     });
     
-    if (!secondaryImages.length || !secondarySeriesId || typeof secondarySeriesId !== 'number') {
-      console.log("❌ Fusion not rendered - missing requirements:", {
-        secondaryImages: secondaryImages.length, 
-        secondarySeriesId, 
-        type: typeof secondarySeriesId
-      });
+    if (!secondaryImages.length || !secondarySeriesId) {
+      console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
       return;
     }
     
@@ -3905,46 +3875,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
-    // Use new geometrically correct fusion renderer if we have the primary geometry
-    if (primaryGeometry.current && transformedSecondaryPositions.current.length > 0) {
-      // Compute CT plane distance for current slice
-      const ctPlaneD = computeCTPlaneD(primaryImage, primaryGeometry.current);
-      
-      console.log('✅ USING NEW FUSION RENDERER:', {
-        ctPlaneD,
-        transformedSecondaryCount: transformedSecondaryPositions.current.length,
-        hasGeometry: !!primaryGeometry.current
-      });
-      
-      await renderFusionOverlayNew({
-        ctx,
-        primaryImage,
-        primaryGeometry: primaryGeometry.current,
-        transformedSecondary: transformedSecondaryPositions.current,
-        secondaryCache: actualCache,
-        ctPlaneDistance: ctPlaneD || ctSliceZ, // Fallback to ctSliceZ if computation fails
-        fusionOpacity,
-        registrationMatrix
-      });
-    } else {
-      // Fallback to legacy renderer if new geometry isn't available
-      console.log('⚠️ Falling back to legacy fusion renderer');
-      const { renderFusionOverlay: renderFusionOverlayLegacy } = await import('@/lib/fusion-utils');
-      await renderFusionOverlayLegacy(
-        ctx,
-        primaryImage,
-        transformedMRIPositions.current,
-        actualCache,
-        ctSliceZ,
-        fusionOpacity,
-        panX,
-        panY,
-        canvas.width,
-        canvas.height,
-        registrationMatrix,
-        ctTransform.current
-      );
-    }
+    // Call the new fusion utility function with registration matrix and shared CT coordinate system
+    // DO NOT apply transform here - fusion-utils handles its own transforms
+    await renderFusionOverlay(
+      ctx,
+      primaryImage,
+      transformedMRIPositions.current,
+      actualCache,
+      ctSliceZ,
+      fusionOpacity,
+      panX,
+      panY,
+      canvas.width,
+      canvas.height,
+      registrationMatrix,
+      ctTransform.current
+    );
     
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
@@ -5226,7 +5172,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* Removed overlaid text - now in titlebar */}
           
-          {/* Fusion Control Panel - Visible when registration is available and fusion series exist */}
+          {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
           {studyId && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
               primarySeriesId={seriesId}
