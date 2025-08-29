@@ -2821,14 +2821,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }),
       );
 
-      // Sort using robust DICOM slice ordering: project IPP onto normal; if missing, fall back to InstanceNumber
+      // Sort using robust DICOM slice ordering: use getSliceZ which handles multiple fallbacks
       const sortedImages = imagesWithMetadata.slice().sort((a: any, b: any) => {
-        const pa = getSlicePositionUsingIOP(a.imageOrientation || a.imageMetadata?.imageOrientation, a.imagePosition || a.imageMetadata?.imagePosition);
-        const pb = getSlicePositionUsingIOP(b.imageOrientation || b.imageMetadata?.imageOrientation, b.imagePosition || b.imageMetadata?.imagePosition);
-        if (pa != null && pb != null) return pa - pb;
+        // Try to get Z position from getSliceZ which handles all the different sources
         const za = getSliceZ(a);
         const zb = getSliceZ(b);
         if (Number.isFinite(za) && Number.isFinite(zb)) return za - zb;
+        // Fallback to instance number if Z positions are not available
         return (a.parsedInstanceNumber ?? a.instanceNumber ?? 0) - (b.parsedInstanceNumber ?? b.instanceNumber ?? 0);
       });
 
@@ -4081,32 +4080,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-    // Get CT slice Z position
-    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
+    // Get CT slice Z position using getSliceZ which handles all fallbacks
+    let ctSliceZ: number = getSliceZ(primaryImage);
     
-    // Try to get Z position from various sources in priority order
-    // Priority 1: Orientation-aware projection using IOP/IPPs
-    const projected = getSlicePositionUsingIOP(
-      primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation,
-      primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition
-    );
-    if (projected != null && Number.isFinite(projected)) {
-      ctSliceZ = projected;
-    } else if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
-      ctSliceZ = primaryImage.parsedSliceLocation;
-    } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
-      ctSliceZ = primaryImage.parsedZPosition;
-    } else if (primaryImage.sliceLocation) {
-      const parsed = parseFloat(primaryImage.sliceLocation);
-      if (!isNaN(parsed)) ctSliceZ = parsed;
-    } else if (primaryImage.imagePosition) {
-      const imagePos = typeof primaryImage.imagePosition === 'string'
-        ? primaryImage.imagePosition.split("\\")
-        : primaryImage.imagePosition;
-      if (imagePos && imagePos.length >= 3) {
-        const parsed = parseFloat(imagePos[2]);
-        if (!isNaN(parsed)) ctSliceZ = parsed;
-      }
+    // If getSliceZ returns NaN, use a fallback based on index
+    if (!Number.isFinite(ctSliceZ)) {
+      ctSliceZ = (currentIndex + 1) * 3; // Default fallback based on index
+      console.warn(`Using fallback Z position for slice ${currentIndex}: ${ctSliceZ}`);
     }
     
     const actualCache = secondaryImageCacheRef.current;
