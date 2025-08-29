@@ -51,7 +51,16 @@ export function computeTransformedMRIPositions(secondaryImages: any[], registrat
   // Sort ascending by zInCT
   transformed.sort((a, b) => a.zInCT - b.zInCT);
   
-  // Reduced logging in production
+  // Debug: Log sample transformed coordinates
+  if (transformed.length > 0) {
+    const first = transformed[0];
+    const middle = transformed[Math.floor(transformed.length / 2)];
+    const last = transformed[transformed.length - 1];
+    console.log(`🔍 Sample MRI→CT coordinate transformations:`);
+    console.log(`  First: (${first.xInCT.toFixed(1)}, ${first.yInCT.toFixed(1)}, ${first.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Middle: (${middle.xInCT.toFixed(1)}, ${middle.yInCT.toFixed(1)}, ${middle.zInCT.toFixed(1)})mm in CT space`);
+    console.log(`  Last: (${last.xInCT.toFixed(1)}, ${last.yInCT.toFixed(1)}, ${last.zInCT.toFixed(1)})mm in CT space`);
+  }
   
   return transformed;
 }
@@ -112,17 +121,24 @@ export function interpolateMRI(
   cache: Map<string, {data: Float32Array, width: number, height: number}>
 ): {data: Float32Array, width: number, height: number} | null {
   const idx = findNearestMRIIndex(ctZ, transformed);
-  if (idx === null) return null;
+  if (idx === null) {
+    console.log(`No MRI index found for CT Z=${ctZ}mm`);
+    return null;
+  }
 
   const best = transformed[idx];
   const distance = Math.abs(best.zInCT - ctZ);
+  console.log(`Found MRI slice for CT ${ctZ}mm: MRI Z=${best.zInCT.toFixed(1)}mm (distance: ${distance.toFixed(1)}mm)`);
   
   const baseData = cache.get(best.image.sopInstanceUID);
   if (!baseData) {
     console.error(`CRITICAL: MRI image data not found in cache: ${best.image.sopInstanceUID}`);
-    // minimal logging
+    console.log(`Cache keys available:`, Array.from(cache.keys()).slice(0, 5));
+    console.log(`Cache size:`, cache.size);
     return null;
   }
+  
+  console.log(`✓ Found MRI data in cache: ${baseData.width}x${baseData.height}, ${baseData.data.length} pixels`);
 
   // Determine neighbor spacing
   const prev = transformed[idx - 1];
@@ -235,6 +251,7 @@ export async function renderFusionOverlay(
   const w = mriData.width;
   const h = mriData.height;
   
+  console.log(`MRI dimensions: ${w}x${h}, Canvas: ${canvasWidth}x${canvasHeight}`);
   
   // Helper function to normalize spacing arrays
   function normalizeSpacing(sp: string|string[]|number[]) {
@@ -275,6 +292,7 @@ export async function renderFusionOverlay(
     return; // Do not render fusion without valid pixel spacing
   }
   
+  console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
   
   // Calculate scale factors - MRI should appear at same physical size as CT
   // If CT spacing is 0.97mm and MRI spacing is 1.95mm, then 1 MRI pixel = 2 CT pixels
@@ -286,6 +304,7 @@ export async function renderFusionOverlay(
   drawW = w * scaleX * ctScale;  // Apply physical scaling AND CT zoom
   drawH = h * scaleY * ctScale;
   
+  console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final MRI size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
   // Helper function to normalize arrays
   const toNumberArray = (sp: string|string[]|number[]) => {
@@ -328,8 +347,16 @@ export async function renderFusionOverlay(
     drawX = ctTransform.offsetX + (pixelOffsetX * ctTransform.scale);
     drawY = ctTransform.offsetY + (pixelOffsetY * ctTransform.scale);
     
+    console.log(`✅ SIMPLIFIED REGISTRATION:`);
+    console.log(`  CT origin: [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
+    console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
+    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
+    console.log(`  World offset: [${worldOffsetX.toFixed(1)}, ${worldOffsetY.toFixed(1)}]mm`);
+    console.log(`  Pixel offset: [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
+    console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
+    console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
   } else if (!ctTransform) {
-    // silent fallback
+    console.warn('⚠️ No CT transform available for fusion alignment');
     // Fallback: center the MRI
     drawX = (canvasWidth - drawW) / 2;
     drawY = (canvasHeight - drawH) / 2;
@@ -344,12 +371,16 @@ export async function renderFusionOverlay(
   // Draw the MRI using the already calculated position and size
   if (drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined) {
     ctx.drawImage(temp, drawX, drawY, drawW, drawH);
+    console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
   } else {
     // Fallback to centered positioning if calculations failed
     const centerX = (canvasWidth - w) / 2;
     const centerY = (canvasHeight - h) / 2;
     ctx.drawImage(temp, centerX, centerY, w, h);
+    console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`);
   }
+  
+  console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
   
   // NO RESTORE - caller manages the transform state
 }

@@ -30,40 +30,66 @@ export default function Viewer() {
   
   useEffect(() => {
     const loadStudyData = async () => {
+      console.log('=== Enhanced Viewer Debug ===');
+      console.log('Studies loaded:', studies);
+      console.log('Loading:', isLoading);
+      console.log('Error:', error);
+      
       if (studies && studies.length > 0) {
         const urlParams = new URLSearchParams(window.location.search);
         const studyId = urlParams.get('studyId');
         const patientId = urlParams.get('patientId');
-
+        
+        console.log('URL studyId:', studyId);
+        console.log('URL patientId:', patientId);
+        console.log('All patient IDs in studies:', studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })));
+        
         let study;
         let patient = null;
-
+        
         if (studyId) {
           study = studies.find((s: any) => s.id === parseInt(studyId));
-          if (study) setStudyData({ studies: [study] });
+          console.log('Found study by ID:', study);
         } else if (patientId) {
-          // Try to get patient for metadata
-          try {
-            const allPatients = await fetch('/api/patients').then(res => res.json());
-            patient = allPatients.find((p: any) => p.patientID === patientId) || null;
-          } catch {}
-
-          // Collect ALL studies for this patient by either patientID (DICOM) or FK match
-          const patientStudies = studies.filter((s: any) =>
-            s.patientID === patientId || (patient && s.patientId === patient.id)
-          );
-
-          if (patientStudies.length > 0) {
-            setStudyData({ studies: patientStudies, patient });
-          } else if (studies.length > 0) {
-            setStudyData({ studies: [studies[0]] });
+          // Find patient and all their studies
+          
+          // First try exact match on patientID
+          study = studies.find((s: any) => s.patientID === patientId);
+          console.log('Found study by exact patientID match:', study);
+          
+          // If not found, try to find by patient name containing the ID (for fusion dataset)
+          if (!study) {
+            const patientQuery = await fetch('/api/patients').then(res => res.json());
+            patient = patientQuery.find((p: any) => p.patientID === patientId);
+            console.log('Found patient with patientID:', patientId, 'patient:', patient);
+            
+            if (patient) {
+              study = studies.find((s: any) => s.patientId === patient.id);
+              console.log('Looking for study with patientId (FK):', patient.id);
+              console.log('Found study by patient database ID:', study);
+            }
           }
-        } else if (studies.length > 0) {
-          setStudyData({ studies: [studies[0]] });
+        } else {
+          study = studies[0];
+          console.log('Using first study:', study);
+        }
+        
+        if (study) {
+          // If we found a study by patient, get ALL studies for that patient
+          if (patientId && patient) {
+            const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
+            console.log('Found all studies for patient:', patientStudies);
+            setStudyData({ studies: patientStudies, patient });
+          } else {
+            console.log('Setting studyData with single study:', study);
+            setStudyData({ studies: [study] });
+          }
+        } else {
+          console.log('NO STUDY FOUND!');
         }
       }
     };
-
+    
     loadStudyData();
   }, [studies, isLoading, error]);
 

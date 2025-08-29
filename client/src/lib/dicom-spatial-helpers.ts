@@ -69,29 +69,6 @@ export function getSpacing(imgMeta: any): { row: number; col: number; z: number 
 }
 
 /**
- * Compare two slices in an orientation-aware manner for sorting
- * This ensures images are properly ordered for display
- */
-export function compareSlicesOrientationAware(a: any, b: any): number {
-  const aZ = getSliceZ(a);
-  const bZ = getSliceZ(b);
-  
-  // If both have valid Z values, sort by Z
-  if (!Number.isNaN(aZ) && !Number.isNaN(bZ)) {
-    return aZ - bZ;
-  }
-  
-  // If only one has valid Z, prioritize it
-  if (!Number.isNaN(aZ)) return -1;
-  if (!Number.isNaN(bZ)) return 1;
-  
-  // Fallback to instance number if both Z values are invalid
-  const aInst = parseInt(a?.instanceNumber || '0');
-  const bInst = parseInt(b?.instanceNumber || '0');
-  return aInst - bInst;
-}
-
-/**
  * Get rescale parameters for proper HU conversion
  */
 export function getRescaleParams(metadata: any): { slope: number; intercept: number } {

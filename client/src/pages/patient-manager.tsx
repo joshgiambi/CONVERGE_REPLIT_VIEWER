@@ -206,7 +206,9 @@ export default function PatientManager() {
           queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
           queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
         }
-      } catch (error) {}
+      } catch (error) {
+        console.log("Demo data population skipped:", error);
+      }
     };
     populateDemo();
   }, [queryClient]);
@@ -220,7 +222,9 @@ export default function PatientManager() {
           const data = await response.json();
           setHasPendingData(data.files && data.files.length > 0);
         }
-      } catch (error) {}
+      } catch (error) {
+        console.error('Error checking unprocessed files:', error);
+      }
     };
 
     // Check immediately and then every 5 seconds
@@ -600,7 +604,7 @@ export default function PatientManager() {
       {/* Header matching viewer interface */}
       <header className="fixed top-4 left-4 right-4 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-2xl px-6 py-3 z-50 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between w-full">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
               <div>
                 <h1 className="text-xl font-black tracking-widest" style={{ letterSpacing: '0.25em' }}>
                   <span style={{

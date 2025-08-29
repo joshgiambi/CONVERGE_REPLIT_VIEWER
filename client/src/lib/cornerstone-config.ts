@@ -27,8 +27,16 @@ export class CornerstoneConfig {
     if (this.initialized) return;
 
     try {
+      console.log('Starting Cornerstone initialization...');
+      
       // Load Cornerstone libraries dynamically
       await this.loadScripts();
+      
+      console.log('Scripts loaded, checking window objects...');
+      console.log('cornerstone:', !!window.cornerstone);
+      console.log('cornerstoneTools:', !!window.cornerstoneTools);
+      console.log('cornerstoneWADOImageLoader:', !!window.cornerstoneWADOImageLoader);
+      console.log('dicomParser:', !!window.dicomParser);
       
       const { cornerstone, cornerstoneTools, cornerstoneWADOImageLoader, dicomParser } = window;
 
@@ -42,20 +50,26 @@ export class CornerstoneConfig {
       }
 
       // Initialize Cornerstone
+      console.log('Initializing cornerstone...');
       try {
         cornerstone.init();
+        console.log('Cornerstone initialized');
       } catch (csError) {
-        // Cornerstone might already be initialized
+        console.error('Cornerstone init error:', csError);
         // Cornerstone might already be initialized
       }
-
+      
+      console.log('Initializing cornerstone tools...');
       try {
         cornerstoneTools.init();
+        console.log('Cornerstone tools initialized');
       } catch (ctError) {
+        console.error('Cornerstone tools init error:', ctError);
         // Tools might already be initialized
       }
 
       // Configure WADO Image Loader
+      console.log('Configuring WADO Image Loader...');
       cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
       cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
 
@@ -73,26 +87,31 @@ export class CornerstoneConfig {
         }
       };
 
+      console.log('Initializing web worker manager...');
       cornerstoneWADOImageLoader.webWorkerManager.initialize(config);
+      console.log('Web worker manager initialized');
 
       // Register image loaders
+      console.log('Configuring image loaders...');
       cornerstoneWADOImageLoader.configure({
         beforeSend: (xhr: XMLHttpRequest) => {
           xhr.setRequestHeader('Accept', 'application/dicom');
         },
         errorInterceptor: (error: any) => {
-          // no-op
+          console.warn('DICOM loading error:', error);
         }
       });
 
       // Register image loader for DICOM files
+      console.log('Registering image loaders...');
       cornerstone.registerImageLoader('wadouri', cornerstoneWADOImageLoader.wadouri.loadImage);
       cornerstone.registerImageLoader('dicomweb', cornerstoneWADOImageLoader.wadouri.loadImage);
 
       this.initialized = true;
+      console.log('Cornerstone initialized successfully');
     } catch (error) {
-      // Surface minimal error to console in case of fatal init failure
-      console.error('Failed to initialize Cornerstone');
+      console.error('Failed to initialize Cornerstone:', error);
+      console.error('Error details:', error);
       throw error;
     }
   }

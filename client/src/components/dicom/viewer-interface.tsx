@@ -78,13 +78,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   // Clear RT structures when patient changes
   useEffect(() => {
+    console.log('Patient changed, clearing RT structures. Patient ID:', studyData?.patient?.id);
     setRTStructures(null);
     setStructureVisibility(new Map());
     setSelectedStructures(new Set());
     setSelectedForEdit(null);
     setSelectedStructureColors([]);
     setIsContourEditMode(false);
-    setLoadedRTSeriesId(null);
+    setLoadedRTSeriesId(null);  // Clear loaded RT series ID
   }, [studyData?.patient?.id]);
 
   // Automatically enter contour edit mode when a structure is selected for editing
@@ -122,99 +123,82 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
       
-      // Auto-select CT series as primary, prefer the CT referenced by registration
+      // Auto-select CT series as primary, fallback to first series
+      // IMPORTANT: Always load CT as primary for fusion dataset
       if (!selectedSeries) {
-        const pickPrimaryCT = async () => {
-          try {
-            // 1) Prefer CT referenced by RTSTRUCT that contains more than a placeholder BODY/EXTERNAL contour
-            const isPlaceholderStructure = (name: string) => {
-              const n = (name || '').toString().trim().toLowerCase();
-              return n === 'body' || n === 'external' || n === 'skin' || n === 'couch' || n === 'table';
-            };
-            for (const study of studyData.studies) {
-              const rtResp = await fetch(`/api/studies/${study.id}/rt-structures`);
-              if (!rtResp.ok) continue;
-              const rtList = await rtResp.json();
-              if (Array.isArray(rtList) && rtList.length > 0) {
-                // Evaluate each RT struct for meaningful content
-                for (const rt of rtList) {
-                  const sid = rt.id || rt.seriesId || rt.rtSeriesId;
-                  if (!sid) continue;
-                  try {
-                    const ctResp = await fetch(`/api/rt-structures/${sid}/contours`);
-                    if (!ctResp.ok) continue;
-                    const data = await ctResp.json();
-                    const structs: any[] = data?.structures || [];
-                    const meaningful = structs.some(s => s?.structureName && !isPlaceholderStructure(s.structureName));
-                    if (meaningful && (rt.referencedSeriesId || rt.referencedSeriesUID)) {
-                      const match = rt.referencedSeriesId
-                        ? seriesData.find((s: any) => s.id === rt.referencedSeriesId)
-                        : seriesData.find((s: any) => s.seriesInstanceUID === rt.referencedSeriesUID);
-                      if (match && match.modality === 'CT') { handleSeriesSelect(match); return; }
-                    }
-                  } catch {}
-                }
-              }
-            }
-
-            // 2) Else use CT referenced by registration, if any
-            for (const study of studyData.studies) {
-              const resp = await fetch(`/api/registrations/${study.id}`);
-              if (!resp.ok) continue;
-              const reg = await resp.json();
-              if (reg && reg.seriesInstanceUID) {
-                const primaryCT = seriesData.find((s: any) => s.modality === 'CT' && s.seriesInstanceUID === reg.seriesInstanceUID);
-                if (primaryCT) { handleSeriesSelect(primaryCT); return; }
-              }
-            }
-          } catch {}
-          // 3) Fallback: first CT, else first series
-          const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
-          if (ctSeries) handleSeriesSelect(ctSeries);
-          else if (seriesData.length > 0) handleSeriesSelect(seriesData[0]);
-        };
-        pickPrimaryCT();
+        const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
+        if (ctSeries) {
+          console.log('Auto-selecting CT series as primary:', ctSeries);
+          handleSeriesSelect(ctSeries);
+        } else if (seriesData.length > 0) {
+          console.log('No CT series found, selecting first series:', seriesData[0]);
+          handleSeriesSelect(seriesData[0]);
+        }
       }
       
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
       if (rtSeries) {
+        console.log(`Loading RT structures for study ${rtSeries.studyId}`);
         handleRTSeriesSelect(rtSeries);
       } else {
         // Clear RT structures if no RT series found
+        console.log(`No RT structures found in any study`);
         setRTStructures(null);
-        setLoadedRTSeriesId(null);
+        setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
-
-      // Ensure registration is parsed server-side when a REG series exists and no registration record is present
-      const ensureRegistration = async () => {
-        try {
-          const studyIds = Array.from(new Set(seriesData.map((s: any) => s.studyId)));
-          for (const sid of studyIds) {
-            const regSeries = seriesData.find((s: any) => s.studyId === sid && s.modality === 'REG');
-            if (!regSeries) continue;
-            const regResp = await fetch(`/api/registrations/${sid}`);
-            if (regResp.ok) {
-              const regData = await regResp.json();
-              if (!regData) {
-                await fetch(`/api/registrations/${sid}/parse`, { method: 'POST' }).catch(() => {});
-              }
-            }
+      
+      // Auto-activate fusion when registration files are detected
+      const regSeries = seriesData.find((s: any) => s.modality === 'REG');
+      if (regSeries && !secondarySeriesId) {
+        console.log('REG file detected, auto-activating fusion');
+        
+        // Find available fusion series (MR or PT)
+        const fusionSeries = seriesData.filter((s: any) => 
+          s.modality === 'MR' || s.modality === 'PT'
+        );
+        
+        if (fusionSeries.length > 0) {
+          // Prefer PET over MR, then specific MR sequences
+          let preferredSeries;
+          const petSeries = fusionSeries.find((s: any) => s.modality === 'PT');
+          const mrSeries = fusionSeries.filter((s: any) => s.modality === 'MR');
+          
+          if (petSeries) {
+            preferredSeries = petSeries;
+            console.log(`Auto-selecting PET series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
+          } else if (mrSeries.length > 0) {
+            // Prefer specific MR sequence
+            preferredSeries = mrSeries.find((s: any) => 
+              s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
+            ) || mrSeries[0];
+            console.log(`Auto-selecting MR series for fusion: ${preferredSeries.id} - ${preferredSeries.seriesDescription}`);
           }
-        } catch {}
-      };
-      ensureRegistration();
+          
+          if (preferredSeries) {
+            setSecondarySeriesId(preferredSeries.id);
+            console.log('🚀 FUSION AUTO-ACTIVATED:', {
+              secondarySeriesId: preferredSeries.id,
+              modality: preferredSeries.modality,
+              description: preferredSeries.seriesDescription,
+              fusionOpacity
+            });
+          }
+        }
+      }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
 
-  // Preload all series images in background to ensure all DICOM files are ready when opening a patient
+  // Control fusion panel visibility based on secondary series selection
   useEffect(() => {
-    if (seriesData && Array.isArray(seriesData)) {
-      seriesData.forEach((s: any) => {
-        fetch(`/api/series/${s.id}`).catch(() => {});
-      });
+    if (secondarySeriesId) {
+      console.log('Secondary series selected, showing fusion panel');
+      setShowFusionPanel(true);
+    } else {
+      console.log('No secondary series, hiding fusion panel');
+      setShowFusionPanel(false);
     }
-  }, [seriesData]);
+  }, [secondarySeriesId]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -254,7 +238,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomIn();
       }
     } catch (error) {
-      // silent
+      console.warn('Error zooming in:', error);
     }
   };
 
@@ -264,7 +248,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomOut();
       }
     } catch (error) {
-      // silent
+      console.warn('Error zooming out:', error);
     }
   };
 
@@ -274,7 +258,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.resetZoom();
       }
     } catch (error) {
-      // silent
+      console.warn('Error resetting zoom:', error);
     }
   };
 
@@ -288,7 +272,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           cornerstoneTools.setToolActiveForElement(element, toolName, { mouseButtonMask: 1 });
         }
       });
-    } catch {}
+    } catch (error) {
+      console.warn('Error setting active tool:', error);
+    }
   };
 
   const handlePanTool = () => {
@@ -329,7 +315,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }
         }
       });
-    } catch {}
+    } catch (error) {
+      console.warn('Error rotating image:', error);
+    }
   };
 
   const handleFlip = () => {
@@ -350,10 +338,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }
         }
       });
-    } catch {}
+    } catch (error) {
+      console.warn('Error flipping image:', error);
+    }
   };
 
   const handleRTStructureLoad = (rtStructData: any) => {
+    console.log('Loading RT structures:', rtStructData);
     setRTStructures(rtStructData);
     // Initialize visibility for all structures
     const visibilityMap = new Map();
@@ -365,6 +356,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   const handleRTSeriesSelect = async (rtSeries: any) => {
     try {
+      console.log('Auto-loading RT structures for series:', rtSeries.id);
       
       // Track which RT series is loaded
       setLoadedRTSeriesId(rtSeries.id);
@@ -373,6 +365,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
       if (response.ok) {
         const rtStructData = await response.json();
+        console.log('RT structures loaded successfully:', rtStructData);
         handleRTStructureLoad(rtStructData);
       } else {
         console.error('Failed to load RT structures:', response.status);
@@ -383,6 +376,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureSelection = (structureId: number, selected: boolean) => {
+    console.log('handleStructureSelection called:', { structureId, selected, currentSelected: Array.from(selectedStructures) });
+    
     const newSelection = new Set(selectedStructures);
     if (selected) {
       newSelection.add(structureId);
@@ -390,6 +385,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       newSelection.delete(structureId);
     }
     setSelectedStructures(newSelection);
+    
+    console.log('Updated selectedStructures:', Array.from(newSelection));
     
     // Update selected structure colors for viewer border
     if (rtStructures?.structures) {
@@ -402,9 +399,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
+    console.log('handleStructureVisibilityChange called:', { 
+      structureId, 
+      visible,
+      allStructuresVisible 
+    });
+    
     setStructureVisibility(prev => {
       const next = new Map(prev);
       next.set(structureId, visible);
+      console.log('Updated structureVisibility map:', Array.from(next.entries()));
       return next;
     });
   };
@@ -517,10 +521,18 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   // Handle structure localization
   const handleStructureLocalization = useCallback((structureId: number) => {
-    if (!rtStructures?.structures || !workingViewerRef.current) return;
+    if (!rtStructures?.structures || !workingViewerRef.current) {
+      console.warn('🎯 Cannot localize: missing structures or viewer ref');
+      return;
+    }
 
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
-    if (!structure || !structure.contours || structure.contours.length === 0) return;
+    if (!structure || !structure.contours || structure.contours.length === 0) {
+      console.warn(`🎯 Cannot localize: structure ${structureId} not found or has no contours`);
+      return;
+    }
+
+    console.log(`🎯 Localizing to structure "${structure.structureName}"...`);
 
     // Calculate structure bounds and centroid
     let minZ = Infinity, maxZ = -Infinity;
@@ -685,6 +697,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
                   studyId={studyData.studies[0]?.id}
+                  studyIds={studyData.studies?.map((s: DICOMStudy) => s.id) || []}
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}
@@ -702,7 +715,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
+                  hasSecondarySeriesForFusion={series.filter(s => s.modality === 'MR' || s.modality === 'PT').length > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
