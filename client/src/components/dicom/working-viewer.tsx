@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
 import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
-import { compareSlicesOrientationAware, getSlicePositionUsingIOP } from "@/lib/dicom-spatial-helpers";
+import { compareSlicesOrientationAware } from "@/lib/dicom-spatial-helpers";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -2524,9 +2524,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (secondaryImages.length > 0) {
         const transformed = computeTransformedMRIPositions(
           secondaryImages,
-          registrationMatrix,
-          images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-          images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+          registrationMatrix
         );
         transformedMRIPositions.current = transformed;
         
@@ -2553,9 +2551,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
       const transformed = computeTransformedMRIPositions(
         secondaryImages,
-        registrationMatrix,
-        images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-        images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+        registrationMatrix
       );
       transformedMRIPositions.current = transformed;
       
@@ -2673,9 +2669,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           // Compute transformed MRI positions and store in ref
           const transformed = computeTransformedMRIPositions(
             sortedImages,
-            registrationMatrix,
-            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+            registrationMatrix
           );
           transformedMRIPositions.current = transformed;
           console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
