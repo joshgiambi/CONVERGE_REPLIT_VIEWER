@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay } from "@/lib/fusion-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4 } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -2418,12 +2418,78 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Pre-compute MRI transformations if we have secondary images loaded
       if (secondaryImages.length > 0) {
-        const transformed = computeTransformedMRIPositions(
+        // Helper: compute CT z-range in mm using CT orientation
+        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+        const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+        let ctZMin = -Infinity, ctZMax = Infinity;
+        if (iop.length >= 6 && origin.length >= 3) {
+          const r = [iop[0], iop[1], iop[2]];
+          const c = [iop[3], iop[4], iop[5]];
+          const n = [
+            r[1] * c[2] - r[2] * c[1],
+            r[2] * c[0] - r[0] * c[2],
+            r[0] * c[1] - r[1] * c[0]
+          ];
+          const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
+          const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+          const zVals: number[] = [];
+          for (const img of images) {
+            const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+            if (p.length >= 3) {
+              const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
+              zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
+            }
+          }
+          if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
+        }
+
+        const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
+
+        // Compute with provided matrix
+        let transformed = computeTransformedMRIPositions(
           secondaryImages,
           registrationMatrix,
-          images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-          images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+          imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+          imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+          secondaryImageCacheRef.current
         );
+
+        // If clearly no overlap in Z with CT, try inverted matrix
+        if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
+          const zMin = Math.min(...transformed.map(t => t.zInCT));
+          const zMax = Math.max(...transformed.map(t => t.zInCT));
+          console.log(`🔎 Z-range check (on reg load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
+          if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
+            console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
+            const inv = invertMatrix4x4(registrationMatrix);
+            if (inv) {
+              const transformedInv = computeTransformedMRIPositions(
+                secondaryImages,
+                inv,
+                imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+                imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+                secondaryImageCacheRef.current
+              );
+              if (transformedInv.length > 0) {
+                const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
+                const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
+                console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
+                if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
+                  console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
+                  transformed = transformedInv;
+                  setRegistrationMatrix(inv);
+                  registrationMatrixRef.current = inv;
+                } else {
+                  console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
+                }
+              }
+            }
+          }
+          else {
+            console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+          }
+        }
         transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
@@ -2447,12 +2513,75 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
       console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      const transformed = computeTransformedMRIPositions(
+      // Helper: compute CT z-range in mm using CT orientation
+      const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+      const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+      const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+      let ctZMin = -Infinity, ctZMax = Infinity;
+      if (iop.length >= 6 && origin.length >= 3) {
+        const r = [iop[0], iop[1], iop[2]];
+        const c = [iop[3], iop[4], iop[5]];
+        const n = [
+          r[1] * c[2] - r[2] * c[1],
+          r[2] * c[0] - r[0] * c[2],
+          r[0] * c[1] - r[1] * c[0]
+        ];
+        const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
+        const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+        const zVals: number[] = [];
+        for (const img of images) {
+          const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+          if (p.length >= 3) {
+            const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
+            zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
+          }
+        }
+        if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
+      }
+
+      const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
+
+      let transformed = computeTransformedMRIPositions(
         secondaryImages,
         registrationMatrix,
-        images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-        images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+        imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+        imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+        secondaryImageCacheRef.current
       );
+
+      if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
+        const zMin = Math.min(...transformed.map(t => t.zInCT));
+        const zMax = Math.max(...transformed.map(t => t.zInCT));
+        console.log(`🔎 Z-range check (precompute): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
+        if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
+          console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
+          const inv = invertMatrix4x4(registrationMatrix);
+          if (inv) {
+            const transformedInv = computeTransformedMRIPositions(
+              secondaryImages,
+              inv,
+              imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+              imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+              secondaryImageCacheRef.current
+            );
+            if (transformedInv.length > 0) {
+              const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
+              const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
+              console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
+              if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
+                console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
+                transformed = transformedInv;
+                setRegistrationMatrix(inv);
+                registrationMatrixRef.current = inv;
+              } else {
+                console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
+              }
+            }
+          }
+        } else {
+          console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+        }
+      }
       transformedMRIPositions.current = transformed;
       
       // Calculate and store Z-range
@@ -2595,14 +2724,77 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           mriZRangeInCTSpace.current = null;
           mriSliceMappingCache.current.clear();
           console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
-          
+
+          // Compute CT z-range
+          const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+          const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+          const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+          let ctZMin = -Infinity, ctZMax = Infinity;
+          if (iop.length >= 6 && origin.length >= 3) {
+            const r = [iop[0], iop[1], iop[2]];
+            const c = [iop[3], iop[4], iop[5]];
+            const n = [
+              r[1] * c[2] - r[2] * c[1],
+              r[2] * c[0] - r[0] * c[2],
+              r[0] * c[1] - r[1] * c[0]
+            ];
+            const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
+            const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+            const zVals: number[] = [];
+            for (const img of images) {
+              const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+              if (p.length >= 3) {
+                const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
+                zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
+              }
+            }
+            if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
+          }
+          const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
+
           // Compute transformed MRI positions and store in ref
-          const transformed = computeTransformedMRIPositions(
+          let transformed = computeTransformedMRIPositions(
             sortedImages,
             registrationMatrix,
-            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+            imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+            imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+            secondaryImageCacheRef.current
           );
+
+          if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
+            const zMin = Math.min(...transformed.map(t => t.zInCT));
+            const zMax = Math.max(...transformed.map(t => t.zInCT));
+            console.log(`🔎 Z-range check (on secondary load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
+            if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
+              console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
+              const inv = invertMatrix4x4(registrationMatrix);
+              if (inv) {
+                const transformedInv = computeTransformedMRIPositions(
+                  sortedImages,
+                  inv,
+                  imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+                  imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+                  secondaryImageCacheRef.current
+                );
+                if (transformedInv.length > 0) {
+                  const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
+                  const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
+                  console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
+                  if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
+                    console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
+                    transformed = transformedInv;
+                    setRegistrationMatrix(inv);
+                    registrationMatrixRef.current = inv;
+                  } else {
+                    console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
+                  }
+                }
+              }
+            } else {
+              console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+            }
+          }
+
           transformedMRIPositions.current = transformed;
           console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
           
@@ -3857,25 +4049,50 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-    // Get CT slice Z position
+    // Compute CT slice Z by projecting onto CT normal for consistent MRI matching
     let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
-    
-    // Try to get Z position from various sources in priority order
-    if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
-      ctSliceZ = primaryImage.parsedSliceLocation;
-    } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
-      ctSliceZ = primaryImage.parsedZPosition;
-    } else if (primaryImage.sliceLocation) {
-      const parsed = parseFloat(primaryImage.sliceLocation);
-      if (!isNaN(parsed)) ctSliceZ = parsed;
-    } else if (primaryImage.imagePosition) {
-      const imagePos = typeof primaryImage.imagePosition === 'string'
-        ? primaryImage.imagePosition.split("\\")
-        : primaryImage.imagePosition;
-      if (imagePos && imagePos.length >= 3) {
-        const parsed = parseFloat(imagePos[2]);
-        if (!isNaN(parsed)) ctSliceZ = parsed;
+    try {
+      const toNumArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+      const iopStr = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation;
+      const iop = toNumArr(iopStr);
+      const seriesOriginStr = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
+      const seriesOrigin = toNumArr(seriesOriginStr);
+      const thisPosStr = primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition;
+      const thisPos = toNumArr(thisPosStr);
+
+      if (iop.length >= 6 && seriesOrigin.length >= 3 && thisPos.length >= 3) {
+        const rx = iop[0], ry = iop[1], rz = iop[2];
+        const cx = iop[3], cy = iop[4], cz = iop[5];
+        const nx = ry * cz - rz * cy;
+        const ny = rz * cx - rx * cz;
+        const nz = rx * cy - ry * cx;
+        const nlen = Math.hypot(nx, ny, nz) || 1;
+        const n = [nx / nlen, ny / nlen, nz / nlen];
+        const dx = thisPos[0] - seriesOrigin[0];
+        const dy = thisPos[1] - seriesOrigin[1];
+        const dz = thisPos[2] - seriesOrigin[2];
+        ctSliceZ = dx * n[0] + dy * n[1] + dz * n[2];
+      } else {
+        // Fallback to legacy heuristics
+        if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
+          ctSliceZ = primaryImage.parsedSliceLocation;
+        } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
+          ctSliceZ = primaryImage.parsedZPosition;
+        } else if (primaryImage.sliceLocation) {
+          const parsed = parseFloat(primaryImage.sliceLocation);
+          if (!isNaN(parsed)) ctSliceZ = parsed;
+        } else if (primaryImage.imagePosition) {
+          const imagePos = typeof primaryImage.imagePosition === 'string'
+            ? primaryImage.imagePosition.split("\\")
+            : primaryImage.imagePosition;
+          if (imagePos && imagePos.length >= 3) {
+            const parsed = parseFloat(imagePos[2]);
+            if (!isNaN(parsed)) ctSliceZ = parsed;
+          }
+        }
       }
+    } catch (e) {
+      // Keep fallback value on error
     }
     
     const actualCache = secondaryImageCacheRef.current;

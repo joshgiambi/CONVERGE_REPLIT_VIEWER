@@ -26,7 +26,8 @@ export function computeTransformedMRIPositions(
   secondaryImages: any[],
   registrationMatrix: number[],
   ctImageOrientation?: string | number[] | null,
-  ctImagePosition?: string | number[] | null
+  ctImagePosition?: string | number[] | null,
+  secondaryCache?: Map<string, { data: Float32Array; width: number; height: number; metadata?: any }>
 ) {
   // Build 4x4 matrix
   const M = [
@@ -68,12 +69,26 @@ export function computeTransformedMRIPositions(
 
   const transformed = secondaryImages.map(img => {
     // Parse imagePosition into [x,y,z] with null safety
-    let pos;
-    if (Array.isArray(img.imagePosition)) {
-      pos = img.imagePosition.map(Number);
-    } else if (img.imagePosition && typeof img.imagePosition === 'string') {
-      pos = img.imagePosition.split('\\').map(Number);
-    } else {
+    let pos: number[] | null = null;
+    try {
+      if (Array.isArray(img.imagePosition)) {
+        pos = (img.imagePosition as number[]).map(Number);
+      } else if (img.imagePosition && typeof img.imagePosition === 'string') {
+        pos = String(img.imagePosition).split('\\').map(Number);
+      } else if (img.imageMetadata?.imagePosition) {
+        const v = img.imageMetadata.imagePosition;
+        pos = Array.isArray(v) ? v.map(Number) : String(v).split('\\').map(Number);
+      } else if (secondaryCache && img.sopInstanceUID) {
+        const cached = secondaryCache.get(img.sopInstanceUID);
+        const meta = cached?.metadata;
+        if (meta?.imagePosition) {
+          const v = meta.imagePosition;
+          pos = Array.isArray(v) ? v.map(Number) : String(v).split('\\').map(Number);
+        }
+      }
+    } catch {}
+
+    if (!pos || pos.length < 3 || !isFinite(pos[0]) || !isFinite(pos[1]) || !isFinite(pos[2])) {
       // Fallback for null/undefined imagePosition - use slice index as Z position
       console.warn('Missing imagePosition for image, using fallback position');
       pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
@@ -106,6 +121,56 @@ export function computeTransformedMRIPositions(
   }
   
   return transformed;
+}
+
+/**
+ * Invert a 4x4 matrix provided as a flat 16-element array (row-major).
+ * Returns null if the matrix is non-invertible.
+ */
+export function invertMatrix4x4(m: number[]): number[] | null {
+  if (!Array.isArray(m) || m.length !== 16) return null;
+  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+  const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+  const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+
+  const b00 = a00 * a11 - a01 * a10;
+  const b01 = a00 * a12 - a02 * a10;
+  const b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11;
+  const b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30;
+  const b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31;
+  const b10 = a21 * a33 - a23 * a31;
+  const b11 = a22 * a33 - a23 * a32;
+
+  // Calculate the determinant
+  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+  const invDet = 1.0 / det;
+
+  const inv = new Array<number>(16);
+  inv[0]  = ( a11 * b11 - a12 * b10 + a13 * b09) * invDet;
+  inv[1]  = (-a01 * b11 + a02 * b10 - a03 * b09) * invDet;
+  inv[2]  = ( a31 * b05 - a32 * b04 + a33 * b03) * invDet;
+  inv[3]  = (-a21 * b05 + a22 * b04 - a23 * b03) * invDet;
+  inv[4]  = (-a10 * b11 + a12 * b08 - a13 * b07) * invDet;
+  inv[5]  = ( a00 * b11 - a02 * b08 + a03 * b07) * invDet;
+  inv[6]  = (-a30 * b05 + a32 * b02 - a33 * b01) * invDet;
+  inv[7]  = ( a20 * b05 - a22 * b02 + a23 * b01) * invDet;
+  inv[8]  = ( a10 * b10 - a11 * b08 + a13 * b06) * invDet;
+  inv[9]  = (-a00 * b10 + a01 * b08 - a03 * b06) * invDet;
+  inv[10] = ( a30 * b04 - a31 * b02 + a33 * b00) * invDet;
+  inv[11] = (-a20 * b04 + a21 * b02 - a23 * b00) * invDet;
+  inv[12] = (-a10 * b09 + a11 * b07 - a12 * b06) * invDet;
+  inv[13] = ( a00 * b09 - a01 * b07 + a02 * b06) * invDet;
+  inv[14] = (-a30 * b03 + a31 * b01 - a32 * b00) * invDet;
+  inv[15] = ( a20 * b03 - a21 * b01 + a22 * b00) * invDet;
+
+  return inv;
 }
 
 /**
@@ -350,10 +415,15 @@ export async function renderFusionOverlay(
   console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final MRI size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
 
   // Helper function to normalize arrays
-  const toNumberArray = (sp: string|string[]|number[]) => {
+  const toNumberArray = (sp: string|string[]|number[]|undefined|null) => {
     if (Array.isArray(sp)) return sp.map(Number);
     if (typeof sp === "string") return sp.split("\\").map(Number);
     return [1, 1, 1]; // fallback
+  };
+  const toNumberArrayFlexible = (val: any): number[] => {
+    if (Array.isArray(val)) return val.map(Number);
+    if (typeof val === 'string') return val.split('\\').map(Number);
+    return [];
   };
   
   // Matrix multiplication helper
@@ -371,31 +441,58 @@ export async function renderFusionOverlay(
   if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
     
     // Get CT and MRI origins in world coordinates
-    const ctOrigin = toNumberArray(primaryImage.imagePosition);  // [X0, Y0, Z0]
-    const mriOrigin = toNumberArray(actualSecondaryImage.imagePosition);  // [x1, y1, z1]
-    const [rowSpacing, colSpacing] = ctSpacingArr; // CT pixel spacing
-    
+    const ctOrigin = toNumberArray((primaryImage as any).imagePosition || (primaryImage as any).imageMetadata?.imagePosition);  // [X0, Y0, Z0]
+    // Try to get MRI origin from secondary image metadata or cache
+    let mriOriginArr: number[] = toNumberArrayFlexible((actualSecondaryImage as any).imagePosition);
+    if ((!mriOriginArr || mriOriginArr.length < 3) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
+      const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
+      const v = meta?.imagePosition;
+      if (v) mriOriginArr = toNumberArrayFlexible(v);
+    }
+    const mriOrigin = (mriOriginArr && mriOriginArr.length >= 3) ? mriOriginArr : [0,0,ctSliceZ];
+    const [rowSpacing, colSpacing] = ctSpacingArr; // CT pixel spacing [row, col]
+
     // Transform MRI origin to CT space using registration matrix
     const [mriCT_x, mriCT_y, mriCT_z] = multiplyMatrixVector(registrationMatrix, [...mriOrigin, 1]);
     
-    // Calculate world-space offset between transformed MRI origin and CT origin
-    const worldOffsetX = mriCT_x - ctOrigin[0];
-    const worldOffsetY = mriCT_y - ctOrigin[1];
-    
-    // Convert world offset to pixel offset - simple division by pixel spacing
-    const pixelOffsetX = worldOffsetX / colSpacing;  // X uses column spacing  
-    const pixelOffsetY = worldOffsetY / rowSpacing;  // Y uses row spacing
+    // Calculate world-space offset vector between transformed MRI origin and CURRENT CT slice origin
+    const worldOffset = [
+      mriCT_x - ctOrigin[0],
+      mriCT_y - ctOrigin[1],
+      mriCT_z - ctOrigin[2]
+    ];
+
+    // Parse CT image orientation to get row/column direction cosines
+    const iop = toNumberArrayFlexible(
+      (primaryImage.imageOrientation ?? primaryImage.imageMetadata?.imageOrientation) as any
+    );
+    let pixelOffsetX = 0;
+    let pixelOffsetY = 0;
+    if (iop.length >= 6) {
+      const r = [iop[0], iop[1], iop[2]]; // row direction
+      const c = [iop[3], iop[4], iop[5]]; // column direction
+      // Project world offset onto CT row/column axes and convert to pixels
+      const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+      const offsetAlongColMM = dot(worldOffset, c);
+      const offsetAlongRowMM = dot(worldOffset, r);
+      pixelOffsetX = offsetAlongColMM / (colSpacing || 1);
+      pixelOffsetY = offsetAlongRowMM / (rowSpacing || 1);
+    } else {
+      // Fallback: assume axes aligned with patient X/Y (less accurate)
+      pixelOffsetX = worldOffset[0] / (colSpacing || 1);
+      pixelOffsetY = worldOffset[1] / (rowSpacing || 1);
+    }
     
     // Apply CT's canvas transform to the MRI position
     drawX = ctTransform.offsetX + (pixelOffsetX * ctTransform.scale);
     drawY = ctTransform.offsetY + (pixelOffsetY * ctTransform.scale);
     
     console.log(`✅ SIMPLIFIED REGISTRATION:`);
-    console.log(`  CT origin: [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
+    console.log(`  CT origin (slice): [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
     console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
-    console.log(`  MRI→CT: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
-    console.log(`  World offset: [${worldOffsetX.toFixed(1)}, ${worldOffsetY.toFixed(1)}]mm`);
-    console.log(`  Pixel offset: [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
+    console.log(`  MRI→CT origin: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
+    console.log(`  World offset (mm): [${worldOffset[0].toFixed(1)}, ${worldOffset[1].toFixed(1)}, ${worldOffset[2].toFixed(1)}]`);
+    console.log(`  Pixel offset (proj): [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
     console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
     console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
   } else if (!ctTransform) {
