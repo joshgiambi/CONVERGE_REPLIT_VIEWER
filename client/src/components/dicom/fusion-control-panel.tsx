@@ -51,7 +51,7 @@ export function FusionControlPanel({
   const ctSeries = seriesList.filter((s: any) => s.modality === 'CT' && s.id !== primarySeriesId);
 
   // Combine MR and PT for fusion-compatible series
-  const fusionSeries = seriesList.filter((s: any) => 
+  const fusionSeries = seriesList.filter((s: any) =>
     s.modality === 'MR' || s.modality === 'PT'
   );
 
@@ -60,7 +60,7 @@ export function FusionControlPanel({
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
 
   // Determine secondary modality label based on available fusion series
-  const secondaryModality = fusionSeries.length > 0 ? 
+  const secondaryModality = fusionSeries.length > 0 ?
     (fusionSeries.find(s => s.modality === 'PT') ? 'PET' : 'MR') : 'Secondary';
 
   // Auto-selection is now handled at parent level in viewer-interface
