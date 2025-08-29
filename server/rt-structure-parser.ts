@@ -135,7 +135,7 @@ export class RTStructureParser {
     if (contourSequence.items) {
       contourSequence.items.forEach((item: any) => {
         const referencedROINumber = this.getNumber(item.dataSet, 'x30060084');
-        const displayColor = this.getNumberArray(item.dataSet, 'x30060002', 3);
+        const displayColor = this.getNumberArray(item.dataSet, 'x3006002a', 3);
         
         if (referencedROINumber !== undefined) {
           const contours: RTContour[] = [];
