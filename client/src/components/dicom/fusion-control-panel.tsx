@@ -38,34 +38,39 @@ export function FusionControlPanel({
   availableModalities = []
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
-  
+
   // Fetch available MR series for fusion
   const { data: availableSeries } = useQuery({
     queryKey: [`/api/studies/${studyId}/series`],
     enabled: !!studyId
   });
-  
-  // Filter for fusion-compatible series (MR and PET)
-  const fusionSeries = (availableSeries as any[])?.filter((s: any) => 
+
+  // Filter for MR and CT (excluding the primary CT)
+  const seriesList = (availableSeries as any[]) || [];
+  const mrSeries = seriesList.filter((s: any) => s.modality === 'MR');
+  const ctSeries = seriesList.filter((s: any) => s.modality === 'CT' && s.id !== primarySeriesId);
+
+  // Combine MR and PT for fusion-compatible series
+  const fusionSeries = seriesList.filter((s: any) => 
     s.modality === 'MR' || s.modality === 'PT'
-  ) || [];
-  
+  );
+
   // Get primary series info
   const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
-  
+
   // Determine secondary modality label based on available fusion series
   const secondaryModality = fusionSeries.length > 0 ? 
     (fusionSeries.find(s => s.modality === 'PT') ? 'PET' : 'MR') : 'Secondary';
-  
+
   // Auto-selection is now handled at parent level in viewer-interface
   // This component only displays controls when fusion is active
-  
+
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
     onSecondarySeriesSelect(seriesId);
   };
-  
+
   const handleOpacityChange = (values: number[]) => {
     const newValue = values[0];
     if (typeof newValue === 'number' && !isNaN(newValue)) {
@@ -74,9 +79,9 @@ export function FusionControlPanel({
       onOpacityChange(clampedValue);
     }
   };
-  
+
   if (!isVisible) return null;
-  
+
   // Minimized view - just opacity slider
   if (isMinimized) {
     return (
@@ -119,7 +124,7 @@ export function FusionControlPanel({
       </div>
     );
   }
-  
+
   // Expanded view with thumbnails
   return (
     <div className="fixed bottom-6 right-8 z-50">
@@ -139,18 +144,18 @@ export function FusionControlPanel({
             <Minimize2 className="h-4 w-4" />
           </Button>
         </div>
-        
+
         {/* Thumbnail MR Series Selector */}
         <div className="space-y-3">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300">Available Fusion Series</Label>
               <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-300">
-                {fusionSeries.length} {secondaryModality} series
+                {(mrSeries.length + ctSeries.length)} series
               </Badge>
             </div>
-            
-            {/* Fusion Series Buttons - Compact Grid */}
+
+            {/* MR/CT Series Buttons - Compact Grid */}
             <div className="grid grid-cols-3 gap-2">
               {fusionSeries.map((series: any, index: number) => (
                 <button
@@ -178,7 +183,7 @@ export function FusionControlPanel({
                   )}
                 </button>
               ))}
-              
+
               {/* No fusion option */}
               <button
                 onClick={() => handleSecondarySelect('none')}
@@ -201,9 +206,9 @@ export function FusionControlPanel({
               </button>
             </div>
           </div>
-          
 
-          
+
+
           {/* Opacity Control */}
           {selectedSecondaryId && (
             <div className="space-y-2">
@@ -236,7 +241,7 @@ export function FusionControlPanel({
               </div>
             </div>
           )}
-          
+
           {/* MRI Window/Level Controls */}
           {selectedSecondaryId && (
             <div className="space-y-2">
@@ -274,7 +279,7 @@ export function FusionControlPanel({
               </div>
             </div>
           )}
-          
+
           {/* Window/Level Note */}
           {selectedSecondaryId && (
             <div className="mt-3 p-2 bg-purple-900/20 rounded-lg border border-purple-500/30">
