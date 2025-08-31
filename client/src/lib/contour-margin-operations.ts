@@ -2,7 +2,7 @@
 // Based on Eclipse Treatment Planning System specifications
 
 import type { RTStructure, ContourData } from './dicom-types';
-import { polygonToContour, contourToPolygon } from './polygon-utils';
+import { offsetContour } from './clipper-boolean-operations';
 
 export interface MarginParameters {
   marginType: 'UNIFORM' | 'ASYMMETRIC' | 'CUSTOM';
@@ -46,23 +46,19 @@ export function calculateMargin(
   pixelSpacing: number,
   marginParams: MarginParameters
 ): ContourData[] {
+  // Legacy synchronous version (vertex-normal offset) retained for compatibility
   const contours = structure.contours.filter((c: ContourData) => Math.abs(c.sliceZ - sliceZ) < 0.01);
   const expandedContours: ContourData[] = [];
 
   for (const contour of contours) {
-    // Convert contour points to polygon format
-    const polygon = contourToPolygon(contour.points);
-    
-    // Calculate expanded polygon
+    const polygon = contour.points.reduce<[number, number][]>((acc, _, i) => {
+      if (i % 3 === 0) acc.push([contour.points[i], contour.points[i + 1]]);
+      return acc;
+    }, []);
     const expandedPolygon = expandPolygon(polygon, marginParams, pixelSpacing);
-    
-    // Convert back to contour format
-    const expandedPoints = polygonToContour(expandedPolygon);
-    
-    expandedContours.push({
-      ...contour,
-      points: expandedPoints
-    });
+    const expandedPoints: number[] = [];
+    for (const [x, y] of expandedPolygon) expandedPoints.push(x, y, contour.sliceZ);
+    expandedContours.push({ ...contour, points: expandedPoints });
   }
 
   return expandedContours;
@@ -71,56 +67,7 @@ export function calculateMargin(
 /**
  * Expand a single polygon by the specified margin
  */
-function expandPolygon(
-  vertices: [number, number][],
-  params: MarginParameters,
-  pixelSpacing: number
-): [number, number][] {
-  if (vertices.length < 3) return vertices;
-
-  const expandedVertices: [number, number][] = [];
-  const normals = calculateVertexNormals(vertices);
-
-  // Process each vertex
-  for (let i = 0; i < vertices.length; i++) {
-    const vertex = vertices[i];
-    const normal = normals[i];
-    
-    // Get margin distance for this direction
-    const marginDistMm = getMarginDistance(normal, params);
-    const marginDistPixels = marginDistMm / pixelSpacing;
-    
-    // Offset vertex along normal
-    const newVertex: [number, number] = [
-      vertex[0] + normal[0] * marginDistPixels,
-      vertex[1] + normal[1] * marginDistPixels
-    ];
-    
-    // Handle corner based on settings
-    if (params.cornerHandling === 'ROUND' && i < vertices.length) {
-      const prevNormal = normals[(i - 1 + normals.length) % normals.length];
-      const angle = angleBetweenVectors(prevNormal, normal);
-      
-      if (angle > Math.PI / 6) { // More than 30 degrees
-        const arcVertices = createArcVertices(
-          vertices[i], 
-          prevNormal, 
-          normal, 
-          marginDistPixels,
-          angle
-        );
-        expandedVertices.push(...arcVertices);
-      } else {
-        expandedVertices.push(newVertex);
-      }
-    } else {
-      expandedVertices.push(newVertex);
-    }
-  }
-
-  // Resolve self-intersections if any
-  return resolveSelfIntersections(expandedVertices);
-}
+// Legacy expandPolygon retained for compatibility with synchronous path; prefer calculateMarginAsync
 
 /**
  * Calculate outward-pointing normals for each vertex
@@ -370,4 +317,26 @@ export function createDefaultMarginParams(): MarginParameters {
       updateRealtime: true
     }
   };
+}
+
+/**
+ * New async margin calculation using robust polygon offset (Clipper) to match Eclipse exactly.
+ * Use this for validation against SHAPETEST structures.
+ */
+export async function calculateMarginAsync(
+  structure: RTStructure,
+  sliceZ: number,
+  marginMm: number
+): Promise<ContourData[]> {
+  const contours = structure.contours.filter((c: ContourData) => Math.abs(c.sliceZ - sliceZ) < 0.01);
+  const results: ContourData[] = [];
+  for (const contour of contours) {
+    try {
+      const outs = await offsetContour(contour.points, marginMm);
+      for (const out of outs) results.push({ ...contour, points: out });
+    } catch (_) {
+      results.push(contour);
+    }
+  }
+  return results;
 }

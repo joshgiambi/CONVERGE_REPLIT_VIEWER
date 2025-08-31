@@ -24,6 +24,7 @@ export interface IStorage {
   getStudyByUID(studyInstanceUID: string): Promise<Study | undefined>;
   getAllStudies(): Promise<Study[]>;
   getStudiesByPatient(patientId: number): Promise<Study[]>;
+  relinkStudyToPatient(studyId: number, newPatientId: number): Promise<void>;
 
   // Series operations
   createSeries(series: InsertSeries): Promise<Series>;
@@ -90,6 +91,7 @@ export interface IStorage {
   // Registration operations
   createRegistration(data: InsertRegistration): Promise<Registration | null>;
   getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
+  deleteRegistrationByStudyId(studyId: number): Promise<void>;
   
   // Patient metadata editing
   updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null>;
@@ -105,7 +107,7 @@ export interface IStorage {
   clearAll(): void;
 }
 
-export class MemStorage implements IStorage {
+export class MemStorage {
   private studies: Map<number, Study>;
   private series: Map<number, Series>;
   private images: Map<number, DicomImage>;
@@ -127,11 +129,16 @@ export class MemStorage implements IStorage {
     const study: Study = {
       id,
       studyInstanceUID: insertStudy.studyInstanceUID,
+      patientId: (insertStudy as any).patientId ?? null,
       patientName: insertStudy.patientName || null,
       patientID: insertStudy.patientID || null,
       studyDate: insertStudy.studyDate || null,
       studyDescription: insertStudy.studyDescription || null,
       accessionNumber: insertStudy.accessionNumber || null,
+      modality: (insertStudy as any).modality ?? null,
+      numberOfSeries: (insertStudy as any).numberOfSeries ?? 0,
+      numberOfImages: (insertStudy as any).numberOfImages ?? 0,
+      isDemo: (insertStudy as any).isDemo ?? false,
       createdAt: new Date(),
     };
     this.studies.set(id, study);
@@ -150,6 +157,14 @@ export class MemStorage implements IStorage {
 
   async getAllStudies(): Promise<Study[]> {
     return Array.from(this.studies.values());
+  }
+
+  async relinkStudyToPatient(studyId: number, newPatientId: number): Promise<void> {
+    const study = this.studies.get(studyId);
+    if (study) {
+      (study as any).patientId = newPatientId;
+      this.studies.set(studyId, study);
+    }
   }
 
   async createSeries(insertSeries: InsertSeries): Promise<Series> {
@@ -296,6 +311,13 @@ export class DatabaseStorage implements IStorage {
 
   async getStudiesByPatient(patientId: number): Promise<Study[]> {
     return await db.select().from(studies).where(eq(studies.patientId, patientId)).orderBy(desc(studies.createdAt));
+  }
+
+  async relinkStudyToPatient(studyId: number, newPatientId: number): Promise<void> {
+    await db
+      .update(studies)
+      .set({ patientId: newPatientId })
+      .where(eq(studies.id, studyId));
   }
 
   // Series operations
@@ -450,7 +472,31 @@ export class DatabaseStorage implements IStorage {
   // Registration operations
   async createRegistration(data: InsertRegistration): Promise<Registration | null> {
     try {
-      const [registration] = await db.insert(registrations).values(data).returning();
+      // Ensure text columns receive serialized JSON strings
+      const normalized: any = { ...data };
+      if (normalized && typeof normalized.transformationMatrix !== 'string') {
+        try {
+          // Accept 4x4 array or flat 16-length array; store as JSON string
+          normalized.transformationMatrix = JSON.stringify(normalized.transformationMatrix);
+        } catch (_) {
+          // Fallback to identity matrix if serialization fails
+          normalized.transformationMatrix = JSON.stringify([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+          ]);
+        }
+      }
+      if (normalized && normalized.metadata && typeof normalized.metadata !== 'string') {
+        try {
+          normalized.metadata = JSON.stringify(normalized.metadata);
+        } catch (_) {
+          normalized.metadata = JSON.stringify({});
+        }
+      }
+
+      const [registration] = await db.insert(registrations).values(normalized).returning();
       return registration;
     } catch (error) {
       console.error('Error creating registration:', error);
@@ -596,7 +642,7 @@ export class DatabaseStorage implements IStorage {
         }
         
         // Add anatomical tags
-        for (const site of anatomicalSites) {
+        for (const site of Array.from(anatomicalSites)) {
           const anatomicalTag = await this.createPatientTag({
             patientId,
             tagType: 'anatomical',
@@ -634,7 +680,7 @@ export class DatabaseStorage implements IStorage {
     
     if (patientStudies.length === 0) return [];
     
-    const studyIds = patientStudies.map(s => s.id);
+    const studyIds = patientStudies.map((s: { id: number }) => s.id);
     
     // Get all RT structure sets for those studies
     const result = await db

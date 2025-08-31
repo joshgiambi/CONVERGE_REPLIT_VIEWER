@@ -1142,6 +1142,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
               
               fs.renameSync(file.path, permanentPath);
 
+              // Preserve essential spatial and display metadata for fusion/RT alignment
+              const px = Array.isArray(metadata.pixelSpacing) ? metadata.pixelSpacing : null;
+              const pixelSpacingStr = px && px.length >= 2 ? `${px[0]}\\${px[1]}` : null;
+              const imagePositionArr = (metadata.imagePositionPatient || metadata.imagePosition);
+              const imagePositionStr = Array.isArray(imagePositionArr) && imagePositionArr.length >= 3
+                ? `${imagePositionArr[0]}\\${imagePositionArr[1]}\\${imagePositionArr[2]}`
+                : (typeof imagePositionArr === 'string' ? imagePositionArr : null);
+              const imageOrientationArr = (metadata.imageOrientationPatient || metadata.imageOrientation);
+              const imageOrientationStr = Array.isArray(imageOrientationArr) && imageOrientationArr.length >= 6
+                ? `${imageOrientationArr[0]}\\${imageOrientationArr[1]}\\${imageOrientationArr[2]}\\${imageOrientationArr[3]}\\${imageOrientationArr[4]}\\${imageOrientationArr[5]}`
+                : (typeof imageOrientationArr === 'string' ? imageOrientationArr : null);
+
               await storage.createImage({
                 seriesId: dbSeries.id,
                 sopInstanceUID: metadata.sopInstanceUID || generateUID(),
@@ -1149,6 +1161,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 filePath: permanentPath,
                 fileName: file.originalname,
                 fileSize: file.size,
+                imagePosition: imagePositionStr || null,
+                imageOrientation: imageOrientationStr || null,
+                pixelSpacing: pixelSpacingStr,
+                sliceLocation: metadata.sliceLocation ? String(metadata.sliceLocation) : null,
+                windowCenter: metadata.windowCenter ? String(metadata.windowCenter) : null,
+                windowWidth: metadata.windowWidth ? String(metadata.windowWidth) : null,
+                rescaleIntercept: metadata.rescaleIntercept ? String(metadata.rescaleIntercept) : null as any,
+                rescaleSlope: metadata.rescaleSlope ? String(metadata.rescaleSlope) : null as any,
                 metadata: { uploaded: true },
               });
             }
@@ -1353,10 +1373,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             console.log(`Study already exists with ID: ${dbStudy.id}`);
             
-            // CRITICAL: Verify existing study is linked to correct patient
+            // If an existing study is linked to a different patient but shares the same DICOM patientID,
+            // automatically relink it to this patient to recover from prior inconsistent deletes.
             if (dbStudy.patientId !== dbPatient.id) {
-              console.error(`CRITICAL: Study ${dbStudy.id} is linked to patient ${dbStudy.patientId} but import expects patient ${dbPatient.id}`);
-              throw new Error(`Study patient link mismatch detected`);
+              if (dbStudy.patientID && dbStudy.patientID === dbPatient.patientID) {
+                console.warn(`Auto-relinking study ${dbStudy.id} from patient ${dbStudy.patientId} to ${dbPatient.id} (same DICOM PatientID=${dbPatient.patientID})`);
+                await storage.relinkStudyToPatient(dbStudy.id, dbPatient.id);
+              } else {
+                console.error(`CRITICAL: Study ${dbStudy.id} is linked to patient ${dbStudy.patientId} but import expects patient ${dbPatient.id}`);
+                throw new Error(`Study patient link mismatch detected`);
+              }
             }
           }
 
@@ -1934,32 +1960,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get RT structure series for a study
+  // Get RT structure series for a study (patient-wide search and cross-study association)
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const studyId = parseInt(req.params.studyId);
-      const series = await storage.getSeriesByStudyId(studyId);
-      
-      // Filter to only RT structure series
-      const rtSeries = series.filter(s => s.modality === 'RTSTRUCT');
-      
-      // For each RT structure, determine which CT/MR series it references
-      const rtSeriesWithAssociations = await Promise.all(rtSeries.map(async (rtSeries) => {
+      const study = await storage.getStudy(studyId);
+      if (!study) {
+        return res.status(404).json({ error: 'Study not found' });
+      }
+
+      // Gather all series across all studies for this patient
+      let allSeriesForPatient: any[] = [];
+      if (study.patientId != null) {
+        const patientStudies = await storage.getStudiesByPatient(study.patientId);
+        for (const ps of patientStudies) {
+          const perStudySeries = await storage.getSeriesByStudyId(ps.id);
+          allSeriesForPatient.push(...perStudySeries);
+        }
+      } else {
+        // Fallback: only series for this study
+        allSeriesForPatient = await storage.getSeriesByStudyId(studyId);
+      }
+
+      // RTSTRUCT series can live in any study for the same patient
+      const rtSeriesAll = allSeriesForPatient.filter(s => s.modality === 'RTSTRUCT');
+
+      // For each RT structure, determine which CT/MR series it references (search across all patient series)
+      const rtSeriesWithAssociations = await Promise.all(rtSeriesAll.map(async (rtSeries) => {
         try {
-          // Get the first image of the RT structure to parse its references
-          const images = await storage.getImagesBySeriesId(rtSeries.id);
-          if (images.length > 0 && images[0].filePath) {
-            // Use the filePath directly as it's already complete
-            const filePath = images[0].filePath;
+          const imgs = await storage.getImagesBySeriesId(rtSeries.id);
+          if (imgs.length > 0 && imgs[0].filePath) {
+            const filePath = imgs[0].filePath;
             console.log('Checking RT structure file path:', filePath);
-              
+
             if (fs.existsSync(filePath)) {
-              // Use the RT structure parser to get referenced series information
               const rtStructureSet = RTStructureParser.parseRTStructureSet(filePath);
-              
-              // Find which series in this study the RT structure references
+
               if (rtStructureSet.referencedSeriesUID) {
-                const referencedSeries = series.find(s => s.seriesInstanceUID === rtStructureSet.referencedSeriesUID);
+                // Look up referenced series across ALL patient series
+                const referencedSeries = allSeriesForPatient.find(s => s.seriesInstanceUID === rtStructureSet.referencedSeriesUID);
                 if (referencedSeries) {
                   return {
                     ...rtSeries,
@@ -1974,16 +2013,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (error) {
           console.log('Error parsing RT structure associations:', error);
         }
-        
-        // Return without association if we couldn't determine it
         return rtSeries;
       }));
-      
-      console.log('RT structures with associations:', rtSeriesWithAssociations.map(rt => ({
+
+      console.log('RT structures with associations (patient-wide):', rtSeriesWithAssociations.map(rt => ({
         id: rt.id,
         description: rt.seriesDescription,
-        referencedSeriesId: rt.referencedSeriesId,
-        referencedSeriesDescription: rt.referencedSeriesDescription
+        referencedSeriesId: (rt as any).referencedSeriesId,
+        referencedSeriesDescription: (rt as any).referencedSeriesDescription
       })));
       res.json(rtSeriesWithAssociations);
     } catch (error: any) {
@@ -2028,11 +2065,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const buffer = fs.readFileSync(regImage.filePath);
           const byteArray = new Uint8Array(buffer);
           const dataSet = dicomParser.parseDicom(byteArray);
-          
-          // Extract additional registration details if available
-          const registrationDesc = dataSet.string('x00080016') || '';
-          if (registrationDesc) {
-            registrationInfo.description = registrationDesc;
+          // Prefer Series Description if present
+          const seriesDesc = dataSet.string?.('x0008103e'); // Series Description
+          if (seriesDesc) {
+            registrationInfo.description = seriesDesc;
           }
         }
       } catch (parseError) {
@@ -2372,6 +2408,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const studyId = parseInt(req.params.studyId);
       
+      // Quick safety: if CT and MR in this study share FrameOfReferenceUID, use identity transform
+      try {
+        const seriesList = await storage.getSeriesByStudyId(studyId);
+        const ctSeries = seriesList.find((s: any) => s.modality === 'CT');
+        const mrSeries = seriesList.find((s: any) => s.modality === 'MR');
+        if (ctSeries && mrSeries) {
+          const [ctImg] = await storage.getImagesBySeriesId(ctSeries.id);
+          const [mrImg] = await storage.getImagesBySeriesId(mrSeries.id);
+          if (ctImg && mrImg) {
+            let ctFoR: string | null = null;
+            let mrFoR: string | null = null;
+            // Prefer reading from metadata JSON if present
+            const readFoRFromMeta = (meta: any) => {
+              try {
+                if (meta && typeof meta === 'string') {
+                  const parsed = JSON.parse(meta);
+                  return parsed?.FrameOfReferenceUID || parsed?.frameOfReferenceUID || null;
+                }
+                if (meta && typeof meta === 'object') {
+                  return meta.FrameOfReferenceUID || meta.frameOfReferenceUID || null;
+                }
+              } catch {}
+              return null;
+            };
+            ctFoR = readFoRFromMeta(ctImg.metadata);
+            mrFoR = readFoRFromMeta(mrImg.metadata);
+            // If not available in DB metadata, read directly from DICOM files
+            if ((!ctFoR || !mrFoR) && fs.existsSync(ctImg.filePath) && fs.existsSync(mrImg.filePath)) {
+              try {
+                const ctData = fs.readFileSync(ctImg.filePath);
+                const mrData = fs.readFileSync(mrImg.filePath);
+                const ctDS = dicomParser.parseDicom(new Uint8Array(ctData));
+                const mrDS = dicomParser.parseDicom(new Uint8Array(mrData));
+                ctFoR = ctFoR || ctDS.string?.('x00200052') || null;
+                mrFoR = mrFoR || mrDS.string?.('x00200052') || null;
+              } catch {}
+            }
+            // Identity fallback is ONLY allowed when the two series are the SAME modality
+            // (e.g., CT with contrast vs non-contrast within the same frame), never for CT↔MR
+            if (ctFoR && mrFoR && ctFoR === mrFoR && ctSeries.modality === mrSeries.modality) {
+              return res.json({
+                transformationMatrix: [
+                  1, 0, 0, 0,
+                  0, 1, 0, 0,
+                  0, 0, 1, 0,
+                  0, 0, 0, 1,
+                ],
+                matrixType: 'IDENTITY_FoR_MATCH_SAME_MODALITY'
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal, continue to normal registration retrieval
+        console.warn('FoR quick-check failed, falling back to stored/parsed registration');
+      }
+      
       // First, check if we have a registration in the database
       const registration = await storage.getRegistrationByStudyId(studyId);
       if (registration) {
@@ -2457,49 +2550,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ];
 
         const candidates: number[][][] = [];
-        const registrationSequence = (dataSet as any).elements?.['x00700308'];
-        if (registrationSequence?.items?.length) {
-          for (let i = 0; i < registrationSequence.items.length; i++) {
-            const item = registrationSequence.items[i];
-            const matrixRegSeq = item.dataSet?.elements?.['x00700309'];
-            if (matrixRegSeq?.items?.length) {
-              const matrixItem = matrixRegSeq.items[0];
-              const matrixElement = matrixItem.dataSet?.elements?.['x0070030c'];
-              if (matrixElement) {
-                const byteArray: Uint8Array = (matrixItem.dataSet as any).byteArray;
-                const dataOffset: number = (matrixElement as any).dataOffset;
-                const length: number = (matrixElement as any).length;
-                const view = new DataView(byteArray.buffer, byteArray.byteOffset + dataOffset, length);
-                const values: number[] = [];
-                for (let j = 0; j + 8 <= length && values.length < 16; j += 8) {
-                  values.push(view.getFloat64(j, true));
-                }
-                if (values.length === 16) {
-                  const cand = [
-                    values.slice(0, 4),
-                    values.slice(4, 8),
-                    values.slice(8, 12),
-                    values.slice(12, 16),
-                  ];
-                  // Skip identity
-                  if (!(cand[0][0] === 1 && cand[1][1] === 1 && cand[2][2] === 1)) {
-                    candidates.push(cand);
+
+        // Robust parsing of Registration -> MatrixRegistrationSequence -> MatrixSequence
+        try {
+          const regSeq = (dataSet as any).elements?.['x00700308']; // Registration Sequence
+          if (regSeq?.items?.length) {
+            for (const regItem of regSeq.items) {
+              const mrs = regItem.dataSet?.elements?.['x00700309']; // Matrix Registration Sequence
+              if (mrs?.items?.length) {
+                for (const mrItem of mrs.items) {
+                  const mseq = mrItem.dataSet?.elements?.['x0070030a']; // Matrix Sequence
+                  if (mseq?.items?.length) {
+                    for (const mItem of mseq.items) {
+                      // Per DICOM, the numeric 4x4 is FrameOfReferenceTransformationMatrix (3006,00C6)
+                      const matStr = mItem.dataSet?.string?.('x300600c6');
+                      if (matStr && typeof matStr === 'string') {
+                        const nums = matStr.split('\\').map((s: string) => parseFloat(s)).filter((n: number) => !Number.isNaN(n));
+                        if (nums.length === 16) {
+                          const cand = [
+                            nums.slice(0, 4),
+                            nums.slice(4, 8),
+                            nums.slice(8, 12),
+                            nums.slice(12, 16),
+                          ];
+                          // Skip identity to prefer actual transforms
+                          if (!(cand[0][0] === 1 && cand[1][1] === 1 && cand[2][2] === 1 && cand[0][1] === 0 && cand[0][2] === 0 && cand[1][0] === 0 && cand[1][2] === 0 && cand[2][0] === 0 && cand[2][1] === 0 && cand[0][3] === 0 && cand[1][3] === 0 && cand[2][3] === 0)) {
+                            candidates.push(cand);
+                          } else if (candidates.length === 0) {
+                            // Keep identity as a possible fallback only if nothing else
+                            candidates.push(cand);
+                          }
+                        }
+                      } else {
+                        // As a last resort, try to parse raw bytes if present (rare)
+                        const matElem = mItem.dataSet?.elements?.['x300600c6'];
+                        if (matElem) {
+                          const byteArray: Uint8Array = (mItem.dataSet as any).byteArray;
+                          const dataOffset: number = (matElem as any).dataOffset;
+                          const length: number = (matElem as any).length;
+                          const view = new DataView(byteArray.buffer, byteArray.byteOffset + dataOffset, length);
+                          const nums: number[] = [];
+                          // DS is text, but some writers might store as doubles; be defensive
+                          for (let j = 0; j + 8 <= length && nums.length < 16; j += 8) {
+                            nums.push(view.getFloat64(j, true));
+                          }
+                          if (nums.length === 16) {
+                            const cand = [
+                              nums.slice(0, 4),
+                              nums.slice(4, 8),
+                              nums.slice(8, 12),
+                              nums.slice(12, 16),
+                            ];
+                            candidates.push(cand);
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               }
             }
           }
+        } catch (e) {
+          console.warn('Registration auto-parse: error traversing matrix sequences', e);
         }
 
         if (candidates.length) {
+          // Prefer the last candidate (often the final transform in a chain)
           transformationMatrix = candidates[candidates.length - 1];
         } else {
-          // Fallback: pre/post concatenation
+          // Fallback: try pre/post deformation matrices (rare)
           const pre = dataSet.string?.('x00185210');
           const post = dataSet.string?.('x00185212');
           const matrixString = pre || post;
           if (matrixString) {
-            const values = matrixString.split('\\').map((v: string) => parseFloat(v));
+            const values = matrixString.split('\\').map((v: string) => parseFloat(v)).filter((n) => !Number.isNaN(n));
             if (values.length === 16) {
               transformationMatrix = [
                 values.slice(0, 4),
@@ -2605,127 +2730,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       try {
         // Check for Registration Sequence (0070,0308)
-        const registrationSequence = dataSet.elements['x00700308'];
-        if (registrationSequence && registrationSequence.items && registrationSequence.items.length > 0) {
+        const registrationSequence = (dataSet as any).elements?.['x00700308'];
+        if (registrationSequence?.items?.length) {
           console.log('📊 Found Registration Sequence with', registrationSequence.items.length, 'items');
-          
-          // For Eclipse TPS, collect all valid matrices and use the LAST non-identity one
-          // (Eclipse typically puts the final registration last)
-          let candidateMatrices = [];
-          
+          const candidateMatrices: Array<{ index: number; matrix: number[][] }> = [];
+
           for (let regIdx = 0; regIdx < registrationSequence.items.length; regIdx++) {
             const regItem = registrationSequence.items[regIdx];
-            console.log(`📊 Checking Registration Item ${regIdx}...`);
-            
-            // Look for Matrix Registration Sequence (0070,0309)
-            const matrixRegSeq = regItem.dataSet.elements['x00700309'];
-            if (matrixRegSeq && matrixRegSeq.items && matrixRegSeq.items.length > 0) {
-              console.log(`📊 Found Matrix Registration Sequence in item ${regIdx}`);
-              
-              const matrixItem = matrixRegSeq.items[0];
-              
-              // Check for MatrixSequence (0070,030A) - another level of nesting in Eclipse files
-              let matrixString = null;
-              const matrixSeq = matrixItem.dataSet.elements['x0070030a'];
-              if (matrixSeq && matrixSeq.items && matrixSeq.items.length > 0) {
-                console.log(`📊 Found MatrixSequence in registration item ${regIdx}`);
-                const seqItem = matrixSeq.items[0];
-                // Try Eclipse's tag (3006,00C6) - Frame of Reference Transformation Matrix
-                matrixString = seqItem.dataSet.string('x300600c6');
-              }
-              
-              // Fallback: try directly on matrixItem if not found in MatrixSequence
-              if (!matrixString) {
-                matrixString = matrixItem.dataSet.string('x300600c6');
-              }
-              
-              // Fallback to standard tag (0070,030C) if Eclipse tag not found
-              if (!matrixString) {
-                const matrixData = matrixItem.dataSet.elements['x0070030c'];
-                if (matrixData) {
-                  // Parse the matrix values (should be 16 float values)
-                  const matrixValues = [];
-                  for (let i = 0; i < matrixData.length && matrixValues.length < 16; i += 8) {
-                    const view = new DataView(matrixData.buffer, matrixData.byteOffset + i, 8);
-                    const value = view.getFloat64(0, true); // little endian
-                    matrixValues.push(value);
-                  }
-                  
-                  if (matrixValues.length === 16) {
-                    // Convert flat array to 4x4 matrix
-                    const candidateMatrix = [
-                      matrixValues.slice(0, 4),
-                      matrixValues.slice(4, 8),
-                      matrixValues.slice(8, 12),
-                      matrixValues.slice(12, 16)
-                    ];
-                    
-                    // Check if non-identity matrix
-                    if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
-                        candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
-                      candidateMatrices.push({index: regIdx, matrix: candidateMatrix});
-                      console.log(`📊 Found non-identity matrix in item ${regIdx}`);
-                    } else {
-                      console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
-                    }
-                  }
+            const matrixRegSeq = regItem.dataSet?.elements?.['x00700309'];
+            if (!matrixRegSeq?.items?.length) continue;
+
+            // Iterate matrices within the registration
+            for (let mIdx = 0; mIdx < matrixRegSeq.items.length; mIdx++) {
+              const matrixItem = matrixRegSeq.items[mIdx];
+
+              // Preferred: Standard tag (0070,030C) FD 16
+              const matrixElement = matrixItem.dataSet?.elements?.['x0070030c'];
+              if (matrixElement) {
+                const byteArray: Uint8Array = (matrixItem.dataSet as any).byteArray;
+                const dataOffset: number = (matrixElement as any).dataOffset;
+                const length: number = (matrixElement as any).length;
+                const view = new DataView(byteArray.buffer, byteArray.byteOffset + dataOffset, length);
+                const values: number[] = [];
+                for (let j = 0; j + 8 <= length && values.length < 16; j += 8) {
+                  values.push(view.getFloat64(j, true));
                 }
-              } else {
-                // Parse Eclipse format matrix string
-                const values = matrixString.split('\\').map(v => parseFloat(v));
                 if (values.length === 16) {
-                  const candidateMatrix = [
+                  const cand = [
                     values.slice(0, 4),
                     values.slice(4, 8),
                     values.slice(8, 12),
-                    values.slice(12, 16)
+                    values.slice(12, 16),
                   ];
-                  
-                  // Check if non-identity matrix
-                  if (candidateMatrix[0][0] !== 1 || candidateMatrix[0][3] !== 0 || 
-                      candidateMatrix[1][1] !== 1 || candidateMatrix[1][3] !== 0) {
-                    candidateMatrices.push({index: regIdx, matrix: candidateMatrix});
-                    console.log(`📊 Found Eclipse matrix in item ${regIdx}`);
-                  } else {
-                    console.log(`⚠️ Item ${regIdx} contains identity matrix, skipping...`);
+                  if (!(cand[0][0] === 1 && cand[1][1] === 1 && cand[2][2] === 1)) {
+                    candidateMatrices.push({ index: regIdx, matrix: cand });
+                    continue;
+                  }
+                }
+              }
+
+              // Eclipse-style nesting: MatrixSequence (0070,030A) with 0070,030C as string-like values
+              const matrixSeq = matrixItem.dataSet?.elements?.['x0070030a'];
+              if (matrixSeq?.items?.length) {
+                const seqItem = matrixSeq.items[0];
+                const txt = seqItem.dataSet?.string?.('x0070030c');
+                if (txt) {
+                  const values = txt.split('\\').map((v: string) => parseFloat(v));
+                  if (values.length === 16) {
+                    const cand = [
+                      values.slice(0, 4),
+                      values.slice(4, 8),
+                      values.slice(8, 12),
+                      values.slice(12, 16),
+                    ];
+                    if (!(cand[0][0] === 1 && cand[1][1] === 1 && cand[2][2] === 1)) {
+                      candidateMatrices.push({ index: regIdx, matrix: cand });
+                      continue;
+                    }
                   }
                 }
               }
             }
           }
-          
-          // Use the LAST non-identity matrix found (Eclipse puts final registration last)
-          if (candidateMatrices.length > 0) {
+
+          if (candidateMatrices.length) {
             const selected = candidateMatrices[candidateMatrices.length - 1];
             transformationMatrix = selected.matrix;
-            console.log(`✅ Selected transformation matrix from item ${selected.index} (last of ${candidateMatrices.length} valid matrices):`, transformationMatrix);
+            console.log(`✅ Selected transformation matrix from item ${selected.index} (last valid)`);
           } else {
-            console.log(`⚠️ No valid non-identity matrices found in registration sequence`);
+            console.log('⚠️ No valid non-identity matrices found in registration sequence');
           }
         }
-        
-        // Alternative: Check for Pre-/Post-concatenation matrix (0018,5210, 0018,5212)
-        if (transformationMatrix[0][0] === 1 && transformationMatrix[0][1] === 0) {
-          const preMatrix = dataSet.string('x00185210');
-          const postMatrix = dataSet.string('x00185212');
-          
-          if (preMatrix || postMatrix) {
-            console.log('📊 Found Pre/Post concatenation matrix data');
-            const matrixString = preMatrix || postMatrix;
-            const values = matrixString.split('\\').map(v => parseFloat(v));
-            
+
+        // Alternative: Check for Pre-/Post-concatenation matrix (rare)
+        if (transformationMatrix[0][0] === 1 && transformationMatrix[1][1] === 1 && transformationMatrix[2][2] === 1) {
+          const preMatrix = dataSet.string?.('x00185210');
+          const postMatrix = dataSet.string?.('x00185212');
+          const matrixString = preMatrix || postMatrix;
+          if (matrixString) {
+            const values = matrixString.split('\\').map((v: string) => parseFloat(v));
             if (values.length === 16) {
               transformationMatrix = [
                 values.slice(0, 4),
                 values.slice(4, 8),
                 values.slice(8, 12),
-                values.slice(12, 16)
+                values.slice(12, 16),
               ];
-              console.log('✅ Extracted matrix from Pre/Post concatenation:', transformationMatrix);
+              console.log('✅ Extracted matrix from Pre/Post concatenation');
             }
           }
         }
-        
+
       } catch (parseError) {
         console.warn('⚠️ Could not parse transformation matrix from REG file:', parseError);
         console.log('Using identity matrix as fallback');

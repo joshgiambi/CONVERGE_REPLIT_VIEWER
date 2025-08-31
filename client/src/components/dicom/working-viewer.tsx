@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4 } from "@/lib/fusion-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4 } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -2020,73 +2020,76 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'clear_all');
     } else if (payload.action === "interpolate") {
-      // Handle interpolate missing slices
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
+      // Handle interpolate missing slices (SDT multi-loop with CT-grid targeting)
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
       if (!structure || !structure.contours || structure.contours.length < 2) {
         console.log("Not enough contours to interpolate");
         return;
       }
 
-      // Sort contours by slice position
-      const sortedContours = [...structure.contours].sort((a: any, b: any) => a.slicePosition - b.slicePosition);
-      
-      // Find gaps and interpolate
-      const newContours = [];
-      for (let i = 0; i < sortedContours.length - 1; i++) {
-        const currentContour = sortedContours[i];
-        const nextContour = sortedContours[i + 1];
-        
-        // Add current contour
-        newContours.push(currentContour);
-        
-        // Check for gap
-        const sliceGap = nextContour.slicePosition - currentContour.slicePosition;
-        if (sliceGap > 1.5) { // If there's a gap of more than 1 slice
-          // Linear interpolation between contours
-          const numSlicesToInterpolate = Math.floor(sliceGap - 1);
-          
-          for (let j = 1; j <= numSlicesToInterpolate; j++) {
-            const ratio = j / (numSlicesToInterpolate + 1);
-            const interpolatedSlicePosition = currentContour.slicePosition + (sliceGap * ratio);
-            
-            // Interpolate points
-            const interpolatedPoints = [];
-            const minPointCount = Math.min(currentContour.points.length, nextContour.points.length);
-            
-            for (let k = 0; k < minPointCount; k += 3) {
-              const x1 = currentContour.points[k];
-              const y1 = currentContour.points[k + 1];
-              const z1 = currentContour.points[k + 2];
-              
-              const x2 = nextContour.points[k];
-              const y2 = nextContour.points[k + 1];
-              const z2 = nextContour.points[k + 2];
-              
-              // Linear interpolation
-              interpolatedPoints.push(x1 + (x2 - x1) * ratio);
-              interpolatedPoints.push(y1 + (y2 - y1) * ratio);
-              interpolatedPoints.push(z1 + (z2 - z1) * ratio);
+      // Group contours by slice position
+      const byZ = new Map<number, any[]>();
+      for (const c of structure.contours) {
+        const arr = byZ.get(c.slicePosition) || [];
+        arr.push(c);
+        byZ.set(c.slicePosition, arr);
+      }
+      const zKeys = Array.from(byZ.keys()).sort((a, b) => a - b);
+
+      // Build CT Z array (mm) for real slice targeting
+      const zArrayRaw: number[] = images.map((img: any) => {
+        let z = img.parsedSliceLocation ?? img.parsedZPosition;
+        if (z == null) {
+          const m = img.imageMetadata || img;
+          if (m?.sliceLocation != null) z = parseFloat(m.sliceLocation);
+          else if (m?.imagePosition) {
+            const pos = typeof m.imagePosition === 'string' ? m.imagePosition.split('\\').map(Number) : m.imagePosition;
+            if (Array.isArray(pos) && pos.length >= 3) z = Number(pos[2]);
+          }
+        }
+        return Number(z);
+      }).filter((z: any) => Number.isFinite(z));
+      const zArray = [...zArrayRaw].sort((a, b) => a - b);
+      const tol = SLICE_TOL_MM;
+
+      const newContours: any[] = [];
+      for (let i = 0; i < zKeys.length - 1; i++) {
+        const zA = zKeys[i];
+        const zB = zKeys[i + 1];
+        const listA = byZ.get(zA)!;
+        const listB = byZ.get(zB)!;
+        // Keep originals
+        newContours.push(...listA);
+        const zMin = Math.min(zA, zB) + tol;
+        const zMax = Math.max(zA, zB) - tol;
+        for (const z of zArray) {
+          if (z > zMin && z < zMax) {
+            let pts: number[] = [];
+            try {
+              const { interpolateBetweenContoursSDTMulti } = await import('@/lib/sdt-interpolation');
+              pts = interpolateBetweenContoursSDTMulti(
+                listA, zA, listB, zB, z,
+                { gridSpacingMm: 0.25, paddingMm: 3, adaptiveMinCells: 180, blend: 'smoothmin', closingMm: 0.3 }
+              );
+            } catch {}
+            if (!pts || pts.length < 9) {
+              // fallback to polar using largest contour of each slice
+              const a0 = listA[0], b0 = listB[0];
+              const { interpolateBetweenContoursPolar } = await import('@/lib/contour-interpolation');
+              pts = interpolateBetweenContoursPolar(a0.points, zA, b0.points, zB, z, 512, true, false);
             }
-            
-            newContours.push({
-              slicePosition: interpolatedSlicePosition,
-              points: interpolatedPoints,
-              numberOfPoints: interpolatedPoints.length / 3,
-            });
+            if (pts && pts.length >= 9) newContours.push({ slicePosition: z, points: pts, numberOfPoints: pts.length / 3 });
           }
         }
       }
-      
-      // Add last contour
-      newContours.push(sortedContours[sortedContours.length - 1]);
-      
+      // push last originals
+      const lastZ = zKeys[zKeys.length - 1];
+      newContours.push(...(byZ.get(lastZ) || []));
       structure.contours = newContours;
-      console.log(`Interpolated missing slices for structure ${payload.structureId}`);
-      
+      console.log(`Interpolated ${newContours.length - structure.contours.length} new slices for structure ${payload.structureId}`);
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'interpolate');
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "delete_nth_slice") {
       // Handle delete every nth slice
       const structure = updatedStructures.structures.find(
@@ -2340,7 +2343,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.log('🔍 FUSION DEBUG: Patient data response:', patientData);
           const studiesData = patientData?.studies || [];
           
-          console.log(`🔍 FUSION DEBUG: Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map(s => s.id));
+          console.log(`🔍 FUSION DEBUG: Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map((s: any) => s.id));
           
           for (const study of studiesData || []) {
             if (study.id !== studyId) {
@@ -2455,41 +2458,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           secondaryImageCacheRef.current
         );
 
-        // If clearly no overlap in Z with CT, try inverted matrix
+        // Strict mode: do not auto-modify the registration matrix or apply Z-offset heuristics
+        // If there is no valid Z-overlap, the registration is considered invalid and should be re-parsed
         if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
           const zMin = Math.min(...transformed.map(t => t.zInCT));
           const zMax = Math.max(...transformed.map(t => t.zInCT));
           console.log(`🔎 Z-range check (on reg load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
           if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
-            console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
-            const inv = invertMatrix4x4(registrationMatrix);
-            if (inv) {
-              const transformedInv = computeTransformedMRIPositions(
-                secondaryImages,
-                inv,
-                imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-                imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
-                secondaryImageCacheRef.current
-              );
-              if (transformedInv.length > 0) {
-                const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
-                const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
-                console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
-                if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
-                  console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
-                  transformed = transformedInv;
-                  setRegistrationMatrix(inv);
-                  registrationMatrixRef.current = inv;
-                } else {
-                  console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
-                }
-              }
-            }
-          }
-          else {
-            console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+            console.error('❌ Registration matrix yields no Z-overlap. Aborting fusion until a valid REG is provided.');
+            transformed = [];
           }
         }
+
         transformedMRIPositions.current = transformed;
         
         // Calculate and store Z-range
@@ -2767,31 +2747,78 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             console.log(`🔎 Z-range check (on secondary load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
             if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
               console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
-              const inv = invertMatrix4x4(registrationMatrix);
-              if (inv) {
-                const transformedInv = computeTransformedMRIPositions(
-                  sortedImages,
-                  inv,
-                  imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-                  imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
-                  secondaryImageCacheRef.current
-                );
-                if (transformedInv.length > 0) {
-                  const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
-                  const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
-                  console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
-                  if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
-                    console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
-                    transformed = transformedInv;
-                    setRegistrationMatrix(inv);
-                    registrationMatrixRef.current = inv;
-                  } else {
-                    console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
+              const tryMatrix = (m: number[]) => computeTransformedMRIPositions(
+                sortedImages,
+                m,
+                imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+                imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+                secondaryImageCacheRef.current
+              );
+              const checkOverlapAndAdopt = (cand: {mat: number[]; tag: string}) => {
+                const tr = tryMatrix(cand.mat);
+                if (tr.length > 0) {
+                  const a = Math.min(...tr.map(t => t.zInCT));
+                  const b = Math.max(...tr.map(t => t.zInCT));
+                  console.log(`🔎 Z-range (${cand.tag}): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${a.toFixed(1)}, ${b.toFixed(1)}]`);
+                  if (overlap(ctZMin, ctZMax, a, b, 5)) {
+                    console.log(`✅ ${cand.tag} matrix provides valid Z overlap. Using it.`);
+                    transformed = tr;
+                    setRegistrationMatrix(cand.mat);
+                    registrationMatrixRef.current = cand.mat;
+                    return true;
                   }
+                }
+                return false;
+              };
+
+              const inv = invertMatrix4x4(registrationMatrix);
+              if (inv && checkOverlapAndAdopt({ mat: inv, tag: 'inverted' })) {
+                // adopted
+              } else {
+                const trn = transposeMatrix4x4(registrationMatrix);
+                if (checkOverlapAndAdopt({ mat: trn, tag: 'transposed' })) {
+                  // adopted
+                } else if (inv) {
+                  const invTrn = transposeMatrix4x4(inv);
+                  checkOverlapAndAdopt({ mat: invTrn, tag: 'inverted+transposed' });
                 }
               }
             } else {
               console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+            }
+          }
+
+          // Z-offset alignment like above path
+          if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
+            const ctZs: number[] = [];
+            const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+            const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+            const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+            if (iop.length >= 6 && origin.length >= 3) {
+              const r = [iop[0], iop[1], iop[2]]; const c = [iop[3], iop[4], iop[5]];
+              const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
+              const nlen = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+              for (const img of images) {
+                const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+                if (p.length >= 3) { const dx = p[0]-origin[0], dy=p[1]-origin[1], dz=p[2]-origin[2]; ctZs.push(dx*nn[0] + dy*nn[1] + dz*nn[2]); }
+              }
+              ctZs.sort((a,b)=>a-b);
+            }
+            if (ctZs.length > 1) {
+              const nearest = (val: number) => {
+                let lo=0, hi=ctZs.length-1, best=ctZs[0];
+                while (lo<=hi) { const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val) < Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1; }
+                return best;
+              };
+              const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
+              if (diffs.length) {
+                const sorted = diffs.slice().sort((a,b)=>a-b);
+                const median = sorted[Math.floor(sorted.length/2)];
+                if (Math.abs(median) > 0.5) {
+                  console.log(`⚙️ Applying Z-offset correction: ${median.toFixed(2)}mm`);
+                  transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
+                }
+              }
             }
           }
 
@@ -4099,8 +4126,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const canvas = canvasRef.current;
     if (!canvas) return;
     
+    // Project current CT slice Z into same CT-relative coordinate as transformed MRI
+    let ctSliceZProjected = ctSliceZ;
+    try {
+      const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+      const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+      const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+      const curPos = toNum(primaryImage?.imagePosition || primaryImage?.imageMetadata?.imagePosition);
+      if (baseIOP.length >= 6 && basePos.length >= 3 && curPos.length >= 3) {
+        const r = [baseIOP[0], baseIOP[1], baseIOP[2]];
+        const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
+        const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
+        const nl = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nl, n[1]/nl, n[2]/nl];
+        const dx = curPos[0] - basePos[0];
+        const dy = curPos[1] - basePos[1];
+        const dz = curPos[2] - basePos[2];
+        ctSliceZProjected = dx*nn[0] + dy*nn[1] + dz*nn[2];
+      }
+    } catch {}
+
     console.log('🚀 About to call renderFusionOverlay with:', {
-      ctSliceZ,
+      ctSliceZ: ctSliceZProjected,
       fusionOpacity,
       canvasSize: `${canvas.width}x${canvas.height}`,
       actualCacheSize: actualCache.size,
@@ -4114,7 +4160,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       primaryImage,
       transformedMRIPositions.current,
       actualCache,
-      ctSliceZ,
+      ctSliceZProjected,
       fusionOpacity,
       panX,
       panY,
@@ -4174,7 +4220,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   ) => {
     if (!localRTStructures || !currentImage) return;
 
-    // FIXED: Get current slice position from actual DICOM metadata
+    // FIXED: Get current slice position from actual DICOM metadata with fallbacks
     let currentSlicePosition: number = currentIndex + 1; // Default fallback
 
     // Priority 1: Use parsed slice location from DICOM (check for null/undefined)

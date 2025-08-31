@@ -849,6 +849,34 @@ export function SeriesSelector({
                                           )}
                                         </div>
                                       </div>
+                                      {/* RT Structure Series that reference this MRI */}
+                                      {rtSeries && rtSeries.length > 0 && (
+                                        <div className="mt-2 space-y-1 border-l-2 border-green-500/30 pl-3">
+                                          {rtSeries
+                                            .filter((rtS: any) => rtS.referencedSeriesId === mrS.id)
+                                            .map((rtS: any) => (
+                                              <Button
+                                                key={rtS.id}
+                                                variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
+                                                className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                                                  selectedRTSeries?.id === rtS.id 
+                                                    ? 'bg-green-600 text-white border-green-500' 
+                                                    : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
+                                                } border rounded-lg`}
+                                                onClick={() => handleRTSeriesSelect(rtS)}
+                                              >
+                                                <div className="flex items-center space-x-2">
+                                                  <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
+                                                    RT
+                                                  </Badge>
+                                                  <span className="truncate text-xs">
+                                                    {rtS.seriesDescription || 'Structure Set'}
+                                                  </span>
+                                                </div>
+                                              </Button>
+                                            ))}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -1515,7 +1543,7 @@ export function SeriesSelector({
                                         }}
                                         className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded-lg"
                                       >
-                                        {groupStructures.every(structure => 
+                                        {groupStructures.every((structure: any) => 
                                           structureVisibility.get(structure.roiNumber) ?? true
                                         ) ? (
                                           <Eye className="w-3 h-3 text-blue-400" />
@@ -1630,7 +1658,7 @@ export function SeriesSelector({
                                         }}
                                         className="p-0.5 h-5 w-5 hover:bg-gray-700 rounded"
                                       >
-                                        {groupStructures.every(structure => 
+                                        {groupStructures.every((structure: any) => 
                                           structureVisibility.get(structure.roiNumber) ?? true
                                         ) ? (
                                           <Eye className="w-3 h-3 text-blue-400" />

@@ -28,6 +28,10 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
   },
+  worker: {
+    // Ensure workers are built as ESM to support code-splitting
+    format: 'es',
+  },
   server: {
     fs: {
       strict: true,
