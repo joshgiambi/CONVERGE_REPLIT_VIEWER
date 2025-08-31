@@ -2069,7 +2069,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const { interpolateBetweenContoursSDTMulti } = await import('@/lib/sdt-interpolation');
               pts = interpolateBetweenContoursSDTMulti(
                 listA, zA, listB, zB, z,
-                { gridSpacingMm: 0.25, paddingMm: 3, adaptiveMinCells: 180, blend: 'smoothmin', closingMm: 0.3 }
+                { gridSpacingMm: 0.25, paddingMm: 3, adaptiveMinCells: 180, pivotPiecewise: true, pivotMode: 'euclidean', closingMm: 0.3 }
               );
             } catch {}
             if (!pts || pts.length < 9) {

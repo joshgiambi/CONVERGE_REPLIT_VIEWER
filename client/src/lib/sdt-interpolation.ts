@@ -299,7 +299,7 @@ export function interpolateBetweenContoursSDTMulti(
   contoursA: Array<{ points: number[] }>, z1: number,
   contoursB: Array<{ points: number[] }>, z2: number,
   targetZ: number,
-  options?: { gridSpacingMm?: number; paddingMm?: number; adaptiveMinCells?: number }
+  options?: { gridSpacingMm?: number; paddingMm?: number; adaptiveMinCells?: number; blend?: 'linear'|'smoothmin'; closingMm?: number; pivotPiecewise?: boolean; pivotMode?: 'euclidean'|'l1'; }
 ): number[] {
   const t = (targetZ - z1) / (z2 - z1);
   if (!(t > 0 && t < 1)) return [];
@@ -366,53 +366,112 @@ export function interpolateBetweenContoursSDTMulti(
     sdtB[i] = (Math.sqrt(dOutB[i]) - Math.sqrt(dInB[i])) * spacing;
   }
 
-  // Blend fields (linear or smooth-min)
-  const field = new Float32Array(width * height);
-  let minV = Infinity, maxV = -Infinity;
-  const blendMode = (options as any)?.blend as ('linear'|'smoothmin') | undefined;
-  if (blendMode === 'smoothmin') {
-    const alpha = Math.max(0.1, spacing * 2);
-    for (let i = 0; i < width * height; i++) {
-      const v = -alpha * Math.log((1 - t) * Math.exp(-sdtA[i] / alpha) + t * Math.exp(-sdtB[i] / alpha));
-      field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v;
+  // Optional pivot + piecewise SDT: build a mid-slice pivot mask via simple cone-union and area-match, then blend A->P or P->B
+  const blendMode = options?.blend;
+  const usePivot = !!options?.pivotPiecewise;
+  const closingMm = options?.closingMm;
+  let bin = new Uint8Array(width * height);
+  if (usePivot) {
+    // Area of A and B
+    let areaA = 0, areaB = 0; for (let i = 0; i < width * height; i++) { if (maskA[i]) areaA++; if (maskB[i]) areaB++; }
+    // Build pivot via Euclidean cone-union at t=0.5 with area match
+    const dzA = Math.abs((z1 + z2) / 2 - z1); // = |z2-z1|/2
+    const dzB = Math.abs(z2 - (z1 + z2) / 2);
+    let klo = 0, khi = Math.max(mmW, mmH) * 2;
+    const tmp = new Uint8Array(width * height);
+    const tmp2 = new Uint8Array(width * height);
+    const applyClosing = (src: Uint8Array) => {
+      if (!closingMm || closingMm <= 0) return src;
+      const rPx = Math.max(1, Math.round(closingMm / spacing));
+      // dilate
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let on = 0; for (let dy=-rPx; dy<=rPx && !on; dy++){ const yy=y+dy; if(yy<0||yy>=height) continue; for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width) continue; if(src[yy*width+xx]){ on=1; break; } } }
+          tmp2[y*width+x]=on;
+        }
+      }
+      // erode back into src
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let keep = 1; for (let dy=-rPx; dy<=rPx && keep; dy++){ const yy=y+dy; if(yy<0||yy>=height){ keep=0; break;} for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width){ keep=0; break;} if(!tmp2[yy*width+xx]){ keep=0; break;} } }
+          src[y*width+x]= keep?1:0;
+        }
+      }
+      return src;
+    };
+    for (let it = 0; it < 24; it++) {
+      const k = (klo + khi) / 2;
+      const rA = k * dzA, rB = k * dzB;
+      // Euclidean cone-union using SDTs: inside if sdtA>=rA or sdtB>=rB
+      let cnt = 0;
+      for (let i = 0; i < width * height; i++) { const inside = (sdtA[i] - rA) >= 0 || (sdtB[i] - rB) >= 0; tmp[i] = inside ? 1 : 0; if (inside) cnt++; }
+      const src = applyClosing(tmp.slice());
+      let cnt2 = 0; for (let i = 0; i < width * height; i++) if (src[i]) cnt2++;
+      const targetMid = 0.5 * (areaA + areaB);
+      if (cnt2 > targetMid) khi = k; else klo = k;
+    }
+    // finalize pivot
+    const k = (klo + khi) / 2; const rA = k * dzA, rB = k * dzB;
+    const pivot = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) pivot[i] = ((sdtA[i] - rA) >= 0 || (sdtB[i] - rB) >= 0) ? 1 : 0;
+    applyClosing(pivot);
+    // SDT of pivot
+    const fInP = new Float32Array(width * height); const fOutP = new Float32Array(width * height);
+    for (let i = 0; i < width * height; i++) { fInP[i] = pivot[i] ? 0 : INF; fOutP[i] = pivot[i] ? INF : 0; }
+    const dInP = edt2d(fInP, width, height); const dOutP = edt2d(fOutP, width, height);
+    const sdtP = new Float32Array(width * height);
+    for (let i = 0; i < width * height; i++) sdtP[i] = (Math.sqrt(dOutP[i]) - Math.sqrt(dInP[i])) * spacing;
+    // Blend piecewise to match area between respective endpoints
+    // Compute areas for targets
+    let areaP = 0; for (let i = 0; i < width * height; i++) if (pivot[i]) areaP++;
+    let t2 = t;
+    let targetCount = 0;
+    const field = new Float32Array(width * height);
+    let minV = Infinity, maxV = -Infinity;
+    if (t <= 0.5) {
+      const u = t * 2; // 0..1
+      targetCount = (1 - u) * areaA + u * areaP;
+      for (let i = 0; i < width * height; i++) { const v = (1 - u) * sdtA[i] + u * sdtP[i]; field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    } else {
+      const u = (t - 0.5) * 2; // 0..1
+      targetCount = (1 - u) * areaP + u * areaB;
+      for (let i = 0; i < width * height; i++) { const v = (1 - u) * sdtP[i] + u * sdtB[i]; field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    }
+    // Threshold by area match
+    let lo = minV, hi = maxV;
+    for (let it = 0; it < 24; it++) { const mid = (lo + hi) / 2; let cnt = 0; for (let i = 0; i < width * height; i++) if (field[i] - mid >= 0) cnt++; if (cnt > targetCount) lo = mid; else hi = mid; }
+    const tau = (lo + hi) / 2;
+    bin = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) bin[i] = (field[i] - tau) >= 0 ? 1 : 0;
+    if (closingMm && closingMm > 0) {
+      const rPx = Math.max(1, Math.round(closingMm / spacing));
+      const dil = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { let on = 0; for (let dy=-rPx; dy<=rPx && !on; dy++){ const yy=y+dy; if(yy<0||yy>=height) continue; for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width) continue; if(bin[yy*width+xx]){ on=1; break; } } } dil[y*width+x]=on; } }
+      for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { let keep = 1; for (let dy=-rPx; dy<=rPx && keep; dy++){ const yy=y+dy; if(yy<0||yy>=height){ keep=0; break;} for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width){ keep=0; break;} if(!dil[yy*width+xx]){ keep=0; break;} } } bin[y*width+x]= keep?1:0; } }
     }
   } else {
-    for (let i = 0; i < width * height; i++) { const v = (1 - t) * sdtA[i] + t * sdtB[i]; field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v; }
-  }
-  // Area target
-  let areaA = 0, areaB = 0; for (let i = 0; i < width * height; i++) { if (maskA[i]) areaA++; if (maskB[i]) areaB++; }
-  const targetCount = (1 - t) * areaA + t * areaB;
-  let lo = minV, hi = maxV; const iters = 24;
-  for (let it = 0; it < iters; it++) {
-    const mid = (lo + hi) / 2; let cnt = 0; for (let i = 0; i < width * height; i++) if (field[i] - mid >= 0) cnt++;
-    if (cnt > targetCount) lo = mid; else hi = mid;
-  }
-  const tau = (lo + hi) / 2;
-  // Binary mask and optional morphological closing
-  const bin = new Uint8Array(width * height);
-  for (let i = 0; i < width * height; i++) bin[i] = (field[i] - tau) >= 0 ? 1 : 0;
-  const closingMm = (options as any)?.closingMm as number | undefined;
-  if (closingMm && closingMm > 0) {
-    const rPx = Math.max(1, Math.round(closingMm / spacing));
-    const dil = new Uint8Array(width * height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let on = 0;
-        for (let dy = -rPx; dy <= rPx && !on; dy++) {
-          const yy = y + dy; if (yy < 0 || yy >= height) continue;
-          for (let dx = -rPx; dx <= rPx; dx++) { const xx = x + dx; if (xx < 0 || xx >= width) continue; if (bin[yy * width + xx]) { on = 1; break; } }
-        }
-        dil[y * width + x] = on;
-      }
+    // Standard SDT blend (linear or smooth-min), then area-match
+    const field = new Float32Array(width * height);
+    let minV = Infinity, maxV = -Infinity;
+    if (blendMode === 'smoothmin') {
+      const alpha = Math.max(0.1, spacing * 2);
+      for (let i = 0; i < width * height; i++) { const v = -alpha * Math.log((1 - t) * Math.exp(-sdtA[i] / alpha) + t * Math.exp(-sdtB[i] / alpha)); field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    } else {
+      for (let i = 0; i < width * height; i++) { const v = (1 - t) * sdtA[i] + t * sdtB[i]; field[i] = v; if (v < minV) minV = v; if (v > maxV) maxV = v; }
     }
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let keep = 1;
-        for (let dy = -rPx; dy <= rPx && keep; dy++) { const yy = y + dy; if (yy < 0 || yy >= height) { keep = 0; break; }
-          for (let dx = -rPx; dx <= rPx; dx++) { const xx = x + dx; if (xx < 0 || xx >= width) { keep = 0; break; } if (!dil[yy * width + xx]) { keep = 0; break; } }
-        }
-        bin[y * width + x] = keep ? 1 : 0;
-      }
+    // Area target
+    let areaA = 0, areaB = 0; for (let i = 0; i < width * height; i++) { if (maskA[i]) areaA++; if (maskB[i]) areaB++; }
+    const targetCount = (1 - t) * areaA + t * areaB;
+    let lo = minV, hi = maxV; const iters = 24;
+    for (let it = 0; it < iters; it++) { const mid = (lo + hi) / 2; let cnt = 0; for (let i = 0; i < width * height; i++) if (field[i] - mid >= 0) cnt++; if (cnt > targetCount) lo = mid; else hi = mid; }
+    const tau = (lo + hi) / 2;
+    bin = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) bin[i] = (field[i] - tau) >= 0 ? 1 : 0;
+    if (closingMm && closingMm > 0) {
+      const rPx = Math.max(1, Math.round(closingMm / spacing));
+      const dil = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { let on = 0; for (let dy=-rPx; dy<=rPx && !on; dy++){ const yy=y+dy; if(yy<0||yy>=height) continue; for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width) continue; if(bin[yy*width+xx]){ on=1; break; } } } dil[y*width+x]=on; } }
+      for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { let keep = 1; for (let dy=-rPx; dy<=rPx && keep; dy++){ const yy=y+dy; if(yy<0||yy>=height){ keep=0; break;} for(let dx=-rPx; dx<=rPx; dx++){ const xx=x+dx; if(xx<0||xx>=width){ keep=0; break;} if(!dil[yy*width+xx]){ keep=0; break;} } } bin[y*width+x]= keep?1:0; } }
     }
   }
   const fieldBin = new Float32Array(width * height); for (let i = 0; i < width * height; i++) fieldBin[i] = (bin[i] ? 1 : 0) - 0.5;
