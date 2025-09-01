@@ -64,3 +64,26 @@ The troublesome slices appear to be orthogonal band crossings. Our current 2D fi
 - Tune 3D mode parameters (k and metric) to match Eclipse diamonds.
 - Confirm whether Eclipse uses an implicit 3D L1 union behavior in crossings.
 - Validate on additional datasets once TARGET1 parity is achieved.
+
+---
+
+## 2025-09-01 – MRI fusion geometry fix and backend backfill
+
+Problem: MRI overlay appeared ~10 mm too low when per-slice MRI geometry (IPP/IOP) was missing. Client had a synthetic index-based Z fallback, causing mismatched slice selection.
+
+Fix:
+- Backend now backfills MRI `ImagePositionPatient` (0020,0032), `ImageOrientationPatient` (0020,0037), and `PixelSpacing` (0028,0030) from on-disk DICOM in `/api/series/:id/images` if missing, and persists via storage.
+- Registration endpoint `/api/registrations/:studyId` guarantees a flat 16-element MRI→CT matrix and corrects direction if necessary.
+- Client fusion enforces strict geometry: excludes MRI slices without IPP (no synthetic Z), and navigation prefers IPP Z when available.
+
+Key edits:
+- `server/routes.ts`: backfill geometry in `/api/series/:id/images`; verify/transpose matrix in `/api/registrations/:studyId` when ambiguous.
+- `server/storage.ts`: added `updateImageGeometry` helper to persist IPP/IOP/pixel spacing/metadata.
+- `client/src/lib/fusion-utils.ts`: require IPP for fusion positioning.
+- `client/src/components/dicom/working-viewer.tsx`: slice navigation prefers IPP Z.
+
+Impact:
+- Eliminates synthetic Z-induced misalignment; MRI overlay aligns with CT when MRI IPP/IOP are present. Tested on `LIMBIC_57`.
+
+Operational note:
+- If some MR slices truly lack geometry in the source DICOM, they are excluded from fusion. Consider re-import/backfill or show a warning banner in the UI.
