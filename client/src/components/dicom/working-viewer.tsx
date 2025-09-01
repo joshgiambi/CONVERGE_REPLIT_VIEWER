@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4 } from "@/lib/fusion-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4, findNearestMRIIndexByPlane } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -2223,9 +2223,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       images.forEach((image, index) => {
         // Get Z position from image metadata
-        let imageZ = index; // fallback to index
+        let imageZ = index; // fallback to index (synthetic)
         
-        if (image.parsedSliceLocation !== undefined && image.parsedSliceLocation !== null) {
+        if (image.imageMetadata?.imagePosition || image.imagePosition) {
+          const pos = Array.isArray(image.imagePosition)
+            ? image.imagePosition
+            : (typeof image.imagePosition === 'string' ? image.imagePosition.split("\\").map(Number) : (Array.isArray(image.imageMetadata?.imagePosition) ? image.imageMetadata.imagePosition : String(image.imageMetadata?.imagePosition||'').split("\\").map(Number)));
+          if (pos && pos.length >= 3 && isFinite(pos[2])) imageZ = pos[2];
+        } else if (image.parsedSliceLocation !== undefined && image.parsedSliceLocation !== null) {
           imageZ = image.parsedSliceLocation;
         } else if (image.parsedZPosition !== undefined && image.parsedZPosition !== null) {
           imageZ = image.parsedZPosition;
@@ -2450,16 +2455,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
 
         // Compute with provided matrix
+        // Always reference CT series origin/orientation from the first CT slice
+        // to keep CT Z-axis consistent across precomputation and per-slice matching
+        const ctSeriesIOP = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
+        const ctSeriesIPP = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
         let transformed = computeTransformedMRIPositions(
           secondaryImages,
           registrationMatrix,
-          imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-          imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+          ctSeriesIOP,
+          ctSeriesIPP,
           secondaryImageCacheRef.current
         );
 
-        // Strict mode: do not auto-modify the registration matrix or apply Z-offset heuristics
-        // If there is no valid Z-overlap, the registration is considered invalid and should be re-parsed
+        // Validate Z-overlap; if present, align any constant Z bias using median offset
         if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
           const zMin = Math.min(...transformed.map(t => t.zInCT));
           const zMax = Math.max(...transformed.map(t => t.zInCT));
@@ -2467,6 +2475,37 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
             console.error('❌ Registration matrix yields no Z-overlap. Aborting fusion until a valid REG is provided.');
             transformed = [];
+          } else {
+            // Compute median Z offset between MRI planes and nearest CT planes and correct it
+            const ctZs: number[] = [];
+            const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+            const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+            const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+            if (iop2.length >= 6 && origin2.length >= 3) {
+              const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
+              const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
+              const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
+              for (const img of images) {
+                const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
+                if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
+              }
+              ctZs.sort((a,b)=>a-b);
+            }
+            if (ctZs.length > 1) {
+              const nearest = (val: number) => {
+                let lo=0, hi=ctZs.length-1, best=ctZs[0];
+                while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
+                return best;
+              };
+              const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
+              if (diffs.length) {
+                const s = diffs.slice().sort((a,b)=>a-b); const median = s[Math.floor(s.length/2)];
+                if (Math.abs(median) > 0.25) {
+                  console.log(`⚙️ Applying median Z-offset correction (reg-load path): ${median.toFixed(2)}mm`);
+                  transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
+                }
+              }
+            }
           }
         }
 
@@ -2521,11 +2560,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
 
+      // Use CT series' first slice for a stable CT origin/orientation
+      const ctSeriesIOP2 = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
+      const ctSeriesIPP2 = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
       let transformed = computeTransformedMRIPositions(
         secondaryImages,
         registrationMatrix,
-        imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-        imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+        ctSeriesIOP2,
+        ctSeriesIPP2,
         secondaryImageCacheRef.current
       );
 
@@ -2540,8 +2582,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             const transformedInv = computeTransformedMRIPositions(
               secondaryImages,
               inv,
-              imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-              imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+              ctSeriesIOP2,
+              ctSeriesIPP2,
               secondaryImageCacheRef.current
             );
             if (transformedInv.length > 0) {
@@ -2560,6 +2602,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
         } else {
           console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+          // Apply median Z offset correction to remove constant bias
+          const ctZs: number[] = [];
+          const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+          const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+          const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+          if (iop2.length >= 6 && origin2.length >= 3) {
+            const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
+            const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
+            const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
+            for (const img of images) {
+              const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
+              if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
+            }
+            ctZs.sort((a,b)=>a-b);
+          }
+          if (ctZs.length > 1) {
+            const nearest = (val: number) => {
+              let lo=0, hi=ctZs.length-1, best=ctZs[0];
+              while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
+              return best;
+            };
+            const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
+            if (diffs.length) {
+              const s = diffs.slice().sort((a,b)=>a-b); const median = s[Math.floor(s.length/2)];
+              if (Math.abs(median) > 0.25) {
+                console.log(`⚙️ Applying median Z-offset correction (precompute path): ${median.toFixed(2)}mm`);
+                transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
+              }
+            }
+          }
         }
       }
       transformedMRIPositions.current = transformed;
@@ -2619,24 +2691,50 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         const imageList = await response.json();
         
-        // Filter out images with null or invalid slice locations
-        const validImages = imageList.filter((img: any) => {
-          const sliceLoc = parseFloat(img.sliceLocation);
-          return !isNaN(sliceLoc) && sliceLoc !== null;
-        });
-        
-        if (validImages.length === 0) {
-          console.error("No MRI images with valid slice locations found");
-          setSecondaryImages([]);
-          return;
+        // Robust ordering using ImagePositionPatient projected along MRI series normal
+        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        // Derive a base origin and normal from the first image that has orientation + position
+        let baseOrigin: number[] | null = null;
+        let normal: number[] | null = null;
+        for (const img of imageList) {
+          const iop = toNum(img.imageOrientation || img.imageMetadata?.imageOrientation);
+          const ipp = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+          if (iop.length >= 6 && ipp.length >= 3) {
+            const r = [iop[0], iop[1], iop[2]];
+            const c = [iop[3], iop[4], iop[5]];
+            const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
+            const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
+            normal = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+            baseOrigin = ipp;
+            break;
+          }
         }
-        
-        const sortedImages = validImages.sort((a: any, b: any) => {
-          // Sort by slice location
-          const aSliceLoc = parseFloat(a.sliceLocation);
-          const bSliceLoc = parseFloat(b.sliceLocation);
-          return aSliceLoc - bSliceLoc;
-        });
+
+        // Filter to images that have a valid ImagePositionPatient; skip others
+        const withPositions = imageList
+          .map((img: any) => {
+            const ipp = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+            return { img, ipp };
+          })
+          .filter(({ ipp }: any) => ipp.length >= 3 && ipp.every((v: number) => isFinite(v)));
+
+        let sortedImages: any[];
+        if (withPositions.length > 0 && normal && baseOrigin) {
+          // Project each image position onto the series normal and sort by that scalar
+          sortedImages = withPositions
+            .map(({ img, ipp }: any) => {
+              const dx = ipp[0] - baseOrigin![0];
+              const dy = ipp[1] - baseOrigin![1];
+              const dz = ipp[2] - baseOrigin![2];
+              const proj = dx*normal![0] + dy*normal![1] + dz*normal![2];
+              return { img, proj };
+            })
+            .sort((a: any, b: any) => a.proj - b.proj)
+            .map((o: any) => o.img);
+        } else {
+          console.warn("Falling back to instanceNumber ordering for MRI (positions/orientation not available yet)");
+          sortedImages = [...imageList].sort((a: any, b: any) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
+        }
 
         setSecondaryImages(sortedImages);
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
@@ -2673,7 +2771,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const imageData = await parseDicomImage(arrayBuffer);
               
               if (imageData) {
-                newCache.set(image.sopInstanceUID, imageData);
+                // Attach essential spatial metadata from DB for fusion geometry
+                const meta = {
+                  imagePosition: image.imagePosition || image.imageMetadata?.imagePosition || null,
+                  imageOrientation: image.imageOrientation || image.imageMetadata?.imageOrientation || null,
+                  pixelSpacing: image.pixelSpacing || image.imageMetadata?.pixelSpacing || null,
+                };
+                newCache.set(image.sopInstanceUID, { ...imageData, metadata: meta });
                 if (index < 3) {
                   console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
                 }
@@ -2733,11 +2837,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
 
           // Compute transformed MRI positions and store in ref
+          // Always use CT series reference (first slice) here as well
           let transformed = computeTransformedMRIPositions(
             sortedImages,
             registrationMatrix,
-            imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-            imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
             secondaryImageCacheRef.current
           );
 
@@ -2750,8 +2855,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const tryMatrix = (m: number[]) => computeTransformedMRIPositions(
                 sortedImages,
                 m,
-                imageMetadata?.imageOrientation || images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-                imageMetadata?.imagePosition || images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+                images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+                images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
                 secondaryImageCacheRef.current
               );
               const checkOverlapAndAdopt = (cand: {mat: number[]; tag: string}) => {
@@ -4153,6 +4258,39 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       transformedMRILength: transformedMRIPositions.current?.length
     });
     
+    // Ensure nearest MRI slice is available in cache; if not, lazy-load it
+    try {
+      if (transformedMRIPositions.current && transformedMRIPositions.current.length > 0) {
+        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+        const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+        let ctNorm: number[] | null = null;
+        if (baseIOP.length >= 6) {
+          const r = [baseIOP[0], baseIOP[1], baseIOP[2]]; const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
+          const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]]; const nl = Math.hypot(n[0],n[1],n[2])||1; ctNorm = [n[0]/nl,n[1]/nl,n[2]/nl];
+        }
+        const nearestIdx = findNearestMRIIndexByPlane(ctSliceZProjected, ctNorm, (basePos.length>=3?basePos:null), transformedMRIPositions.current as any);
+        if (nearestIdx !== null && nearestIdx >= 0) {
+          const uid = transformedMRIPositions.current[nearestIdx]?.image?.sopInstanceUID;
+          if (uid && !secondaryImageCacheRef.current.has(uid)) {
+            console.log('🔄 Lazy-loading nearest MRI slice into cache:', uid);
+            try {
+              const resp = await fetch(`/api/images/${uid}`);
+              if (resp.ok) {
+                const buf = await resp.arrayBuffer();
+                const imgData = await parseDicomImage(buf);
+                if (imgData) {
+                  secondaryImageCacheRef.current.set(uid, imgData);
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to lazy-load nearest MRI slice:', e);
+            }
+          }
+        }
+      }
+    } catch {}
+
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
     // DO NOT apply transform here - fusion-utils handles its own transforms
     await renderFusionOverlay(
@@ -4167,7 +4305,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width,
       canvas.height,
       registrationMatrix,
-      ctTransform.current
+      ctTransform.current,
+      // Pass the CT series origin to maintain the same reference as ctSliceZProjected
+      (images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
+        ? (Array.isArray(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition)
+            ? (images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition).map((n: any)=>Number(n))
+            : String(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition).split('\\').map(Number)
+          )
+        : null),
+      // Pass CT series IOP as a stable fallback
+      (images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || null)
     );
     
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);

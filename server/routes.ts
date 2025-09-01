@@ -2169,6 +2169,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/series/:id/images", async (req, res) => {
     try {
       const images = await storage.getImagesBySeriesId(parseInt(req.params.id));
+      // Backfill missing MRI geometry (IPP/IOP/PixelSpacing) from on-disk DICOM if needed
+      const backfilled: any[] = [];
+      for (const img of images) {
+        const needsIPP = !img.imagePosition || (Array.isArray(img.imagePosition) && img.imagePosition.length < 3);
+        const needsIOP = !img.imageOrientation || (Array.isArray(img.imageOrientation) && img.imageOrientation.length < 6);
+        const needsPS = !img.pixelSpacing || (Array.isArray(img.pixelSpacing) && img.pixelSpacing.length < 2);
+        const canRead = typeof img.filePath === 'string' && fs.existsSync(img.filePath);
+        if ((needsIPP || needsIOP || needsPS) && canRead) {
+          try {
+            const data = fs.readFileSync(img.filePath);
+            const ds = dicomParser.parseDicom(new Uint8Array(data));
+            const toArray = (val: string | undefined) => (val ? val.split('\\').map(s => parseFloat(s)) : undefined);
+            const ipp = toArray(ds.string?.('x00200032'));
+            const iop = toArray(ds.string?.('x00200037'));
+            const ps = toArray(ds.string?.('x00280030'));
+            const newMeta: any = (typeof img.metadata === 'string' ? (() => { try { return JSON.parse(img.metadata); } catch { return {}; } })() : (img.metadata || {}));
+            if (ipp && ipp.length >= 3) newMeta.imagePositionPatient = ipp;
+            if (iop && iop.length >= 6) newMeta.imageOrientationPatient = iop;
+            if (ps && ps.length >= 2) newMeta.pixelSpacing = ps;
+            await storage.updateImageGeometry(img.id, {
+              imagePosition: (ipp && ipp.length >= 3) ? `${ipp[0]}\\${ipp[1]}\\${ipp[2]}` : img.imagePosition || null,
+              imageOrientation: (iop && iop.length >= 6) ? `${iop[0]}\\${iop[1]}\\${iop[2]}\\${iop[3]}\\${iop[4]}\\${iop[5]}` : img.imageOrientation || null,
+              pixelSpacing: (ps && ps.length >= 2) ? `${ps[0]}\\${ps[1]}` : img.pixelSpacing || null,
+              metadata: newMeta,
+            });
+            backfilled.push(img.id);
+          } catch (e) {
+            // continue without failing the request
+          }
+        }
+      }
       res.json(images);
     } catch (error) {
       console.error('Error fetching images:', error);
@@ -2511,10 +2542,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
         }
         
-        res.json({
-          transformationMatrix: matrix,
-          matrixType: registration.matrixType || 'RIGID'
-        });
+        // Ensure matrix is MRI→CT. If we can infer MR/CT sample positions, verify direction.
+        try {
+          const seriesList = await storage.getSeriesByStudyId(studyId);
+          const ctSeries = seriesList.find((s: any) => s.modality === 'CT');
+          const mrSeries = seriesList.find((s: any) => s.modality === 'MR');
+          if (ctSeries && mrSeries) {
+            const [ctImg] = await storage.getImagesBySeriesId(ctSeries.id);
+            const [mrImg] = await storage.getImagesBySeriesId(mrSeries.id);
+            const parseArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+            const mrPos = parseArr((mrImg as any).imagePosition ?? (mrImg as any).metadata?.imagePositionPatient);
+            const ctPos = parseArr((ctImg as any).imagePosition ?? (ctImg as any).metadata?.imagePositionPatient);
+            const mat = matrix as number[];
+            if (mrPos.length >= 3 && ctPos.length >= 3 && Array.isArray(mat) && mat.length === 16) {
+              const map = (m: number[], p: number[]) => [
+                m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
+                m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
+                m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11],
+              ];
+              const mrToCT = map(mat, mrPos);
+              const distDirect = Math.hypot(mrToCT[0]-ctPos[0], mrToCT[1]-ctPos[1], mrToCT[2]-ctPos[2]);
+              // Try inverse direction
+              const inv = [
+                mat[0],mat[4],mat[8],mat[12],
+                mat[1],mat[5],mat[9],mat[13],
+                mat[2],mat[6],mat[10],mat[14],
+                mat[3],mat[7],mat[11],mat[15]
+              ]; // transpose as quick heuristic if stored column-major
+              const mrToCT_invGuess = map(inv, mrPos);
+              const distInv = Math.hypot(mrToCT_invGuess[0]-ctPos[0], mrToCT_invGuess[1]-ctPos[1], mrToCT_invGuess[2]-ctPos[2]);
+              if (distInv < distDirect) {
+                matrix = inv; // use transposed if it matches better
+              }
+            }
+          }
+        } catch {}
+        res.json({ transformationMatrix: matrix, matrixType: registration.matrixType || 'RIGID' });
         return;
       }
       

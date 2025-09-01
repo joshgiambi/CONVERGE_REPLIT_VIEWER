@@ -67,7 +67,24 @@ export function computeTransformedMRIPositions(
     ctOrigin = null;
   }
 
-  const transformed = secondaryImages.map(img => {
+  // Pre-extract 3x3 rotation (or linear) part for transforming MRI direction cosines
+  const R = [
+    [M[0][0], M[0][1], M[0][2]],
+    [M[1][0], M[1][1], M[1][2]],
+    [M[2][0], M[2][1], M[2][2]]
+  ];
+
+  const dot3 = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross3 = (a: number[], b: number[]) => [
+    a[1]*b[2] - a[2]*b[1],
+    a[2]*b[0] - a[0]*b[2],
+    a[0]*b[1] - a[1]*b[0]
+  ];
+  const norm3 = (v: number[]) => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l];
+  };
+
+  let transformed = secondaryImages.map(img => {
     // Parse imagePosition into [x,y,z] with null safety
     let pos: number[] | null = null;
     try {
@@ -89,22 +106,105 @@ export function computeTransformedMRIPositions(
     } catch {}
 
     if (!pos || pos.length < 3 || !isFinite(pos[0]) || !isFinite(pos[1]) || !isFinite(pos[2])) {
-      // Fallback for null/undefined imagePosition - use slice index as Z position
-      console.warn('Missing imagePosition for image, using fallback position');
-      pos = [0, 0, secondaryImages.indexOf(img) * 1.0]; // 1mm spacing fallback
+      // STRICT: do not use synthetic Z; exclude this slice from fusion
+      console.warn('Missing ImagePositionPatient for MRI image — excluded from fusion');
+      return null as any;
     }
     const hom = [pos[0], pos[1], pos[2], 1];
-    const [xInCT, yInCT, zInCTRaw] = multiplyMatrixVector(M, hom).slice(0, 3);
-    let zInCT = zInCTRaw;
-    // If CT normal and origin are known, project onto CT slice normal to derive consistent z
+    const [xInCT, yInCT, zInCTPoint] = multiplyMatrixVector(M, hom).slice(0, 3);
+
+    let zInCT = zInCTPoint;
+    let planeInfo: { nCT: number[]; denom: number; cMRI: number } | undefined = undefined;
     if (ctNormal && ctOrigin) {
-      const dx = xInCT - ctOrigin[0];
-      const dy = yInCT - ctOrigin[1];
-      const dz = zInCTRaw - ctOrigin[2];
-      zInCT = dx * ctNormal[0] + dy * ctNormal[1] + dz * ctNormal[2];
+      // Geometry-driven plane distance: compute MRI slice plane normal in CT coords if possible
+      let mriRow: number[] | null = null;
+      let mriCol: number[] | null = null;
+      try {
+        let iopVal: any = (img.imageOrientation ?? img.imageMetadata?.imageOrientation);
+        if ((!iopVal) && secondaryCache && img.sopInstanceUID) {
+          iopVal = secondaryCache.get(img.sopInstanceUID)?.metadata?.imageOrientation;
+        }
+        const iopArr: number[] = Array.isArray(iopVal)
+          ? (iopVal as number[]).map(Number)
+          : (typeof iopVal === 'string' ? (iopVal as string).split('\\').map(Number) : []);
+        if (iopArr.length >= 6 && iopArr.every(v => isFinite(v))) {
+          mriRow = [iopArr[0], iopArr[1], iopArr[2]];
+          mriCol = [iopArr[3], iopArr[4], iopArr[5]];
+        }
+      } catch {}
+
+      if (mriRow && mriCol) {
+        // Transform MRI row/col direction cosines into CT space using R
+        const rowCT = [
+          R[0][0]*mriRow[0] + R[0][1]*mriRow[1] + R[0][2]*mriRow[2],
+          R[1][0]*mriRow[0] + R[1][1]*mriRow[1] + R[1][2]*mriRow[2],
+          R[2][0]*mriRow[0] + R[2][1]*mriRow[1] + R[2][2]*mriRow[2],
+        ];
+        const colCT = [
+          R[0][0]*mriCol[0] + R[0][1]*mriCol[1] + R[0][2]*mriCol[2],
+          R[1][0]*mriCol[0] + R[1][1]*mriCol[1] + R[1][2]*mriCol[2],
+          R[2][0]*mriCol[0] + R[2][1]*mriCol[1] + R[2][2]*mriCol[2],
+        ];
+        const nMRI_CT = norm3(cross3(rowCT, colCT));
+        const denom = dot3(nMRI_CT, ctNormal);
+        if (isFinite(denom) && Math.abs(denom) > 1e-6) {
+          // Plane equation for MRI slice in CT: nMRI_CT · X = c, with c = nMRI_CT · pMRI_CT
+          const c = dot3(nMRI_CT, [xInCT, yInCT, zInCTPoint]);
+          const c0 = dot3(nMRI_CT, ctOrigin);
+          // Signed distance along CT normal from CT origin plane to MRI plane
+          zInCT = (c - c0) / denom;
+          planeInfo = { nCT: nMRI_CT, denom, cMRI: c };
+        } else {
+          // Fallback to point-projection if planes are nearly parallel to avoid noise
+          const dx = xInCT - ctOrigin[0];
+          const dy = yInCT - ctOrigin[1];
+          const dz = zInCTPoint - ctOrigin[2];
+          zInCT = dx * ctNormal[0] + dy * ctNormal[1] + dz * ctNormal[2];
+        }
+      } else {
+        // Fallback: project MRI origin onto CT normal
+        const dx = xInCT - ctOrigin[0];
+        const dy = yInCT - ctOrigin[1];
+        const dz = zInCTPoint - ctOrigin[2];
+        zInCT = dx * ctNormal[0] + dy * ctNormal[1] + dz * ctNormal[2];
+      }
     }
-    return { xInCT, yInCT, zInCT, image: img };
+    return { xInCT, yInCT, zInCT, image: img, _plane: planeInfo, zInCTPoint } as any;
   });
+
+  // Remove any images we could not position safely
+  const before = transformed.length;
+  transformed = (transformed.filter(Boolean) as Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>);
+  if (before !== transformed.length) {
+    console.warn(`Skipped ${before - transformed.length} MRI slices without valid ImagePositionPatient during fusion prep`);
+  }
+
+  // Second pass: approximate plane normals for slices missing orientation using neighbors
+  if (ctNormal && ctOrigin && transformed.length >= 2) {
+    for (let i = 0; i < transformed.length; i++) {
+      const t: any = transformed[i];
+      if (!t._plane) {
+        const nb = transformed[i+1] || transformed[i-1];
+        if (nb) {
+          const v = [
+            (nb as any).xInCT - t.xInCT,
+            (nb as any).yInCT - t.yInCT,
+            (nb as any).zInCTPoint - t.zInCTPoint
+          ];
+          const vlen = Math.hypot(v[0], v[1], v[2]) || 1;
+          const nCT = [v[0]/vlen, v[1]/vlen, v[2]/vlen];
+          const denom = nCT[0]*ctNormal[0] + nCT[1]*ctNormal[1] + nCT[2]*ctNormal[2];
+          if (isFinite(denom) && Math.abs(denom) > 1e-6) {
+            const cMRI = nCT[0]*t.xInCT + nCT[1]*t.yInCT + nCT[2]*t.zInCTPoint;
+            const c0 = nCT[0]*ctOrigin[0] + nCT[1]*ctOrigin[1] + nCT[2]*ctOrigin[2];
+            const z = (cMRI - c0) / denom;
+            t.zInCT = z;
+            t._plane = { nCT, denom, cMRI };
+          }
+        }
+      }
+    }
+  }
 
   // Sort ascending by zInCT
   transformed.sort((a, b) => a.zInCT - b.zInCT);
@@ -230,6 +330,57 @@ export function findNearestMRIIndex(ctZ: number, transformed: Array<{xInCT: numb
 }
 
 /**
+ * Compute CT basis vectors from ImageOrientationPatient.
+ */
+function basisFromIOP(iop: number[] | undefined | null): { row: number[]; col: number[]; normal: number[] } | null {
+  if (!iop || iop.length < 6 || iop.some(v => !isFinite(v))) return null;
+  const row = [iop[0], iop[1], iop[2]];
+  const col = [iop[3], iop[4], iop[5]];
+  const nx = row[1]*col[2] - row[2]*col[1];
+  const ny = row[2]*col[0] - row[0]*col[2];
+  const nz = row[0]*col[1] - row[1]*col[0];
+  const nlen = Math.hypot(nx, ny, nz) || 1;
+  const normal = [nx/nlen, ny/nlen, nz/nlen];
+  return { row, col, normal };
+}
+
+/**
+ * Find nearest MRI index using exact plane-to-plane distance along CT normal.
+ * Falls back to zInCT if plane parameters are missing.
+ */
+export function findNearestMRIIndexByPlane(
+  ctZ: number,
+  ctNormal: number[] | null | undefined,
+  ctOrigin: number[] | null | undefined,
+  transformed: Array<{xInCT: number, yInCT: number, zInCT: number, image: any, _plane?: { nCT: number[]; denom: number; cMRI: number; }}> 
+): number | null {
+  if (!transformed.length) return null;
+  if (!ctNormal || !ctOrigin || ctNormal.length < 3 || ctOrigin.length < 3) {
+    return findNearestMRIIndex(ctZ, transformed);
+  }
+  let best = 0;
+  let bestAbs = Infinity;
+  for (let i = 0; i < transformed.length; i++) {
+    const t = transformed[i] as any;
+    let zPlane: number;
+    if (t._plane && t._plane.denom && Math.abs(t._plane.denom) > 1e-6) {
+      // Distance of MRI plane from CT origin along CT normal
+      const c0 = t._plane.nCT[0]*ctOrigin[0] + t._plane.nCT[1]*ctOrigin[1] + t._plane.nCT[2]*ctOrigin[2];
+      zPlane = (t._plane.cMRI - c0) / t._plane.denom;
+    } else {
+      // Fallback: project the transformed slice point
+      const dx = t.xInCT - ctOrigin[0];
+      const dy = t.yInCT - ctOrigin[1];
+      const dz = (t as any).zInCTPoint !== undefined ? (t as any).zInCTPoint - ctOrigin[2] : transformed[i].zInCT; // best effort
+      zPlane = dx*ctNormal[0] + dy*ctNormal[1] + dz*ctNormal[2];
+    }
+    const d = Math.abs(zPlane - ctZ);
+    if (d < bestAbs) { bestAbs = d; best = i; }
+  }
+  return best;
+}
+
+/**
  * Interpolate MRI image data for a given CT slice.
  * If CT z is closest to an MRI slice, returns that image data; otherwise linearly interpolates between neighbors.
  * @param ctZ CT slice position
@@ -240,9 +391,13 @@ export function findNearestMRIIndex(ctZ: number, transformed: Array<{xInCT: numb
 export function interpolateMRI(
   ctZ: number, 
   transformed: Array<{xInCT: number, yInCT: number, zInCT: number, image: any}>, 
-  cache: Map<string, {data: Float32Array, width: number, height: number}>
-): {data: Float32Array, width: number, height: number} | null {
-  const idx = findNearestMRIIndex(ctZ, transformed);
+  cache: Map<string, {data: Float32Array, width: number, height: number, min?: number, max?: number}>,
+  opts?: { ctNormal?: number[] | null; ctOrigin?: number[] | null; mode?: 'nearest'|'blend' }
+): {data: Float32Array, width: number, height: number, uid?: string, min?: number, max?: number} | null {
+  // Use plane-based nearest if CT geometry provided
+  const idx = (opts?.ctNormal && opts?.ctOrigin)
+    ? findNearestMRIIndexByPlane(ctZ, opts.ctNormal, opts.ctOrigin, transformed as any)
+    : findNearestMRIIndex(ctZ, transformed);
   if (idx === null) {
     console.log(`No MRI index found for CT Z=${ctZ}mm`);
     return null;
@@ -262,23 +417,28 @@ export function interpolateMRI(
   
   console.log(`✓ Found MRI data in cache: ${baseData.width}x${baseData.height}, ${baseData.data.length} pixels`);
 
+  // Fast path: nearest only (default for performance)
+  if ((opts?.mode ?? 'nearest') === 'nearest') {
+    return { ...baseData, uid: best.image.sopInstanceUID };
+  }
+
   // Determine neighbor spacing
   const prev = transformed[idx - 1];
   const next = transformed[idx + 1];
 
   // If no neighbors or CT is exactly on slice, return base
-  if (!prev || !next) return baseData;
+  if (!prev || !next) return { ...baseData, uid: best.image.sopInstanceUID };
 
   const lowerZ = prev.zInCT;
   const upperZ = next.zInCT;
-  if (upperZ === lowerZ) return baseData;
+  if (upperZ === lowerZ) return { ...baseData, uid: best.image.sopInstanceUID };
 
   // Linear weight between prev and next
   const w = (ctZ - lowerZ) / (upperZ - lowerZ);
 
   const prevData = cache.get(prev.image.sopInstanceUID);
   const nextData = cache.get(next.image.sopInstanceUID);
-  if (!prevData || !nextData) return baseData;
+  if (!prevData || !nextData) return { ...baseData, uid: best.image.sopInstanceUID };
 
   // Always blend with weight w (0→1) no matter how small - eliminates sudden jumps
   const length = baseData.data.length;
@@ -286,7 +446,10 @@ export function interpolateMRI(
   for (let i = 0; i < length; i++) {
     interp[i] = prevData.data[i] * (1 - w) + nextData.data[i] * w;
   }
-  return { data: interp, width: baseData.width, height: baseData.height };
+  // Provide conservative min/max from neighbors to avoid scanning
+  const min = Math.min(prevData.min ?? prevData.data[0], nextData.min ?? nextData.data[0]);
+  const max = Math.max(prevData.max ?? prevData.data[0], nextData.max ?? nextData.data[0]);
+  return { data: interp, width: baseData.width, height: baseData.height, min, max };
 }
 
 /**
@@ -305,7 +468,9 @@ export async function renderFusionOverlay(
   canvasWidth: number,
   canvasHeight: number,
   registrationMatrix?: number[],
-  ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null
+  ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null,
+  ctSeriesOrigin?: number[] | null,
+  ctSeriesIOP?: number[] | string | null
 ) {
   // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
   console.log('🎯 Rendering fusion overlay in CT coordinate space');
@@ -321,7 +486,28 @@ export async function renderFusionOverlay(
   }
 
   // Get the interpolated MRI data for this CT slice
-  const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache);
+  // Compute CT normal and origin for plane-based nearest selection
+  const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+  let iopArr = toNum((primaryImage as any).imageOrientation ?? (primaryImage as any).imageMetadata?.imageOrientation);
+  if (iopArr.length < 6 && ctSeriesIOP) {
+    iopArr = toNum(ctSeriesIOP);
+  }
+  const posArr = toNum((primaryImage as any).imagePosition ?? (primaryImage as any).imageMetadata?.imagePosition);
+  let ctNormalForInterp: number[] | null = null;
+  if (iopArr.length >= 6) {
+    const r = [iopArr[0], iopArr[1], iopArr[2]];
+    const c = [iopArr[3], iopArr[4], iopArr[5]];
+    const nx = r[1]*c[2] - r[2]*c[1];
+    const ny = r[2]*c[0] - r[0]*c[2];
+    const nz = r[0]*c[1] - r[1]*c[0];
+    const nlen = Math.hypot(nx, ny, nz) || 1;
+    ctNormalForInterp = [nx/nlen, ny/nlen, nz/nlen];
+  }
+  const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache, {
+    ctNormal: ctNormalForInterp,
+    // Use provided series origin if available to match caller's ctSliceZ reference
+    ctOrigin: (ctSeriesOrigin && ctSeriesOrigin.length >= 3) ? ctSeriesOrigin : (posArr.length >= 3 ? posArr : null)
+  });
   if (!mriData) return; // nothing to draw
 
   // Create temp canvas
@@ -473,7 +659,12 @@ export async function renderFusionOverlay(
       if (v) mriOriginArr = toNumberArrayFlexible(v);
     }
     const mriOrigin = (mriOriginArr && mriOriginArr.length >= 3) ? mriOriginArr : [0, 0, ctSliceZ];
-    const mriIOP = toNumberArrayFlexible((actualSecondaryImage.imageOrientation ?? actualSecondaryImage.imageMetadata?.imageOrientation) as any);
+    let mriIOP = toNumberArrayFlexible((actualSecondaryImage.imageOrientation ?? actualSecondaryImage.imageMetadata?.imageOrientation) as any);
+    if ((!mriIOP || mriIOP.length < 6) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
+      const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
+      const v = meta?.imageOrientation;
+      if (v) mriIOP = toNumberArrayFlexible(v as any);
+    }
     const hasMRIDirs = mriIOP.length >= 6;
 
     if (hasCTDirs && hasMRIDirs) {
@@ -605,4 +796,24 @@ export async function renderFusionOverlay(
   
   console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
   // NO RESTORE - caller manages the transform state
+
+  // Optional on-canvas debug overlay when window.__FUSION_DEBUG__ is truthy
+  try {
+    if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
+      const fontSize = Math.max(10, Math.round(12 * (ctTransform?.scale || 1)));
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // screen space for text
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(8, 8, 360, 64);
+      ctx.fillStyle = '#0ff';
+      ctx.font = `${fontSize}px monospace`;
+      const zVals = transformedMRI.map(t => t.zInCT);
+      const minZ = Math.min(...zVals);
+      const maxZ = Math.max(...zVals);
+      ctx.fillText(`Fusion Z: CT=${ctSliceZ.toFixed(2)}mm | MRI=[${minZ.toFixed(1)}, ${maxZ.toFixed(1)}]`, 14, 28);
+      ctx.fillText(`Size=${drawW?.toFixed(0)}x${drawH?.toFixed(0)} px  Opacity=${Math.round(fusionOpacity*100)}%`, 14, 28+fontSize+2);
+      ctx.restore();
+    }
+  } catch { /* noop */ }
 }

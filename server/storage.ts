@@ -41,6 +41,13 @@ export interface IStorage {
   getImage(id: number): Promise<DicomImage | undefined>;
   getImageByUID(sopInstanceUID: string): Promise<DicomImage | undefined>;
   getImagesBySeriesId(seriesId: number): Promise<DicomImage[]>;
+  // Update image geometry/metadata fields (partial)
+  updateImageGeometry(imageId: number, updates: {
+    imagePosition?: string | number[] | null;
+    imageOrientation?: string | number[] | null;
+    pixelSpacing?: string | number[] | null;
+    metadata?: any;
+  }): Promise<void>;
   
   // PACS operations
   createPacsConnection(connection: InsertPacsConnection): Promise<PacsConnection>;
@@ -240,6 +247,22 @@ export class MemStorage {
     ).sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
   }
 
+  async updateImageGeometry(imageId: number, updates: {
+    imagePosition?: string | number[] | null;
+    imageOrientation?: string | number[] | null;
+    pixelSpacing?: string | number[] | null;
+    metadata?: any;
+  }): Promise<void> {
+    const img = this.images.get(imageId);
+    if (!img) return;
+    const next: any = { ...img };
+    if (updates.imagePosition !== undefined) next.imagePosition = updates.imagePosition as any;
+    if (updates.imageOrientation !== undefined) next.imageOrientation = updates.imageOrientation as any;
+    if (updates.pixelSpacing !== undefined) next.pixelSpacing = updates.pixelSpacing as any;
+    if (updates.metadata !== undefined) next.metadata = updates.metadata as any;
+    this.images.set(imageId, next);
+  }
+
   async updateSeriesImageCount(seriesId: number, count: number): Promise<void> {
     const seriesData = this.series.get(seriesId);
     if (seriesData) {
@@ -364,6 +387,24 @@ export class DatabaseStorage implements IStorage {
 
   async getImagesBySeriesId(seriesId: number): Promise<DicomImage[]> {
     return await db.select().from(images).where(eq(images.seriesId, seriesId));
+  }
+
+  async updateImageGeometry(imageId: number, updates: {
+    imagePosition?: string | number[] | null;
+    imageOrientation?: string | number[] | null;
+    pixelSpacing?: string | number[] | null;
+    metadata?: any;
+  }): Promise<void> {
+    const toDbVal = (v: any) => v === undefined ? undefined : v;
+    await db
+      .update(images)
+      .set({
+        imagePosition: toDbVal(updates.imagePosition) as any,
+        imageOrientation: toDbVal(updates.imageOrientation) as any,
+        pixelSpacing: toDbVal(updates.pixelSpacing) as any,
+        metadata: toDbVal(updates.metadata) as any,
+      })
+      .where(eq(images.id, imageId));
   }
 
   // PACS operations
