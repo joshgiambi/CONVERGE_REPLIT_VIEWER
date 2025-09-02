@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,6 +55,7 @@ export function MarginToolbar({
   const [isPreviewActive, setIsPreviewActive] = useState(false);
   const [targetStructure, setTargetStructure] = useState<'same' | 'different' | 'new'>('same');
   const [selectedTargetId, setSelectedTargetId] = useState<number | null>(null);
+  const previewDebounceRef = useRef<number | null>(null);
   
   // Margin values
   const [uniformMargin, setUniformMargin] = useState(5);
@@ -109,6 +110,24 @@ export function MarginToolbar({
 
     setIsPreviewActive(true);
   };
+
+  // Auto-preview whenever parameters change
+  useEffect(() => {
+    if (!selectedStructure) return;
+    // Debounce to avoid flooding
+    if (previewDebounceRef.current) {
+      window.clearTimeout(previewDebounceRef.current);
+    }
+    previewDebounceRef.current = window.setTimeout(() => {
+      handlePreview();
+    }, 200);
+    return () => {
+      if (previewDebounceRef.current) {
+        window.clearTimeout(previewDebounceRef.current);
+        previewDebounceRef.current = null;
+      }
+    };
+  }, [activeMode, uniformMargin, anisotropicMargins.x, anisotropicMargins.y, anisotropicMargins.z, directionalMargins.superior, directionalMargins.inferior, directionalMargins.anterior, directionalMargins.posterior, directionalMargins.left, directionalMargins.right, selectedStructure?.id]);
 
   const handleExecute = () => {
     if (!selectedStructure) return;

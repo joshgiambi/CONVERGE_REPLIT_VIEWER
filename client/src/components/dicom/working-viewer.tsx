@@ -27,6 +27,7 @@ import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, t
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
+import { attachDiceDebug } from "@/lib/dice-utils";
 import { 
   isGPUAccelerationAvailable,
   initializeCornerstone3D,
@@ -184,6 +185,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(externalRTStructures);
     }
   }, [externalRTStructures]);
+
+  // Attach global dice helpers for quick validation
+  useEffect(() => {
+    attachDiceDebug(() => rtStructures);
+  }, [rtStructures]);
 
   // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
@@ -803,7 +809,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setPreviewContours([]);
 
       const marginValue = parameters.margin || 5;
-      console.log('🔹 📊 Applying 3D margin value:', marginValue);
+      console.log('🔹 📊 Margin value:', marginValue);
+
+      // Uniform margin: prefer fast 3D preview to match Eclipse volumetric margin
+      if (parameters?.marginType === 'UNIFORM') {
+        // Safe, stable preview: do exact 2D offset per-slice and render only current slice
+        const { offsetContour } = await import('@/lib/clipper-boolean-operations');
+        const previewContoursWithSlices: any[] = [];
+        for (const contour of structure.contours) {
+          if (!contour.points || contour.points.length < 9) continue;
+          try {
+            const outs = await offsetContour(contour.points, marginValue);
+            outs?.forEach(out => {
+              if (out.length >= 9) {
+                previewContoursWithSlices.push({
+                  points: out,
+                  slicePosition: contour.slicePosition,
+                  isPreview: true,
+                  previewColor: '#FFFF00'
+                });
+              }
+            });
+          } catch (err) {
+            console.warn(`Offset preview failed for slice ${contour.slicePosition}:`, err);
+          }
+        }
+        setPreviewContours(previewContoursWithSlices);
+        return;
+      }
 
       // Import the optimized 3D volumetric margin operation handler
       const { apply3DMarginOptimized } = await import('@/lib/volumetric-margin-operations-optimized');
@@ -898,7 +931,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const { structureId, targetStructureId, parameters } = payload;
     
-    console.log(`🔹 📊 Executing simple margin operation for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Executing margin operation for structure ${structureId} with parameters:`, parameters);
     console.log(`🔹 Target structure ID: ${targetStructureId || 'same structure'}`);
     
     try {
@@ -928,7 +961,75 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       
       const marginValue = parameters.marginValues?.uniform || parameters.margin || 5;
-      console.log(`🔹 Applying simple margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
+      console.log(`🔹 Applying margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
+
+      // Uniform margin: prefer fast 3D execution to match Eclipse volumetric margin
+      if (parameters?.marginType === 'UNIFORM') {
+        try {
+          const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
+          const px = imageMetadata?.pixelSpacing || [1, 1];
+          const th = imageMetadata?.sliceThickness || 2;
+          const fast3DResults = await applyFast3DMargin(
+            sourceStructure.contours || [],
+            {
+              marginMm: marginValue,
+              pixelSpacing: [px[0], px[1], th],
+              imageMetadata: {
+                imagePosition: [0, 0, 0],
+                imageSize: { width: 512, height: 512, depth: 100 }
+              },
+              useOptimizedAlgorithm: true,
+              maxProcessingTime: 15000
+            }
+          );
+          const processedContours = fast3DResults.map((c: any) => ({
+            slicePosition: c.slicePosition,
+            points: c.points,
+            numberOfPoints: c.numberOfPoints || c.points.length / 3
+          }));
+          targetStructure.contours = processedContours;
+        } catch (e2) {
+          console.warn('Fast 3D execution failed, falling back to 2D offset:', e2);
+          const { offsetContour } = await import('@/lib/clipper-boolean-operations');
+          const processedContours: any[] = [];
+          for (const contour of sourceStructure.contours || []) {
+            if (!contour.points || contour.points.length < 9) continue;
+            try {
+              const outs = await offsetContour(contour.points, marginValue);
+              outs?.forEach(out => {
+                if (out.length >= 9) {
+                  processedContours.push({
+                    slicePosition: contour.slicePosition,
+                    points: out,
+                    numberOfPoints: out.length / 3
+                  });
+                }
+              });
+            } catch (err) {
+              console.warn('Offset execution failed; preserving original contour:', err);
+              processedContours.push({
+                slicePosition: contour.slicePosition,
+                points: contour.points,
+                numberOfPoints: contour.points.length / 3
+              });
+            }
+          }
+          targetStructure.contours = processedContours;
+        }
+
+        // Clear preview and persist
+        setPreviewContours([]);
+        if (seriesId) {
+          undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
+        }
+        setLocalRTStructures(updatedRTStructures);
+        saveContourUpdates(updatedRTStructures, 'apply_margin');
+        if (onContourUpdate) {
+          onContourUpdate(updatedRTStructures);
+        }
+        console.log(`✅ Successfully applied uniform margin to structure ${targetStructure.roiNumber}`);
+        return;
+      }
       
       // Choose algorithm based on margin parameters and structure size
       let use3D = Math.abs(marginValue) > 2 || (sourceStructure.contours?.length || 0) > 5;
@@ -1002,14 +1103,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Apply results to target structure
       targetStructure.contours = processedContours;
       
-      console.log(`🔹 ✅ Applied simple margin, generated ${processedContours.length} contours`);
+      console.log(`🔹 ✅ Applied simple/3D margin, generated ${processedContours.length} contours`);
       
       // Clear preview contours
       setPreviewContours([]);
       
-      // Update local structures and save
+      // Save to undo/redo and persist
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
+      }
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_simple_margin');
+      saveContourUpdates(updatedRTStructures, 'apply_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -4457,7 +4561,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
     // CRITICAL DEBUG: Log all slice position sources for comparison
-    console.log(`🔍 SLICE POSITION DEBUG:
+    if (DEBUG) console.log(`🔍 SLICE POSITION DEBUG:
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
       parsedZPosition: ${currentImage.parsedZPosition} 
       imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
@@ -4472,7 +4576,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           : "N/A")}
       currentIndex: ${currentIndex}
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
-    console.log(
+    if (DEBUG) console.log(
       `📋 Available structures:`,
       localRTStructures?.structures?.map((s: any) => s.structureName) || [],
     );
@@ -4490,10 +4594,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (allRTZPositions.length > 0) {
       const rtZMin = Math.min(...allRTZPositions);
       const rtZMax = Math.max(...allRTZPositions);
-      console.log(
+      if (DEBUG) console.log(
         `🎯 RT coordinate range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm`,
       );
-      console.log(
+      if (DEBUG) console.log(
         `🎯 Current CT slice ${currentSlicePosition}mm should show structures at RT positions near this value`,
       );
     }
@@ -4518,7 +4622,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
       
       // Debug visibility map
-      console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
+      if (DEBUG) console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
         isVisible,
         visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
         allStructuresVisible,
@@ -4557,13 +4661,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
 
+      // Determine an effective slice tolerance based on metadata to prevent flicker
+      const metaTol = (() => {
+        const meta = currentImage?.imageMetadata;
+        if (!meta) return SLICE_TOL_MM;
+        const sbs = parseFloat(meta.spacingBetweenSlices ?? '');
+        const sth = parseFloat(meta.sliceThickness ?? '');
+        const zCand = Number.isFinite(sbs) ? sbs * 0.45 : (Number.isFinite(sth) ? sth * 0.45 : 0);
+        return Math.max(SLICE_TOL_MM, zCand || 0);
+      })();
+
       structure.contours.forEach((contour: any) => {
         // Debug: Log what contours are being considered for drawing
         const positionDiff = Math.abs(
           contour.slicePosition - currentSlicePosition,
         );
-        if (positionDiff <= SLICE_TOL_MM) {
-          console.log(
+        if (positionDiff <= metaTol) {
+          if (DEBUG) console.log(
             `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
           );
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
@@ -4578,8 +4692,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Set preview contour styling - bright yellow and dashed
       ctx.strokeStyle = '#FFFF00'; // Bright yellow
-      ctx.fillStyle = 'rgba(255, 255, 0, 0.15)'; // Semi-transparent yellow fill
-      ctx.lineWidth = 3;
+      ctx.fillStyle = 'rgba(255, 255, 0, 0.12)'; // Slightly lighter fill
+      ctx.lineWidth = 1.25; // Thin dashed line per spec
       
       // Set dashed line pattern
       ctx.setLineDash([8, 4]); // 8px dash, 4px gap
@@ -4590,22 +4704,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (contour.slicePosition !== undefined) {
           const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
           
-          // FIXED: Show preview contours on ALL slices for true 3D preview
-          // Only filter out contours that are very far away (> 100mm) for performance
-          if (positionDiff <= 100) { // Much larger tolerance to show 3D preview
-            drawContour(ctx, { points: contour.points }, canvas.width, canvas.height, currentImage, animationTime);
+          // Show preview only on the current slice to avoid layered jagged lines
+          if (positionDiff <= SLICE_TOL_MM) {
+            drawContour(ctx, { points: contour.points, isPreview: true }, canvas.width, canvas.height, currentImage, animationTime);
             renderedPreviewCount++;
             
             // Log when we're showing preview on current slice vs other slices
             if (positionDiff <= SLICE_TOL_MM) {
               console.log(`🔹 🎯 Showing preview on CURRENT slice ${currentSlicePosition.toFixed(1)} (diff: ${positionDiff.toFixed(1)}mm)`);
-            } else {
-              console.log(`🔹 🌐 Showing 3D preview on slice ${contour.slicePosition.toFixed(1)} (current: ${currentSlicePosition.toFixed(1)}, diff: ${positionDiff.toFixed(1)}mm)`);
             }
           }
         } else {
           // Fallback for old format (array of points) - always show
-          drawContour(ctx, { points: contour }, canvas.width, canvas.height, currentImage, animationTime);
+          drawContour(ctx, { points: contour, isPreview: true }, canvas.width, canvas.height, currentImage, animationTime);
           renderedPreviewCount++;
         }
       });
@@ -4640,8 +4751,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-    // Debug: Log first few points of the contour
-    if (contour.points.length >= 6) {
+    // Debug logging disabled unless DEBUG is true
+    if (DEBUG && contour.points.length >= 6) {
       console.log('Drawing contour with metadata:', {
         imagePosition: imgMetadata.imagePosition,
         pixelSpacing: imgMetadata.pixelSpacing,
@@ -4715,8 +4826,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Close the contour
     ctx.closePath();
 
-    // Fill with reduced opacity for predictions
-    if (contour.isPredicted) {
+    // Fill only for confirmed contours; skip fill for previews
+    // Also use reduced opacity for predictions
+    if (contour.isPreview) {
+      // No fill for preview to match thin dashed outline spec
+    } else if (contour.isPredicted) {
       const originalAlpha = ctx.globalAlpha;
       ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
       ctx.fill();
