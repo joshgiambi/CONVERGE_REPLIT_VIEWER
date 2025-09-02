@@ -246,16 +246,54 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const displayCurrentImageRef = useRef<() => Promise<void>>();
   const prefetchCompleteRef = useRef(false);
   
+  // Frame rate limiting for smoother scrolling
+  const lastRenderTimeRef = useRef<number>(0);
+  const RENDER_THROTTLE_MS = 16; // 60fps max
+  const fusionRenderDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const isScrollingRef = useRef(false);
+  
   const scheduleRender = useCallback(() => {
     if (needsRenderRef.current) return;
     needsRenderRef.current = true;
-    requestAnimationFrame(async () => {
-      needsRenderRef.current = false;
-      if (displayCurrentImageRef.current) {
-        await displayCurrentImageRef.current();
-      }
-    });
-  }, []);
+    
+    // Mark as scrolling for fusion optimization
+    isScrollingRef.current = true;
+    if (fusionRenderDebounceRef.current) {
+      clearTimeout(fusionRenderDebounceRef.current);
+    }
+    
+    // Throttle renders during rapid scrolling
+    const now = performance.now();
+    const timeSinceLastRender = now - lastRenderTimeRef.current;
+    
+    if (timeSinceLastRender < RENDER_THROTTLE_MS) {
+      // Delay render to maintain frame rate
+      setTimeout(() => {
+        needsRenderRef.current = false;
+        if (displayCurrentImageRef.current) {
+          displayCurrentImageRef.current();
+        }
+        lastRenderTimeRef.current = performance.now();
+      }, RENDER_THROTTLE_MS - timeSinceLastRender);
+    } else {
+      requestAnimationFrame(async () => {
+        needsRenderRef.current = false;
+        if (displayCurrentImageRef.current) {
+          await displayCurrentImageRef.current();
+        }
+        lastRenderTimeRef.current = performance.now();
+        
+        // Debounce fusion rendering for smoother scrolling
+        fusionRenderDebounceRef.current = setTimeout(() => {
+          isScrollingRef.current = false;
+          // Re-render with full quality fusion after scrolling stops
+          if (fusionOpacity > 0 && secondarySeriesId) {
+            scheduleRender();
+          }
+        }, 100);
+      });
+    }
+  }, [fusionOpacity, secondarySeriesId]);
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
@@ -263,6 +301,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Optimized rendering with cached LUT and offscreen canvas
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cachedLUTRef = useRef<{ key: string; lut: Uint8Array } | null>(null);
+  
+  // Secondary image prefetch optimization
+  const secondaryPrefetchCompleteRef = useRef(false);
+  const lastFusionRenderRef = useRef<{ ctZ: number; mriIndex: number } | null>(null);
 
 
 
@@ -4147,6 +4189,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    // Skip expensive fusion during rapid scrolling for better performance
+    if (isScrollingRef.current && fusionOpacity > 0) {
+      // Skip fusion rendering during active scrolling to maintain smooth performance
+      console.log("⚡ Skipping fusion during rapid scrolling");
+      return;
+    }
+    
     console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
     console.log('🎯 FUSION RENDER DEBUG: Full state:', {
       secondaryImagesLength: secondaryImages.length,

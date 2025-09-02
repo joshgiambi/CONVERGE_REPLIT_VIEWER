@@ -1695,6 +1695,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch metadata endpoint for performance optimization
+  app.post("/api/images/batch-metadata", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { imageIds } = req.body;
+      if (!Array.isArray(imageIds) || imageIds.length === 0) {
+        return res.status(400).json({ error: 'imageIds array is required' });
+      }
+      
+      // Limit batch size to prevent memory issues
+      const MAX_BATCH_SIZE = 100;
+      if (imageIds.length > MAX_BATCH_SIZE) {
+        return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE}` });
+      }
+      
+      const results: { [key: number]: any } = {};
+      
+      // Process images in parallel for better performance
+      await Promise.all(imageIds.map(async (imageId) => {
+        try {
+          const image = await storage.getImage(imageId);
+          if (!image || !fs.existsSync(image.filePath)) {
+            results[imageId] = { error: 'Image not found' };
+            return;
+          }
+          
+          const buffer = fs.readFileSync(image.filePath);
+          const byteArray = new Uint8Array(buffer);
+          const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+          
+          const getString = (tag: string) => {
+            try { return dataSet.string(tag)?.trim() || null; } catch { return null; }
+          };
+          
+          const getArray = (tag: string) => {
+            try { return getString(tag)?.split('\\').map(Number) || null; } catch { return null; }
+          };
+          
+          results[imageId] = {
+            imagePosition: getArray('x00200032')?.join('\\') || null,
+            imageOrientation: getArray('x00200037')?.join('\\') || null,
+            pixelSpacing: getArray('x00280030')?.join('\\') || null,
+            sliceLocation: getString('x00201041'),
+            frameOfReferenceUID: getString('x00200052'),
+            rows: getString('x00280010'),
+            columns: getString('x00280011'),
+            sopClassUID: getString('x00080016'),
+            sopInstanceUID: getString('x00080018'),
+            windowCenter: getString('x00281050'),
+            windowWidth: getString('x00281051')
+          };
+        } catch (err) {
+          results[imageId] = { error: 'Failed to parse metadata' };
+        }
+      }));
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Error in batch metadata fetch:', error);
+      next(error);
+    }
+  });
+
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
