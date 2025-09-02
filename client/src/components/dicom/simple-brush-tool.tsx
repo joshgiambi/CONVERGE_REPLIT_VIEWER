@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import { canvasToWorld } from "@/lib/dicom-coordinates";
 import { createAdaptivePreview } from "@/lib/smart-brush-utils";
 import { combineContours } from "@/lib/clipper-boolean-operations";
+import { log } from '@/lib/log';
 
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -53,7 +54,7 @@ export function SimpleBrushTool({
   dicomImage = null,
   onPreviewUpdate,
 }: SimpleBrushToolProps) {
-  console.log('SimpleBrushTool render:', { isActive, selectedStructure, hasCanvas: !!canvasRef.current, isEraseMode });
+  log.debug(`SimpleBrushTool render: active=${isActive} selected=${selectedStructure} erase=${isEraseMode}`, 'brush');
   const [isDrawing, setIsDrawing] = useState(false);
   const isDrawingRef = useRef(false); // Immediate tracking for drawing state
   const [cursorPosition, setCursorPosition] = useState<{
@@ -98,7 +99,7 @@ export function SimpleBrushTool({
       if (e.key === 'Shift' && !isShiftPressed) {
         setIsShiftPressed(true);
         setIsTemporaryEraseMode(true);
-        console.log('🔹 Temporary erase mode activated (Shift held)');
+        log.debug('🔹 Temporary erase mode activated (Shift held)', 'brush');
       }
     };
     
@@ -106,7 +107,7 @@ export function SimpleBrushTool({
       if (e.key === 'Shift' && isShiftPressed) {
         setIsShiftPressed(false);
         setIsTemporaryEraseMode(false);
-        console.log('🔹 Temporary erase mode deactivated (Shift released)');
+        log.debug('🔹 Temporary erase mode deactivated (Shift released)', 'brush');
       }
     };
     
@@ -143,7 +144,7 @@ export function SimpleBrushTool({
 
     // Create overlay canvas if it doesn't exist
     if (!overlayCanvasRef.current) {
-      console.log('Creating overlay canvas');
+      log.debug('Creating overlay canvas','brush');
       const overlayCanvas = document.createElement("canvas");
       overlayCanvas.style.position = "absolute";
       
@@ -358,6 +359,10 @@ export function SimpleBrushTool({
     // The previous logic was preventing the mouse move events from being
     // correctly processed when adjusting the brush size.
     const handleMouseMove = (e: MouseEvent) => {
+        if (!isAdjustingSize && Date.now() - lastUpdateTime.current < updateThrottle) {
+          return;
+        }
+        lastUpdateTime.current = Date.now();
         if (isAdjustingSize && sizeAdjustStart) {
             e.preventDefault();
             e.stopPropagation();
@@ -481,7 +486,7 @@ export function SimpleBrushTool({
                     }
                 }
             } catch (error) {
-                console.error("Error creating adaptive preview:", error);
+                log.warn(`Error creating adaptive preview: ${String(error)}`, 'brush');
                 setAdaptivePreviewPoints(null);
             }
         } else {
@@ -491,17 +496,30 @@ export function SimpleBrushTool({
         if (isDrawingRef.current && selectedStructure) {
             if (!smartBrushEnabled) {
                 const lastPoint = brushPointsRef.current[brushPointsRef.current.length - 1];
-                if (!lastPoint || Math.hypot(coords.x - lastPoint.x, coords.y - lastPoint.y) > 2) {
-                    brushPointsRef.current.push(coords);
+                if (!lastPoint) {
+                  brushPointsRef.current.push(coords);
+                } else {
+                  const dx = coords.x - lastPoint.x;
+                  const dy = coords.y - lastPoint.y;
+                  const dist = Math.hypot(dx, dy);
+                  const scale = (ctTransform?.current?.scale || 1);
+                  const step = Math.max(1, Math.min((brushSize * scale) * 0.5, 8)); // canvas pixels
+                  const steps = Math.max(1, Math.ceil(dist / step));
+                  for (let i = 1; i <= steps; i++) {
+                    brushPointsRef.current.push({
+                      x: lastPoint.x + (dx * i) / steps,
+                      y: lastPoint.y + (dy * i) / steps,
+                    });
+                  }
                 }
             }
         }
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      console.log("🖱️ Mouse down event triggered, button:", e.button, "selectedStructure:", selectedStructure, "isAdjustingSize:", isAdjustingSize);
+      log.debug(`🖱️ Mouse down event triggered, button:${e.button} selected:${selectedStructure} adjusting:${isAdjustingSize}`, 'brush');
       if (e.button === 0 && selectedStructure && !isAdjustingSize) {
-        console.log("✅ Entering drawing mode");
+        log.debug("✅ Entering drawing mode", 'brush');
         // Left click and structure selected
         e.preventDefault();
         e.stopPropagation();
@@ -509,16 +527,16 @@ export function SimpleBrushTool({
         // Set both state and ref for immediate access
         setIsDrawing(true);
         isDrawingRef.current = true;
-        console.log("✅ Set isDrawing to true (state and ref)");
+        log.debug("✅ Set isDrawing to true (state and ref)", 'brush');
         
         const coords = getCanvasCoords(e);
-        console.log("✅ Got canvas coords:", coords);
+        log.debug(`✅ Got canvas coords: ${coords.x},${coords.y}`, 'brush');
         brushPointsRef.current = [coords];
         adaptiveShapesRef.current = []; // Clear adaptive shapes for new stroke
         
-        console.log("🎨 Smart brush enabled:", smartBrushEnabled);
+        log.debug(`🎨 Smart brush enabled: ${smartBrushEnabled}`, 'brush');
         if (smartBrushEnabled) {
-          console.log("🎨 Smart brush stroke started - adaptive shapes cleared");
+          log.debug("🎨 Smart brush stroke started - adaptive shapes cleared", 'brush');
         }
         
         // For standard brush, start collecting points
@@ -529,7 +547,7 @@ export function SimpleBrushTool({
         // Right click - start diameter adjustment
         e.preventDefault();
         e.stopPropagation();
-        console.log('Right-click detected, starting diameter adjustment');
+        log.debug('Right-click detected, starting diameter adjustment','brush');
         setIsAdjustingSize(true);
         setSizeAdjustStart({ x: e.clientX, y: e.clientY, size: brushSize });
         setAdjustedBrushSize(brushSize);
@@ -548,7 +566,7 @@ export function SimpleBrushTool({
 
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawingRef.current) {
-        console.log(`🛑 Mouse up - finalizing stroke. Smart brush enabled: ${smartBrushEnabled}, Adaptive shapes collected: ${adaptiveShapesRef.current.length}`);
+        log.debug(`🛑 Mouse up - finalizing stroke. Smart brush enabled: ${smartBrushEnabled}, Adaptive shapes collected: ${adaptiveShapesRef.current.length}`,'brush');
         finalizeBrushStroke();
         setIsDrawing(false);
         isDrawingRef.current = false; // Clear the ref too
@@ -566,7 +584,7 @@ export function SimpleBrushTool({
         // Apply the new brush size and sync with main toolbar
         if (onBrushSizeChange && adjustedBrushSize !== brushSize) {
           onBrushSizeChange(adjustedBrushSize);
-          console.log(`Right-click slider: Updated brush size from ${brushSize}px to ${adjustedBrushSize}px`);
+          log.debug(`Right-click slider: Updated brush size from ${brushSize}px to ${adjustedBrushSize}px`,'brush');
         }
         setIsAdjustingSize(false);
         setSizeAdjustStart(null);
@@ -699,7 +717,7 @@ export function SimpleBrushTool({
             });
 
             if (adaptivePolygons.length === 0) {
-                console.log("No valid adaptive shapes to create contour");
+            log.debug("No valid adaptive shapes to create contour", 'brush');
                 return;
             }
             
@@ -715,7 +733,7 @@ export function SimpleBrushTool({
                 });
             }
         } else if (!smartBrushEnabled && brushPointsRef.current.length > 0) {
-            console.log(`Finalizing regular brush with ${brushPointsRef.current.length} points`);
+            log.debug(`Finalizing regular brush with ${brushPointsRef.current.length} points`, 'brush');
 
             // Regular brush mode - convert all brush points to world coordinates
             const worldPoints = brushPointsRef.current.map((point) => {
@@ -723,6 +741,26 @@ export function SimpleBrushTool({
                 const pixelY = (point.y - transform.offsetY) / transform.scale;
                 return pixelToWorld(pixelX, pixelY, imageMetadata, currentSlicePosition);
             });
+
+            // Light decimation to prevent lumpy/sawtooth contours on fast strokes
+            const decimateByDistance = (pts: [number, number, number][], minDistMm = 0.5) => {
+              if (pts.length <= 2) return pts;
+              const out: [number, number, number][] = [pts[0]];
+              let last = pts[0];
+              for (let i = 1; i < pts.length - 1; i++) {
+                const p = pts[i];
+                const dx = p[0] - last[0];
+                const dy = p[1] - last[1];
+                const dist = Math.hypot(dx, dy);
+                if (dist >= minDistMm) {
+                  out.push(p);
+                  last = p;
+                }
+              }
+              out.push(pts[pts.length - 1]);
+              return out;
+            };
+            const filteredPoints = decimateByDistance(worldPoints);
 
             const actionType = isInEraseMode ? "erase_stroke" : "brush_stroke";
             
@@ -732,8 +770,8 @@ export function SimpleBrushTool({
                 action: actionType,
                 structureId: selectedStructure,
                 slicePosition: currentSlicePosition,
-                pointCount: worldPoints.length,
-                points: worldPoints,
+                pointCount: filteredPoints.length,
+                points: filteredPoints,
                 brushSize: brushSize,
                 predictionEnabled: predictionEnabled,
                 isEraseMode: isInEraseMode,
@@ -741,7 +779,7 @@ export function SimpleBrushTool({
             }
         }
     } catch (error) {
-        console.error("Error in finalizeBrushStroke:", error);
+        log.error(`Error in finalizeBrushStroke: ${String(error)}`, 'brush');
     } finally {
         brushPointsRef.current = [];
         adaptiveShapesRef.current = [];

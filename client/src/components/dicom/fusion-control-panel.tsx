@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Minimize2, Maximize2, Layers, Settings2, X, Brain } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
+import { log } from '@/lib/log';
 
 
 
@@ -46,10 +47,12 @@ export function FusionControlPanel({
   });
   
   // Filter for MR series only
-  const mrSeries = (availableSeries as any[])?.filter((s: any) => s.modality === 'MR') || [];
+  type SeriesItem = { id: number; modality: string; seriesDescription?: string; imageCount?: number };
+  const seriesList = (availableSeries as SeriesItem[]) || [];
+  const mrSeries: SeriesItem[] = seriesList.filter((s) => s.modality === 'MR');
   
   // Get primary series info
-  const primarySeries = (availableSeries as any[])?.find((s: any) => s.id === primarySeriesId);
+  const primarySeries = seriesList.find((s) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
   
   // Determine secondary modality label
@@ -67,7 +70,7 @@ export function FusionControlPanel({
       );
       
       const seriestoSelect = preferredSeries || mrSeries[0];
-      console.log(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`);
+      log.debug(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`, 'fusion');
       
       hasAutoSelected.current = true;
       onSecondarySeriesSelect(seriestoSelect.id);

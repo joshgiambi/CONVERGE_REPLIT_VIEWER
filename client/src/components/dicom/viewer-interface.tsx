@@ -9,6 +9,7 @@ import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
+import { log } from '@/lib/log';
 import { Button } from '@/components/ui/button';
 import { MarginToolbar } from './margin-toolbar';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
@@ -26,9 +27,10 @@ interface ViewerInterfaceProps {
   studyData: any;
   onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
   contourSettings?: { width: number; opacity: number };
+  onLoadedRTSeriesChange?: (seriesId: number | null) => void;
 }
 
-export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings }: ViewerInterfaceProps) {
+export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings, onLoadedRTSeriesChange }: ViewerInterfaceProps) {
   const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
@@ -74,10 +76,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Watch for secondary series changes to show/hide fusion panel
   useEffect(() => {
     if (secondarySeriesId !== null) {
-      console.log('Secondary series selected, showing fusion panel');
+      log.debug('Secondary series selected, showing fusion panel', 'viewer-interface');
       setShowFusionPanel(true);
     } else {
-      console.log('No secondary series, hiding fusion panel');
+      log.debug('No secondary series, hiding fusion panel', 'viewer-interface');
       setShowFusionPanel(false);
     }
   }, [secondarySeriesId]);
@@ -89,7 +91,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   // Clear RT structures when patient changes
   useEffect(() => {
-    console.log('Patient changed, clearing RT structures. Patient ID:', studyData?.patient?.id);
+    log.debug(`Patient changed, clearing RT structures. Patient ID: ${studyData?.patient?.id}`,'viewer-interface');
     setRTStructures(null);
     setStructureVisibility(new Map());
     setSelectedStructures(new Set());
@@ -97,7 +99,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     setSelectedStructureColors([]);
     setIsContourEditMode(false);
     setLoadedRTSeriesId(null);  // Clear loaded RT series ID
-  }, [studyData?.patient?.id]);
+    }, [studyData?.patient?.id]);
+
+  // Notify parent when loaded RT series changes
+  useEffect(() => {
+    if (onLoadedRTSeriesChange) {
+      onLoadedRTSeriesChange(loadedRTSeriesId);
+    }
+  }, [loadedRTSeriesId, onLoadedRTSeriesChange]);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -139,10 +148,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       if (!selectedSeries) {
         const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
         if (ctSeries) {
-          console.log('Auto-selecting CT series as primary:', ctSeries);
+          log.debug(`Auto-selecting CT series as primary: ${ctSeries.id}`, 'viewer-interface');
           handleSeriesSelect(ctSeries);
         } else if (seriesData.length > 0) {
-          console.log('No CT series found, selecting first series:', seriesData[0]);
+          log.debug(`No CT series found, selecting first series: ${seriesData[0]?.id}`, 'viewer-interface');
           handleSeriesSelect(seriesData[0]);
         }
       }
@@ -150,11 +159,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
       if (rtSeries) {
-        console.log(`Loading RT structures for study ${rtSeries.studyId}`);
+        log.debug(`Loading RT structures for study ${rtSeries.studyId}`, 'viewer-interface');
         handleRTSeriesSelect(rtSeries);
       } else {
         // Clear RT structures if no RT series found
-        console.log(`No RT structures found in any study`);
+        log.debug(`No RT structures found in any study`, 'viewer-interface');
         setRTStructures(null);
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
@@ -166,7 +175,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const ptSeries = seriesData.find((s: any) => s.modality === 'PT');
       
       if (regSeries && ctSeriesForFusion && (mrSeries || ptSeries)) {
-        console.log('Auto-activating fusion: REG detected with CT and secondary series');
+        log.debug('Auto-activating fusion: REG detected with CT and secondary series', 'viewer-interface');
         // Prefer MR over PT for fusion
         const secondarySeriesForFusion = mrSeries || ptSeries;
         
@@ -175,17 +184,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           method: 'POST'
         }).then(async response => {
           if (response.ok) {
-            console.log('Registration parsed successfully for auto-fusion');
+            log.debug('Registration parsed successfully for auto-fusion', 'viewer-interface');
             
             // Wait a moment for database to update
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Auto-select secondary series for fusion
-            console.log('Setting secondary series for fusion:', secondarySeriesForFusion.id);
+            log.debug(`Setting secondary series for fusion: ${secondarySeriesForFusion.id}`, 'viewer-interface');
             setSecondarySeriesId(secondarySeriesForFusion.id);
           }
         }).catch(error => {
-          console.error('Error parsing registration for auto-fusion:', error);
+          log.warn(`Error parsing registration for auto-fusion: ${String(error)}`, 'viewer-interface');
         });
       }
     }
@@ -214,7 +223,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       }
       
     } catch (error) {
-      console.error('Error selecting series:', error);
+      log.error(`Error selecting series: ${String(error)}`, 'viewer-interface');
       setError({
         title: 'Error Loading Series',
         message: 'Failed to load the selected series.',
@@ -229,7 +238,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomIn();
       }
     } catch (error) {
-      console.warn('Error zooming in:', error);
+      log.warn(`Error zooming in: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -239,7 +248,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomOut();
       }
     } catch (error) {
-      console.warn('Error zooming out:', error);
+      log.warn(`Error zooming out: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -249,7 +258,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.resetZoom();
       }
     } catch (error) {
-      console.warn('Error resetting zoom:', error);
+      log.warn(`Error resetting zoom: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -264,7 +273,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       });
     } catch (error) {
-      console.warn('Error setting active tool:', error);
+      log.warn(`Error setting active tool: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -291,7 +300,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const handleRotate = () => {
     try {
       if (!window.cornerstone) {
-        console.warn('Cornerstone not available for rotation');
+        log.warn('Cornerstone not available for rotation','viewer-interface');
         return;
       }
       const cornerstone = window.cornerstone;
@@ -330,12 +339,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       });
     } catch (error) {
-      console.warn('Error flipping image:', error);
+      log.warn(`Error flipping image: ${String(error)}`, 'viewer-interface');
     }
   };
 
   const handleRTStructureLoad = (rtStructData: any) => {
-    console.log('Loading RT structures:', rtStructData);
+    log.debug('Loading RT structures', 'viewer-interface');
     setRTStructures(rtStructData);
     // Initialize visibility for all structures
     const visibilityMap = new Map();
@@ -356,18 +365,18 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
       if (response.ok) {
         const rtStructData = await response.json();
-        console.log('RT structures loaded successfully:', rtStructData);
+        log.debug('RT structures loaded successfully', 'viewer-interface');
         handleRTStructureLoad(rtStructData);
       } else {
-        console.error('Failed to load RT structures:', response.status);
+        log.error(`Failed to load RT structures: ${response.status}`, 'viewer-interface');
       }
     } catch (error) {
-      console.error('Error loading RT structure contours:', error);
+      log.error(`Error loading RT structure contours: ${String(error)}`, 'viewer-interface');
     }
   };
 
   const handleStructureSelection = (structureId: number, selected: boolean) => {
-    console.log('handleStructureSelection called:', { structureId, selected, currentSelected: Array.from(selectedStructures) });
+    log.debug(`handleStructureSelection: ${structureId} -> ${selected}`, 'viewer-interface');
     
     const newSelection = new Set(selectedStructures);
     if (selected) {
@@ -377,7 +386,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
     setSelectedStructures(newSelection);
     
-    console.log('Updated selectedStructures:', Array.from(newSelection));
+    log.debug(`Updated selectedStructures: ${Array.from(newSelection).join(',')}`, 'viewer-interface');
     
     // Update selected structure colors for viewer border
     if (rtStructures?.structures) {
@@ -390,11 +399,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
-    console.log('handleStructureVisibilityChange called:', { 
-      structureId, 
-      visible,
-      allStructuresVisible 
-    });
+    log.debug(`handleStructureVisibilityChange: ${structureId} -> ${visible}`, 'viewer-interface');
     
     setStructureVisibility(prev => {
       const next = new Map(prev);
@@ -513,7 +518,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Handle structure localization
   const handleStructureLocalization = useCallback((structureId: number) => {
     if (!rtStructures?.structures || !workingViewerRef.current) {
-      console.warn('🎯 Cannot localize: missing structures or viewer ref');
+      log.warn('🎯 Cannot localize: missing structures or viewer ref', 'viewer-interface');
       return;
     }
 

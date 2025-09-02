@@ -32,6 +32,7 @@ import {
   initializeCornerstone3D,
   render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
+import { log } from '@/lib/log';
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
@@ -161,13 +162,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Initialize Cornerstone3D when GPU is available
   useEffect(() => {
     if (gpuCheckComplete && isGPUMode && !cornerstone3DInitialized) {
-      console.log('Initializing Cornerstone3D for GPU-accelerated rendering...');
+      log.debug('Initializing Cornerstone3D for GPU-accelerated rendering...', 'viewer');
       initializeCornerstone3D().then((success) => {
         if (success) {
-          console.log('✅ Cornerstone3D initialized successfully');
+          log.debug('✅ Cornerstone3D initialized successfully', 'viewer');
           setCornerstone3DInitialized(true);
         } else {
-          console.log('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core');
+          log.warn('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core', 'viewer');
           setIsGPUMode(false);
         }
       });
@@ -177,9 +178,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Update local structures when external ones change
   useEffect(() => {
     // Only update if actually changed to prevent unnecessary re-renders
-    console.log("RT Structures update - external:", externalRTStructures);
+    log.debug('RT Structures update received', 'viewer');
     if (externalRTStructures && externalRTStructures !== localRTStructures) {
-      console.log("Setting local RT structures:", externalRTStructures);
+      log.debug('Setting local RT structures', 'viewer');
       setLocalRTStructures(externalRTStructures);
     }
   }, [externalRTStructures]);
@@ -310,23 +311,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Save contour updates using debounced save
   const saveContourUpdates = (updatedStructures: any, action?: string) => {
-    console.log(`Queuing save for ${action || 'unknown action'}`);
+    log.debug(`Queuing save for ${action || 'unknown action'}`, 'viewer');
     if (debouncedSaveRef.current) {
       debouncedSaveRef.current(updatedStructures);
     } else {
-      console.warn('Debounced save not initialized');
+      log.warn('Debounced save not initialized', 'viewer');
     }
   };
 
   // Handle boolean operations (combine/subtract) between structures
   const handleBooleanOperation = async (payload: any) => {
     if (!rtStructures) {
-      console.error("RT structures not available for boolean operation");
+      log.error('RT structures not available for boolean operation', 'viewer');
       return;
     }
 
     const { operation, sourceStructureId, targetStructureId, slicePosition } = payload;
-    console.log(`🔶 Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`);
+    log.debug(`🔶 Performing ${operation} op between ${sourceStructureId} and ${targetStructureId} @ slice ${slicePosition}`, 'viewer');
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -340,7 +341,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     );
 
     if (!sourceStructure || !targetStructure) {
-      console.error("Source or target structure not found");
+      log.error('Source or target structure not found', 'viewer');
       return;
     }
 
@@ -353,12 +354,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     );
 
     if (!sourceContour || !sourceContour.points || sourceContour.points.length < 9) {
-      console.warn(`No source contour found on slice ${slicePosition}`);
+      log.warn(`No source contour found on slice ${slicePosition}`, 'viewer');
       return;
     }
 
     if (!targetContour || !targetContour.points || targetContour.points.length < 9) {
-      console.warn(`No target contour found on slice ${slicePosition}`);
+      log.warn(`No target contour found on slice ${slicePosition}`, 'viewer');
       return;
     }
 
@@ -371,13 +372,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (operation === 'combine') {
         // Combine the two contours
         resultContours = await combineContours(sourceContour.points, targetContour.points);
-        console.log(`🔶 Combine operation returned ${resultContours.length} contours`);
+        log.debug(`🔶 Combine returned ${resultContours.length} contours`, 'viewer');
       } else if (operation === 'subtract') {
         // Subtract target from source
         resultContours = await subtractContours(sourceContour.points, targetContour.points);
-        console.log(`🔶 Subtract operation returned ${resultContours.length} contours`);
+        log.debug(`🔶 Subtract returned ${resultContours.length} contours`, 'viewer');
       } else {
-        console.error(`Unknown boolean operation: ${operation}`);
+        log.error(`Unknown boolean operation: ${operation}`, 'viewer');
         return;
       }
 
@@ -402,9 +403,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
         });
         
-        console.log(`✅ Boolean ${operation} operation completed: ${resultContours.length} result contours`);
+        log.debug(`✅ Boolean ${operation} completed: ${resultContours.length} contours`, 'viewer');
       } else {
-        console.log(`✅ Boolean ${operation} operation completed: no result contours (empty result)`);
+        log.debug(`✅ Boolean ${operation} completed: empty`, 'viewer');
       }
 
       // Update local structures and save to server
@@ -422,16 +423,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
     } catch (error) {
-      console.error(`Error performing ${operation} operation:`, error);
+      log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
     }
   };
 
   // Handle Eclipse TPS margin operation
   const handleMarginOperation = (payload: any) => {
-    console.log('🔹 handleMarginOperation called with:', payload);
+    log.debug('🔹 handleMarginOperation called', 'viewer');
     
     if (!localRTStructures && !rtStructures) {
-      console.error("RT structures not available for margin operation");
+      log.error('RT structures not available for margin operation', 'viewer');
       return;
     }
 
@@ -440,7 +441,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     // Check if this is an execute operation (applying preview)
     if (payload.action === 'apply_margin' && !payload.isPreview && previewContours.length > 0) {
-      console.log('🔹 Executing margin operation - applying preview contours');
+      log.debug('🔹 Executing margin operation - applying preview contours', 'viewer');
       
       // Create a deep copy of RT structures
       const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
@@ -451,7 +452,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!structure) {
-        console.error(`Structure ${structureId} not found`);
+        log.error(`Structure ${structureId} not found`, 'viewer');
         return;
       }
       
@@ -462,7 +463,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         numberOfPoints: preview.points.length / 3
       }));
       
-      console.log(`🔹 Replaced ${structure.contours.length} contours with preview contours`);
+      log.debug(`🔹 Replaced ${structure.contours.length} contours with preview contours`, 'viewer');
       
       // Clear preview
       setPreviewContours([]);
@@ -476,13 +477,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         onContourUpdate(updatedRTStructures);
       }
       
-      console.log(`✅ Successfully applied margin to structure ${structureId}`);
+      log.debug(`✅ Applied margin to structure ${structureId}`, 'viewer');
       return;
     }
     
     // For single slice margin operations (legacy)
     if (payload.slicePosition !== undefined) {
-      console.log('🔹 Single slice margin operation (legacy)');
+      log.debug('🔹 Single slice margin operation (legacy)', 'viewer');
       
       const { slicePosition, marginParams } = payload;
       const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
@@ -492,7 +493,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!structure) {
-        console.error(`Structure ${structureId} not found`);
+        log.error(`Structure ${structureId} not found`, 'viewer');
         return;
       }
       
@@ -501,7 +502,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!contour || !contour.points || contour.points.length === 0) {
-        console.warn(`No contour found for structure ${structureId} at slice ${slicePosition}`);
+        log.warn(`No contour found for structure ${structureId} at slice ${slicePosition}`, 'viewer');
         return;
       }
       
@@ -535,9 +536,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           onContourUpdate(updatedRTStructures);
         }
         
-        console.log(`Successfully applied margin of ${marginValueMm}mm to structure ${structureId}`);
+        log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
       } catch (error) {
-        console.error("Error applying margin operation:", error);
+        log.error(`Error applying margin operation: ${String(error)}`, 'viewer');
       }
     }
   };
@@ -545,12 +546,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Handle preview grow contour operation
   const handlePreviewGrowOperation = async (payload: any) => {
     if (!localRTStructures) {
-      console.error("RT structures not available for preview");
+      log.error('RT structures not available for preview', 'viewer');
       return;
     }
 
     const { structureId, slicePosition, distance, direction = 'all' } = payload;
-    console.log(`🔹 Generating preview for structure ${structureId} by ${distance}mm at slice ${slicePosition}`);
+    log.debug(`🔹 Generating preview for structure ${structureId} by ${distance}mm @ slice ${slicePosition}`, 'viewer');
 
     // Find the target structure
     const structure = localRTStructures.structures?.find(
@@ -1301,16 +1302,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       return false; // No intersection found
     };
-    console.log("Handling contour update:", payload);
+    log.debug('Handling contour update', 'viewer');
 
     if (!rtStructures || !rtStructures.structures) {
-      console.error("No RT structures available");
+      log.error('No RT structures available', 'viewer');
       return;
     }
 
     // Handle refresh action for undo/redo
     if (payload.action === "refresh") {
-      console.log("Refreshing RT structures after undo/redo");
+      log.debug('Refreshing RT structures after undo/redo', 'viewer');
       // Update with the RT structures from the payload
       if (payload.rtStructures) {
         setLocalRTStructures(payload.rtStructures);
@@ -1334,7 +1335,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         (s: any) => s.roiNumber === payload.structureId,
       );
       if (!structure) {
-        console.error(`Structure ${payload.structureId} not found`);
+        log.error(`Structure ${payload.structureId} not found`, 'viewer');
         return;
       }
 
@@ -1345,8 +1346,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // The brush size is already in screen pixels and should remain that way
       // The polygon creation function will handle coordinate transformation internally
       
-      console.log(`Brush size: ${payload.brushSize}px (keeping in pixel units)`);
-      console.log(`Sample brush point coordinates:`, payload.points.slice(0, 3));
+      log.debug(`Brush size: ${payload.brushSize}px (pixel units)`, 'viewer');
+      log.debug('Sample brush point coordinates present', 'viewer');
       
       // TEMPORARILY DISABLED: Polishing causing structure morphing/shrinking
       // Use unpolished brush stroke until polishing is fixed
@@ -1355,7 +1356,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         payload.points,
         payload.brushSize, // Use pixel size directly - let polygon function handle conversion
       );
-      console.log("Using unpolished brush stroke (polishing temporarily disabled)");
+      log.debug('Using unpolished brush stroke (polishing temporarily disabled)', 'viewer');
       
       // TODO: Fix polishing ClipperLib compatibility issue
       // The polishing function is failing with "Error polishing contour" 
