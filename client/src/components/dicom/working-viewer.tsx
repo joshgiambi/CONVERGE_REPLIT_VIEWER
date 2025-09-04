@@ -11,6 +11,7 @@ import PenToolV2 from "./pen-tool-v2";
 
 import { FusionControlPanel } from "./fusion-control-panel";
 import { MeasurementTool } from "./measurement-tool";
+import { MPRFloating } from './mpr-floating';
 import { BrushOperation } from "@shared/schema";
 import { growContour } from "@/lib/contour-grow";
 import { gaussianSmoothContour as smoothContour } from "@/lib/contour-smooth-simple";
@@ -213,6 +214,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const mprCacheRef = useRef<Map<string, { data: Uint16Array; width: number; height: number }>>(new Map());
+  // Expose cache for MPRFloating (read-only reference)
+  useEffect(() => {
+    try {
+      (window as any).__WV_CACHE__ = imageCacheRef.current;
+    } catch {}
+  }, []);
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
@@ -811,9 +818,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const marginValue = parameters.margin || 5;
       console.log('🔹 📊 Margin value:', marginValue);
 
-      // Uniform margin: prefer fast 3D preview to match Eclipse volumetric margin
+      // Uniform margin preview: use DT worker for large |margin|, otherwise fast 2D offset
       if (parameters?.marginType === 'UNIFORM') {
-        // Safe, stable preview: do exact 2D offset per-slice and render only current slice
+        const useWorker = Math.abs(marginValue) >= 3;
+        if (useWorker) {
+          try {
+            // Abort any in-flight preview worker
+            if ((window as any).__marginPreviewWorker) {
+              try { (window as any).__marginPreviewWorker.terminate(); } catch {}
+            }
+            const worker = new Worker(new URL('@/margins/margin-worker.ts', import.meta.url), { type: 'module' });
+            (window as any).__marginPreviewWorker = worker;
+            const px = imageMetadata?.pixelSpacing || [1, 1];
+            const th = imageMetadata?.sliceThickness || 2;
+            const spacing: [number, number, number] = [px[1] ?? px[0], px[0], th];
+            const jobId = `prev-${Date.now()}`;
+            const padding = Math.abs(marginValue) + 5;
+            const srcContours = structure.contours || [];
+            const previewPromise: Promise<any> = new Promise((resolve, reject) => {
+              worker.onmessage = (ev: MessageEvent<any>) => {
+                if (!ev.data || ev.data.jobId !== jobId) return;
+                try { worker.terminate(); } catch {}
+                (window as any).__marginPreviewWorker = null;
+                if (ev.data.ok) resolve(ev.data.contours); else reject(ev.data.error);
+              };
+              worker.onerror = (err) => {
+                try { worker.terminate(); } catch {}
+                (window as any).__marginPreviewWorker = null;
+                reject(err);
+              };
+            });
+            worker.postMessage({ jobId, kind: 'UNIFORM', contours: srcContours, spacing, padding, margin: marginValue });
+            const workerContours = await previewPromise;
+            const previewContoursWithSlices: any[] = (workerContours || []).map((c: any) => ({
+              points: c.points,
+              slicePosition: c.slicePosition,
+              isPreview: true,
+              previewColor: '#FFFF00'
+            }));
+            setPreviewContours(previewContoursWithSlices);
+            return;
+          } catch (err) {
+            console.warn('DT preview worker failed, falling back to 2D offset:', err);
+          }
+        }
+        // Fallback/fast path: 2D offset per slice
         const { offsetContour } = await import('@/lib/clipper-boolean-operations');
         const previewContoursWithSlices: any[] = [];
         for (const contour of structure.contours) {
@@ -4886,9 +4935,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // MPR click handlers for navigation
   const handleSagittalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!sagittalCanvasRef.current || images.length === 0) return;
+    if (images.length === 0) return;
     
-    const canvas = sagittalCanvasRef.current;
+    const canvas = e.currentTarget as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -4914,9 +4963,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCoronalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!coronalCanvasRef.current || images.length === 0) return;
+    if (images.length === 0) return;
     
-    const canvas = coronalCanvasRef.current;
+    const canvas = e.currentTarget as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -5212,6 +5261,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     };
   }, [rtStructures]); // Re-run when RT structures change
+
+  // Animation loop for animated dashed preview contours
+  useEffect(() => {
+    if (!previewContours || previewContours.length === 0) return;
+
+    let rafId: number | null = null;
+    const animate = (ts: number) => {
+      setAnimationTime(ts);
+      try { scheduleRender(); } catch {}
+      rafId = requestAnimationFrame(animate);
+    };
+
+    rafId = requestAnimationFrame(animate);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [previewContours.length, scheduleRender]);
 
   // Test function to add a predicted contour for demonstration
   const addTestPredictedContour = () => {
@@ -5783,22 +5849,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Sagittal</span>
-                  <span className="text-cyan-400">{crosshairPos.x}/{images[0]?.columns || 512}</span>
                 </div>
                 <div className="mpr-canvas-container">
-                  <canvas
-                    ref={sagittalCanvasRef}
-                    className="mpr-canvas"
-                    width={384}
-                    height={384}
+                  <MPRFloating
+                    images={images}
+                    orientation="sagittal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    currentZIndex={currentIndex}
                     onClick={handleSagittalClick}
-                  />
-                  {/* Crosshair on sagittal view (horizontal line shows axial Y position) */}
-                  <div 
-                    className="mpr-crosshair-h" 
-                    style={{ 
-                      top: `${(crosshairPos.y / (images[0]?.rows || 512)) * 100}%` 
-                    }} 
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">
@@ -5812,22 +5874,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Coronal</span>
-                  <span className="text-cyan-400">{crosshairPos.y}/{images[0]?.rows || 512}</span>
                 </div>
                 <div className="mpr-canvas-container">
-                  <canvas
-                    ref={coronalCanvasRef}
-                    className="mpr-canvas"
-                    width={384}
-                    height={384}
+                  <MPRFloating
+                    images={images}
+                    orientation="coronal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    currentZIndex={currentIndex}
                     onClick={handleCoronalClick}
-                  />
-                  {/* Crosshair on coronal view (vertical line shows axial X position) */}
-                  <div 
-                    className="mpr-crosshair-v" 
-                    style={{ 
-                      left: `${(crosshairPos.x / (images[0]?.columns || 512)) * 100}%` 
-                    }} 
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">

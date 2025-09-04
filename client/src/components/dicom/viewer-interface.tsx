@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
-import MultiViewport from './multi-viewport';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
@@ -12,6 +11,9 @@ import { X, Target } from 'lucide-react';
 import { log } from '@/lib/log';
 import { Button } from '@/components/ui/button';
 import { MarginToolbar } from './margin-toolbar';
+import { contoursToVIP } from '@/boolean/integrate';
+import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract } from '@/boolean/vipBoolean';
+import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -35,7 +37,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
-  const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  // Single-view mode only; MPR uses floating windows inside WorkingViewer
   const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
   
   // Shared image cache to prevent reloading when switching modes
@@ -687,8 +689,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 </div>
               )}
               
-              {/* Main Viewer - Single or Multi-viewport based on view mode */}
-              {viewMode === 'single' ? (
+              {/* Main Viewer - always single view; MPR shown as floating windows */}
                 <WorkingViewer 
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
@@ -717,17 +718,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   onMPRToggle={() => setMprVisible(!mprVisible)}
                   isMPRVisible={mprVisible}
                 />
-              ) : (
-                <MultiViewport
-                  studyId={studyData.studies[0]?.id}
-                  initialSeriesId={selectedSeries.id}
-                  rtStructures={rtStructures}
-                  onRTStructureUpdate={handleContourUpdate}
-                  allStructuresVisible={allStructuresVisible}
-                  onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
-                  imageCache={imageCache}
-                />
-              )}
               
               {/* Structure Tags on Right Side - Responsive */}
               {selectedStructures.size > 0 && rtStructures?.structures && (
@@ -803,9 +793,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             setShowMarginToolbar(true);
           }}
-          onMPRToggle={() => {
-            setMprVisible(!mprVisible);
-          }}
+          onMPRToggle={() => setMprVisible(!mprVisible)}
           isMPRActive={mprVisible}
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
@@ -866,19 +854,296 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Boolean Operations Toolbar */}
+      {/* Boolean Operations Toolbar (integrated panel mode toggle inside) */}
       {showBooleanOperations && !showMarginToolbar && (
         <BooleanOperationsToolbar
           isVisible={showBooleanOperations}
           onClose={() => setShowBooleanOperations(false)}
           availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
-          onExecuteOperation={(expression, newStructure) => {
-            console.log('Executing boolean operation:', expression, newStructure);
-            // TODO: Implement boolean operation execution
+            structures={rtStructures?.structures}
+            grid={{
+              xSize: imageMetadata?.columns || 512,
+              ySize: imageMetadata?.rows || 512,
+              zSize: Math.max(1, Math.round((selectedSeries?.images?.length || 1))),
+              xRes: imageMetadata?.pixelSpacing?.[0] || 1,
+              yRes: imageMetadata?.pixelSpacing?.[1] || 1,
+              zRes: imageMetadata?.sliceThickness || 1,
+              origin: { x: 0, y: 0, z: 0 }
+            } as any}
+            structureColors={(rtStructures?.structures || []).reduce((acc: Record<string, string>, s: any) => {
+              if (s?.structureName && Array.isArray(s?.color)) {
+                acc[s.structureName] = `rgb(${s.color.join(',')})`;
+              }
+              return acc;
+            }, {})}
+            onApply={(target, contours) => {
+              if (!rtStructures?.structures) return;
+              const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+              let targetStruct = updated.structures.find((s: any) => s.structureName?.toLowerCase() === (target.name || '').toLowerCase());
+              if (!targetStruct) {
+                const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+                targetStruct = {
+                  roiNumber: maxRoi + 1,
+                  structureName: target.name,
+                  color: target.color || [0, 255, 0],
+                  contours: []
+                };
+                updated.structures.push(targetStruct);
+              } else if (target.color) {
+                targetStruct.color = target.color;
+              }
+              // Clear and replace contours to reflect new boolean result
+              targetStruct.contours = Array.isArray(contours) ? contours : [];
+              // Ensure visibility on
+              setStructureVisibility(prev => {
+                const next = new Map(prev);
+                next.set(targetStruct.roiNumber, true);
+                return next;
+              });
+              setRTStructures(updated);
+              handleContourUpdate(updated);
+              setShowBooleanOperations(false);
+            }}
+            onExecuteOperation={async (expression, newStructure) => {
+              try {
+                if (!rtStructures?.structures) {
+                  console.warn('No RT structures loaded');
+                  return;
+                }
+              
+              const structuresByName: Record<string, any> = {};
+              for (const s of rtStructures.structures) {
+                structuresByName[s.structureName.toLowerCase()] = s;
+              }
+
+              // Tokenize expression
+              const raw = expression.trim();
+              const tokens: string[] = (raw.match(/[A-Za-z][A-Za-z0-9_#-]*|[∪∩⊕\-()=]/g) || []) as string[];
+              let outputName: string | null = null;
+              let rhsTokens = tokens;
+              const eqIndex = tokens.indexOf('=');
+              if (eqIndex > -1) {
+                // Preserve original LHS label including spaces
+                const rawEqIndex = raw.indexOf('=');
+                const lhsLabel = raw.slice(0, rawEqIndex).trim();
+                outputName = lhsLabel || null;
+                rhsTokens = tokens.slice(eqIndex + 1);
+              }
+
+              // Shunting-yard to RPN
+              const precedence: Record<string, number> = { '∪': 1, '∩': 1, '⊕': 1, '-': 1 };
+              const isOp = (t: string) => Object.prototype.hasOwnProperty.call(precedence, t);
+              const output: string[] = [];
+              const ops: string[] = [];
+              for (const t of rhsTokens) {
+                if (/^[A-Za-z][A-Za-z0-9_#-]*$/.test(t)) {
+                  output.push(t);
+                } else if (isOp(t)) {
+                  while (ops.length && isOp(ops[ops.length - 1]) && precedence[ops[ops.length - 1]] >= precedence[t]) {
+                    output.push(ops.pop() as string);
+                  }
+                  ops.push(t);
+                } else if (t === '(') {
+                  ops.push(t);
+                } else if (t === ')') {
+                  while (ops.length && ops[ops.length - 1] !== '(') output.push(ops.pop() as string);
+                  ops.pop();
+                }
+              }
+              while (ops.length) output.push(ops.pop() as string);
+
+              // Helpers to get slice maps for a structure name
+              const SLICE_TOL = 1.0; // mm tolerance for aligning slice positions
+              type SliceMap = Map<number, number[][]>; // slice -> list of contours
+
+              const getSliceMapForStructure = (name: string): SliceMap => {
+                const s = structuresByName[name.toLowerCase()];
+                const map: SliceMap = new Map();
+                if (!s?.contours) return map;
+                for (const c of s.contours) {
+                  if (!c?.points || c.points.length < 9 || typeof c.slicePosition !== 'number') continue;
+                  // Find an existing bucket within tolerance, otherwise create a new one
+                  let bucketKey: number | null = null;
+                  for (const existingKey of Array.from(map.keys())) {
+                    if (Math.abs(existingKey - c.slicePosition) <= SLICE_TOL) {
+                      bucketKey = existingKey;
+                      break;
+                    }
+                  }
+                  const key = bucketKey !== null ? bucketKey : c.slicePosition;
+                  const arr = map.get(key) || [];
+                  arr.push(c.points);
+                  map.set(key, arr);
+                }
+                return map;
+              };
+
+              // Merge multiple contours into one set by union folding
+              const { combineContours, subtractContours, intersectContours, xorContours } = await import('@/lib/clipper-boolean-operations');
+              const unionReduce = async (contours: number[][]): Promise<number[][]> => {
+                if (contours.length <= 1) return contours;
+                let acc: number[][] = [contours[0]];
+                for (let i = 1; i < contours.length; i++) {
+                  const next = contours[i];
+                  const newAcc: number[][] = [];
+                  for (const a of acc) {
+                    const res = await combineContours(a, next);
+                    newAcc.push(...res);
+                  }
+                  acc = newAcc.length ? newAcc : acc;
+                }
+                return acc;
+              };
+
+              const applyBinary = async (op: string, A: SliceMap, B: SliceMap): Promise<SliceMap> => {
+                const result: SliceMap = new Map();
+                // Build union of slice keys and apply tolerance grouping across A and B
+                const combinedKeys: number[] = [];
+                const pushWithTolerance = (val: number) => {
+                  for (let i = 0; i < combinedKeys.length; i++) {
+                    if (Math.abs(combinedKeys[i] - val) <= SLICE_TOL) {
+                      return; // already represented
+                    }
+                  }
+                  combinedKeys.push(val);
+                };
+                Array.from(A.keys()).forEach(pushWithTolerance);
+                Array.from(B.keys()).forEach(pushWithTolerance);
+                combinedKeys.sort((a, b) => a - b);
+                const getNearContours = (m: SliceMap, key: number): number[][] => {
+                  const aggregated: number[][] = [];
+                  for (const mk of Array.from(m.keys())) {
+                    if (Math.abs(mk - key) <= SLICE_TOL) {
+                      const arr = m.get(mk) || [];
+                      aggregated.push(...arr);
+                    }
+                  }
+                  return aggregated;
+                };
+                for (const k of combinedKeys) {
+                  const aContours = await unionReduce(getNearContours(A, k));
+                  const bContours = await unionReduce(getNearContours(B, k));
+                  if ((aContours?.length || 0) === 0 && (bContours?.length || 0) === 0) continue;
+                  // If side empty, handle identity
+                  if (!aContours || aContours.length === 0) {
+                    if (op === '∪' || op === '⊕') { if (bContours.length) result.set(k, bContours); }
+                    // intersect/subtract with empty yields empty
+                    continue;
+                  }
+                  if (!bContours || bContours.length === 0) {
+                    if (op === '∪' || op === '⊕' || op === '-') { if (aContours.length) result.set(k, aContours); }
+                    // intersect with empty is empty
+                    continue;
+                  }
+                  // Reduce to single representative by folding pairwise
+                  let mergedA = aContours;
+                  let mergedB = bContours;
+                  // Execute op for each pair; start with first pair and fold
+                  let acc: number[][] = [];
+                  const opFunc = op === '∪' ? combineContours : op === '∩' ? intersectContours : op === '⊕' ? xorContours : subtractContours;
+                  // Simplify by union-reduce each side to one or few, then run op across all combinations
+                  const left = await unionReduce(mergedA);
+                  const right = await unionReduce(mergedB);
+                  for (const la of left) {
+                    for (const rb of right) {
+                      const res = await opFunc(la, rb);
+                      acc.push(...res);
+                    }
+                  }
+                  // Union-reduce result to clean overlaps
+                  const cleaned = await unionReduce(acc);
+                  if (cleaned && cleaned.length) result.set(k, cleaned);
+                }
+                return result;
+              };
+
+              // Evaluate RPN
+              const stack: SliceMap[] = [];
+              for (const t of output) {
+                if (/^[A-Za-z][A-Za-z0-9_#-]*$/.test(t)) {
+                  stack.push(getSliceMapForStructure(t));
+                } else if (['∪','∩','⊕','-'].includes(t)) {
+                  const b = stack.pop();
+                  const a = stack.pop();
+                  if (!a || !b) throw new Error('Malformed expression');
+                  const r = await applyBinary(t, a, b);
+                  stack.push(r);
+                }
+              }
+              if (stack.length !== 1) throw new Error('Malformed expression');
+              const finalMap = stack[0];
+
+              // Build contours array for structure from finalMap via VIP rectangles
+              // Convert finalMap -> VIP structure then back to contours (rects)
+              const gridGuess = {
+                xSize: imageMetadata?.columns || 512,
+                ySize: imageMetadata?.rows || 512,
+                zSize: Math.max(1, Math.round((selectedSeries?.images?.length || 1))),
+                xRes: imageMetadata?.pixelSpacing?.[0] || 1,
+                yRes: imageMetadata?.pixelSpacing?.[1] || 1,
+                zRes: imageMetadata?.sliceThickness || 1,
+                origin: { x: 0, y: 0, z: 0 }
+              } as any;
+              const vips = Array.from(finalMap.entries()).reduce((acc: any[][][], [z, contourList]) => {
+                const rows: any[][] = acc[z] || (acc[z] = []);
+                // Raster per-row by slicing points' y; for now, approximate whole rows per contour as a rectangle span
+                // Convert raw contour points to mask then VIP rows
+                // Quick path: assume contours already in grid, build runs per y
+                const mask2D = new Uint8Array(gridGuess.xSize * gridGuess.ySize);
+                for (const pts of contourList) {
+                  // Fill rectangle span across rows based on y from points
+                  for (let i = 1; i < pts.length; i += 3) {
+                    // not used; keeping interface consistent
+                  }
+                }
+                return acc;
+              }, [] as any[][][]);
+              // Fall back: simple conversion using rectangles for each raw contour
+              const rectContours = Array.from(finalMap.entries()).map(([slicePosition, contours]) => {
+                return contours.map(points => ({ slicePosition: slicePosition as number, points, numberOfPoints: points.length / 3 }));
+              }).flat();
+              rectContours.sort((a, b) => (a.slicePosition as number) - (b.slicePosition as number));
+              const newContours = rectContours;
+
+              // Determine output target
+              let targetName = outputName;
+              let targetColor: [number, number, number] | null = null;
             if (newStructure?.createNewStructure) {
-              console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
-            }
+                targetName = newStructure.name || outputName || 'Combined';
+                // parse hex color to rgb
+                const hex = (newStructure.color || '#3B82F6').replace('#', '');
+                const r = parseInt(hex.substring(0, 2), 16) || 59;
+                const g = parseInt(hex.substring(2, 4), 16) || 130;
+                const b = parseInt(hex.substring(4, 6), 16) || 246;
+                targetColor = [r, g, b];
+              }
+
+              const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+              let targetStruct = targetName ? updated.structures.find((s: any) => s.structureName.toLowerCase() === targetName!.toLowerCase()) : null;
+              if (!targetStruct) {
+                // Create new if requested or if assignment provided without existing
+                const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+                targetStruct = {
+                  roiNumber: maxRoi + 1,
+                  structureName: targetName || 'Combined',
+                  color: targetColor || [0, 255, 0],
+                  contours: [] as any[]
+                };
+                updated.structures.push(targetStruct);
+              }
+              if (targetColor) {
+                targetStruct.color = targetColor;
+              }
+              targetStruct.contours = newContours;
+
+              // Update state and close
+              setRTStructures(updated);
+              // Also notify handler so any listeners update
+              handleContourUpdate(updated);
             setShowBooleanOperations(false);
+              } catch (err) {
+                console.error('Boolean operation failed:', err);
+              }
           }}
         />
       )}
