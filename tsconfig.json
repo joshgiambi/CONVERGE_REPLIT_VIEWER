@@ -18,7 +18,7 @@
     "noEmit": true,
     "target": "ES2019",
     "module": "ESNext",
-    "strict": true,
+    "strict": false,
     "lib": ["esnext", "dom", "dom.iterable"],
     "downlevelIteration": true,
     "jsx": "preserve",

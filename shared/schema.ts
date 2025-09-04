@@ -217,8 +217,8 @@ export const rtStructureSets = pgTable("rt_structure_sets", {
   studyId: integer("study_id").references(() => studies.id),
   referencedSeriesId: integer("referenced_series_id").references(() => series.id), // The CT/MRI series this RT struct is based on
   frameOfReferenceUID: text("frame_of_reference_uid"),
-  structureSetLabel: text("structure_set_label"),
-  structureSetDate: text("structure_set_date"),
+  structureSetLabel: text("structure_set_label").default(""),
+  structureSetDate: text("structure_set_date").default(""),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

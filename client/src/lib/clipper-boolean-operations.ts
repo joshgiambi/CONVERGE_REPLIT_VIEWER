@@ -321,8 +321,8 @@ export async function isPointInContour(point: [number, number], contour: number[
   let result;
   try {
     // Try as a direct function (JavaScript version)
-    if (typeof api.PointInPolygon === 'function') {
-      result = api.PointInPolygon(testPoint, path);
+    if (typeof (api as any).PointInPolygon === 'function') {
+      result = (api as any).PointInPolygon(testPoint, path);
     } else if (api.Clipper && typeof api.Clipper.PointInPolygon === 'function') {
       // Try as a static method on Clipper class
       result = api.Clipper.PointInPolygon(testPoint, path);
@@ -352,7 +352,7 @@ export async function simplifyContour(contour: number[], tolerance: number = 0.5
   const api = await getClipper();
   const path = await contourToClipperPath(contour);
   
-  const CleanPolygonClass = api.CleanPolygon;
+  const CleanPolygonClass = (api as any).CleanPolygon ?? api.cleanPolygon;
   const cleanedPath = CleanPolygonClass(path, tolerance * SCALE);
   
   const result: number[] = [];
