@@ -52,6 +52,7 @@ export function BooleanOperationsToolbar({
   const [showInstructions, setShowInstructions] = useState(false);
   const [livePreview, setLivePreview] = useState(false);
   const [isPreviewActive, setIsPreviewActive] = useState(false);
+  const [hasAutoPreviewedRef] = useState(() => ({ value: false }));
   const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [showNewStructurePanel, setShowNewStructurePanel] = useState(false);
   const [newStructureName, setNewStructureName] = useState('');
@@ -89,14 +90,35 @@ export function BooleanOperationsToolbar({
     }
   }, [aName, bName, outExistingName, outName, outMode, effectivePanelMode, onHighlightStructures]);
   
-  // Auto-preview when all 3 structures are selected
+  // Auto-preview when all 3 structures are selected (only once)
   useEffect(() => {
-    if (isPanelReady && !isPreviewActive && onPreview) {
-      // Automatically trigger preview
-      const previewTimer = setTimeout(() => {
-        runPanel(true);
-      }, 500); // Small delay to avoid too frequent updates
-      return () => clearTimeout(previewTimer);
+    if (isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value && onPreview) {
+      // Clear any existing timer
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+      
+      // Set timer for auto-preview
+      previewTimeoutRef.current = setTimeout(() => {
+        if (isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value) {
+          hasAutoPreviewedRef.value = true;
+          runPanel(true);
+        }
+      }, 800); // Slightly longer delay to avoid rapid triggers
+      
+      return () => {
+        if (previewTimeoutRef.current) {
+          clearTimeout(previewTimeoutRef.current);
+          previewTimeoutRef.current = null;
+        }
+      };
+    }
+  }, [isPanelReady, isPreviewActive]);
+  
+  // Reset auto-preview flag when panel is not ready
+  useEffect(() => {
+    if (!isPanelReady) {
+      hasAutoPreviewedRef.value = false;
     }
   }, [isPanelReady]);
 
@@ -973,9 +995,11 @@ export function BooleanOperationsToolbar({
                 
                 if (newPreviewState) {
                   // Start preview
+                  hasAutoPreviewedRef.value = true; // Mark as manually previewed
                   runPanel(true);
                 } else {
                   // Clear preview
+                  hasAutoPreviewedRef.value = false; // Allow auto-preview again
                   onPreview?.({ name: '', color: [0, 0, 0] }, []);
                   setIsPreviewActive(false);
                   onPreviewStateChange?.({ targetName: '', isNewStructure: false });
@@ -985,9 +1009,9 @@ export function BooleanOperationsToolbar({
             disabled={effectivePanelMode ? !isPanelReady : (!expression.trim() || syntaxErrors.length > 0)}
             className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 transition-all duration-300 ${
               isPreviewActive 
-                ? 'bg-yellow-600/60 border-yellow-400 text-yellow-100 hover:bg-yellow-500/70 animate-pulse' 
-                : isPanelReady && !isPreviewActive
-                ? 'bg-yellow-500/40 border-yellow-300 text-yellow-100 hover:bg-yellow-400/50 animate-bounce'
+                ? 'bg-yellow-600/60 border-yellow-400 text-yellow-100 hover:bg-yellow-500/70' 
+                : isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value
+                ? 'bg-yellow-500/40 border-yellow-300 text-yellow-100 hover:bg-yellow-400/50 animate-pulse'
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
             title={isPreviewActive ? "Clear preview" : "Preview operation"}
