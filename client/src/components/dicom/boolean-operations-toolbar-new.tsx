@@ -20,6 +20,8 @@ interface BooleanOperationsToolbarProps {
   structureColors?: Record<string, string>;
   // Optional: direct apply callback when in panel mode
   onApply?: (target: { name: string; color?: [number, number, number] }, contours: { slicePosition: number; points: number[]; numberOfPoints: number }[]) => void;
+  // Optional: preview callback to render dashed preview
+  onPreview?: (contours: { slicePosition: number; points: number[] }[]) => void;
   onExecuteOperation: (expression: string, newStructure?: {
     createNewStructure: boolean;
     name: string;
@@ -35,6 +37,7 @@ export function BooleanOperationsToolbar({
   grid,
   structureColors,
   onApply,
+  onPreview,
   onExecuteOperation
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
@@ -486,6 +489,27 @@ export function BooleanOperationsToolbar({
           </div>
         )}
         <div className="flex items-start space-x-3">
+          {/* Left floating controls (mode toggle) */}
+          <div className="flex flex-col space-y-1 mr-2">
+            <Button
+              variant={effectivePanelMode ? "outline" : "default"}
+              size="sm"
+              onClick={() => setUsePanel(false)}
+              className={`h-7 w-24 ${!panelMode ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!panelMode}
+            >
+              Expression
+            </Button>
+            <Button
+              variant={effectivePanelMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => panelMode && setUsePanel(true)}
+              className={`h-7 w-24 ${!panelMode ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!panelMode}
+            >
+              Panel
+            </Button>
+          </div>
         {/* Main toolbar panel - 20% larger */}
         <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[960px]">
 
@@ -919,6 +943,106 @@ export function BooleanOperationsToolbar({
               <span>{effectivePanelMode ? (busy ? 'Applying…' : 'Apply') : 'Run'}</span>
             </div>
           </Button>
+          {effectivePanelMode && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!panelMode) return;
+                if (!aName || !bName) { setPanelError('Select A and B'); return; }
+                setPanelError(null);
+                setBusy(true);
+                try {
+                  const aStruct = structures.find((s: any) => s.structureName === aName);
+                  const bStruct = structures.find((s: any) => s.structureName === bName);
+                  if (!aStruct || !bStruct) { setPanelError('Invalid A or B'); setBusy(false); return; }
+                  const SLICE_TOL = 1.0;
+                  const mapFrom = (s: any): Map<number, number[][]> => {
+                    const m = new Map<number, number[][]>();
+                    for (const c of s.contours || []) {
+                      if (!c?.points || c.points.length < 9 || typeof c.slicePosition !== 'number') continue;
+                      let key: number | null = null;
+                      for (const k of Array.from(m.keys())) { if (Math.abs(k - c.slicePosition) <= SLICE_TOL) { key = k; break; } }
+                      const useKey = key !== null ? key : c.slicePosition;
+                      const arr = m.get(useKey) || [];
+                      arr.push(c.points);
+                      m.set(useKey, arr);
+                    }
+                    return m;
+                  };
+                  const A = mapFrom(aStruct);
+                  const B = mapFrom(bStruct);
+                  const { combineContours, subtractContours, intersectContours } = await import('@/lib/clipper-boolean-operations');
+                  const unionReduce = async (contours: number[][]): Promise<number[][]> => {
+                    if (contours.length <= 1) return contours;
+                    let acc: number[][] = [contours[0]];
+                    for (let i = 1; i < contours.length; i++) {
+                      const next = contours[i];
+                      const newAcc: number[][] = [];
+                      for (const a of acc) newAcc.push(...await combineContours(a, next));
+                      acc = newAcc.length ? newAcc : acc;
+                    }
+                    return acc;
+                  };
+                  const keys: number[] = [];
+                  const pushTol = (v: number) => { for (const k of keys) { if (Math.abs(k - v) <= SLICE_TOL) return; } keys.push(v); };
+                  Array.from(A.keys()).forEach(pushTol); Array.from(B.keys()).forEach(pushTol);
+                  keys.sort((a, b) => a - b);
+                  const preview: { slicePosition: number; points: number[] }[] = [];
+                  for (const k of keys) {
+                    const getNear = (m: Map<number, number[][]>): number[][] => {
+                      const out: number[][] = [];
+                      for (const mk of Array.from(m.keys())) if (Math.abs(mk - k) <= SLICE_TOL) out.push(...(m.get(mk) || []));
+                      return out;
+                    };
+                    const aList = await unionReduce(getNear(A));
+                    const bList = await unionReduce(getNear(B));
+                    if ((aList?.length || 0) === 0 && (bList?.length || 0) === 0) continue;
+                    let acc: number[][] = [];
+                    if (!aList || aList.length === 0) {
+                      if (op === 'union') acc = bList;
+                    } else if (!bList || bList.length === 0) {
+                      if (op === 'union' || op === 'subtract') acc = aList;
+                    } else {
+                      if (op === 'union') {
+                        const combined: number[][] = [];
+                        for (const a of aList) for (const b of bList) combined.push(...await combineContours(a, b));
+                        acc = await unionReduce(combined);
+                      } else if (op === 'intersect') {
+                        const inters: number[][] = [];
+                        for (const a of aList) for (const b of bList) inters.push(...await intersectContours(a, b));
+                        acc = await unionReduce(inters);
+                      } else if (op === 'subtract') {
+                        let cur: number[][] = aList;
+                        for (const b of bList) { const next: number[][] = []; for (const a of cur) next.push(...await subtractContours(a, b)); cur = next; }
+                        acc = await unionReduce(cur);
+                      } else {
+                        const combined: number[][] = [];
+                        for (const a of aList) for (const b of bList) combined.push(...await combineContours(a, b));
+                        const unioned = await unionReduce(combined);
+                        const inters: number[][] = [];
+                        for (const a of aList) for (const b of bList) inters.push(...await intersectContours(a, b));
+                        const intersection = await unionReduce(inters);
+                        let cur: number[][] = unioned;
+                        for (const i of intersection) { const next: number[][] = []; for (const u of cur) next.push(...await subtractContours(u, i)); cur = next; }
+                        acc = await unionReduce(cur);
+                      }
+                    }
+                    for (const pts of acc) if (pts && pts.length >= 9) preview.push({ slicePosition: k, points: pts });
+                  }
+                  onPreview && onPreview(preview);
+                } catch (e: any) {
+                  setPanelError(e?.message || 'Preview failed');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className="h-8 w-24 bg-yellow-900/30 border border-yellow-500/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40 rounded backdrop-blur-sm shadow-sm text-xs font-medium px-3"
+              title="Preview"
+            >
+              Preview
+            </Button>
+          )}
         </div>
         </div>
       </div>
