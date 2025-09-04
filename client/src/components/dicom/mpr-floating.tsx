@@ -198,7 +198,7 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
         }
         return pos0[2] + i * spacing.z;
       })();
-      const zTol = Math.max(Math.abs(spacing.z) * 0.6, 0.6);
+      const zTol = Math.max(Math.abs(spacing.z) * 1.1, 1.2);
       for (const s of rtStructures.structures) {
         if (!s?.contours?.length) continue;
         const color = s.color || [0, 255, 0];
@@ -225,6 +225,9 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
               const xA = offX + Math.round(((ys[k] + 0.5) / height) * drawW);
               const xB = offX + Math.round(((ys[k + 1] + 0.5) / height) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
+              ctx.fillStyle = '#ff0';
+              ctx.beginPath(); ctx.arc(xA, yA, 1.8, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.arc(xB, yA, 1.8, 0, Math.PI * 2); ctx.fill();
             }
           } else {
             const y0 = sliceIndex; // fixed row index in axial space
@@ -244,6 +247,9 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
               const xA = offX + Math.round(((xs[k] + 0.5) / width) * drawW);
               const xB = offX + Math.round(((xs[k + 1] + 0.5) / width) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
+              ctx.fillStyle = '#ff0';
+              ctx.beginPath(); ctx.arc(xA, yA, 1.8, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.arc(xB, yA, 1.8, 0, Math.PI * 2); ctx.fill();
             }
           }
         }
