@@ -103,34 +103,66 @@ export function structureToContours(
     const targetZ = matchedZ !== undefined ? matchedZ : zWorld;
     if (matchedZ !== undefined) used.add(matchedZ);
     const slice = mask.values.subarray(zi * xy, zi * xy + xy);
-    // Extract boundary by marching squares (simple variant)
-    const pts: number[] = [];
-    for (let y = 1; y < grid.ySize - 1; y++) {
-      for (let x = 1; x < grid.xSize - 1; x++) {
-        const i = x + y * grid.xSize;
-        if (slice[i] === 1 && (
-          slice[i - 1] === 0 || slice[i + 1] === 0 ||
-          slice[i - grid.xSize] === 0 || slice[i + grid.xSize] === 0
-        )) {
-          const wx = grid.origin.x + x * grid.xRes;
-          const wy = grid.origin.y + y * grid.yRes;
-          pts.push(wx, wy, targetZ);
+    // Moore-neighbor boundary tracing; gather all contours and pick the largest
+    const visited = new Uint8Array(slice.length);
+    const contoursOnSlice: number[][] = [];
+    const neighbors = [
+      [1, 0], [1, 1], [0, 1], [-1, 1],
+      [-1, 0], [-1, -1], [0, -1], [1, -1]
+    ];
+
+    for (let sy = 1; sy < grid.ySize - 1; sy++) {
+      for (let sx = 1; sx < grid.xSize - 1; sx++) {
+        const si = sx + sy * grid.xSize;
+        if (slice[si] !== 1 || visited[si]) continue;
+        // start boundary only if neighbor has background
+        if (slice[si - 1] && slice[si + 1] && slice[si - grid.xSize] && slice[si + grid.xSize]) continue;
+
+        let cx = sx, cy = sy;
+        let dir = 0; // initial direction
+        const chain: number[] = [];
+        const maxSteps = slice.length * 4;
+
+        for (let steps = 0; steps < maxSteps; steps++) {
+          const idxPix = cx + cy * grid.xSize;
+          if (!visited[idxPix]) {
+            visited[idxPix] = 1;
+            const wx = grid.origin.x + cx * grid.xRes;
+            const wy = grid.origin.y + cy * grid.yRes;
+            chain.push(wx, wy, targetZ);
+          }
+          // find next boundary neighbor, prefer turning left
+          let moved = false;
+          for (let i = 0; i < 8; i++) {
+            const nd = (dir + 7 + i) % 8; // bias to left-hand rule
+            const nx = cx + neighbors[nd][0];
+            const ny = cy + neighbors[nd][1];
+            if (nx <= 0 || nx >= grid.xSize - 1 || ny <= 0 || ny >= grid.ySize - 1) continue;
+            const nidx = nx + ny * grid.xSize;
+            if (slice[nidx] === 1) {
+              cx = nx; cy = ny; dir = nd; moved = true; break;
+            }
+          }
+          if (!moved || (cx === sx && cy === sy)) break;
         }
+        if (chain.length >= 9) contoursOnSlice.push(chain);
       }
     }
-    if (pts.length >= 9) {
-      // Order points by angle around centroid for a simple polygon
-      let cx = 0, cy = 0, n = 0;
-      for (let i = 0; i < pts.length; i += 3) { cx += pts[i]; cy += pts[i + 1]; n++; }
-      cx /= n; cy /= n;
-      const ordered = pts
-        .reduce<{x:number;y:number;z:number}[]>((acc, _, i) => {
-          if (i % 3 === 0) acc.push({ x: pts[i], y: pts[i + 1], z: pts[i + 2] });
-          return acc;
-        }, [])
-        .sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx))
-        .flatMap(p => [p.x, p.y, p.z]);
-      contours.push({ points: ordered, slicePosition: targetZ });
+
+    if (contoursOnSlice.length > 0) {
+      // pick the largest by area (shoelace)
+      let best = contoursOnSlice[0];
+      let bestArea = -Infinity;
+      for (const c of contoursOnSlice) {
+        let area = 0;
+        for (let i = 0; i < c.length; i += 3) {
+          const j = (i + 3) % c.length;
+          area += c[i] * c[j + 1] - c[j] * c[i + 1];
+        }
+        area = Math.abs(area) * 0.5;
+        if (area > bestArea) { bestArea = area; best = c; }
+      }
+      contours.push({ points: best, slicePosition: targetZ });
     }
   }
   return contours;
