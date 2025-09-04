@@ -165,6 +165,11 @@ export function SimpleBrushTool({
       overlayCanvas.style.height = computedStyle.height;
       overlayCanvas.style.imageRendering = "auto";
 
+      // Ensure the container can stack canvases
+      const parent = mainCanvas.parentElement as HTMLElement | null;
+      if (parent && getComputedStyle(parent).position === 'static') {
+        parent.style.position = 'relative';
+      }
       mainCanvas.parentElement?.appendChild(overlayCanvas);
       overlayCanvasRef.current = overlayCanvas;
     }

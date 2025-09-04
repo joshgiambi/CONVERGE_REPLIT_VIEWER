@@ -5624,8 +5624,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
-            brushToolState?.tool === "brush" &&
-            selectedForEdit && (
+            brushToolState?.tool === "brush" && (
               <SimpleBrushTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
@@ -5676,8 +5675,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* Erase Tool overlay - works like brush but erases */}
           {brushToolState?.isActive &&
-            brushToolState?.tool === "erase" &&
-            selectedForEdit && (
+            brushToolState?.tool === "erase" && (
               <SimpleBrushTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
