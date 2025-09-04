@@ -34,9 +34,18 @@ export interface DICOMMetadata {
   reconstructionKernel?: string;
   windowCenter?: number;
   windowWidth?: number;
-  // RT Structure Set specific from your guide
+  // RT Structure Set specific
   structureSetDate?: string;
-  structures?: RTStructure[];
+  structureSetTime?: string;
+  structures?: any[];
+  // RT Dose
+  doseUnits?: string;
+  doseType?: string;
+  doseSummationType?: string;
+  // RT Plan
+  planName?: string;
+  planDate?: string;
+  planTime?: string;
   // Error handling
   error?: string;
 }
@@ -120,13 +129,11 @@ export class DICOMMetadataParser {
   private static parseRTStructMetadata(dataSet: any, metadata: DICOMMetadata): void {
     metadata.structureSetDate = this.getString(dataSet, 'x30060008');
     metadata.structureSetTime = this.getString(dataSet, 'x30060009');
-    
-    // Parse ROI structures
-    const roiSequence = dataSet.elements['x30060020']; // StructureSetROISequence
-    const contourSequence = dataSet.elements['x30060039']; // ROIContourSequence
-    
+    // Parse ROI sequences would populate `structures` in a simplified way
+    const roiSequence = dataSet.elements['x30060020'];
+    const contourSequence = dataSet.elements['x30060039'];
     if (roiSequence && contourSequence) {
-      metadata.structures = this.parseROIStructures(dataSet, roiSequence, contourSequence);
+      metadata.structures = this.parseROIStructures(dataSet, roiSequence, contourSequence) as any[];
     }
   }
 
@@ -294,7 +301,10 @@ export class DICOMMetadataParser {
    */
   static isDICOMFile(filePath: string): boolean {
     try {
-      const buffer = fs.readFileSync(filePath, { start: 128, end: 132 });
+      const fd = fs.openSync(filePath, 'r');
+      const buffer = Buffer.alloc(4);
+      fs.readSync(fd, buffer, 0, 4, 128);
+      fs.closeSync(fd);
       return buffer.toString('ascii') === 'DICM';
     } catch (error) {
       return false;

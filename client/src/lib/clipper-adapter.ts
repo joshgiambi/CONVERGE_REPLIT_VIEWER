@@ -16,13 +16,19 @@ export type ClipperAPI = {
   PolyFillType: any;
   JoinType: any;
   EndType: any;
-  CleanPolygon: (path: any, dist: number) => any;
-  CleanPolygons: (paths: any, dist: number) => any;
-  SimplifyPolygon: (path: any, fillType: any) => any;
-  SimplifyPolygons: (paths: any, fillType: any) => any;
+  cleanPolygon: (path: any, dist: number) => any;
+  cleanPolygons: (paths: any, dist: number) => any;
+  simplifyPolygon: (path: any, fillType: any) => any;
+  simplifyPolygons: (paths: any, fillType: any) => any;
   ClipperOffset?: any;
-  PointInPolygon: (pt: any, path: any) => number;
-  IntPoint: any;
+  pointInPolygon: (pt: any, path: any) => number;
+  IntPoint?: any;
+  // Back-compat PascalCase aliases used elsewhere
+  CleanPolygon?: (path: any, dist: number) => any;
+  CleanPolygons?: (paths: any, dist: number) => any;
+  SimplifyPolygon?: (path: any, fillType: any) => any;
+  SimplifyPolygons?: (paths: any, fillType: any) => any;
+  PointInPolygon?: (pt: any, path: any) => number;
 };
 
 let cached: ClipperAPI | null = null;
@@ -58,15 +64,23 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
       PolyFillType: lib.instance.PolyFillType,
       JoinType: lib.instance.JoinType,
       EndType: lib.instance.EndType,
-      CleanPolygon: lib.instance.CleanPolygon,
-      CleanPolygons: lib.instance.CleanPolygons,
-      SimplifyPolygon: lib.instance.SimplifyPolygon,
-      SimplifyPolygons: lib.instance.SimplifyPolygons,
+      cleanPolygon: lib.instance.cleanPolygon,
+      cleanPolygons: lib.instance.cleanPolygons,
+      simplifyPolygon: lib.instance.simplifyPolygon as any,
+      simplifyPolygons: (lib.instance as any).simplifyPolygons ?? (lib.instance.simplifyPolygon as any),
       ClipperOffset: lib.instance.ClipperOffset,
-      PointInPolygon: lib.instance.PointInPolygon,
+      pointInPolygon: lib.instance.pointInPolygon,
       IntPoint: lib.instance.IntPoint,
-    };
-    
+    } as any;
+
+    // Back-compat shim: expose PascalCase aliases for older codepaths
+    (api as any).CleanPolygon = (api as any).cleanPolygon;
+    (api as any).CleanPolygons = (api as any).cleanPolygons;
+    (api as any).SimplifyPolygon = (api as any).simplifyPolygon;
+    (api as any).SimplifyPolygons = (api as any).simplifyPolygons;
+    (api as any).PointInPolygon = (api as any).pointInPolygon;
+    (api as any).IntPoint = (api as any).IntPoint;
+
     return api;
   } catch (error) {
     console.error('Failed to load Clipper WASM:', error);
