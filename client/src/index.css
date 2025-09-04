@@ -417,13 +417,13 @@ input[type="range"]::-moz-range-thumb:hover {
 
 /* MPR Window Styling */
 .mpr-window {
-  @apply bg-gray-900 rounded border border-gray-800 overflow-hidden;
+  @apply bg-gray-900/80 backdrop-blur-md rounded-2xl border border-gray-700/60 overflow-hidden shadow-xl shadow-black/40;
   position: relative;
 }
 
 .mpr-window-header {
-  @apply bg-gray-800 px-2 py-1 text-xs text-gray-300 font-semibold;
-  border-bottom: 1px solid #2d3748;
+  @apply bg-transparent px-3 py-2 text-xs text-gray-200 font-semibold;
+  border-bottom: 1px solid rgba(55,65,81,0.2);
 }
 
 .mpr-canvas-container {

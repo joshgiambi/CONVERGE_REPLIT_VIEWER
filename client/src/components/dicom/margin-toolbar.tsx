@@ -58,7 +58,8 @@ export function MarginToolbar({
   const previewDebounceRef = useRef<number | null>(null);
   
   // Margin values
-  const [uniformMargin, setUniformMargin] = useState(5);
+  // Default expansion set to 10mm
+  const [uniformMargin, setUniformMargin] = useState(10);
   const [anisotropicMargins, setAnisotropicMargins] = useState({ x: 5, y: 5, z: 5 });
   const [directionalMargins, setDirectionalMargins] = useState({
     superior: 5, inferior: 5,
@@ -79,7 +80,7 @@ export function MarginToolbar({
   const handlePreview = () => {
     if (!selectedStructure) return;
 
-    // For preview, use single slice only for performance
+    // For preview, generate contours across slices so user can scroll
     const parameters: any = {
       margin: activeMode === 'uniform' ? uniformMargin : 
               activeMode === 'anisotropic' ? anisotropicMargins.x : // Use X for preview
@@ -87,7 +88,7 @@ export function MarginToolbar({
       marginType: activeMode.toUpperCase(),
       marginValues: {},
       preview: { enabled: true, opacity: 0.5, color: '#FFFF00' },
-      singleSlice: true // Optimize for preview
+      // allSlices preview (handled in viewer) for scroll-friendly visualization
     };
 
     if (activeMode === 'uniform') {
@@ -294,7 +295,7 @@ export function MarginToolbar({
               {/* Separator */}
               <div className="w-px h-6 bg-white/30 mx-2" />
               
-              {/* Mode buttons */}
+              {/* Simplified: Only show Uniform mode button for radial expansion */}
               <Button
                 variant="outline"
                 size="sm"
@@ -308,36 +309,6 @@ export function MarginToolbar({
               >
                 <Expand className="w-3 h-3 mr-1" />
                 <span className="text-xs font-medium">Uniform</span>
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleModeChange('anisotropic')}
-                className={`h-7 px-3 border-2 text-white rounded-lg backdrop-blur-sm shadow-sm ${
-                  activeMode === 'anisotropic' 
-                    ? 'bg-cyan-500/30 border-cyan-400/60 hover:bg-cyan-500/40' 
-                    : 'bg-white/10 border-white/30 hover:bg-white/20'
-                }`}
-                title="Anisotropic margin (X,Y,Z)"
-              >
-                <Box className="w-3 h-3 mr-1" />
-                <span className="text-xs font-medium">X,Y,Z</span>
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleModeChange('directional')}
-                className={`h-7 px-3 border-2 text-white rounded-lg backdrop-blur-sm shadow-sm ${
-                  activeMode === 'directional' 
-                    ? 'bg-cyan-500/30 border-cyan-400/60 hover:bg-cyan-500/40' 
-                    : 'bg-white/10 border-white/30 hover:bg-white/20'
-                }`}
-                title="Directional margin"
-              >
-                <Move className="w-3 h-3 mr-1" />
-                <span className="text-xs font-medium">Directional</span>
               </Button>
               
               {/* Separator */}
@@ -389,54 +360,71 @@ export function MarginToolbar({
             </Button>
           </div>
           
-          {/* Settings panel - always visible */}
+          {/* Settings panel - simplified: target selector and distance control on one line */}
           <div className="mt-3 border-t border-white/20 pt-2">
-            {/* Target Structure Selector */}
-            <div className="flex items-center space-x-3 p-3 mb-2">
-              <Label className="text-xs text-white/70">Target Structure:</Label>
-              <Select value={targetStructure} onValueChange={(value: 'same' | 'different' | 'new') => setTargetStructure(value)}>
-                <SelectTrigger className="w-48 h-7 bg-white/10 border-white/30 text-white text-xs">
-                  <SelectValue placeholder="Select target" />
-                </SelectTrigger>
-                <SelectContent className="bg-gray-900 border-gray-700">
-                  <SelectItem value="same" className="text-white text-xs hover:bg-gray-800">
-                    Same Structure (Modify)
-                  </SelectItem>
-                  <SelectItem value="different" className="text-white text-xs hover:bg-gray-800">
-                    Different Structure
-                  </SelectItem>
-                  <SelectItem value="new" className="text-white text-xs hover:bg-gray-800">
-                    <div className="flex items-center">
-                      <Plus className="w-3 h-3 mr-1" />
-                      New Structure
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              
-              {targetStructure === 'different' && (
-                <Select value={selectedTargetId?.toString()} onValueChange={(value) => setSelectedTargetId(parseInt(value))}>
-                  <SelectTrigger className="w-40 h-7 bg-white/10 border-white/30 text-white text-xs">
-                    <SelectValue placeholder="Select structure" />
+            <div className="flex items-center justify-between p-3 space-x-4">
+              {/* Target Structure Selector */}
+              <div className="flex items-center space-x-3">
+                <Label className="text-xs text-white/70">Target:</Label>
+                <Select value={targetStructure} onValueChange={(value: 'same' | 'different' | 'new') => setTargetStructure(value)}>
+                  <SelectTrigger className="w-44 h-7 bg-white/10 border-white/30 text-white text-xs">
+                    <SelectValue placeholder="Select target" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-900 border-gray-700">
-                    {availableStructures
-                      .filter(s => s.id !== selectedStructure.id)
-                      .map(structure => (
-                        <SelectItem key={structure.id} value={structure.id.toString()} className="text-white text-xs hover:bg-gray-800">
-                          {structure.name}
-                        </SelectItem>
-                      ))
-                    }
+                    <SelectItem value="same" className="text-white text-xs hover:bg-gray-800">
+                      Same (Modify)
+                    </SelectItem>
+                    <SelectItem value="different" className="text-white text-xs hover:bg-gray-800">
+                      Different Structure
+                    </SelectItem>
+                    <SelectItem value="new" className="text-white text-xs hover:bg-gray-800">
+                      <div className="flex items-center">
+                        <Plus className="w-3 h-3 mr-1" />
+                        New Structure
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-              )}
+                {targetStructure === 'different' && (
+                  <Select value={selectedTargetId?.toString()} onValueChange={(value) => setSelectedTargetId(parseInt(value))}>
+                    <SelectTrigger className="w-40 h-7 bg-white/10 border-white/30 text-white text-xs">
+                      <SelectValue placeholder="Select structure" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700">
+                      {availableStructures
+                        .filter(s => s.id !== selectedStructure.id)
+                        .map(structure => (
+                          <SelectItem key={structure.id} value={structure.id.toString()} className="text-white text-xs hover:bg-gray-800">
+                            {structure.name}
+                          </SelectItem>
+                        ))
+                      }
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Inline distance control */}
+              <div className="flex items-center space-x-2">
+                <Label className="text-xs text-white/70">Distance</Label>
+                <Slider
+                  value={[uniformMargin]}
+                  onValueChange={(value) => setUniformMargin(value[0])}
+                  min={-10}
+                  max={20}
+                  step={0.5}
+                  className="w-40"
+                />
+                <Input
+                  type="number"
+                  value={uniformMargin}
+                  onChange={(e) => setUniformMargin(parseFloat(e.target.value) || 0)}
+                  className="w-16 h-6 bg-white/10 border-white/30 text-white text-xs"
+                  step="0.5"
+                />
+                <span className="text-white/50 text-xs">mm</span>
+              </div>
             </div>
-            
-            {/* Mode-specific settings */}
-            {activeMode === 'uniform' && renderUniformSettings()}
-            {activeMode === 'anisotropic' && renderAnisotropicSettings()}
-            {activeMode === 'directional' && renderDirectionalSettings()}
           </div>
           
           {/* Preview status */}
@@ -444,7 +432,7 @@ export function MarginToolbar({
             <div className="mt-2 p-2 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
               <div className="flex items-center text-xs text-yellow-400">
                 <Eye className="w-3 h-3 mr-2" />
-                <span>Preview active - Yellow dashed outline shows margin result</span>
+                <span>Preview active - Animated yellow dashed outline shows margin</span>
               </div>
             </div>
           )}
