@@ -83,7 +83,7 @@ export function computeDiceForStructureNames(rt: RTStructures, nameA: string, na
   if (!B) throw new Error(`Structure ${nameB} not found`);
 
   // Collect all slices
-  const slices = Array.from(new Set([...listUniqueSlices(A), ...listUniqueSlices(B)])).sort((a, b) => a - b);
+  const slices = Array.from(new Set<number>([...listUniqueSlices(A), ...listUniqueSlices(B)])).sort((a, b) => a - b);
   const thickness = medianSpacing(slices) || 1; // mm
 
   let volA = 0;

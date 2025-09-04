@@ -21,7 +21,10 @@ import {
   Workflow,
   ArrowUpFromLine,
   Move3d,
-  Target
+  Target,
+  Undo,
+  Redo,
+  History
 } from 'lucide-react';
 
 interface ViewerToolbarProps {
@@ -52,6 +55,13 @@ interface ViewerToolbarProps {
   isMPRActive?: boolean;
   onLocalization?: () => void;
   isLocalizationActive?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  historyItems?: Array<{ timestamp: number; action: string; structureId: number }>;
+  currentHistoryIndex?: number;
+  onSelectHistory?: (index: number) => void;
 }
 
 export function ViewerToolbar({
@@ -78,13 +88,21 @@ export function ViewerToolbar({
   onMPRToggle,
   isMPRActive = false,
   onLocalization,
-  isLocalizationActive = false
+  isLocalizationActive = false,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  historyItems = [],
+  currentHistoryIndex = -1,
+  onSelectHistory
 }: ViewerToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showMetadata, setShowMetadata] = useState(false);
   const [showInteractionTips, setShowInteractionTips] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
   const [showContourOperations, setShowContourOperations] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const handleToolSelect = (tool: string, callback: () => void) => {
     // Ensure only one selectable tool is active at a time (except MPR which is a toggle)
@@ -176,6 +194,7 @@ export function ViewerToolbar({
                 </div>
               );
             })}
+
           </div>
         </div>
 
@@ -269,6 +288,97 @@ export function ViewerToolbar({
             )}
           </div>
         </div>
+
+        {/* Undo/Redo/History cluster - left side of toolbar */}
+        {(canUndo || canRedo || (historyItems && historyItems.length > 0)) && (
+          <div className="absolute -left-40 top-1/2 transform -translate-y-1/2 animate-in slide-in-from-right-2 duration-300">
+            <div className="flex space-x-2">
+              {canUndo && (
+                <div className="relative group">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90 hover:bg-white/20 hover:text-white"
+                    onClick={onUndo}
+                    title="Undo (Ctrl+Z)"
+                  >
+                    <Undo className="w-4 h-4" />
+                  </Button>
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    Undo
+                  </div>
+                </div>
+              )}
+
+              {canRedo && (
+                <div className="relative group">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90 hover:bg-white/20 hover:text-white"
+                    onClick={onRedo}
+                    title="Redo (Ctrl+Y)"
+                  >
+                    <Redo className="w-4 h-4" />
+                  </Button>
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    Redo
+                  </div>
+                </div>
+              )}
+
+              {historyItems && historyItems.length > 0 && (
+                <div className="relative">
+                  <div className="relative group">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`h-8 w-8 p-0 transition-all duration-200 rounded-lg text-white/90 ${showHistory ? 'bg-white/20 text-white' : 'hover:bg-white/20 hover:text-white'}`}
+                      onClick={() => setShowHistory(!showHistory)}
+                      title="History"
+                    >
+                      <History className="w-4 h-4" />
+                    </Button>
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                      History
+                    </div>
+                  </div>
+
+                  {showHistory && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-black bg-opacity-95 text-white p-2 rounded-lg text-xs w-80 shadow-lg border border-gray-600 max-h-80 overflow-y-auto z-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-indigo-300 font-semibold">Edit History</div>
+                        <button className="text-gray-400 hover:text-white" onClick={() => setShowHistory(false)}>×</button>
+                      </div>
+                      <div className="space-y-1">
+                        {historyItems.map((h, idx) => {
+                          const date = new Date(h.timestamp);
+                          const isCurrent = idx === (currentHistoryIndex ?? -1);
+                          return (
+                            <button
+                              key={`${h.timestamp}-${idx}`}
+                              className={`w-full text-left px-2 py-1 rounded border transition-colors ${isCurrent ? 'bg-blue-600/20 border-blue-500/50 text-blue-200' : 'bg-white/5 border-white/10 text-gray-200 hover:bg-white/10'}`}
+                              onClick={() => {
+                                onSelectHistory && onSelectHistory(idx);
+                                setShowHistory(false);
+                              }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium">{h.action}</span>
+                                <span className="text-[10px] text-gray-400">{date.toLocaleTimeString()}</span>
+                              </div>
+                              <div className="text-[11px] text-gray-400">Structure {h.structureId}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Metadata Popup */}
         {showMetadata && (

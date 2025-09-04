@@ -16,13 +16,13 @@ export type ClipperAPI = {
   PolyFillType: any;
   JoinType: any;
   EndType: any;
-  CleanPolygon: (path: any, dist: number) => any;
-  CleanPolygons: (paths: any, dist: number) => any;
-  SimplifyPolygon: (path: any, fillType: any) => any;
-  SimplifyPolygons: (paths: any, fillType: any) => any;
+  cleanPolygon: (path: any, dist: number) => any;
+  cleanPolygons: (paths: any, dist: number) => any;
+  simplifyPolygon: (path: any, fillType: any) => any;
+  simplifyPolygons: (paths: any, fillType: any) => any;
   ClipperOffset?: any;
-  PointInPolygon: (pt: any, path: any) => number;
-  IntPoint: any;
+  pointInPolygon: (pt: any, path: any) => number;
+  IntPoint?: any;
 };
 
 let cached: ClipperAPI | null = null;
@@ -58,12 +58,12 @@ async function loadClipperInstance(): Promise<ClipperAPI> {
       PolyFillType: lib.instance.PolyFillType,
       JoinType: lib.instance.JoinType,
       EndType: lib.instance.EndType,
-      CleanPolygon: lib.instance.CleanPolygon,
-      CleanPolygons: lib.instance.CleanPolygons,
-      SimplifyPolygon: lib.instance.SimplifyPolygon,
-      SimplifyPolygons: lib.instance.SimplifyPolygons,
+      cleanPolygon: lib.instance.cleanPolygon,
+      cleanPolygons: lib.instance.cleanPolygons,
+      simplifyPolygon: lib.instance.simplifyPolygon,
+      simplifyPolygons: lib.instance.simplifyPolygons,
       ClipperOffset: lib.instance.ClipperOffset,
-      PointInPolygon: lib.instance.PointInPolygon,
+      pointInPolygon: lib.instance.pointInPolygon,
       IntPoint: lib.instance.IntPoint,
     };
     

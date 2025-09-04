@@ -8,6 +8,7 @@ import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
+import { undoRedoManager } from '@/lib/undo-system';
 import { log } from '@/lib/log';
 import { Button } from '@/components/ui/button';
 import { MarginToolbar } from './margin-toolbar';
@@ -74,6 +75,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   
   // Watch for secondary series changes to show/hide fusion panel
   useEffect(() => {
@@ -446,6 +448,52 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
+  // Undo/Redo handlers for bottom toolbar
+  const handleGlobalUndo = () => {
+    const prev = undoRedoManager.undo();
+    if (prev) {
+      setRTStructures(prev.rtStructures);
+    }
+  };
+
+  const handleGlobalRedo = () => {
+    const next = undoRedoManager.redo();
+    if (next) {
+      setRTStructures(next.rtStructures);
+    }
+  };
+
+  const handleJumpToHistory = (index: number) => {
+    const state = undoRedoManager.jumpTo(index);
+    if (state) {
+      setRTStructures(state.rtStructures);
+    }
+  };
+
+  // Subscribe to undo manager changes to refresh toolbar state
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    items: [] as Array<{ timestamp: number; action: string; structureId: number }>,
+    index: -1
+  });
+
+  useEffect(() => {
+    const update = () => {
+      try {
+        setHistoryState({
+          canUndo: undoRedoManager.canUndo(),
+          canRedo: undoRedoManager.canRedo(),
+          items: undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId })),
+          index: undoRedoManager.getCurrentIndex()
+        });
+      } catch {}
+    };
+    update();
+    const unsubscribe = undoRedoManager.subscribe(update);
+    return () => unsubscribe();
+  }, [selectedSeries?.id]);
+
   // Auto-zoom functionality based on structure bounds
   const getStructureBounds = (structure: any) => {
     let xMin = Infinity, xMax = -Infinity;
@@ -804,6 +852,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onLocalization={handleLocalizationToggle}
           isLocalizationActive={showLocalizationTool}
           className="toolbar-custom"
+          onUndo={handleGlobalUndo}
+          onRedo={handleGlobalRedo}
+          canUndo={undoRedoManager.canUndo()}
+          canRedo={undoRedoManager.canRedo()}
+          historyItems={undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId }))}
+          currentHistoryIndex={undoRedoManager.getCurrentIndex()}
+          onSelectHistory={handleJumpToHistory}
         />
       )}
 
