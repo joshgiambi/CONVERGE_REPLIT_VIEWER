@@ -163,7 +163,10 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     // Contours projection by intersecting axial polygons with current plane
     if (rtStructures?.structures?.length && images?.[0]?.imageMetadata?.imagePosition) {
       ctx.save();
-      ctx.globalAlpha = 0.95;
+      ctx.globalAlpha = 1.0;
+      ctx.lineWidth = 2.0;
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = 'lighter';
       const pos0Str = images[0].imageMetadata.imagePosition || images[0].imagePosition;
       const pos0 = (typeof pos0Str === 'string' ? pos0Str.split('\\').map(Number) : pos0Str) as number[];
       // Parse IOP to handle rotated datasets correctly
@@ -178,8 +181,9 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
       const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
       const worldToPixel = (wx: number, wy: number, wz: number): { x: number; y: number } => {
         const d = [wx - pos0[0], wy - pos0[1], wz - pos0[2]];
-        const x = dot(d, colDir) / spacing.col; // column index
-        const y = dot(d, rowDir) / spacing.row; // row index
+        // Map world→pixel indices on axial grid and shift by half-voxel so vertices align to pixel centers
+        const x = (dot(d, colDir) / spacing.col) - 0.5; // column index (centered)
+        const y = (dot(d, rowDir) / spacing.row) - 0.5; // row index (centered)
         return { x, y };
       };
       const zIndexForContours = Number.isFinite(currentZIndex as number) ? (currentZIndex as number) : Math.round(depth / 2);
@@ -217,9 +221,9 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
             }
             ys.sort((a, b) => a - b);
             for (let k = 0; k + 1 < ys.length; k += 2) {
-              const yA = offY + Math.round(((depth - 1 - zIndexForContours) / dimY) * drawH);
-              const xA = offX + Math.round((ys[k] / height) * drawW);
-              const xB = offX + Math.round((ys[k + 1] / height) * drawW);
+              const yA = offY + Math.round((((depth - 1 - zIndexForContours) + 0.5) / dimY) * drawH);
+              const xA = offX + Math.round(((ys[k] + 0.5) / height) * drawW);
+              const xB = offX + Math.round(((ys[k + 1] + 0.5) / height) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
             }
           } else {
@@ -236,14 +240,15 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
             }
             xs.sort((a, b) => a - b);
             for (let k = 0; k + 1 < xs.length; k += 2) {
-              const yA = offY + Math.round(((depth - 1 - zIndexForContours) / dimY) * drawH);
-              const xA = offX + Math.round((xs[k] / width) * drawW);
-              const xB = offX + Math.round((xs[k + 1] / width) * drawW);
+              const yA = offY + Math.round((((depth - 1 - zIndexForContours) + 0.5) / dimY) * drawH);
+              const xA = offX + Math.round(((xs[k] + 0.5) / width) * drawW);
+              const xB = offX + Math.round(((xs[k + 1] + 0.5) / width) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
             }
           }
         }
       }
+      ctx.globalCompositeOperation = prevComp;
       ctx.restore();
     }
 
