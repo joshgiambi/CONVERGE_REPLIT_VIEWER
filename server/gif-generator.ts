@@ -1,4 +1,4 @@
-import { createCanvas, Image } from 'canvas';
+import { createCanvas, Image, CanvasRenderingContext2D as NodeCanvasRenderingContext2D } from 'canvas';
 import GIFEncoder from 'gifencoder';
 import fs from 'fs';
 import path from 'path';
@@ -28,7 +28,7 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
     const framesToGenerate = Math.min(30, totalImages);
     const step = totalImages > 30 ? Math.floor(totalImages / 30) : 1;
     
-    const selectedImages = [];
+    const selectedImages = [] as any[];
     for (let i = 0; i < totalImages && selectedImages.length < framesToGenerate; i += step) {
       selectedImages.push(images[i]);
     }
@@ -37,7 +37,7 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
     const width = 256;
     const height = 256;
     const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d') as unknown as NodeCanvasRenderingContext2D;
     
     const encoder = new GIFEncoder(width, height);
     
@@ -63,17 +63,17 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
       
       // Draw modality text
       ctx.fillStyle = '#444444';
-      ctx.font = 'bold 48px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(series?.modality || 'DICOM', width / 2, height / 2 - 20);
+      (ctx as any).font = 'bold 48px Arial';
+      ;(ctx as any).textAlign = 'center';
+      ;(ctx as any).textBaseline = 'middle';
+      ;(ctx as any).fillText(series?.modality || 'DICOM', width / 2, height / 2 - 20);
       
       // Draw frame number
-      ctx.font = '24px Arial';
+      ;(ctx as any).font = '24px Arial';
       ctx.fillStyle = '#666666';
-      ctx.fillText(`Frame ${index + 1}/${framesToGenerate}`, width / 2, height / 2 + 30);
+      ;(ctx as any).fillText(`Frame ${index + 1}/${framesToGenerate}`, width / 2, height / 2 + 30);
       
-      encoder.addFrame(ctx);
+      encoder.addFrame(ctx as unknown as any);
       framesAdded++;
     };
 
@@ -102,7 +102,7 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
         }
         
         // Get pixel data element
-        const pixelDataElement = dataSet.elements.x7fe00010;
+        const pixelDataElement = (dataSet as any).elements.x7fe00010;
         if (!pixelDataElement) {
           console.log('No pixel data found, using placeholder frame');
           createPlaceholderFrame(i);
@@ -110,18 +110,18 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
         }
 
         // Get image dimensions
-        const rows = dataSet.uint16('x00280010') || 512;
-        const columns = dataSet.uint16('x00280011') || 512;
+        const rows = (dataSet as any).uint16('x00280010') || 512;
+        const columns = (dataSet as any).uint16('x00280011') || 512;
         
         // Get window/level
-        const windowCenter = parseFloat(dataSet.string('x00281050') || '40');
-        const windowWidth = parseFloat(dataSet.string('x00281051') || '300');
+        const windowCenter = parseFloat((dataSet as any).string('x00281050') || '40');
+        const windowWidth = parseFloat((dataSet as any).string('x00281051') || '300');
         
         // Get pixel data
         let pixelData: Uint16Array;
-        if (pixelDataElement.fragments) {
+        if ((pixelDataElement as any).fragments) {
           // Handle encapsulated pixel data
-          const fragments = pixelDataElement.fragments;
+          const fragments = (pixelDataElement as any).fragments as any[];
           let totalLength = 0;
           fragments.forEach((fragment: any) => {
             totalLength += fragment.length;
@@ -138,16 +138,16 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
           pixelData = new Uint16Array(combinedArray.buffer);
         } else {
           // Handle uncompressed pixel data
-          const pixelDataOffset = pixelDataElement.dataOffset;
-          const pixelDataLength = pixelDataElement.length;
+          const pixelDataOffset = (pixelDataElement as any).dataOffset;
+          const pixelDataLength = (pixelDataElement as any).length;
           pixelData = new Uint16Array(byteArray.buffer, pixelDataOffset, pixelDataLength / 2);
         }
         
         // Create temporary canvas for this frame
         const frameCanvas = createCanvas(columns, rows);
-        const frameCtx = frameCanvas.getContext('2d');
-        const imageData = frameCtx.createImageData(columns, rows);
-        const data = imageData.data;
+        const frameCtx = frameCanvas.getContext('2d') as unknown as NodeCanvasRenderingContext2D;
+        const imageData = (frameCtx as any).createImageData(columns, rows);
+        const data = imageData.data as Uint8ClampedArray;
         
         // Apply window/level
         const min = windowCenter - windowWidth / 2;
@@ -165,7 +165,7 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
           data[offset + 3] = 255;   // A
         }
         
-        frameCtx.putImageData(imageData, 0, 0);
+        (frameCtx as any).putImageData(imageData, 0, 0);
         
         // Scale to target size and draw on main canvas
         ctx.fillStyle = 'black';
@@ -178,15 +178,15 @@ export async function generateSeriesGIF(seriesId: number, storage: any): Promise
         const x = (width - scaledWidth) / 2;
         const y = (height - scaledHeight) / 2;
         
-        ctx.drawImage(frameCanvas, x, y, scaledWidth, scaledHeight);
+        (ctx as any).drawImage(frameCanvas as any, x, y, scaledWidth, scaledHeight);
         
         // Add frame number overlay
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.font = '12px Arial';
-        ctx.fillText(`${selectedImages.indexOf(image) + 1}/${framesToGenerate}`, 5, 15);
+        (ctx as any).font = '12px Arial';
+        ;(ctx as any).fillText(`${selectedImages.indexOf(image) + 1}/${framesToGenerate}`, 5, 15);
         
         // Add frame to GIF
-        encoder.addFrame(ctx);
+        encoder.addFrame(ctx as unknown as any);
         framesAdded++;
         
       } catch (error) {

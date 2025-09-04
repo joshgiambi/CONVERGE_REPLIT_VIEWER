@@ -39,12 +39,15 @@ async function contourToClipperPath(points: number[]): Promise<any> {
   const path = new api.Path();
   
   for (let i = 0; i < points.length; i += 3) {
-    // Create IntPoint using the ClipperLib constructor
-    const pt = new api.IntPoint(
-      Math.round(points[i] * SCALE),
-      Math.round(points[i + 1] * SCALE)
-    );
-    path.push_back(pt);
+    // Create point in the format accepted by the current Clipper instance
+    const x = Math.round(points[i] * SCALE);
+    const y = Math.round(points[i + 1] * SCALE);
+    const pt = (api as any).IntPoint ? new (api as any).IntPoint(x, y) : { X: x, Y: y };
+    if (typeof (path as any).push_back === 'function') {
+      (path as any).push_back(pt);
+    } else if (typeof (path as any).push === 'function') {
+      (path as any).push(pt);
+    }
   }
   
   return path;
