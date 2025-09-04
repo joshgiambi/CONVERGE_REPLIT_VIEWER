@@ -11,6 +11,7 @@ import PenToolV2 from "./pen-tool-v2";
 
 import { FusionControlPanel } from "./fusion-control-panel";
 import { MeasurementTool } from "./measurement-tool";
+import { MPRFloating } from './mpr-floating';
 import { BrushOperation } from "@shared/schema";
 import { growContour } from "@/lib/contour-grow";
 import { gaussianSmoothContour as smoothContour } from "@/lib/contour-smooth-simple";
@@ -27,11 +28,13 @@ import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, t
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
+import { attachDiceDebug } from "@/lib/dice-utils";
 import { 
   isGPUAccelerationAvailable,
   initializeCornerstone3D,
   render16BitImageGPU
 } from "@/lib/cornerstone3d-adapter";
+import { log } from '@/lib/log';
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
@@ -161,13 +164,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Initialize Cornerstone3D when GPU is available
   useEffect(() => {
     if (gpuCheckComplete && isGPUMode && !cornerstone3DInitialized) {
-      console.log('Initializing Cornerstone3D for GPU-accelerated rendering...');
+      log.debug('Initializing Cornerstone3D for GPU-accelerated rendering...', 'viewer');
       initializeCornerstone3D().then((success) => {
         if (success) {
-          console.log('✅ Cornerstone3D initialized successfully');
+          log.debug('✅ Cornerstone3D initialized successfully', 'viewer');
           setCornerstone3DInitialized(true);
         } else {
-          console.log('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core');
+          log.warn('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core', 'viewer');
           setIsGPUMode(false);
         }
       });
@@ -177,12 +180,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Update local structures when external ones change
   useEffect(() => {
     // Only update if actually changed to prevent unnecessary re-renders
-    console.log("RT Structures update - external:", externalRTStructures);
+    log.debug('RT Structures update received', 'viewer');
     if (externalRTStructures && externalRTStructures !== localRTStructures) {
-      console.log("Setting local RT structures:", externalRTStructures);
+      log.debug('Setting local RT structures', 'viewer');
       setLocalRTStructures(externalRTStructures);
     }
   }, [externalRTStructures]);
+
+  // Attach global dice helpers for quick validation
+  useEffect(() => {
+    attachDiceDebug(() => rtStructures);
+  }, [rtStructures]);
 
   // No longer need to load RT structures here - handled by parent component
   // Convert external window/level format to internal width/center format
@@ -206,6 +214,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
   const mprCacheRef = useRef<Map<string, { data: Uint16Array; width: number; height: number }>>(new Map());
+  // Expose cache for MPRFloating (read-only reference)
+  useEffect(() => {
+    try {
+      (window as any).__WV_CACHE__ = imageCacheRef.current;
+    } catch {}
+  }, []);
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
@@ -246,16 +260,54 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const displayCurrentImageRef = useRef<() => Promise<void>>();
   const prefetchCompleteRef = useRef(false);
   
+  // Frame rate limiting for smoother scrolling
+  const lastRenderTimeRef = useRef<number>(0);
+  const RENDER_THROTTLE_MS = 16; // 60fps max
+  const fusionRenderDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const isScrollingRef = useRef(false);
+  
   const scheduleRender = useCallback(() => {
     if (needsRenderRef.current) return;
     needsRenderRef.current = true;
-    requestAnimationFrame(async () => {
-      needsRenderRef.current = false;
-      if (displayCurrentImageRef.current) {
-        await displayCurrentImageRef.current();
-      }
-    });
-  }, []);
+    
+    // Mark as scrolling for fusion optimization
+    isScrollingRef.current = true;
+    if (fusionRenderDebounceRef.current) {
+      clearTimeout(fusionRenderDebounceRef.current);
+    }
+    
+    // Throttle renders during rapid scrolling
+    const now = performance.now();
+    const timeSinceLastRender = now - lastRenderTimeRef.current;
+    
+    if (timeSinceLastRender < RENDER_THROTTLE_MS) {
+      // Delay render to maintain frame rate
+      setTimeout(() => {
+        needsRenderRef.current = false;
+        if (displayCurrentImageRef.current) {
+          displayCurrentImageRef.current();
+        }
+        lastRenderTimeRef.current = performance.now();
+      }, RENDER_THROTTLE_MS - timeSinceLastRender);
+    } else {
+      requestAnimationFrame(async () => {
+        needsRenderRef.current = false;
+        if (displayCurrentImageRef.current) {
+          await displayCurrentImageRef.current();
+        }
+        lastRenderTimeRef.current = performance.now();
+        
+        // Debounce fusion rendering for smoother scrolling
+        fusionRenderDebounceRef.current = setTimeout(() => {
+          isScrollingRef.current = false;
+          // Re-render with full quality fusion after scrolling stops
+          if (fusionOpacity > 0 && secondarySeriesId) {
+            scheduleRender();
+          }
+        }, 100);
+      });
+    }
+  }, [fusionOpacity, secondarySeriesId]);
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
@@ -263,28 +315,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Optimized rendering with cached LUT and offscreen canvas
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cachedLUTRef = useRef<{ key: string; lut: Uint8Array } | null>(null);
+  
+  // Secondary image prefetch optimization
+  const secondaryPrefetchCompleteRef = useRef(false);
+  const lastFusionRenderRef = useRef<{ ctZ: number; mriIndex: number } | null>(null);
 
 
 
   // Save contour updates using debounced save
   const saveContourUpdates = (updatedStructures: any, action?: string) => {
-    console.log(`Queuing save for ${action || 'unknown action'}`);
+    log.debug(`Queuing save for ${action || 'unknown action'}`, 'viewer');
     if (debouncedSaveRef.current) {
       debouncedSaveRef.current(updatedStructures);
     } else {
-      console.warn('Debounced save not initialized');
+      log.warn('Debounced save not initialized', 'viewer');
     }
   };
 
   // Handle boolean operations (combine/subtract) between structures
   const handleBooleanOperation = async (payload: any) => {
     if (!rtStructures) {
-      console.error("RT structures not available for boolean operation");
+      log.error('RT structures not available for boolean operation', 'viewer');
       return;
     }
 
     const { operation, sourceStructureId, targetStructureId, slicePosition } = payload;
-    console.log(`🔶 Performing ${operation} operation between structures ${sourceStructureId} and ${targetStructureId} at slice ${slicePosition}`);
+    log.debug(`🔶 Performing ${operation} op between ${sourceStructureId} and ${targetStructureId} @ slice ${slicePosition}`, 'viewer');
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -298,7 +354,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     );
 
     if (!sourceStructure || !targetStructure) {
-      console.error("Source or target structure not found");
+      log.error('Source or target structure not found', 'viewer');
       return;
     }
 
@@ -311,12 +367,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     );
 
     if (!sourceContour || !sourceContour.points || sourceContour.points.length < 9) {
-      console.warn(`No source contour found on slice ${slicePosition}`);
+      log.warn(`No source contour found on slice ${slicePosition}`, 'viewer');
       return;
     }
 
     if (!targetContour || !targetContour.points || targetContour.points.length < 9) {
-      console.warn(`No target contour found on slice ${slicePosition}`);
+      log.warn(`No target contour found on slice ${slicePosition}`, 'viewer');
       return;
     }
 
@@ -329,13 +385,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (operation === 'combine') {
         // Combine the two contours
         resultContours = await combineContours(sourceContour.points, targetContour.points);
-        console.log(`🔶 Combine operation returned ${resultContours.length} contours`);
+        log.debug(`🔶 Combine returned ${resultContours.length} contours`, 'viewer');
       } else if (operation === 'subtract') {
         // Subtract target from source
         resultContours = await subtractContours(sourceContour.points, targetContour.points);
-        console.log(`🔶 Subtract operation returned ${resultContours.length} contours`);
+        log.debug(`🔶 Subtract returned ${resultContours.length} contours`, 'viewer');
       } else {
-        console.error(`Unknown boolean operation: ${operation}`);
+        log.error(`Unknown boolean operation: ${operation}`, 'viewer');
         return;
       }
 
@@ -360,9 +416,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
         });
         
-        console.log(`✅ Boolean ${operation} operation completed: ${resultContours.length} result contours`);
+        log.debug(`✅ Boolean ${operation} completed: ${resultContours.length} contours`, 'viewer');
       } else {
-        console.log(`✅ Boolean ${operation} operation completed: no result contours (empty result)`);
+        log.debug(`✅ Boolean ${operation} completed: empty`, 'viewer');
       }
 
       // Update local structures and save to server
@@ -380,16 +436,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
     } catch (error) {
-      console.error(`Error performing ${operation} operation:`, error);
+      log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
     }
   };
 
   // Handle Eclipse TPS margin operation
   const handleMarginOperation = (payload: any) => {
-    console.log('🔹 handleMarginOperation called with:', payload);
+    log.debug('🔹 handleMarginOperation called', 'viewer');
     
     if (!localRTStructures && !rtStructures) {
-      console.error("RT structures not available for margin operation");
+      log.error('RT structures not available for margin operation', 'viewer');
       return;
     }
 
@@ -398,7 +454,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     // Check if this is an execute operation (applying preview)
     if (payload.action === 'apply_margin' && !payload.isPreview && previewContours.length > 0) {
-      console.log('🔹 Executing margin operation - applying preview contours');
+      log.debug('🔹 Executing margin operation - applying preview contours', 'viewer');
       
       // Create a deep copy of RT structures
       const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
@@ -409,7 +465,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!structure) {
-        console.error(`Structure ${structureId} not found`);
+        log.error(`Structure ${structureId} not found`, 'viewer');
         return;
       }
       
@@ -420,7 +476,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         numberOfPoints: preview.points.length / 3
       }));
       
-      console.log(`🔹 Replaced ${structure.contours.length} contours with preview contours`);
+      log.debug(`🔹 Replaced ${structure.contours.length} contours with preview contours`, 'viewer');
       
       // Clear preview
       setPreviewContours([]);
@@ -434,13 +490,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         onContourUpdate(updatedRTStructures);
       }
       
-      console.log(`✅ Successfully applied margin to structure ${structureId}`);
+      log.debug(`✅ Applied margin to structure ${structureId}`, 'viewer');
       return;
     }
     
     // For single slice margin operations (legacy)
     if (payload.slicePosition !== undefined) {
-      console.log('🔹 Single slice margin operation (legacy)');
+      log.debug('🔹 Single slice margin operation (legacy)', 'viewer');
       
       const { slicePosition, marginParams } = payload;
       const updatedRTStructures = structuredClone ? structuredClone(structures) : JSON.parse(JSON.stringify(structures));
@@ -450,7 +506,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!structure) {
-        console.error(`Structure ${structureId} not found`);
+        log.error(`Structure ${structureId} not found`, 'viewer');
         return;
       }
       
@@ -459,7 +515,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       
       if (!contour || !contour.points || contour.points.length === 0) {
-        console.warn(`No contour found for structure ${structureId} at slice ${slicePosition}`);
+        log.warn(`No contour found for structure ${structureId} at slice ${slicePosition}`, 'viewer');
         return;
       }
       
@@ -493,9 +549,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           onContourUpdate(updatedRTStructures);
         }
         
-        console.log(`Successfully applied margin of ${marginValueMm}mm to structure ${structureId}`);
+        log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
       } catch (error) {
-        console.error("Error applying margin operation:", error);
+        log.error(`Error applying margin operation: ${String(error)}`, 'viewer');
       }
     }
   };
@@ -503,12 +559,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Handle preview grow contour operation
   const handlePreviewGrowOperation = async (payload: any) => {
     if (!localRTStructures) {
-      console.error("RT structures not available for preview");
+      log.error('RT structures not available for preview', 'viewer');
       return;
     }
 
     const { structureId, slicePosition, distance, direction = 'all' } = payload;
-    console.log(`🔹 Generating preview for structure ${structureId} by ${distance}mm at slice ${slicePosition}`);
+    log.debug(`🔹 Generating preview for structure ${structureId} by ${distance}mm @ slice ${slicePosition}`, 'viewer');
 
     // Find the target structure
     const structure = localRTStructures.structures?.find(
@@ -760,7 +816,76 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setPreviewContours([]);
 
       const marginValue = parameters.margin || 5;
-      console.log('🔹 📊 Applying 3D margin value:', marginValue);
+      console.log('🔹 📊 Margin value:', marginValue);
+
+      // Uniform margin preview: use DT worker for large |margin|, otherwise fast 2D offset
+      if (parameters?.marginType === 'UNIFORM') {
+        const useWorker = Math.abs(marginValue) >= 3;
+        if (useWorker) {
+          try {
+            // Abort any in-flight preview worker
+            if ((window as any).__marginPreviewWorker) {
+              try { (window as any).__marginPreviewWorker.terminate(); } catch {}
+            }
+            const worker = new Worker(new URL('@/margins/margin-worker.ts', import.meta.url), { type: 'module' });
+            (window as any).__marginPreviewWorker = worker;
+            const px = imageMetadata?.pixelSpacing || [1, 1];
+            const th = imageMetadata?.sliceThickness || 2;
+            const spacing: [number, number, number] = [px[1] ?? px[0], px[0], th];
+            const jobId = `prev-${Date.now()}`;
+            const padding = Math.abs(marginValue) + 5;
+            const srcContours = structure.contours || [];
+            const previewPromise: Promise<any> = new Promise((resolve, reject) => {
+              worker.onmessage = (ev: MessageEvent<any>) => {
+                if (!ev.data || ev.data.jobId !== jobId) return;
+                try { worker.terminate(); } catch {}
+                (window as any).__marginPreviewWorker = null;
+                if (ev.data.ok) resolve(ev.data.contours); else reject(ev.data.error);
+              };
+              worker.onerror = (err) => {
+                try { worker.terminate(); } catch {}
+                (window as any).__marginPreviewWorker = null;
+                reject(err);
+              };
+            });
+            worker.postMessage({ jobId, kind: 'UNIFORM', contours: srcContours, spacing, padding, margin: marginValue });
+            const workerContours = await previewPromise;
+            const previewContoursWithSlices: any[] = (workerContours || []).map((c: any) => ({
+              points: c.points,
+              slicePosition: c.slicePosition,
+              isPreview: true,
+              previewColor: '#FFFF00'
+            }));
+            setPreviewContours(previewContoursWithSlices);
+            return;
+          } catch (err) {
+            console.warn('DT preview worker failed, falling back to 2D offset:', err);
+          }
+        }
+        // Fallback/fast path: 2D offset per slice
+        const { offsetContour } = await import('@/lib/clipper-boolean-operations');
+        const previewContoursWithSlices: any[] = [];
+        for (const contour of structure.contours) {
+          if (!contour.points || contour.points.length < 9) continue;
+          try {
+            const outs = await offsetContour(contour.points, marginValue);
+            outs?.forEach(out => {
+              if (out.length >= 9) {
+                previewContoursWithSlices.push({
+                  points: out,
+                  slicePosition: contour.slicePosition,
+                  isPreview: true,
+                  previewColor: '#FFFF00'
+                });
+              }
+            });
+          } catch (err) {
+            console.warn(`Offset preview failed for slice ${contour.slicePosition}:`, err);
+          }
+        }
+        setPreviewContours(previewContoursWithSlices);
+        return;
+      }
 
       // Import the optimized 3D volumetric margin operation handler
       const { apply3DMarginOptimized } = await import('@/lib/volumetric-margin-operations-optimized');
@@ -855,7 +980,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const { structureId, targetStructureId, parameters } = payload;
     
-    console.log(`🔹 📊 Executing simple margin operation for structure ${structureId} with parameters:`, parameters);
+    console.log(`🔹 📊 Executing margin operation for structure ${structureId} with parameters:`, parameters);
     console.log(`🔹 Target structure ID: ${targetStructureId || 'same structure'}`);
     
     try {
@@ -885,7 +1010,75 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       
       const marginValue = parameters.marginValues?.uniform || parameters.margin || 5;
-      console.log(`🔹 Applying simple margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
+      console.log(`🔹 Applying margin of ${marginValue}mm to ${sourceStructure.contours?.length || 0} contours`);
+
+      // Uniform margin: prefer fast 3D execution to match Eclipse volumetric margin
+      if (parameters?.marginType === 'UNIFORM') {
+        try {
+          const { applyFast3DMargin } = await import('@/lib/fast-3d-margin-operations');
+          const px = imageMetadata?.pixelSpacing || [1, 1];
+          const th = imageMetadata?.sliceThickness || 2;
+          const fast3DResults = await applyFast3DMargin(
+            sourceStructure.contours || [],
+            {
+              marginMm: marginValue,
+              pixelSpacing: [px[0], px[1], th],
+              imageMetadata: {
+                imagePosition: [0, 0, 0],
+                imageSize: { width: 512, height: 512, depth: 100 }
+              },
+              useOptimizedAlgorithm: true,
+              maxProcessingTime: 15000
+            }
+          );
+          const processedContours = fast3DResults.map((c: any) => ({
+            slicePosition: c.slicePosition,
+            points: c.points,
+            numberOfPoints: c.numberOfPoints || c.points.length / 3
+          }));
+          targetStructure.contours = processedContours;
+        } catch (e2) {
+          console.warn('Fast 3D execution failed, falling back to 2D offset:', e2);
+          const { offsetContour } = await import('@/lib/clipper-boolean-operations');
+          const processedContours: any[] = [];
+          for (const contour of sourceStructure.contours || []) {
+            if (!contour.points || contour.points.length < 9) continue;
+            try {
+              const outs = await offsetContour(contour.points, marginValue);
+              outs?.forEach(out => {
+                if (out.length >= 9) {
+                  processedContours.push({
+                    slicePosition: contour.slicePosition,
+                    points: out,
+                    numberOfPoints: out.length / 3
+                  });
+                }
+              });
+            } catch (err) {
+              console.warn('Offset execution failed; preserving original contour:', err);
+              processedContours.push({
+                slicePosition: contour.slicePosition,
+                points: contour.points,
+                numberOfPoints: contour.points.length / 3
+              });
+            }
+          }
+          targetStructure.contours = processedContours;
+        }
+
+        // Clear preview and persist
+        setPreviewContours([]);
+        if (seriesId) {
+          undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
+        }
+        setLocalRTStructures(updatedRTStructures);
+        saveContourUpdates(updatedRTStructures, 'apply_margin');
+        if (onContourUpdate) {
+          onContourUpdate(updatedRTStructures);
+        }
+        console.log(`✅ Successfully applied uniform margin to structure ${targetStructure.roiNumber}`);
+        return;
+      }
       
       // Choose algorithm based on margin parameters and structure size
       let use3D = Math.abs(marginValue) > 2 || (sourceStructure.contours?.length || 0) > 5;
@@ -959,14 +1152,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Apply results to target structure
       targetStructure.contours = processedContours;
       
-      console.log(`🔹 ✅ Applied simple margin, generated ${processedContours.length} contours`);
+      console.log(`🔹 ✅ Applied simple/3D margin, generated ${processedContours.length} contours`);
       
       // Clear preview contours
       setPreviewContours([]);
       
-      // Update local structures and save
+      // Save to undo/redo and persist
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
+      }
       setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'apply_simple_margin');
+      saveContourUpdates(updatedRTStructures, 'apply_margin');
       
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
@@ -1259,16 +1455,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       return false; // No intersection found
     };
-    console.log("Handling contour update:", payload);
+    log.debug('Handling contour update', 'viewer');
 
     if (!rtStructures || !rtStructures.structures) {
-      console.error("No RT structures available");
+      log.error('No RT structures available', 'viewer');
       return;
     }
 
     // Handle refresh action for undo/redo
     if (payload.action === "refresh") {
-      console.log("Refreshing RT structures after undo/redo");
+      log.debug('Refreshing RT structures after undo/redo', 'viewer');
       // Update with the RT structures from the payload
       if (payload.rtStructures) {
         setLocalRTStructures(payload.rtStructures);
@@ -1292,7 +1488,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         (s: any) => s.roiNumber === payload.structureId,
       );
       if (!structure) {
-        console.error(`Structure ${payload.structureId} not found`);
+        log.error(`Structure ${payload.structureId} not found`, 'viewer');
         return;
       }
 
@@ -1303,8 +1499,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // The brush size is already in screen pixels and should remain that way
       // The polygon creation function will handle coordinate transformation internally
       
-      console.log(`Brush size: ${payload.brushSize}px (keeping in pixel units)`);
-      console.log(`Sample brush point coordinates:`, payload.points.slice(0, 3));
+      log.debug(`Brush size: ${payload.brushSize}px (pixel units)`, 'viewer');
+      log.debug('Sample brush point coordinates present', 'viewer');
       
       // TEMPORARILY DISABLED: Polishing causing structure morphing/shrinking
       // Use unpolished brush stroke until polishing is fixed
@@ -1313,7 +1509,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         payload.points,
         payload.brushSize, // Use pixel size directly - let polygon function handle conversion
       );
-      console.log("Using unpolished brush stroke (polishing temporarily disabled)");
+      log.debug('Using unpolished brush stroke (polishing temporarily disabled)', 'viewer');
       
       // TODO: Fix polishing ClipperLib compatibility issue
       // The polishing function is failing with "Error polishing contour" 
@@ -4147,6 +4343,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    // Skip expensive fusion during rapid scrolling for better performance
+    if (isScrollingRef.current && fusionOpacity > 0) {
+      // Skip fusion rendering during active scrolling to maintain smooth performance
+      console.log("⚡ Skipping fusion during rapid scrolling");
+      return;
+    }
+    
     console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
     console.log('🎯 FUSION RENDER DEBUG: Full state:', {
       secondaryImagesLength: secondaryImages.length,
@@ -4407,7 +4610,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
     // CRITICAL DEBUG: Log all slice position sources for comparison
-    console.log(`🔍 SLICE POSITION DEBUG:
+    if (DEBUG) console.log(`🔍 SLICE POSITION DEBUG:
       parsedSliceLocation: ${currentImage.parsedSliceLocation}
       parsedZPosition: ${currentImage.parsedZPosition} 
       imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
@@ -4422,7 +4625,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           : "N/A")}
       currentIndex: ${currentIndex}
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
-    console.log(
+    if (DEBUG) console.log(
       `📋 Available structures:`,
       localRTStructures?.structures?.map((s: any) => s.structureName) || [],
     );
@@ -4440,10 +4643,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (allRTZPositions.length > 0) {
       const rtZMin = Math.min(...allRTZPositions);
       const rtZMax = Math.max(...allRTZPositions);
-      console.log(
+      if (DEBUG) console.log(
         `🎯 RT coordinate range: ${rtZMin.toFixed(1)} to ${rtZMax.toFixed(1)}mm`,
       );
-      console.log(
+      if (DEBUG) console.log(
         `🎯 Current CT slice ${currentSlicePosition}mm should show structures at RT positions near this value`,
       );
     }
@@ -4468,7 +4671,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
       
       // Debug visibility map
-      console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
+      if (DEBUG) console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
         isVisible,
         visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
         allStructuresVisible,
@@ -4507,13 +4710,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
 
+      // Determine an effective slice tolerance based on metadata to prevent flicker
+      const metaTol = (() => {
+        const meta = currentImage?.imageMetadata;
+        if (!meta) return SLICE_TOL_MM;
+        const sbs = parseFloat(meta.spacingBetweenSlices ?? '');
+        const sth = parseFloat(meta.sliceThickness ?? '');
+        const zCand = Number.isFinite(sbs) ? sbs * 0.45 : (Number.isFinite(sth) ? sth * 0.45 : 0);
+        return Math.max(SLICE_TOL_MM, zCand || 0);
+      })();
+
       structure.contours.forEach((contour: any) => {
         // Debug: Log what contours are being considered for drawing
         const positionDiff = Math.abs(
           contour.slicePosition - currentSlicePosition,
         );
-        if (positionDiff <= SLICE_TOL_MM) {
-          console.log(
+        if (positionDiff <= metaTol) {
+          if (DEBUG) console.log(
             `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
           );
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
@@ -4528,8 +4741,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Set preview contour styling - bright yellow and dashed
       ctx.strokeStyle = '#FFFF00'; // Bright yellow
-      ctx.fillStyle = 'rgba(255, 255, 0, 0.15)'; // Semi-transparent yellow fill
-      ctx.lineWidth = 3;
+      ctx.fillStyle = 'rgba(255, 255, 0, 0.12)'; // Slightly lighter fill
+      ctx.lineWidth = 1.25; // Thin dashed line per spec
       
       // Set dashed line pattern
       ctx.setLineDash([8, 4]); // 8px dash, 4px gap
@@ -4540,22 +4753,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (contour.slicePosition !== undefined) {
           const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
           
-          // FIXED: Show preview contours on ALL slices for true 3D preview
-          // Only filter out contours that are very far away (> 100mm) for performance
-          if (positionDiff <= 100) { // Much larger tolerance to show 3D preview
-            drawContour(ctx, { points: contour.points }, canvas.width, canvas.height, currentImage, animationTime);
+          // Show preview only on the current slice to avoid layered jagged lines
+          if (positionDiff <= SLICE_TOL_MM) {
+            drawContour(ctx, { points: contour.points, isPreview: true }, canvas.width, canvas.height, currentImage, animationTime);
             renderedPreviewCount++;
             
             // Log when we're showing preview on current slice vs other slices
             if (positionDiff <= SLICE_TOL_MM) {
               console.log(`🔹 🎯 Showing preview on CURRENT slice ${currentSlicePosition.toFixed(1)} (diff: ${positionDiff.toFixed(1)}mm)`);
-            } else {
-              console.log(`🔹 🌐 Showing 3D preview on slice ${contour.slicePosition.toFixed(1)} (current: ${currentSlicePosition.toFixed(1)}, diff: ${positionDiff.toFixed(1)}mm)`);
             }
           }
         } else {
           // Fallback for old format (array of points) - always show
-          drawContour(ctx, { points: contour }, canvas.width, canvas.height, currentImage, animationTime);
+          drawContour(ctx, { points: contour, isPreview: true }, canvas.width, canvas.height, currentImage, animationTime);
           renderedPreviewCount++;
         }
       });
@@ -4590,8 +4800,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     
-    // Debug: Log first few points of the contour
-    if (contour.points.length >= 6) {
+    // Debug logging disabled unless DEBUG is true
+    if (DEBUG && contour.points.length >= 6) {
       console.log('Drawing contour with metadata:', {
         imagePosition: imgMetadata.imagePosition,
         pixelSpacing: imgMetadata.pixelSpacing,
@@ -4665,8 +4875,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Close the contour
     ctx.closePath();
 
-    // Fill with reduced opacity for predictions
-    if (contour.isPredicted) {
+    // Fill only for confirmed contours; skip fill for previews
+    // Also use reduced opacity for predictions
+    if (contour.isPreview) {
+      // No fill for preview to match thin dashed outline spec
+    } else if (contour.isPredicted) {
       const originalAlpha = ctx.globalAlpha;
       ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
       ctx.fill();
@@ -4722,9 +4935,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // MPR click handlers for navigation
   const handleSagittalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!sagittalCanvasRef.current || images.length === 0) return;
+    if (images.length === 0) return;
     
-    const canvas = sagittalCanvasRef.current;
+    const canvas = e.currentTarget as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -4750,9 +4963,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const handleCoronalClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!coronalCanvasRef.current || images.length === 0) return;
+    if (images.length === 0) return;
     
-    const canvas = coronalCanvasRef.current;
+    const canvas = e.currentTarget as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -5048,6 +5261,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     };
   }, [rtStructures]); // Re-run when RT structures change
+
+  // Animation loop for animated dashed preview contours
+  useEffect(() => {
+    if (!previewContours || previewContours.length === 0) return;
+
+    let rafId: number | null = null;
+    const animate = (ts: number) => {
+      setAnimationTime(ts);
+      try { scheduleRender(); } catch {}
+      rafId = requestAnimationFrame(animate);
+    };
+
+    rafId = requestAnimationFrame(animate);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [previewContours.length, scheduleRender]);
 
   // Test function to add a predicted contour for demonstration
   const addTestPredictedContour = () => {
@@ -5394,8 +5624,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
-            brushToolState?.tool === "brush" &&
-            selectedForEdit && (
+            brushToolState?.tool === "brush" && (
               <SimpleBrushTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
@@ -5446,8 +5675,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           {/* Erase Tool overlay - works like brush but erases */}
           {brushToolState?.isActive &&
-            brushToolState?.tool === "erase" &&
-            selectedForEdit && (
+            brushToolState?.tool === "erase" && (
               <SimpleBrushTool
                 canvasRef={canvasRef}
                 isActive={brushToolState.isActive}
@@ -5619,22 +5847,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Sagittal</span>
-                  <span className="text-cyan-400">{crosshairPos.x}/{images[0]?.columns || 512}</span>
                 </div>
                 <div className="mpr-canvas-container">
-                  <canvas
-                    ref={sagittalCanvasRef}
-                    className="mpr-canvas"
-                    width={384}
-                    height={384}
+                  <MPRFloating
+                    images={images}
+                    orientation="sagittal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    currentZIndex={currentIndex}
                     onClick={handleSagittalClick}
-                  />
-                  {/* Crosshair on sagittal view (horizontal line shows axial Y position) */}
-                  <div 
-                    className="mpr-crosshair-h" 
-                    style={{ 
-                      top: `${(crosshairPos.y / (images[0]?.rows || 512)) * 100}%` 
-                    }} 
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">
@@ -5648,22 +5872,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
                   <span>Coronal</span>
-                  <span className="text-cyan-400">{crosshairPos.y}/{images[0]?.rows || 512}</span>
                 </div>
                 <div className="mpr-canvas-container">
-                  <canvas
-                    ref={coronalCanvasRef}
-                    className="mpr-canvas"
-                    width={384}
-                    height={384}
+                  <MPRFloating
+                    images={images}
+                    orientation="coronal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    currentZIndex={currentIndex}
                     onClick={handleCoronalClick}
-                  />
-                  {/* Crosshair on coronal view (vertical line shows axial X position) */}
-                  <div 
-                    className="mpr-crosshair-v" 
-                    style={{ 
-                      left: `${(crosshairPos.x / (images[0]?.columns || 512)) * 100}%` 
-                    }} 
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">

@@ -41,6 +41,7 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
 import { growContourSimple } from '@/lib/simple-polygon-operations';
+import { log } from '@/lib/log';
 import { useToast } from '@/hooks/use-toast';
 
 interface ContourEditToolbarProps {
@@ -128,7 +129,7 @@ export function ContourEditToolbar({
 
   // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
-    console.log('TOOLBAR: Tool activated:', toolId);
+    log.debug(`TOOLBAR: Tool activated: ${toolId}`, 'toolbar');
     
     // Special handling for margin button - directly open the panel
     if (toolId === 'margin') {
@@ -142,7 +143,7 @@ export function ContourEditToolbar({
     const newTool = isActive ? null : toolId;
     setActiveTool(newTool);
     
-    console.log('TOOLBAR: Setting tool to:', newTool, 'isActive:', newTool !== null);
+    log.debug(`TOOLBAR: Setting tool to: ${newTool} active=${newTool !== null}`, 'toolbar');
     
     // Pass tool state to parent
     if (onToolChange) {
@@ -152,7 +153,7 @@ export function ContourEditToolbar({
         isActive: newTool !== null,
         predictionEnabled: isPredictionEnabled
       };
-      console.log('TOOLBAR: Sending tool state to parent:', toolState);
+      log.debug('TOOLBAR: Sending tool state to parent', 'toolbar');
       onToolChange(toolState);
     }
     
@@ -213,7 +214,7 @@ export function ContourEditToolbar({
     
     const previousState = undoRedoManager.undo();
     if (previousState) {
-      console.log(`Undoing to: ${previousState.action} on structure ${previousState.structureId}`);
+      log.debug(`Undoing to: ${previousState.action} on structure ${previousState.structureId}`, 'toolbar');
       if (onContourUpdate) {
         onContourUpdate(previousState.rtStructures);
       }
@@ -228,7 +229,7 @@ export function ContourEditToolbar({
     
     const nextState = undoRedoManager.redo();
     if (nextState) {
-      console.log(`Redoing to: ${nextState.action} on structure ${nextState.structureId}`);
+      log.debug(`Redoing to: ${nextState.action} on structure ${nextState.structureId}`, 'toolbar');
       if (onContourUpdate) {
         onContourUpdate(nextState.rtStructures);
       }
@@ -248,7 +249,7 @@ export function ContourEditToolbar({
   const handleDeleteCurrentSlice = () => {
     if (!selectedStructure || !currentSlicePosition) return;
     
-    console.log(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${currentSlicePosition}`);
+    log.debug(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${currentSlicePosition}`, 'toolbar');
     
     // Create notification for local update
     if (onContourUpdate) {
@@ -273,7 +274,7 @@ export function ContourEditToolbar({
       return;
     }
     
-    console.log(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${sliceNum}`);
+    log.debug(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${sliceNum}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -291,7 +292,7 @@ export function ContourEditToolbar({
   const handleClearAllSlices = () => {
     if (!selectedStructure) return;
     
-    console.log(`Clearing all contours for structure ${selectedStructure.roiNumber}`);
+    log.debug(`Clearing all contours for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -307,7 +308,7 @@ export function ContourEditToolbar({
   const handleInterpolate = () => {
     if (!selectedStructure) return;
     
-    console.log(`Interpolating missing slices for structure ${selectedStructure.roiNumber}`);
+    log.debug(`Interpolating missing slices for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -323,7 +324,7 @@ export function ContourEditToolbar({
   const handleDeleteEveryNthSlice = (n: number) => {
     if (!selectedStructure) return;
     
-    console.log(`Deleting every ${n} slice for structure ${selectedStructure.roiNumber}`);
+    log.debug(`Deleting every ${n} slice for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -341,7 +342,7 @@ export function ContourEditToolbar({
   const handleClearBelowSlice = () => {
     if (!selectedStructure || !currentSlicePosition) return;
     
-    console.log(`Clearing all contours below slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`);
+    log.debug(`Clearing all contours below slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -359,7 +360,7 @@ export function ContourEditToolbar({
   const handleClearAboveSlice = () => {
     if (!selectedStructure || !currentSlicePosition) return;
     
-    console.log(`Clearing all contours above slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`);
+    log.debug(`Clearing all contours above slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -392,7 +393,7 @@ export function ContourEditToolbar({
       distanceMm = -distanceMm;
     }
     
-    console.log(`🔹 Previewing ${growMode === 'grow' ? 'grow' : 'shrink'} operation: ${distanceMm}mm`);
+    log.debug(`🔹 Previewing ${growMode === 'grow' ? 'grow' : 'shrink'} operation: ${distanceMm}mm`, 'toolbar');
     
     // Trigger preview request through the callback mechanism
     if (onContourUpdate) {
@@ -436,7 +437,7 @@ export function ContourEditToolbar({
       distanceMm = -distanceMm;
     }
     
-    console.log(`${growMode === 'grow' ? 'Growing' : 'Shrinking'} contour for structure ${selectedStructure.roiNumber} by ${distanceCm}cm (${Math.abs(distanceMm)}mm) in direction: ${growDirection} at slice ${currentSlicePosition}`);
+    log.debug(`${growMode === 'grow' ? 'Growing' : 'Shrinking'} contour for structure ${selectedStructure.roiNumber} by ${distanceCm}cm (${Math.abs(distanceMm)}mm) dir: ${growDirection} @ slice ${currentSlicePosition}`, 'toolbar');
     
     if (onContourUpdate) {
       const updatePayload = {
@@ -689,7 +690,7 @@ export function ContourEditToolbar({
                 // Handle boolean operation
                 if (!selectedStructure || !targetStructure || !currentSlicePosition) return;
                 
-                console.log(`Performing ${booleanOperation} operation between structures ${selectedStructure.roiNumber} and ${targetStructure}`);
+                log.debug(`Performing ${booleanOperation} operation between structures ${selectedStructure.roiNumber} and ${targetStructure}`, 'toolbar');
                 
                 if (onContourUpdate) {
                   const updatePayload = {
@@ -1042,7 +1043,7 @@ export function ContourEditToolbar({
               size="sm"
               onClick={() => {
                 if (!selectedStructure) return;
-                console.log(`Smoothing contours for structure ${selectedStructure.roiNumber}`);
+                log.debug(`Smoothing contours for structure ${selectedStructure.roiNumber}`, 'toolbar');
                 
                 if (onContourUpdate) {
                   const updatePayload = {

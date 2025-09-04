@@ -3,6 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import { setupVite } from "./vite";
 import { registerRoutes } from "./routes";
+import { logger } from "./logger";
 
 const app = express();
 const server = createServer(app);
@@ -19,7 +20,7 @@ async function startServer() {
 
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(port, "0.0.0.0", () => {
-    console.log(`🚀 Server running on port ${port}`);
+    logger.info(`🚀 Server running on port ${port}`, 'server');
   });
 }
 

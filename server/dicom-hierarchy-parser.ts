@@ -123,7 +123,10 @@ export class DICOMHierarchyParser {
    */
   private static isDICOMFile(filePath: string): boolean {
     try {
-      const buffer = fs.readFileSync(filePath, { start: 128, end: 132 });
+      const fd = fs.openSync(filePath, 'r');
+      const buffer = Buffer.alloc(4);
+      fs.readSync(fd, buffer, 0, 4, 128);
+      fs.closeSync(fd);
       return buffer.toString() === 'DICM';
     } catch {
       return false;

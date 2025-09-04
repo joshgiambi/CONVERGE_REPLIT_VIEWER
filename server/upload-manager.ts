@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { v4 as uuidv4 } from 'nanoid';
+import { nanoid } from 'nanoid';
 
 export class UploadManager {
   private uploadDir: string;
@@ -24,7 +24,7 @@ export class UploadManager {
 
   // Create a session for batch upload
   createUploadSession(): string {
-    const sessionId = uuidv4();
+    const sessionId = nanoid();
     const sessionDir = path.join(this.tempDir, sessionId);
     fs.mkdirSync(sessionDir, { recursive: true });
     return sessionId;

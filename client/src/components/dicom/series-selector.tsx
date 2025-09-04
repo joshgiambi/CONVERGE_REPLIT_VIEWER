@@ -38,6 +38,7 @@ interface SeriesSelectorProps {
   preventRTLoading?: boolean;
   localizationMode?: boolean;
   loadedRTSeriesId?: number | null;
+  previewStructureInfo?: { targetName: string; isNewStructure: boolean } | null;
 }
 
 export function SeriesSelector({
@@ -63,7 +64,8 @@ export function SeriesSelector({
   onAllStructuresVisibilityChange,
   preventRTLoading = false,
   localizationMode = false,
-  loadedRTSeriesId
+  loadedRTSeriesId,
+  previewStructureInfo
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -1460,19 +1462,26 @@ export function SeriesSelector({
                         
                         if (!groupingEnabled) {
                           // Show all structures as individual rows with reduced height
-                          return sorted.map((structure: any) => (
-                            <div 
-                              key={structure.roiNumber}
-                              className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 backdrop-blur-sm ${
-                                selectedStructures.has(structure.roiNumber) 
-                                  ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                  : 'border-gray-700/50 bg-gray-800/30'
-                              } ${
-                                selectedForEdit === structure.roiNumber
-                                  ? 'border-blue-500/60 bg-blue-500/10'
-                                  : 'hover:bg-gray-700/50'
-                              }`}
-                            >
+                          return sorted.map((structure: any) => {
+                            // Check if this structure is in preview mode
+                            const isInPreview = previewStructureInfo?.targetName && 
+                              structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
+                            
+                            return (
+                              <div 
+                                key={structure.roiNumber}
+                                className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 backdrop-blur-sm ${
+                                  selectedStructures.has(structure.roiNumber) 
+                                    ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                    : 'border-gray-700/50 bg-gray-800/30'
+                                } ${
+                                  selectedForEdit === structure.roiNumber
+                                    ? 'border-blue-500/60 bg-blue-500/10'
+                                    : 'hover:bg-gray-700/50'
+                                } ${
+                                  isInPreview ? 'preview-structure-highlight' : ''
+                                }`}
+                              >
                               <Checkbox
                                 checked={selectedStructures.has(structure.roiNumber)}
                                 onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
@@ -1509,7 +1518,8 @@ export function SeriesSelector({
                                 <Trash2 className="w-3 h-3 text-red-400" />
                               </Button>
                             </div>
-                          ));
+                          );
+                          });
                         }
                         
                         return (
@@ -1567,17 +1577,24 @@ export function SeriesSelector({
                                     <div className="mt-1 ml-4 space-y-1 relative">
                                       {/* Vertical connection line */}
                                       <div className="absolute left-0 top-0 bottom-0 w-px bg-blue-400/30 -ml-2"></div>
-                                      {groupStructures.map((structure: any, index: number) => (
-                                        <div className="relative" key={`wrapper-${structure.roiNumber}`}>
-                                          <div 
-                                            className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                            selectedForEdit === structure.roiNumber
-                                              ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                              : selectedStructures.has(structure.roiNumber) 
-                                              ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                              : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
-                                          }`}
-                                        >
+                                      {groupStructures.map((structure: any, index: number) => {
+                                        // Check if this structure is in preview mode
+                                        const isInPreview = previewStructureInfo?.targetName && 
+                                          structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
+                                        
+                                        return (
+                                          <div className="relative" key={`wrapper-${structure.roiNumber}`}>
+                                            <div 
+                                              className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                              selectedForEdit === structure.roiNumber
+                                                ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
+                                                : selectedStructures.has(structure.roiNumber) 
+                                                ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                                : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
+                                            } ${
+                                              isInPreview ? 'preview-structure-highlight' : ''
+                                            }`}
+                                          >
                                           <Checkbox
                                             checked={selectedStructures.has(structure.roiNumber)}
                                             onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
@@ -1615,7 +1632,8 @@ export function SeriesSelector({
                                           </Button>
                                         </div>
                                         </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
@@ -1677,17 +1695,24 @@ export function SeriesSelector({
                                     <div className="mt-1 ml-4 space-y-1 relative">
                                       {/* Vertical connection line */}
                                       <div className="absolute left-0 top-0 bottom-0 w-px bg-blue-400/30 -ml-2"></div>
-                                      {groupStructures.map((structure: any, index: number) => (
-                                        <div className="relative" key={`wrapper-nested-${structure.roiNumber}`}>
-                                          <div 
-                                            className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                            selectedForEdit === structure.roiNumber
-                                              ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                              : selectedStructures.has(structure.roiNumber) 
-                                              ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                              : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
-                                          }`}
-                                        >
+                                      {groupStructures.map((structure: any, index: number) => {
+                                        // Check if this structure is in preview mode
+                                        const isInPreview = previewStructureInfo?.targetName && 
+                                          structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
+                                        
+                                        return (
+                                          <div className="relative" key={`wrapper-nested-${structure.roiNumber}`}>
+                                            <div 
+                                              className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                              selectedForEdit === structure.roiNumber
+                                                ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
+                                                : selectedStructures.has(structure.roiNumber) 
+                                                ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                                : 'border-gray-700/30 bg-gray-800/20 hover:bg-gray-700/30'
+                                            } ${
+                                              isInPreview ? 'preview-structure-highlight' : ''
+                                            }`}
+                                          >
                                           <Checkbox
                                             checked={selectedStructures.has(structure.roiNumber)}
                                             onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
@@ -1725,7 +1750,8 @@ export function SeriesSelector({
                                           </Button>
                                         </div>
                                         </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
@@ -1733,17 +1759,24 @@ export function SeriesSelector({
                             ))}
 
                             {/* Ungrouped Structures */}
-                            {ungrouped.map((structure: any) => (
-                              <div 
-                                key={structure.roiNumber}
-                                className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                  selectedForEdit === structure.roiNumber
-                                    ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                    : selectedStructures.has(structure.roiNumber) 
-                                    ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                    : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/50'
-                                }`}
-                              >
+                            {ungrouped.map((structure: any) => {
+                              // Check if this structure is in preview mode
+                              const isInPreview = previewStructureInfo?.targetName && 
+                                structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
+                              
+                              return (
+                                <div 
+                                  key={structure.roiNumber}
+                                  className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                    selectedForEdit === structure.roiNumber
+                                      ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
+                                      : selectedStructures.has(structure.roiNumber) 
+                                      ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                      : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/50'
+                                  } ${
+                                    isInPreview ? 'preview-structure-highlight' : ''
+                                  }`}
+                                >
                                 <Checkbox
                                   checked={selectedStructures.has(structure.roiNumber)}
                                   onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
@@ -1780,7 +1813,8 @@ export function SeriesSelector({
                                   <Trash2 className="w-3 h-3 text-red-400" />
                                 </Button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </>
                         );
                       })()}

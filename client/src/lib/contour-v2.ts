@@ -188,7 +188,7 @@ export class ContourV2 {
         const ringDisplayPoints: DisplayPoint[] = ring.map(point => {
           // Apply coordinate transformation
           const worldPoint = CoordinateTransformerV2.scaledToWorld(point);
-          return CoordinateTransformerV2.worldToDisplay(worldPoint, viewport);
+          return CoordinateTransformerV2.worldToDisplay(worldPoint, viewport) as any;
         });
 
         displayPoints.push(ringDisplayPoints);

@@ -11,6 +11,7 @@ export class UndoRedoManager {
   private history: UndoState[] = [];
   private currentIndex: number = -1;
   private maxHistorySize: number = 50;
+  private listeners: Array<() => void> = [];
 
   constructor() {
     console.log('UndoRedoManager: Initialized new undo/redo system');
@@ -43,6 +44,7 @@ export class UndoRedoManager {
     }
 
     console.log(`UndoRedoManager: State saved. History length: ${this.history.length}, Current index: ${this.currentIndex}`);
+    this.notifyChange();
   }
 
   // Undo to previous state
@@ -56,6 +58,7 @@ export class UndoRedoManager {
     const previousState = this.history[this.currentIndex];
     
     console.log(`UndoRedoManager: Undoing to state at index ${this.currentIndex}, action: ${previousState.action}`);
+    this.notifyChange();
     return previousState;
   }
 
@@ -70,6 +73,7 @@ export class UndoRedoManager {
     const nextState = this.history[this.currentIndex];
     
     console.log(`UndoRedoManager: Redoing to state at index ${this.currentIndex}, action: ${nextState.action}`);
+    this.notifyChange();
     return nextState;
   }
 
@@ -95,6 +99,7 @@ export class UndoRedoManager {
     this.history = [];
     this.currentIndex = -1;
     console.log('UndoRedoManager: History cleared');
+    this.notifyChange();
   }
 
   // Get history statistics
@@ -105,6 +110,40 @@ export class UndoRedoManager {
       canUndo: this.canUndo(),
       canRedo: this.canRedo()
     };
+  }
+
+  // Return a shallow copy of history for UI display
+  getHistory(): UndoState[] {
+    return [...this.history];
+  }
+
+  // Return the current history index
+  getCurrentIndex(): number {
+    return this.currentIndex;
+  }
+
+  // Jump directly to a specific index in history and return the state
+  jumpTo(index: number): UndoState | null {
+    if (index < 0 || index >= this.history.length) return null;
+    this.currentIndex = index;
+    const state = this.history[this.currentIndex];
+    console.log(`UndoRedoManager: Jumping to index ${this.currentIndex}, action: ${state.action}`);
+    this.notifyChange();
+    return state;
+  }
+
+  // Subscribe to changes (history updates, index moves)
+  subscribe(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== listener);
+    };
+  }
+
+  private notifyChange(): void {
+    for (const l of this.listeners) {
+      try { l(); } catch {}
+    }
   }
 }
 

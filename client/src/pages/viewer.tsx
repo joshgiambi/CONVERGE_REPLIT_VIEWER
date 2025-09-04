@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { log } from '@/lib/log';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckboxIndicator } from '@radix-ui/react-checkbox';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -21,6 +22,7 @@ export default function Viewer() {
   const [seriesDescription, setSeriesDescription] = useState('');
   const [selectedExportItems, setSelectedExportItems] = useState<Set<string>>(new Set());
   const [exportItems, setExportItems] = useState<any[]>([]);
+  const [currentRTSeriesId, setCurrentRTSeriesId] = useState<number | null>(null);
   const { toast } = useToast();
   
   const { data: studies, isLoading, error } = useQuery({
@@ -30,47 +32,47 @@ export default function Viewer() {
   
   useEffect(() => {
     const loadStudyData = async () => {
-      console.log('=== Enhanced Viewer Debug ===');
-      console.log('Studies loaded:', studies);
-      console.log('Loading:', isLoading);
-      console.log('Error:', error);
+      log.debug('=== Enhanced Viewer Debug ===', 'viewer');
+      log.debug(`Studies loaded: ${Array.isArray(studies) ? studies.length : 0}`, 'viewer');
+      log.debug(`Loading: ${isLoading}`, 'viewer');
+      if (error) log.debug(`Error: ${String(error)}`, 'viewer');
       
       if (studies && studies.length > 0) {
         const urlParams = new URLSearchParams(window.location.search);
         const studyId = urlParams.get('studyId');
         const patientId = urlParams.get('patientId');
         
-        console.log('URL studyId:', studyId);
-        console.log('URL patientId:', patientId);
-        console.log('All patient IDs in studies:', studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })));
+        log.debug(`URL studyId: ${studyId}`, 'viewer');
+        log.debug(`URL patientId: ${patientId}`, 'viewer');
+        log.debug(`All patient IDs: ${JSON.stringify(studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })))}`, 'viewer');
         
         let study;
         let patient = null;
         
         if (studyId) {
           study = studies.find((s: any) => s.id === parseInt(studyId));
-          console.log('Found study by ID:', study);
+          log.debug(`Found study by ID: ${JSON.stringify(study)}`, 'viewer');
         } else if (patientId) {
           // Find ALL studies for this patient
           
           // First try exact match on patientID - get ALL matching studies
           const matchingStudiesByPatientID = studies.filter((s: any) => s.patientID === patientId);
-          console.log('Found studies by exact patientID match:', matchingStudiesByPatientID);
+          log.debug(`Found studies by exact patientID match: ${matchingStudiesByPatientID.length}`, 'viewer');
           
           if (matchingStudiesByPatientID.length > 0) {
             // Found studies directly by patientID
-            console.log('Setting studyData with all matching studies:', matchingStudiesByPatientID);
+            log.debug(`Setting studyData with all matching studies: ${matchingStudiesByPatientID.length}`, 'viewer');
             setStudyData({ studies: matchingStudiesByPatientID });
             study = matchingStudiesByPatientID[0]; // Set first for compatibility
           } else {
             // If not found, try to find by patient database ID
             const patientQuery = await fetch('/api/patients').then(res => res.json());
             patient = patientQuery.find((p: any) => p.patientID === patientId);
-            console.log('Found patient with patientID:', patientId, 'patient:', patient);
+            log.debug(`Found patient with patientID: ${patientId} -> ${!!patient}`, 'viewer');
             
             if (patient) {
               const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
-              console.log('Found all studies by patient database ID:', patientStudies);
+              log.debug(`Found all studies by patient database ID: ${patientStudies.length}`, 'viewer');
               if (patientStudies.length > 0) {
                 setStudyData({ studies: patientStudies, patient });
                 study = patientStudies[0];
@@ -79,14 +81,14 @@ export default function Viewer() {
           }
         } else {
           study = studies[0];
-          console.log('Using first study:', study);
+          log.debug(`Using first study: ${study?.id}`, 'viewer');
           if (study) {
             setStudyData({ studies: [study] });
           }
         }
         
         if (!study && !studyData) {
-          console.log('NO STUDY FOUND!');
+          log.warn('NO STUDY FOUND!', 'viewer');
         }
       }
     };
@@ -151,21 +153,21 @@ export default function Viewer() {
   };
 
   const handleSaveConfirm = async () => {
-    if (!currentStudy) return;
-    
+    if (!currentStudy || !currentRTSeriesId) {
+      toast({ title: 'Error', description: 'No RT Structure Set loaded', variant: 'destructive' });
+      return;
+    }
     try {
-      // TODO: Implement RT structure save API endpoint
-      toast({
-        title: "Success",
-        description: `RT Structure Set saved as: ${seriesDescription}`,
+      const res = await fetch(`/api/rt-structures/${currentRTSeriesId}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: seriesDescription })
       });
+      if (!res.ok) throw new Error(await res.text());
+      toast({ title: 'Success', description: `RT Structure Set saved as: ${seriesDescription}` });
       setShowSaveDialog(false);
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to save RT structure set",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'Failed to save RT structure set', variant: 'destructive' });
     }
   };
 
@@ -180,18 +182,30 @@ export default function Viewer() {
     }
     
     try {
-      // TODO: Implement export API endpoint
-      toast({
-        title: "Success",
-        description: `Exporting ${selectedExportItems.size} items...`,
+      if (!currentStudy) return;
+      const seriesIds = exportItems
+        .filter((item) => selectedExportItems.has(item.id))
+        .map((item) => item.data.id);
+
+      const res = await fetch(`/api/studies/${currentStudy.id}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seriesIds })
       });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `study_${currentStudy.id}_export.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Export started', description: `Exporting ${selectedExportItems.size} items...` });
       setShowExportDialog(false);
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to export files",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'Failed to export files', variant: 'destructive' });
     }
   };
 
@@ -316,6 +330,7 @@ export default function Viewer() {
           studyData={studyData} 
           onContourSettingsChange={setContourSettings}
           contourSettings={contourSettings}
+          onLoadedRTSeriesChange={setCurrentRTSeriesId}
         />
       </div>
 

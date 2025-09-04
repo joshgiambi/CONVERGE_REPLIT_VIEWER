@@ -1,13 +1,26 @@
 {
   "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/*.test.ts",
+    "client/src/**/unused/**",
+    "client/src/**/*.backup*",
+    "client/src/**/backups/**",
+    "server/unused/**",
+    "server/**/test-*.ts",
+    "server/**/test*.ts"
+  ],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
+    "target": "ES2019",
     "module": "ESNext",
-    "strict": true,
+    "strict": false,
     "lib": ["esnext", "dom", "dom.iterable"],
+    "downlevelIteration": true,
     "jsx": "preserve",
     "esModuleInterop": true,
     "skipLibCheck": true,

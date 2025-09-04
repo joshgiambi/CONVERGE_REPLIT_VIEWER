@@ -2,15 +2,19 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
-import MultiViewport from './multi-viewport';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
+import { undoRedoManager } from '@/lib/undo-system';
+import { log } from '@/lib/log';
 import { Button } from '@/components/ui/button';
 import { MarginToolbar } from './margin-toolbar';
+import { contoursToVIP } from '@/boolean/integrate';
+import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract } from '@/boolean/vipBoolean';
+import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 
@@ -26,14 +30,15 @@ interface ViewerInterfaceProps {
   studyData: any;
   onContourSettingsChange?: (settings: { width: number; opacity: number }) => void;
   contourSettings?: { width: number; opacity: number };
+  onLoadedRTSeriesChange?: (seriesId: number | null) => void;
 }
 
-export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings }: ViewerInterfaceProps) {
+export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings, onLoadedRTSeriesChange }: ViewerInterfaceProps) {
   const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
-  const [viewMode, setViewMode] = useState<'single' | 'mpr'>('single');
+  // Single-view mode only; MPR uses floating windows inside WorkingViewer
   const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
   
   // Shared image cache to prevent reloading when switching modes
@@ -70,14 +75,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   
   // MPR visibility state
   const [mprVisible, setMprVisible] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   
   // Watch for secondary series changes to show/hide fusion panel
   useEffect(() => {
     if (secondarySeriesId !== null) {
-      console.log('Secondary series selected, showing fusion panel');
+      log.debug('Secondary series selected, showing fusion panel', 'viewer-interface');
       setShowFusionPanel(true);
     } else {
-      console.log('No secondary series, hiding fusion panel');
+      log.debug('No secondary series, hiding fusion panel', 'viewer-interface');
       setShowFusionPanel(false);
     }
   }, [secondarySeriesId]);
@@ -86,10 +92,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
   const [showLocalizationTool, setShowLocalizationTool] = useState(true);
+  const [previewStructureInfo, setPreviewStructureInfo] = useState<{ targetName: string; isNewStructure: boolean } | null>(null);
 
   // Clear RT structures when patient changes
   useEffect(() => {
-    console.log('Patient changed, clearing RT structures. Patient ID:', studyData?.patient?.id);
+    log.debug(`Patient changed, clearing RT structures. Patient ID: ${studyData?.patient?.id}`,'viewer-interface');
     setRTStructures(null);
     setStructureVisibility(new Map());
     setSelectedStructures(new Set());
@@ -97,7 +104,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     setSelectedStructureColors([]);
     setIsContourEditMode(false);
     setLoadedRTSeriesId(null);  // Clear loaded RT series ID
-  }, [studyData?.patient?.id]);
+    }, [studyData?.patient?.id]);
+
+  // Notify parent when loaded RT series changes
+  useEffect(() => {
+    if (onLoadedRTSeriesChange) {
+      onLoadedRTSeriesChange(loadedRTSeriesId);
+    }
+  }, [loadedRTSeriesId, onLoadedRTSeriesChange]);
 
   // Automatically enter contour edit mode when a structure is selected for editing
   useEffect(() => {
@@ -139,10 +153,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       if (!selectedSeries) {
         const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
         if (ctSeries) {
-          console.log('Auto-selecting CT series as primary:', ctSeries);
+          log.debug(`Auto-selecting CT series as primary: ${ctSeries.id}`, 'viewer-interface');
           handleSeriesSelect(ctSeries);
         } else if (seriesData.length > 0) {
-          console.log('No CT series found, selecting first series:', seriesData[0]);
+          log.debug(`No CT series found, selecting first series: ${seriesData[0]?.id}`, 'viewer-interface');
           handleSeriesSelect(seriesData[0]);
         }
       }
@@ -150,11 +164,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       // Auto-load RT structures if available
       const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
       if (rtSeries) {
-        console.log(`Loading RT structures for study ${rtSeries.studyId}`);
+        log.debug(`Loading RT structures for study ${rtSeries.studyId}`, 'viewer-interface');
         handleRTSeriesSelect(rtSeries);
       } else {
         // Clear RT structures if no RT series found
-        console.log(`No RT structures found in any study`);
+        log.debug(`No RT structures found in any study`, 'viewer-interface');
         setRTStructures(null);
         setLoadedRTSeriesId(null);  // Clear loaded RT series ID
       }
@@ -166,7 +180,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const ptSeries = seriesData.find((s: any) => s.modality === 'PT');
       
       if (regSeries && ctSeriesForFusion && (mrSeries || ptSeries)) {
-        console.log('Auto-activating fusion: REG detected with CT and secondary series');
+        log.debug('Auto-activating fusion: REG detected with CT and secondary series', 'viewer-interface');
         // Prefer MR over PT for fusion
         const secondarySeriesForFusion = mrSeries || ptSeries;
         
@@ -175,17 +189,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           method: 'POST'
         }).then(async response => {
           if (response.ok) {
-            console.log('Registration parsed successfully for auto-fusion');
+            log.debug('Registration parsed successfully for auto-fusion', 'viewer-interface');
             
             // Wait a moment for database to update
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Auto-select secondary series for fusion
-            console.log('Setting secondary series for fusion:', secondarySeriesForFusion.id);
+            log.debug(`Setting secondary series for fusion: ${secondarySeriesForFusion.id}`, 'viewer-interface');
             setSecondarySeriesId(secondarySeriesForFusion.id);
           }
         }).catch(error => {
-          console.error('Error parsing registration for auto-fusion:', error);
+          log.warn(`Error parsing registration for auto-fusion: ${String(error)}`, 'viewer-interface');
         });
       }
     }
@@ -214,7 +228,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       }
       
     } catch (error) {
-      console.error('Error selecting series:', error);
+      log.error(`Error selecting series: ${String(error)}`, 'viewer-interface');
       setError({
         title: 'Error Loading Series',
         message: 'Failed to load the selected series.',
@@ -229,7 +243,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomIn();
       }
     } catch (error) {
-      console.warn('Error zooming in:', error);
+      log.warn(`Error zooming in: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -239,7 +253,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.zoomOut();
       }
     } catch (error) {
-      console.warn('Error zooming out:', error);
+      log.warn(`Error zooming out: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -249,7 +263,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         (window as any).currentViewerZoom.resetZoom();
       }
     } catch (error) {
-      console.warn('Error resetting zoom:', error);
+      log.warn(`Error resetting zoom: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -264,7 +278,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       });
     } catch (error) {
-      console.warn('Error setting active tool:', error);
+      log.warn(`Error setting active tool: ${String(error)}`, 'viewer-interface');
     }
   };
 
@@ -291,7 +305,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const handleRotate = () => {
     try {
       if (!window.cornerstone) {
-        console.warn('Cornerstone not available for rotation');
+        log.warn('Cornerstone not available for rotation','viewer-interface');
         return;
       }
       const cornerstone = window.cornerstone;
@@ -330,12 +344,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       });
     } catch (error) {
-      console.warn('Error flipping image:', error);
+      log.warn(`Error flipping image: ${String(error)}`, 'viewer-interface');
     }
   };
 
   const handleRTStructureLoad = (rtStructData: any) => {
-    console.log('Loading RT structures:', rtStructData);
+    log.debug('Loading RT structures', 'viewer-interface');
     setRTStructures(rtStructData);
     // Initialize visibility for all structures
     const visibilityMap = new Map();
@@ -356,18 +370,18 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
       if (response.ok) {
         const rtStructData = await response.json();
-        console.log('RT structures loaded successfully:', rtStructData);
+        log.debug('RT structures loaded successfully', 'viewer-interface');
         handleRTStructureLoad(rtStructData);
       } else {
-        console.error('Failed to load RT structures:', response.status);
+        log.error(`Failed to load RT structures: ${response.status}`, 'viewer-interface');
       }
     } catch (error) {
-      console.error('Error loading RT structure contours:', error);
+      log.error(`Error loading RT structure contours: ${String(error)}`, 'viewer-interface');
     }
   };
 
   const handleStructureSelection = (structureId: number, selected: boolean) => {
-    console.log('handleStructureSelection called:', { structureId, selected, currentSelected: Array.from(selectedStructures) });
+    log.debug(`handleStructureSelection: ${structureId} -> ${selected}`, 'viewer-interface');
     
     const newSelection = new Set(selectedStructures);
     if (selected) {
@@ -377,7 +391,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
     setSelectedStructures(newSelection);
     
-    console.log('Updated selectedStructures:', Array.from(newSelection));
+    log.debug(`Updated selectedStructures: ${Array.from(newSelection).join(',')}`, 'viewer-interface');
     
     // Update selected structure colors for viewer border
     if (rtStructures?.structures) {
@@ -390,11 +404,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   };
 
   const handleStructureVisibilityChange = (structureId: number, visible: boolean) => {
-    console.log('handleStructureVisibilityChange called:', { 
-      structureId, 
-      visible,
-      allStructuresVisible 
-    });
+    log.debug(`handleStructureVisibilityChange: ${structureId} -> ${visible}`, 'viewer-interface');
     
     setStructureVisibility(prev => {
       const next = new Map(prev);
@@ -438,6 +448,52 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       setRTStructures(payload);
     }
   };
+
+  // Undo/Redo handlers for bottom toolbar
+  const handleGlobalUndo = () => {
+    const prev = undoRedoManager.undo();
+    if (prev) {
+      setRTStructures(prev.rtStructures);
+    }
+  };
+
+  const handleGlobalRedo = () => {
+    const next = undoRedoManager.redo();
+    if (next) {
+      setRTStructures(next.rtStructures);
+    }
+  };
+
+  const handleJumpToHistory = (index: number) => {
+    const state = undoRedoManager.jumpTo(index);
+    if (state) {
+      setRTStructures(state.rtStructures);
+    }
+  };
+
+  // Subscribe to undo manager changes to refresh toolbar state
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    items: [] as Array<{ timestamp: number; action: string; structureId: number }>,
+    index: -1
+  });
+
+  useEffect(() => {
+    const update = () => {
+      try {
+        setHistoryState({
+          canUndo: undoRedoManager.canUndo(),
+          canRedo: undoRedoManager.canRedo(),
+          items: undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId })),
+          index: undoRedoManager.getCurrentIndex()
+        });
+      } catch {}
+    };
+    update();
+    const unsubscribe = undoRedoManager.subscribe(update);
+    return () => unsubscribe();
+  }, [selectedSeries?.id]);
 
   // Auto-zoom functionality based on structure bounds
   const getStructureBounds = (structure: any) => {
@@ -513,7 +569,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Handle structure localization
   const handleStructureLocalization = useCallback((structureId: number) => {
     if (!rtStructures?.structures || !workingViewerRef.current) {
-      console.warn('🎯 Cannot localize: missing structures or viewer ref');
+      log.warn('🎯 Cannot localize: missing structures or viewer ref', 'viewer-interface');
       return;
     }
 
@@ -646,6 +702,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
             // Pass localization mode to highlight when active
             localizationMode={showLocalizationTool}
+            // Pass preview state for highlighting
+            previewStructureInfo={previewStructureInfo}
             loadedRTSeriesId={loadedRTSeriesId}
           />
         </div>
@@ -682,8 +740,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 </div>
               )}
               
-              {/* Main Viewer - Single or Multi-viewport based on view mode */}
-              {viewMode === 'single' ? (
+              {/* Main Viewer - always single view; MPR shown as floating windows */}
                 <WorkingViewer 
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
@@ -712,17 +769,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   onMPRToggle={() => setMprVisible(!mprVisible)}
                   isMPRVisible={mprVisible}
                 />
-              ) : (
-                <MultiViewport
-                  studyId={studyData.studies[0]?.id}
-                  initialSeriesId={selectedSeries.id}
-                  rtStructures={rtStructures}
-                  onRTStructureUpdate={handleContourUpdate}
-                  allStructuresVisible={allStructuresVisible}
-                  onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
-                  imageCache={imageCache}
-                />
-              )}
               
               {/* Structure Tags on Right Side - Responsive */}
               {selectedStructures.size > 0 && rtStructures?.structures && (
@@ -798,9 +844,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             setShowMarginToolbar(true);
           }}
-          onMPRToggle={() => {
-            setMprVisible(!mprVisible);
-          }}
+          onMPRToggle={() => setMprVisible(!mprVisible)}
           isMPRActive={mprVisible}
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
@@ -811,6 +855,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onLocalization={handleLocalizationToggle}
           isLocalizationActive={showLocalizationTool}
           className="toolbar-custom"
+          onUndo={handleGlobalUndo}
+          onRedo={handleGlobalRedo}
+          canUndo={undoRedoManager.canUndo()}
+          canRedo={undoRedoManager.canRedo()}
+          historyItems={undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId }))}
+          currentHistoryIndex={undoRedoManager.getCurrentIndex()}
+          onSelectHistory={handleJumpToHistory}
         />
       )}
 
@@ -826,10 +877,45 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setSelectedForEdit(null);
           }}
           onStructureNameChange={(name: string) => {
-            // Update structure name
+            // Update structure name locally so UI reflects immediately
+            if (!rtStructures || !selectedForEdit) return;
+            setRTStructures((prev: any) => {
+              if (!prev?.structures) return prev;
+              const updated = structuredClone ? structuredClone(prev) : JSON.parse(JSON.stringify(prev));
+              const s = updated.structures.find((x: any) => x.roiNumber === selectedForEdit);
+              if (s) s.structureName = name;
+              return updated;
+            });
           }}
           onStructureColorChange={(color: string) => {
-            // Update structure color
+            // Update structure color locally so UI reflects immediately
+            if (!rtStructures || !selectedForEdit) return;
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const rgb: [number, number, number] = [
+              Number.isFinite(r) ? r : 255,
+              Number.isFinite(g) ? g : 255,
+              Number.isFinite(b) ? b : 255,
+            ];
+            setRTStructures((prev: any) => {
+              if (!prev?.structures) return prev;
+              const updated = structuredClone ? structuredClone(prev) : JSON.parse(JSON.stringify(prev));
+              const s = updated.structures.find((x: any) => x.roiNumber === selectedForEdit);
+              if (s) s.color = rgb;
+              return updated;
+            });
+            // Also refresh the selected border colors if this structure is selected
+            setSelectedStructureColors((prevColors: string[]) => {
+              if (!selectedStructures.has(selectedForEdit)) return prevColors;
+              const next = Array.from(selectedStructures).map(id => {
+                const st = (rtStructures?.structures || []).find((x: any) => x.roiNumber === id);
+                const use = id === selectedForEdit ? rgb : st?.color;
+                return use ? `rgb(${use.join(',')})` : '';
+              }).filter(Boolean);
+              return next;
+            });
           }}
           onToolChange={(toolState) => {
             setBrushToolState({
@@ -861,19 +947,331 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Boolean Operations Toolbar */}
+      {/* Boolean Operations Toolbar (integrated panel mode toggle inside) */}
       {showBooleanOperations && !showMarginToolbar && (
         <BooleanOperationsToolbar
           isVisible={showBooleanOperations}
-          onClose={() => setShowBooleanOperations(false)}
-          availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
-          onExecuteOperation={(expression, newStructure) => {
-            console.log('Executing boolean operation:', expression, newStructure);
-            // TODO: Implement boolean operation execution
-            if (newStructure?.createNewStructure) {
-              console.log('Creating new structure:', newStructure.name, 'with color:', newStructure.color);
-            }
+          onClose={() => {
             setShowBooleanOperations(false);
+            setPreviewStructureInfo(null);
+            // Clear preview contours when closing
+            if (viewerRef.current) {
+              viewerRef.current.handleContourUpdate({ action: 'clear_preview' });
+            }
+          }}
+          availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
+            structures={rtStructures?.structures}
+            grid={{
+              xSize: imageMetadata?.columns || 512,
+              ySize: imageMetadata?.rows || 512,
+              zSize: Math.max(1, Math.round((selectedSeries?.images?.length || 1))),
+              xRes: imageMetadata?.pixelSpacing?.[0] || 1,
+              yRes: imageMetadata?.pixelSpacing?.[1] || 1,
+              zRes: imageMetadata?.sliceThickness || 1,
+              origin: { x: 0, y: 0, z: 0 }
+            } as any}
+            structureColors={(rtStructures?.structures || []).reduce((acc: Record<string, string>, s: any) => {
+              if (s?.structureName && Array.isArray(s?.color)) {
+                acc[s.structureName] = `rgb(${s.color.join(',')})`;
+              }
+              return acc;
+            }, {})}
+            onPreview={(target, contours) => {
+              // Handle preview by updating working viewer with preview contours
+              if (viewerRef.current && contours.length > 0) {
+                // Show preview contours in yellow
+                const previewContoursForViewer = contours.map((c: any) => ({
+                  slicePosition: c.slicePosition,
+                  points: c.points,
+                  numberOfPoints: c.numberOfPoints,
+                  color: [255, 223, 0] // Yellow for preview
+                }));
+                viewerRef.current.setPreviewContours?.(previewContoursForViewer);
+              } else if (viewerRef.current) {
+                // Clear preview if no contours
+                viewerRef.current.setPreviewContours?.([]);
+              }
+            }}
+            onPreviewStateChange={(previewInfo) => {
+              setPreviewStructureInfo(previewInfo.targetName ? previewInfo : null);
+              if (!previewInfo.targetName && viewerRef.current) {
+                // Clear preview when state is cleared
+                viewerRef.current.setPreviewContours?.([]);
+              }
+            }}
+            onApply={(target, contours) => {
+              if (!rtStructures?.structures) return;
+              const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+              let targetStruct = updated.structures.find((s: any) => s.structureName?.toLowerCase() === (target.name || '').toLowerCase());
+              if (!targetStruct) {
+                const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+                targetStruct = {
+                  roiNumber: maxRoi + 1,
+                  structureName: target.name,
+                  color: target.color || [0, 255, 0],
+                  contours: []
+                };
+                updated.structures.push(targetStruct);
+              } else if (target.color) {
+                targetStruct.color = target.color;
+              }
+              // Clear and replace contours to reflect new boolean result
+              targetStruct.contours = Array.isArray(contours) ? contours : [];
+              // Ensure visibility on
+              setStructureVisibility(prev => {
+                const next = new Map(prev);
+                next.set(targetStruct.roiNumber, true);
+                return next;
+              });
+              setRTStructures(updated);
+              handleContourUpdate(updated);
+              setShowBooleanOperations(false);
+              setPreviewStructureInfo(null);
+              // Clear preview contours after applying
+              if (viewerRef.current) {
+                viewerRef.current.setPreviewContours?.([]);
+              }
+            }}
+            onExecuteOperation={async (expression, newStructure) => {
+              try {
+                if (!rtStructures?.structures) {
+                  console.warn('No RT structures loaded');
+                  return;
+                }
+              
+              const structuresByName: Record<string, any> = {};
+              for (const s of rtStructures.structures) {
+                structuresByName[s.structureName.toLowerCase()] = s;
+              }
+
+              // Tokenize expression
+              const raw = expression.trim();
+              const tokens: string[] = (raw.match(/[A-Za-z][A-Za-z0-9_#-]*|[∪∩⊕\-()=]/g) || []) as string[];
+              let outputName: string | null = null;
+              let rhsTokens = tokens;
+              const eqIndex = tokens.indexOf('=');
+              if (eqIndex > -1) {
+                // Preserve original LHS label including spaces
+                const rawEqIndex = raw.indexOf('=');
+                const lhsLabel = raw.slice(0, rawEqIndex).trim();
+                outputName = lhsLabel || null;
+                rhsTokens = tokens.slice(eqIndex + 1);
+              }
+
+              // Shunting-yard to RPN
+              const precedence: Record<string, number> = { '∪': 1, '∩': 1, '⊕': 1, '-': 1 };
+              const isOp = (t: string) => Object.prototype.hasOwnProperty.call(precedence, t);
+              const output: string[] = [];
+              const ops: string[] = [];
+              for (const t of rhsTokens) {
+                if (/^[A-Za-z][A-Za-z0-9_#-]*$/.test(t)) {
+                  output.push(t);
+                } else if (isOp(t)) {
+                  while (ops.length && isOp(ops[ops.length - 1]) && precedence[ops[ops.length - 1]] >= precedence[t]) {
+                    output.push(ops.pop() as string);
+                  }
+                  ops.push(t);
+                } else if (t === '(') {
+                  ops.push(t);
+                } else if (t === ')') {
+                  while (ops.length && ops[ops.length - 1] !== '(') output.push(ops.pop() as string);
+                  ops.pop();
+                }
+              }
+              while (ops.length) output.push(ops.pop() as string);
+
+              // Helpers to get slice maps for a structure name
+              const SLICE_TOL = 1.0; // mm tolerance for aligning slice positions
+              type SliceMap = Map<number, number[][]>; // slice -> list of contours
+
+              const getSliceMapForStructure = (name: string): SliceMap => {
+                const s = structuresByName[name.toLowerCase()];
+                const map: SliceMap = new Map();
+                if (!s?.contours) return map;
+                for (const c of s.contours) {
+                  if (!c?.points || c.points.length < 9 || typeof c.slicePosition !== 'number') continue;
+                  // Find an existing bucket within tolerance, otherwise create a new one
+                  let bucketKey: number | null = null;
+                  for (const existingKey of Array.from(map.keys())) {
+                    if (Math.abs(existingKey - c.slicePosition) <= SLICE_TOL) {
+                      bucketKey = existingKey;
+                      break;
+                    }
+                  }
+                  const key = bucketKey !== null ? bucketKey : c.slicePosition;
+                  const arr = map.get(key) || [];
+                  arr.push(c.points);
+                  map.set(key, arr);
+                }
+                return map;
+              };
+
+              // Merge multiple contours into one set by union folding
+              const { combineContours, subtractContours, intersectContours, xorContours } = await import('@/lib/clipper-boolean-operations');
+              const unionReduce = async (contours: number[][]): Promise<number[][]> => {
+                if (contours.length <= 1) return contours;
+                let acc: number[][] = [contours[0]];
+                for (let i = 1; i < contours.length; i++) {
+                  const next = contours[i];
+                  const newAcc: number[][] = [];
+                  for (const a of acc) {
+                    const res = await combineContours(a, next);
+                    newAcc.push(...res);
+                  }
+                  acc = newAcc.length ? newAcc : acc;
+                }
+                return acc;
+              };
+
+              const applyBinary = async (op: string, A: SliceMap, B: SliceMap): Promise<SliceMap> => {
+                const result: SliceMap = new Map();
+                // Build union of slice keys and apply tolerance grouping across A and B
+                const combinedKeys: number[] = [];
+                const pushWithTolerance = (val: number) => {
+                  for (let i = 0; i < combinedKeys.length; i++) {
+                    if (Math.abs(combinedKeys[i] - val) <= SLICE_TOL) {
+                      return; // already represented
+                    }
+                  }
+                  combinedKeys.push(val);
+                };
+                Array.from(A.keys()).forEach(pushWithTolerance);
+                Array.from(B.keys()).forEach(pushWithTolerance);
+                combinedKeys.sort((a, b) => a - b);
+                const getNearContours = (m: SliceMap, key: number): number[][] => {
+                  const aggregated: number[][] = [];
+                  for (const mk of Array.from(m.keys())) {
+                    if (Math.abs(mk - key) <= SLICE_TOL) {
+                      const arr = m.get(mk) || [];
+                      aggregated.push(...arr);
+                    }
+                  }
+                  return aggregated;
+                };
+                for (const k of combinedKeys) {
+                  const aContours = await unionReduce(getNearContours(A, k));
+                  const bContours = await unionReduce(getNearContours(B, k));
+                  if ((aContours?.length || 0) === 0 && (bContours?.length || 0) === 0) continue;
+                  // If side empty, handle identity
+                  if (!aContours || aContours.length === 0) {
+                    if (op === '∪' || op === '⊕') { if (bContours.length) result.set(k, bContours); }
+                    // intersect/subtract with empty yields empty
+                    continue;
+                  }
+                  if (!bContours || bContours.length === 0) {
+                    if (op === '∪' || op === '⊕' || op === '-') { if (aContours.length) result.set(k, aContours); }
+                    // intersect with empty is empty
+                    continue;
+                  }
+                  // Reduce to single representative by folding pairwise
+                  let mergedA = aContours;
+                  let mergedB = bContours;
+                  // Execute op for each pair; start with first pair and fold
+                  let acc: number[][] = [];
+                  const opFunc = op === '∪' ? combineContours : op === '∩' ? intersectContours : op === '⊕' ? xorContours : subtractContours;
+                  // Simplify by union-reduce each side to one or few, then run op across all combinations
+                  const left = await unionReduce(mergedA);
+                  const right = await unionReduce(mergedB);
+                  for (const la of left) {
+                    for (const rb of right) {
+                      const res = await opFunc(la, rb);
+                      acc.push(...res);
+                    }
+                  }
+                  // Union-reduce result to clean overlaps
+                  const cleaned = await unionReduce(acc);
+                  if (cleaned && cleaned.length) result.set(k, cleaned);
+                }
+                return result;
+              };
+
+              // Evaluate RPN
+              const stack: SliceMap[] = [];
+              for (const t of output) {
+                if (/^[A-Za-z][A-Za-z0-9_#-]*$/.test(t)) {
+                  stack.push(getSliceMapForStructure(t));
+                } else if (['∪','∩','⊕','-'].includes(t)) {
+                  const b = stack.pop();
+                  const a = stack.pop();
+                  if (!a || !b) throw new Error('Malformed expression');
+                  const r = await applyBinary(t, a, b);
+                  stack.push(r);
+                }
+              }
+              if (stack.length !== 1) throw new Error('Malformed expression');
+              const finalMap = stack[0];
+
+              // Build contours array for structure from finalMap via VIP rectangles
+              // Convert finalMap -> VIP structure then back to contours (rects)
+              const gridGuess = {
+                xSize: imageMetadata?.columns || 512,
+                ySize: imageMetadata?.rows || 512,
+                zSize: Math.max(1, Math.round((selectedSeries?.images?.length || 1))),
+                xRes: imageMetadata?.pixelSpacing?.[0] || 1,
+                yRes: imageMetadata?.pixelSpacing?.[1] || 1,
+                zRes: imageMetadata?.sliceThickness || 1,
+                origin: { x: 0, y: 0, z: 0 }
+              } as any;
+              const vips = Array.from(finalMap.entries()).reduce((acc: any[][][], [z, contourList]) => {
+                const rows: any[][] = acc[z] || (acc[z] = []);
+                // Raster per-row by slicing points' y; for now, approximate whole rows per contour as a rectangle span
+                // Convert raw contour points to mask then VIP rows
+                // Quick path: assume contours already in grid, build runs per y
+                const mask2D = new Uint8Array(gridGuess.xSize * gridGuess.ySize);
+                for (const pts of contourList) {
+                  // Fill rectangle span across rows based on y from points
+                  for (let i = 1; i < pts.length; i += 3) {
+                    // not used; keeping interface consistent
+                  }
+                }
+                return acc;
+              }, [] as any[][][]);
+              // Fall back: simple conversion using rectangles for each raw contour
+              const rectContours = Array.from(finalMap.entries()).map(([slicePosition, contours]) => {
+                return contours.map(points => ({ slicePosition: slicePosition as number, points, numberOfPoints: points.length / 3 }));
+              }).flat();
+              rectContours.sort((a, b) => (a.slicePosition as number) - (b.slicePosition as number));
+              const newContours = rectContours;
+
+              // Determine output target
+              let targetName = outputName;
+              let targetColor: [number, number, number] | null = null;
+            if (newStructure?.createNewStructure) {
+                targetName = newStructure.name || outputName || 'Combined';
+                // parse hex color to rgb
+                const hex = (newStructure.color || '#3B82F6').replace('#', '');
+                const r = parseInt(hex.substring(0, 2), 16) || 59;
+                const g = parseInt(hex.substring(2, 4), 16) || 130;
+                const b = parseInt(hex.substring(4, 6), 16) || 246;
+                targetColor = [r, g, b];
+              }
+
+              const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+              let targetStruct = targetName ? updated.structures.find((s: any) => s.structureName.toLowerCase() === targetName!.toLowerCase()) : null;
+              if (!targetStruct) {
+                // Create new if requested or if assignment provided without existing
+                const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+                targetStruct = {
+                  roiNumber: maxRoi + 1,
+                  structureName: targetName || 'Combined',
+                  color: targetColor || [0, 255, 0],
+                  contours: [] as any[]
+                };
+                updated.structures.push(targetStruct);
+              }
+              if (targetColor) {
+                targetStruct.color = targetColor;
+              }
+              targetStruct.contours = newContours;
+
+              // Update state and close
+              setRTStructures(updated);
+              // Also notify handler so any listeners update
+              handleContourUpdate(updated);
+            setShowBooleanOperations(false);
+              } catch (err) {
+                console.error('Boolean operation failed:', err);
+              }
           }}
         />
       )}

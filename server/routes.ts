@@ -12,6 +12,8 @@ import { eq } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
+import { logger } from './logger';
+const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
 function polygonOverlaps(poly1: number[][], poly2: number[][]): boolean {
@@ -1012,8 +1014,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Handle file uploads
   app.post("/api/upload", upload.array('dicomFiles'), async (req: Request, res: Response, next: NextFunction) => {
-    console.log('Upload endpoint hit with files:', req.files?.length);
-    console.log('Request body:', req.body);
+    if (isDev) {
+      logger.debug(`Upload endpoint hit with files: ${req.files?.length}`, 'upload');
+      logger.debug(`Request body keys: ${Object.keys(req.body || {}).join(',')}`, 'upload');
+    }
     
     try {
       const files = req.files as Express.Multer.File[];
@@ -1023,7 +1027,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No files uploaded" });
       }
 
-      console.log(`Processing ${files.length} uploaded files`);
+      if (isDev) logger.debug(`Processing ${files.length} uploaded files`, 'upload');
 
       // Group files by patient, study, and series
       const patientMap = new Map();
@@ -1060,7 +1064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log(`Organized files into ${patientMap.size} patients`);
+      if (isDev) logger.debug(`Organized files into ${patientMap.size} patients`, 'upload');
 
       const results = [];
 
@@ -1695,6 +1699,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch metadata endpoint for performance optimization
+  app.post("/api/images/batch-metadata", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { imageIds } = req.body;
+      if (!Array.isArray(imageIds) || imageIds.length === 0) {
+        return res.status(400).json({ error: 'imageIds array is required' });
+      }
+      
+      // Limit batch size to prevent memory issues
+      const MAX_BATCH_SIZE = 100;
+      if (imageIds.length > MAX_BATCH_SIZE) {
+        return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE}` });
+      }
+      
+      const results: { [key: number]: any } = {};
+      
+      // Process images in parallel for better performance
+      await Promise.all(imageIds.map(async (imageId) => {
+        try {
+          const image = await storage.getImage(imageId);
+          if (!image || !fs.existsSync(image.filePath)) {
+            results[imageId] = { error: 'Image not found' };
+            return;
+          }
+          
+          const buffer = fs.readFileSync(image.filePath);
+          const byteArray = new Uint8Array(buffer);
+          const dataSet = (dicomParser as any).parseDicom(byteArray, {});
+          
+          const getString = (tag: string) => {
+            try { return dataSet.string(tag)?.trim() || null; } catch { return null; }
+          };
+          
+          const getArray = (tag: string) => {
+            try { return getString(tag)?.split('\\').map(Number) || null; } catch { return null; }
+          };
+          
+          results[imageId] = {
+            imagePosition: getArray('x00200032')?.join('\\') || null,
+            imageOrientation: getArray('x00200037')?.join('\\') || null,
+            pixelSpacing: getArray('x00280030')?.join('\\') || null,
+            sliceLocation: getString('x00201041'),
+            frameOfReferenceUID: getString('x00200052'),
+            rows: getString('x00280010'),
+            columns: getString('x00280011'),
+            sopClassUID: getString('x00080016'),
+            sopInstanceUID: getString('x00080018'),
+            windowCenter: getString('x00281050'),
+            windowWidth: getString('x00281051')
+          };
+        } catch (err) {
+          results[imageId] = { error: 'Failed to parse metadata' };
+        }
+      }));
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Error in batch metadata fetch:', error);
+      next(error);
+    }
+  });
+
   // Get DICOM metadata for proper coordinate transformation
   app.get("/api/images/:imageId/metadata", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -1991,7 +2057,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const imgs = await storage.getImagesBySeriesId(rtSeries.id);
           if (imgs.length > 0 && imgs[0].filePath) {
             const filePath = imgs[0].filePath;
-            console.log('Checking RT structure file path:', filePath);
+            if (isDev) logger.debug(`Checking RT structure file path: ${filePath}`, 'rtstruct');
 
             if (fs.existsSync(filePath)) {
               const rtStructureSet = RTStructureParser.parseRTStructureSet(filePath);
@@ -2016,12 +2082,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return rtSeries;
       }));
 
-      console.log('RT structures with associations (patient-wide):', rtSeriesWithAssociations.map(rt => ({
+      if (isDev) logger.debug('RT structures with associations (patient-wide): ' + JSON.stringify(rtSeriesWithAssociations.map(rt => ({
         id: rt.id,
         description: rt.seriesDescription,
         referencedSeriesId: (rt as any).referencedSeriesId,
         referencedSeriesDescription: (rt as any).referencedSeriesDescription
-      })));
+      }))), 'rtstruct');
       res.json(rtSeriesWithAssociations);
     } catch (error: any) {
       console.error('Error fetching RT structure series:', error);
@@ -3360,6 +3426,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error updating patient metadata:', error);
       next(error);
+    }
+  });
+
+  // Helper: get the current merged RT structure set (original + in-memory modifications)
+  async function getCurrentRTStructureSet(seriesId: number) {
+    // Get RT series and file path
+    const rtStructSeries = await storage.getSeriesById(seriesId);
+    if (!rtStructSeries || rtStructSeries.modality !== 'RTSTRUCT') {
+      throw new Error('RT Structure Set not found');
+    }
+
+    const images = await db.select()
+      .from(imagesTable)
+      .where(eq(imagesTable.seriesId, seriesId))
+      .limit(1);
+
+    if (images.length === 0 || !images[0].filePath) {
+      throw new Error(`RT Structure file not found in database for series ${seriesId}`);
+    }
+
+    const rtStructPath = images[0].filePath;
+    if (!fs.existsSync(rtStructPath)) {
+      throw new Error(`RT Structure file not found at: ${rtStructPath}`);
+    }
+
+    // Parse or use cache
+    let rtStructureSet: any;
+    if (rtStructureCache.has(rtStructPath)) {
+      rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
+    } else {
+      rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+      rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
+    }
+
+    // Apply in-memory modifications if any
+    const modifications = rtStructureModifications.get(seriesId);
+    if (modifications) {
+      if (modifications.newStructures.length > 0) {
+        rtStructureSet.structures.push(...modifications.newStructures);
+      }
+      modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+        const structureIndex = rtStructureSet.structures.findIndex((s: any) => s.roiNumber === roiNumber);
+        if (structureIndex >= 0) {
+          rtStructureSet.structures[structureIndex] = {
+            ...rtStructureSet.structures[structureIndex],
+            ...modifiedData,
+          };
+        }
+      });
+    }
+
+    return { rtStructSeries, rtStructureSet };
+  }
+
+  // Save (version) of current RT Structure Set state into DB
+  app.post("/api/rt-structures/:seriesId/save", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = parseInt(req.params.seriesId);
+      const description = (req.body?.description as string) || `RT Structure Set - ${new Date().toISOString()}`;
+
+      const { rtStructSeries, rtStructureSet } = await getCurrentRTStructureSet(seriesId);
+
+      // Create structure set record
+      const setRecord = await storage.createRTStructureSet({
+        seriesId,
+        studyId: rtStructSeries.studyId,
+        referencedSeriesId: undefined as unknown as number, // try to resolve from parsed set
+        frameOfReferenceUID: rtStructureSet.frameOfReferenceUID,
+        structureSetLabel: description,
+        structureSetDate: rtStructureSet.structureSetDate || new Date().toISOString().slice(0,10).replace(/-/g, ''),
+      } as any);
+
+      // If we can resolve referenced series by UID, update the set
+      if (rtStructureSet.referencedSeriesUID) {
+        try {
+          const ref = await storage.getSeriesByUID(rtStructureSet.referencedSeriesUID);
+          if (ref) {
+            await storage.updateRTStructureSet(setRecord.id, { referencedSeriesId: ref.id });
+          }
+        } catch {}
+      }
+
+      // Persist structures and contours
+      for (const s of rtStructureSet.structures || []) {
+        const structure = await storage.createRTStructure({
+          rtStructureSetId: setRecord.id,
+          roiNumber: s.roiNumber,
+          structureName: s.structureName,
+          color: Array.isArray(s.color) ? s.color : undefined,
+          isVisible: true,
+        });
+
+        const contours = (s.contours || []).map((c: any) => ({
+          rtStructureId: structure.id,
+          slicePosition: c.slicePosition,
+          points: c.points,
+          isPredicted: false,
+        }));
+        if (contours.length) {
+          await storage.createRTStructureContours(contours as any);
+        }
+      }
+
+      // Optional history snapshot
+      try {
+        await storage.createRTStructureHistory({
+          rtStructureSetId: setRecord.id,
+          actionType: 'save',
+          actionDetails: JSON.stringify({ description }),
+          affectedStructureIds: (rtStructureSet.structures || []).map((x: any) => x.roiNumber),
+          snapshot: JSON.stringify(rtStructureSet),
+          userId: undefined as any,
+        });
+      } catch {}
+
+      return res.json({ success: true, rtStructureSetId: setRecord.id });
+    } catch (error: any) {
+      console.error('Error saving RT structure set:', error);
+      return res.status(500).json({ error: 'Failed to save RT structure set', details: error?.message });
+    }
+  });
+
+  // Export selected series from a study as a zip
+  app.post("/api/studies/:studyId/export", async (req: Request, res: Response) => {
+    try {
+      const studyId = parseInt(req.params.studyId);
+      const body = req.body || {};
+      const seriesIds = (body.seriesIds || []) as number[];
+      if (!Array.isArray(seriesIds) || seriesIds.length === 0) {
+        return res.status(400).json({ error: 'seriesIds required' });
+      }
+
+      // Lazy import archiver to avoid startup cost
+      const archiver = (await import('archiver')).default;
+      res.setHeader('Content-Type', 'application/zip');
+      const filename = `study_${studyId}_export_${Date.now()}.zip`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.on('error', (err: any) => {
+        console.error('Archive error:', err);
+        if (!res.headersSent) res.status(500);
+        res.end();
+      });
+      archive.pipe(res);
+
+      for (const sid of seriesIds) {
+        const s = await storage.getSeriesById(sid);
+        if (!s) continue;
+        const imgs = await storage.getImagesBySeriesId(sid);
+        for (const img of imgs) {
+          if (img.filePath && fs.existsSync(img.filePath)) {
+            // Put under series folder for clarity
+            const baseName = path.basename(img.filePath);
+            const subdir = `${s.modality || 'SERIES'}_${sid}`;
+            archive.file(img.filePath, { name: path.posix.join(subdir, baseName) });
+          }
+        }
+      }
+
+      await archive.finalize();
+    } catch (error) {
+      console.error('Export error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to export series' });
+      }
     }
   });
 

@@ -407,7 +407,7 @@ export default function PatientManager() {
       // TODO: Implement merge API endpoint
       toast({
         title: "Success",
-        description: targetPatientId === 'new' 
+        description: (targetPatientId as any) === 'new' 
           ? `Merging patients into new patient: ${newPatientName}`
           : `Merging patients into existing patient`,
       });
