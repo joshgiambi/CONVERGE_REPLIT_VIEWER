@@ -93,6 +93,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
   const [showLocalizationTool, setShowLocalizationTool] = useState(true);
   const [previewStructureInfo, setPreviewStructureInfo] = useState<{ targetName: string; isNewStructure: boolean } | null>(null);
+  const [highlightedStructures, setHighlightedStructures] = useState<{ inputs: string[]; output: string }>({ inputs: [], output: '' });
 
   // Clear RT structures when patient changes
   useEffect(() => {
@@ -704,6 +705,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             localizationMode={showLocalizationTool}
             // Pass preview state for highlighting
             previewStructureInfo={previewStructureInfo}
+            // Pass highlighted structures for boolean operations
+            highlightedStructures={highlightedStructures}
             loadedRTSeriesId={loadedRTSeriesId}
           />
         </div>
@@ -955,8 +958,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             setPreviewStructureInfo(null);
             // Clear preview contours when closing
-            if (viewerRef.current) {
-              viewerRef.current.handleContourUpdate({ action: 'clear_preview' });
+            if (workingViewerRef.current) {
+              workingViewerRef.current.handleContourUpdate({ action: 'clear_preview' });
             }
           }}
           availableStructures={rtStructures?.structures?.map((s: any) => s.structureName) || []}
@@ -978,7 +981,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }, {})}
             onPreview={(target, contours) => {
               // Handle preview by updating working viewer with preview contours
-              if (viewerRef.current && contours.length > 0) {
+              if (workingViewerRef.current && contours.length > 0) {
                 // Show preview contours in yellow
                 const previewContoursForViewer = contours.map((c: any) => ({
                   slicePosition: c.slicePosition,
@@ -986,18 +989,21 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   numberOfPoints: c.numberOfPoints,
                   color: [255, 223, 0] // Yellow for preview
                 }));
-                viewerRef.current.setPreviewContours?.(previewContoursForViewer);
-              } else if (viewerRef.current) {
+                workingViewerRef.current.setPreviewContours?.(previewContoursForViewer);
+              } else if (workingViewerRef.current) {
                 // Clear preview if no contours
-                viewerRef.current.setPreviewContours?.([]);
+                workingViewerRef.current.setPreviewContours?.([]);
               }
             }}
             onPreviewStateChange={(previewInfo) => {
               setPreviewStructureInfo(previewInfo.targetName ? previewInfo : null);
-              if (!previewInfo.targetName && viewerRef.current) {
+              if (!previewInfo.targetName && workingViewerRef.current) {
                 // Clear preview when state is cleared
-                viewerRef.current.setPreviewContours?.([]);
+                workingViewerRef.current.setPreviewContours?.([]);
               }
+            }}
+            onHighlightStructures={(inputs, output) => {
+              setHighlightedStructures({ inputs, output });
             }}
             onApply={(target, contours) => {
               if (!rtStructures?.structures) return;
@@ -1028,8 +1034,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               setShowBooleanOperations(false);
               setPreviewStructureInfo(null);
               // Clear preview contours after applying
-              if (viewerRef.current) {
-                viewerRef.current.setPreviewContours?.([]);
+              if (workingViewerRef.current) {
+                workingViewerRef.current.setPreviewContours?.([]);
               }
             }}
             onExecuteOperation={async (expression, newStructure) => {

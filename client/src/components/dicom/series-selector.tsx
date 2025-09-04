@@ -39,6 +39,7 @@ interface SeriesSelectorProps {
   localizationMode?: boolean;
   loadedRTSeriesId?: number | null;
   previewStructureInfo?: { targetName: string; isNewStructure: boolean } | null;
+  highlightedStructures?: { inputs: string[]; output: string };
 }
 
 export function SeriesSelector({
@@ -65,7 +66,8 @@ export function SeriesSelector({
   preventRTLoading = false,
   localizationMode = false,
   loadedRTSeriesId,
-  previewStructureInfo
+  previewStructureInfo,
+  highlightedStructures = { inputs: [], output: '' }
 }: SeriesSelectorProps) {
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
@@ -1467,17 +1469,27 @@ export function SeriesSelector({
                             const isInPreview = previewStructureInfo?.targetName && 
                               structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
                             
+                            // Check if this is an input or output structure
+                            const isInput = highlightedStructures.inputs.some(
+                              input => input.toLowerCase() === structure.structureName.toLowerCase()
+                            );
+                            const isOutput = highlightedStructures.output.toLowerCase() === structure.structureName.toLowerCase();
+                            
                             return (
                               <div 
                                 key={structure.roiNumber}
                                 className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border transition-all duration-200 backdrop-blur-sm ${
-                                  selectedStructures.has(structure.roiNumber) 
+                                  isInput
+                                    ? 'border-pink-500/60 bg-pink-500/20 shadow-lg shadow-pink-500/20'
+                                    : isOutput
+                                    ? 'border-yellow-400/60 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
+                                    : selectedStructures.has(structure.roiNumber) 
                                     ? 'border-yellow-500/60 bg-yellow-500/10' 
                                     : 'border-gray-700/50 bg-gray-800/30'
                                 } ${
                                   selectedForEdit === structure.roiNumber
                                     ? 'border-blue-500/60 bg-blue-500/10'
-                                    : 'hover:bg-gray-700/50'
+                                    : !isInput && !isOutput ? 'hover:bg-gray-700/50' : ''
                                 } ${
                                   isInPreview ? 'preview-structure-highlight' : ''
                                 }`}
@@ -1582,11 +1594,21 @@ export function SeriesSelector({
                                         const isInPreview = previewStructureInfo?.targetName && 
                                           structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
                                         
+                                        // Check if this is an input or output structure
+                                        const isInput = highlightedStructures.inputs.some(
+                                          input => input.toLowerCase() === structure.structureName.toLowerCase()
+                                        );
+                                        const isOutput = highlightedStructures.output.toLowerCase() === structure.structureName.toLowerCase();
+                                        
                                         return (
                                           <div className="relative" key={`wrapper-${structure.roiNumber}`}>
                                             <div 
                                               className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                              selectedForEdit === structure.roiNumber
+                                              isInput
+                                                ? 'border-pink-500 bg-pink-500/20 shadow-lg shadow-pink-500/20'
+                                                : isOutput
+                                                ? 'border-yellow-400 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
+                                                : selectedForEdit === structure.roiNumber
                                                 ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
                                                 : selectedStructures.has(structure.roiNumber) 
                                                 ? 'border-yellow-500/60 bg-yellow-500/10' 
@@ -1700,11 +1722,21 @@ export function SeriesSelector({
                                         const isInPreview = previewStructureInfo?.targetName && 
                                           structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
                                         
+                                        // Check if this is an input or output structure
+                                        const isInput = highlightedStructures.inputs.some(
+                                          input => input.toLowerCase() === structure.structureName.toLowerCase()
+                                        );
+                                        const isOutput = highlightedStructures.output.toLowerCase() === structure.structureName.toLowerCase();
+                                        
                                         return (
                                           <div className="relative" key={`wrapper-nested-${structure.roiNumber}`}>
                                             <div 
                                               className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                              selectedForEdit === structure.roiNumber
+                                              isInput
+                                                ? 'border-pink-500 bg-pink-500/20 shadow-lg shadow-pink-500/20'
+                                                : isOutput
+                                                ? 'border-yellow-400 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
+                                                : selectedForEdit === structure.roiNumber
                                                 ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
                                                 : selectedStructures.has(structure.roiNumber) 
                                                 ? 'border-yellow-500/60 bg-yellow-500/10' 
@@ -1764,11 +1796,21 @@ export function SeriesSelector({
                               const isInPreview = previewStructureInfo?.targetName && 
                                 structure.structureName.toLowerCase() === previewStructureInfo.targetName.toLowerCase();
                               
+                              // Check if this is an input or output structure
+                              const isInput = highlightedStructures.inputs.some(
+                                input => input.toLowerCase() === structure.structureName.toLowerCase()
+                              );
+                              const isOutput = highlightedStructures.output.toLowerCase() === structure.structureName.toLowerCase();
+                              
                               return (
                                 <div 
                                   key={structure.roiNumber}
                                   className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                    selectedForEdit === structure.roiNumber
+                                    isInput
+                                      ? 'border-pink-500 bg-pink-500/20 shadow-lg shadow-pink-500/20'
+                                      : isOutput
+                                      ? 'border-yellow-400 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
+                                      : selectedForEdit === structure.roiNumber
                                       ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
                                       : selectedStructures.has(structure.roiNumber) 
                                       ? 'border-yellow-500/60 bg-yellow-500/10' 

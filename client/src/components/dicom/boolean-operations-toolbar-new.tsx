@@ -24,6 +24,8 @@ interface BooleanOperationsToolbarProps {
   onPreview?: (target: { name: string; color?: [number, number, number]; isTemporary?: boolean }, contours: { slicePosition: number; points: number[]; numberOfPoints: number }[]) => void;
   // New: callback to notify which structures are in preview state
   onPreviewStateChange?: (previewStructures: { targetName: string; isNewStructure: boolean }) => void;
+  // New: callback to notify which structures are selected as inputs/outputs
+  onHighlightStructures?: (inputs: string[], output: string) => void;
   onExecuteOperation: (expression: string, newStructure?: {
     createNewStructure: boolean;
     name: string;
@@ -41,6 +43,7 @@ export function BooleanOperationsToolbar({
   onApply,
   onPreview,
   onPreviewStateChange,
+  onHighlightStructures,
   onExecuteOperation
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
@@ -71,7 +74,31 @@ export function BooleanOperationsToolbar({
   const panelMode = !!(structures && grid && onApply);
   const [usePanel, setUsePanel] = useState<boolean>(false);
   const effectivePanelMode = panelMode && usePanel;
-  const isPanelReady = effectivePanelMode && aName && bName && (outMode === 'new' ? true : !!outExistingName);
+  const isPanelReady = effectivePanelMode && aName && bName && (outMode === 'new' ? !!outName : !!outExistingName);
+  
+  // Track when to highlight structures and auto-preview
+  useEffect(() => {
+    if (effectivePanelMode && onHighlightStructures) {
+      const inputs = [];
+      if (aName) inputs.push(aName);
+      if (bName) inputs.push(bName);
+      const output = outMode === 'existing' ? outExistingName : outName;
+      onHighlightStructures(inputs, output);
+    } else if (onHighlightStructures) {
+      onHighlightStructures([], '');
+    }
+  }, [aName, bName, outExistingName, outName, outMode, effectivePanelMode, onHighlightStructures]);
+  
+  // Auto-preview when all 3 structures are selected
+  useEffect(() => {
+    if (isPanelReady && !isPreviewActive && onPreview) {
+      // Automatically trigger preview
+      const previewTimer = setTimeout(() => {
+        runPanel(true);
+      }, 500); // Small delay to avoid too frequent updates
+      return () => clearTimeout(previewTimer);
+    }
+  }, [isPanelReady]);
 
   // Get structure color for pill tags
   const getStructureColor = (structureName: string): string => {
@@ -956,9 +983,11 @@ export function BooleanOperationsToolbar({
               }
             }}
             disabled={effectivePanelMode ? !isPanelReady : (!expression.trim() || syntaxErrors.length > 0)}
-            className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 ${
+            className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 transition-all duration-300 ${
               isPreviewActive 
                 ? 'bg-yellow-600/60 border-yellow-400 text-yellow-100 hover:bg-yellow-500/70 animate-pulse' 
+                : isPanelReady && !isPreviewActive
+                ? 'bg-yellow-500/40 border-yellow-300 text-yellow-100 hover:bg-yellow-400/50 animate-bounce'
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
             title={isPreviewActive ? "Clear preview" : "Preview operation"}
