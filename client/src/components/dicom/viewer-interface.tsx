@@ -819,10 +819,45 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setSelectedForEdit(null);
           }}
           onStructureNameChange={(name: string) => {
-            // Update structure name
+            // Update structure name locally so UI reflects immediately
+            if (!rtStructures || !selectedForEdit) return;
+            setRTStructures((prev: any) => {
+              if (!prev?.structures) return prev;
+              const updated = structuredClone ? structuredClone(prev) : JSON.parse(JSON.stringify(prev));
+              const s = updated.structures.find((x: any) => x.roiNumber === selectedForEdit);
+              if (s) s.structureName = name;
+              return updated;
+            });
           }}
           onStructureColorChange={(color: string) => {
-            // Update structure color
+            // Update structure color locally so UI reflects immediately
+            if (!rtStructures || !selectedForEdit) return;
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const rgb: [number, number, number] = [
+              Number.isFinite(r) ? r : 255,
+              Number.isFinite(g) ? g : 255,
+              Number.isFinite(b) ? b : 255,
+            ];
+            setRTStructures((prev: any) => {
+              if (!prev?.structures) return prev;
+              const updated = structuredClone ? structuredClone(prev) : JSON.parse(JSON.stringify(prev));
+              const s = updated.structures.find((x: any) => x.roiNumber === selectedForEdit);
+              if (s) s.color = rgb;
+              return updated;
+            });
+            // Also refresh the selected border colors if this structure is selected
+            setSelectedStructureColors((prevColors: string[]) => {
+              if (!selectedStructures.has(selectedForEdit)) return prevColors;
+              const next = Array.from(selectedStructures).map(id => {
+                const st = (rtStructures?.structures || []).find((x: any) => x.roiNumber === id);
+                const use = id === selectedForEdit ? rgb : st?.color;
+                return use ? `rgb(${use.join(',')})` : '';
+              }).filter(Boolean);
+              return next;
+            });
           }}
           onToolChange={(toolState) => {
             setBrushToolState({
