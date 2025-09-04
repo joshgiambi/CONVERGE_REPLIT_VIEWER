@@ -1374,6 +1374,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
 
+    // Handle boolean preview from boolean toolbar
+    if (payload && payload.action === 'preview_boolean') {
+      console.log('🔹 Preview boolean contours received:', payload);
+      const { contours, target } = payload;
+      const mapped = (contours || []).map((c: any) => ({
+        slicePosition: c.slicePosition,
+        points: c.points,
+        meta: { type: 'boolean_preview' }
+      }));
+      setPreviewContours(mapped as any);
+      // Optionally store target for UI highlighting via window event
+      try {
+        window.dispatchEvent(new CustomEvent('boolean-preview-target', { detail: target }));
+      } catch {}
+      return;
+    }
+
     // Handle advanced margin preview operations
     if (payload && payload.action === "preview_margin") {
       console.log("🔹 Advanced margin preview request:", payload);
@@ -3108,7 +3125,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             if (ctZs.length > 1) {
               const nearest = (val: number) => {
                 let lo=0, hi=ctZs.length-1, best=ctZs[0];
-                while (lo<=hi) { const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val) < Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1; }
+                while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
                 return best;
               };
               const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
@@ -5705,7 +5722,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
-                predictionEnabled={false} // No prediction for erase tool
+                predictionEnabled={false // No prediction for erase tool
                 smartBrushEnabled={false} // No smart mode for erase tool
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
