@@ -20,6 +20,12 @@ interface BooleanOperationsToolbarProps {
   structureColors?: Record<string, string>;
   // Optional: direct apply callback when in panel mode
   onApply?: (target: { name: string; color?: [number, number, number] }, contours: { slicePosition: number; points: number[]; numberOfPoints: number }[]) => void;
+  // New: preview callback for showing temporary structure
+  onPreview?: (target: { name: string; color?: [number, number, number]; isTemporary?: boolean }, contours: { slicePosition: number; points: number[]; numberOfPoints: number }[]) => void;
+  // New: callback to notify which structures are in preview state
+  onPreviewStateChange?: (previewStructures: { targetName: string; isNewStructure: boolean }) => void;
+  // New: callback to notify which structures are selected as inputs/outputs
+  onHighlightStructures?: (inputs: string[], output: string) => void;
   onExecuteOperation: (expression: string, newStructure?: {
     createNewStructure: boolean;
     name: string;
@@ -35,6 +41,9 @@ export function BooleanOperationsToolbar({
   grid,
   structureColors,
   onApply,
+  onPreview,
+  onPreviewStateChange,
+  onHighlightStructures,
   onExecuteOperation
 }: BooleanOperationsToolbarProps) {
   const [expression, setExpression] = useState('');
@@ -42,6 +51,9 @@ export function BooleanOperationsToolbar({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
   const [livePreview, setLivePreview] = useState(false);
+  const [isPreviewActive, setIsPreviewActive] = useState(false);
+  const [hasAutoPreviewedRef] = useState(() => ({ value: false }));
+  const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [showNewStructurePanel, setShowNewStructurePanel] = useState(false);
   const [newStructureName, setNewStructureName] = useState('');
   const [newStructureColor, setNewStructureColor] = useState('#3B82F6');
@@ -63,7 +75,52 @@ export function BooleanOperationsToolbar({
   const panelMode = !!(structures && grid && onApply);
   const [usePanel, setUsePanel] = useState<boolean>(false);
   const effectivePanelMode = panelMode && usePanel;
-  const isPanelReady = effectivePanelMode && aName && bName && (outMode === 'new' ? true : !!outExistingName);
+  const isPanelReady = effectivePanelMode && aName && bName && (outMode === 'new' ? !!outName : !!outExistingName);
+  
+  // Track when to highlight structures and auto-preview
+  useEffect(() => {
+    if (effectivePanelMode && onHighlightStructures) {
+      const inputs = [];
+      if (aName) inputs.push(aName);
+      if (bName) inputs.push(bName);
+      const output = outMode === 'existing' ? outExistingName : outName;
+      onHighlightStructures(inputs, output);
+    } else if (onHighlightStructures) {
+      onHighlightStructures([], '');
+    }
+  }, [aName, bName, outExistingName, outName, outMode, effectivePanelMode, onHighlightStructures]);
+  
+  // Auto-preview when all 3 structures are selected (only once)
+  useEffect(() => {
+    if (isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value && onPreview) {
+      // Clear any existing timer
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+      
+      // Set timer for auto-preview
+      previewTimeoutRef.current = setTimeout(() => {
+        if (isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value) {
+          hasAutoPreviewedRef.value = true;
+          runPanel(true);
+        }
+      }, 800); // Slightly longer delay to avoid rapid triggers
+      
+      return () => {
+        if (previewTimeoutRef.current) {
+          clearTimeout(previewTimeoutRef.current);
+          previewTimeoutRef.current = null;
+        }
+      };
+    }
+  }, [isPanelReady, isPreviewActive]);
+  
+  // Reset auto-preview flag when panel is not ready
+  useEffect(() => {
+    if (!isPanelReady) {
+      hasAutoPreviewedRef.value = false;
+    }
+  }, [isPanelReady]);
 
   // Get structure color for pill tags
   const getStructureColor = (structureName: string): string => {
@@ -85,7 +142,7 @@ export function BooleanOperationsToolbar({
     return fallback[structureName] || '#3B82F6';
   };
 
-  const runPanel = () => {
+  const runPanel = (isPreview = false) => {
     if (!panelMode) return;
     if (!aName || !bName) { setPanelError('Select A and B'); return; }
     if (outMode === 'existing' && !outExistingName) { setPanelError('Select output structure'); return; }
@@ -175,8 +232,20 @@ export function BooleanOperationsToolbar({
           }
         }
 
-        if (outMode === 'existing') {
+        if (isPreview && onPreview) {
+          // Preview mode - show temporary result
+          const targetName = outMode === 'existing' ? outExistingName : (outName || 'Preview');
+          const hex = outColor.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16) || 255;
+          const g = parseInt(hex.substring(2, 4), 16) || 223;
+          const b = parseInt(hex.substring(4, 6), 16) || 0;
+          onPreview({ name: targetName, color: [r, g, b], isTemporary: true }, results);
+          onPreviewStateChange?.({ targetName, isNewStructure: outMode === 'new' });
+          setIsPreviewActive(true);
+        } else if (outMode === 'existing') {
           onApply && onApply({ name: (outExistingName || '').trim() }, results);
+          setIsPreviewActive(false);
+          onPreviewStateChange?.({ targetName: '', isNewStructure: false });
         } else {
           const hex = outColor.replace('#', '');
           const r = parseInt(hex.substring(0, 2), 16) || 59;
@@ -189,7 +258,11 @@ export function BooleanOperationsToolbar({
           while (exists(unique)) {
             unique = `${base} (${i++})`;
           }
-          onApply && onApply({ name: unique, color: [r, g, b] }, results);
+          if (!isPreview) {
+            onApply && onApply({ name: unique, color: [r, g, b] }, results);
+            setIsPreviewActive(false);
+            onPreviewStateChange?.({ targetName: '', isNewStructure: false });
+          }
         }
       } catch (e: any) {
         setPanelError(e?.message || 'Operation failed');
@@ -485,9 +558,49 @@ export function BooleanOperationsToolbar({
             {panelError}
           </div>
         )}
-        <div className="flex items-start space-x-3">
-        {/* Main toolbar panel - 20% larger */}
-        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[960px]">
+        <div className="flex items-start space-x-2">
+        
+        {/* Floating Mode Selector Buttons - on the left */}
+        {panelMode && (
+          <div className="flex flex-col space-y-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setUsePanel(false)}
+              className={`h-8 w-24 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 ${
+                !usePanel 
+                  ? 'bg-blue-700/50 border-blue-500 text-blue-200 hover:bg-blue-600/60' 
+                  : 'bg-gray-800/50 border-gray-600 text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+              }`}
+              title="Expression mode"
+            >
+              <div className="flex items-center space-x-1">
+                <span className="text-lg">Σ</span>
+                <span>Expression</span>
+              </div>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setUsePanel(true)}
+              className={`h-8 w-24 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 ${
+                usePanel 
+                  ? 'bg-blue-700/50 border-blue-500 text-blue-200 hover:bg-blue-600/60' 
+                  : 'bg-gray-800/50 border-gray-600 text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+              }`}
+              title="Panel mode"
+            >
+              <div className="flex items-center space-x-1">
+                <span className="text-lg">◎</span>
+                <span>Panel</span>
+              </div>
+            </Button>
+          </div>
+        )}
+        
+        {/* Main toolbar panel */}
+        <div className="backdrop-blur-sm border border-blue-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[900px]">
 
           {/* First Row: Title, Info, Text Field */}
           <div className="flex items-center space-x-3 mb-3">
@@ -506,28 +619,6 @@ export function BooleanOperationsToolbar({
               >
                 <Info size={12} />
               </Button>
-              <div className="ml-2 flex items-center gap-2">
-                <span className="text-[10px] text-gray-400">Mode</span>
-                <div className="inline-flex rounded-md border border-white/20 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setUsePanel(false)}
-                    className={`px-2 h-6 text-[10px] ${!effectivePanelMode ? 'bg-white/20 text-white' : 'bg-transparent text-white/70 hover:bg-white/10'}`}
-                    title="Expression mode"
-                  >
-                    Expression
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => panelMode && setUsePanel(true)}
-                    disabled={!panelMode}
-                    className={`px-2 h-6 text-[10px] border-l border-white/20 ${effectivePanelMode ? 'bg-white/20 text-white' : 'bg-transparent text-white/70 hover:bg-white/10'} ${!panelMode ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={!panelMode ? 'Panel mode unavailable' : 'Panel mode'}
-                  >
-                    Panel
-                  </button>
-                </div>
-              </div>
             </div>
 
             {/* Main area */}
@@ -887,36 +978,67 @@ export function BooleanOperationsToolbar({
           )}
         </div>
 
-        {/* Floating action buttons - Preview and Run with horizontal icons */}
+        {/* Floating action buttons - Preview and Apply */}
         <div className="flex flex-col space-y-1">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setLivePreview(!livePreview)}
-            className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 mb-2 ${
-              livePreview 
-                ? 'bg-yellow-700/50 border-yellow-500 text-yellow-200 hover:bg-yellow-600/60' 
+            onClick={() => {
+              if (effectivePanelMode && isPanelReady) {
+                // Clear previous preview timeout
+                if (previewTimeoutRef.current) {
+                  clearTimeout(previewTimeoutRef.current);
+                }
+                
+                // Toggle preview state
+                const newPreviewState = !isPreviewActive;
+                
+                if (newPreviewState) {
+                  // Start preview
+                  hasAutoPreviewedRef.value = true; // Mark as manually previewed
+                  runPanel(true);
+                } else {
+                  // Clear preview
+                  hasAutoPreviewedRef.value = false; // Allow auto-preview again
+                  onPreview?.({ name: '', color: [0, 0, 0] }, []);
+                  setIsPreviewActive(false);
+                  onPreviewStateChange?.({ targetName: '', isNewStructure: false });
+                }
+              }
+            }}
+            disabled={effectivePanelMode ? !isPanelReady : (!expression.trim() || syntaxErrors.length > 0)}
+            className={`h-8 w-20 rounded backdrop-blur-sm shadow-sm border text-xs font-medium px-2 transition-all duration-300 ${
+              isPreviewActive 
+                ? 'bg-yellow-600/60 border-yellow-400 text-yellow-100 hover:bg-yellow-500/70' 
+                : isPanelReady && !isPreviewActive && !hasAutoPreviewedRef.value
+                ? 'bg-yellow-500/40 border-yellow-300 text-yellow-100 hover:bg-yellow-400/50 animate-pulse'
                 : 'bg-yellow-900/30 border-yellow-400/60 text-yellow-200 hover:text-yellow-100 hover:bg-yellow-800/40'
-            }`}
-            title="Toggle preview"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            title={isPreviewActive ? "Clear preview" : "Preview operation"}
           >
             <div className="flex items-center space-x-1">
-              <Eye className="w-3 h-3" />
-              <span>Preview</span>
+              <Eye className={`w-3 h-3 ${isPreviewActive ? 'animate-pulse' : ''}`} />
+              <span>{isPreviewActive ? 'Clear' : 'Preview'}</span>
             </div>
           </Button>
           
           <Button
             variant="outline"
             size="sm"
-            onClick={effectivePanelMode ? runPanel : handleExecute}
+            onClick={() => {
+              if (effectivePanelMode) {
+                runPanel(false);
+              } else {
+                handleExecute();
+              }
+            }}
             disabled={effectivePanelMode ? (busy || !isPanelReady) : (!expression.trim() || syntaxErrors.length > 0)}
-            className="h-8 w-24 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-xs font-medium px-3"
-            title="Apply"
+            className="h-8 w-20 bg-green-700/50 border border-green-600 text-green-300 hover:text-green-200 hover:bg-green-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded backdrop-blur-sm shadow-sm text-xs font-medium px-2"
+            title="Apply operation"
           >
             <div className="flex items-center space-x-1">
               <Play className="w-3 h-3" />
-              <span>{effectivePanelMode ? (busy ? 'Applying…' : 'Apply') : 'Run'}</span>
+              <span>{effectivePanelMode ? (busy ? 'Applying' : 'Apply') : 'Apply'}</span>
             </div>
           </Button>
         </div>
