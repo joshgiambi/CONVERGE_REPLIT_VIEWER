@@ -1108,25 +1108,17 @@ export function SeriesSelector({
                                   onMouseEnter={() => setHoveredRegSeries(seriesItem.id)}
                                   onMouseLeave={() => setHoveredRegSeries(null)}
                                   onClick={async () => {
-                                    // Parse the registration file first
+                                    // Parse the registration file first (disabled during rebuild)
                                     try {
-                                      const response = await fetch(`/api/registrations/${studyId}/parse`, {
-                                        method: 'POST'
-                                      });
-                                      if (!response.ok) {
-                                        console.error('Failed to parse registration:', await response.text());
-                                      } else {
-                                        console.log('Registration parsed successfully');
-                                      }
+                                      // await fetch(`/api/registrations/${studyId}/parse`, { method: 'POST' });
                                     } catch (error) {
-                                      console.error('Error parsing registration:', error);
+                                      console.error('Error parsing registration (disabled):', error);
                                     }
                                     
                                     // Open primary with secondary fusion when clicking REG
                                     if (primarySeries && secondarySeries) {
                                       onSeriesSelect(primarySeries);
                                       if (onSecondarySeriesSelect) {
-                                        // Small delay to ensure primary is selected first
                                         setTimeout(() => {
                                           onSecondarySeriesSelect(secondarySeries.id);
                                         }, 100);

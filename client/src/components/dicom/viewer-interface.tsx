@@ -185,23 +185,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         // Prefer MR over PT for fusion
         const secondarySeriesForFusion = mrSeries || ptSeries;
         
-        // Parse registration if needed
-        fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, {
-          method: 'POST'
-        }).then(async response => {
-          if (response.ok) {
-            log.debug('Registration parsed successfully for auto-fusion', 'viewer-interface');
-            
-            // Wait a moment for database to update
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Auto-select secondary series for fusion
-            log.debug(`Setting secondary series for fusion: ${secondarySeriesForFusion.id}`, 'viewer-interface');
-            setSecondarySeriesId(secondarySeriesForFusion.id);
-          }
-        }).catch(error => {
-          log.warn(`Error parsing registration for auto-fusion: ${String(error)}`, 'viewer-interface');
-        });
+        // Parse registration if needed (disabled during rebuild)
+        // await fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, { method: 'POST' });
+        // Wait briefly and set secondary
+        setTimeout(() => {
+          setSecondarySeriesId(secondarySeriesForFusion!.id);
+        }, 100);
       }
     }
   }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop

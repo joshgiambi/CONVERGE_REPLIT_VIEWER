@@ -2498,113 +2498,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     const loadRegistration = async () => {
       if (!studyId) return;
-      
-      console.log(`🔍 Looking for registration matrix starting with study ${studyId}`);
-      console.log('🔍 FUSION DEBUG: Starting registration search');
-      console.log('🔍 FUSION DEBUG: Current study ID:', studyId);
-      
-      // Try the current study first
-      let registrationData = null;
-      
-      try {
-        console.log(`🔍 FUSION DEBUG: Fetching /api/registrations/${studyId}`);
-        const res = await fetch(`/api/registrations/${studyId}`);
-        const data = await res.json();
-        console.log(`🔍 FUSION DEBUG: Registration response from study ${studyId}:`, data);
-        
-        // Handle both direct registration data and wrapped format
-        if (data && data.transformationMatrix) {
-          console.log(`✅ Found registration in current study ${studyId} (direct format)`);
-          registrationData = data;
-        } else if (data && data.registration && data.registration.transformationMatrix) {
-          console.log(`✅ Found registration in current study ${studyId} (wrapped format)`);
-          registrationData = data.registration;
-        } else {
-          console.log(`❌ No registration in study ${studyId}, checking related studies...`);
-          console.log('🔍 FUSION DEBUG: No registration in current study, starting cross-study search');
-          
-          // If no registration in current study, check all studies for this patient
-          // This handles the case where MRI is in study 18 but registration is in study 17
-          // First get the patient ID for this study
-          console.log(`🔍 FUSION DEBUG: Fetching study info from /api/studies/${studyId}`);
-          const studyRes = await fetch(`/api/studies/${studyId}`);
-          const studyData = await studyRes.json();
-          console.log('🔍 FUSION DEBUG: Study data:', studyData);
-          const patientId = studyData?.patientId;
-          
-          if (!patientId) {
-            console.log('❌ FUSION DEBUG: Could not determine patient ID from study data');
-            return;
-          }
-          
-          console.log(`🔍 FUSION DEBUG: Patient ID is ${patientId}, fetching patient data...`);
-          // Get all studies for this patient
-          const patientsRes = await fetch(`/api/patients/${patientId}`);
-          const patientData = await patientsRes.json();
-          console.log('🔍 FUSION DEBUG: Patient data response:', patientData);
-          const studiesData = patientData?.studies || [];
-          
-          console.log(`🔍 FUSION DEBUG: Found ${studiesData.length} studies for patient ${patientId}:`, studiesData.map((s: any) => s.id));
-          
-          for (const study of studiesData || []) {
-            if (study.id !== studyId) {
-              console.log(`🔍 FUSION DEBUG: Checking study ${study.id} for registration...`);
-              const otherRes = await fetch(`/api/registrations/${study.id}`);
-              const otherData = await otherRes.json();
-              console.log(`🔍 FUSION DEBUG: Registration response from study ${study.id}:`, otherData);
-              
-              // Handle both direct registration data and wrapped format
-              if (otherData && otherData.transformationMatrix) {
-                console.log(`✅ Found registration in related study ${study.id} (direct format)`);
-                registrationData = otherData;
-                break;
-              } else if (otherData && otherData.registration && otherData.registration.transformationMatrix) {
-                console.log(`✅ Found registration in related study ${study.id} (wrapped format)`);
-                registrationData = otherData.registration;
-                break;
-              }
-            }
-          }
-        }
-        
-        if (registrationData && registrationData.transformationMatrix) {
-          console.log(`📊 Registration data:`, registrationData);
-          
-          // Parse the transformation matrix if it's a string
-          let matrix = registrationData.transformationMatrix;
-          if (typeof matrix === 'string') {
-            try {
-              const parsed = JSON.parse(matrix);
-              if (Array.isArray(parsed) && parsed.length === 4) {
-                matrix = parsed.flat();
-              } else if (parsed['0'] && parsed['1'] && parsed['2'] && parsed['3']) {
-                matrix = [...parsed['0'], ...parsed['1'], ...parsed['2'], ...parsed['3']];
-              }
-              console.log('✅ Parsed registration matrix:', matrix);
-            } catch (e) {
-              console.error('Failed to parse registration matrix:', e);
-              matrix = null;
-            }
-          }
-          setRegistrationMatrix(matrix);
-          registrationMatrixRef.current = matrix;
-        } else {
-          console.log(`❌ No registration found in any study`);
-          setRegistrationMatrix(null);
-          registrationMatrixRef.current = null;
-        }
-      } catch (error) {
-        console.error('❌ Error loading registration:', error);
-        setRegistrationMatrix(null);
-        registrationMatrixRef.current = null;
-      }
+      // Registration API removed for rebuild
+      setRegistrationMatrix(null);
+      registrationMatrixRef.current = null;
     };
-    
     loadRegistration();
   }, [studyId]);
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
+    // Disabled during rebuild (no registration matrix)
+    if (!registrationMatrix || registrationMatrix.length !== 16) {
+      scheduleRender();
+      return;
+    }
     console.log('🔥 FUSION DEBUG: Registration matrix useEffect triggered');
     console.log('🔥 FUSION DEBUG: Registration matrix:', registrationMatrix);
     console.log('🔥 FUSION DEBUG: State check:', {
@@ -2726,125 +2633,125 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Trigger pre-computation when both registration matrix and secondary images are available
   useEffect(() => {
-    if (registrationMatrix && registrationMatrix.length === 16 && secondaryImages.length > 0) {
-      console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-      // Helper: compute CT z-range in mm using CT orientation
-      const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-      const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-      const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-      let ctZMin = -Infinity, ctZMax = Infinity;
-      if (iop.length >= 6 && origin.length >= 3) {
-        const r = [iop[0], iop[1], iop[2]];
-        const c = [iop[3], iop[4], iop[5]];
-        const n = [
-          r[1] * c[2] - r[2] * c[1],
-          r[2] * c[0] - r[0] * c[2],
-          r[0] * c[1] - r[1] * c[0]
-        ];
-        const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
-        const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-        const zVals: number[] = [];
-        for (const img of images) {
-          const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-          if (p.length >= 3) {
-            const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
-            zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
-          }
-        }
-        if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
-      }
-
-      const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
-
-      // Use CT series' first slice for a stable CT origin/orientation
-      const ctSeriesIOP2 = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
-      const ctSeriesIPP2 = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
-      let transformed = computeTransformedMRIPositions(
-        secondaryImages,
-        registrationMatrix,
-        ctSeriesIOP2,
-        ctSeriesIPP2,
-        secondaryImageCacheRef.current
-      );
-
-      if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
-        const zMin = Math.min(...transformed.map(t => t.zInCT));
-        const zMax = Math.max(...transformed.map(t => t.zInCT));
-        console.log(`🔎 Z-range check (precompute): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
-        if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
-          console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
-          const inv = invertMatrix4x4(registrationMatrix);
-          if (inv) {
-            const transformedInv = computeTransformedMRIPositions(
-              secondaryImages,
-              inv,
-              ctSeriesIOP2,
-              ctSeriesIPP2,
-              secondaryImageCacheRef.current
-            );
-            if (transformedInv.length > 0) {
-              const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
-              const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
-              console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
-              if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
-                console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
-                transformed = transformedInv;
-                setRegistrationMatrix(inv);
-                registrationMatrixRef.current = inv;
-              } else {
-                console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
-              }
-            }
-          }
-        } else {
-          console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
-          // Apply median Z offset correction to remove constant bias
-          const ctZs: number[] = [];
-          const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-          const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-          const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-          if (iop2.length >= 6 && origin2.length >= 3) {
-            const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
-            const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
-            const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
-            for (const img of images) {
-              const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
-              if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
-            }
-            ctZs.sort((a,b)=>a-b);
-          }
-          if (ctZs.length > 1) {
-            const nearest = (val: number) => {
-              let lo=0, hi=ctZs.length-1, best=ctZs[0];
-              while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
-              return best;
-            };
-            const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
-            if (diffs.length) {
-              const s = diffs.slice().sort((a,b)=>a-b); const median = s[Math.floor(s.length/2)];
-              if (Math.abs(median) > 0.25) {
-                console.log(`⚙️ Applying median Z-offset correction (precompute path): ${median.toFixed(2)}mm`);
-                transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
-              }
-            }
-          }
+    if (!registrationMatrix || registrationMatrix.length !== 16) return;
+    console.log('Both registration matrix and secondary images available, pre-computing transformations...');
+    // Helper: compute CT z-range in mm using CT orientation
+    const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+    const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+    const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+    let ctZMin = -Infinity, ctZMax = Infinity;
+    if (iop.length >= 6 && origin.length >= 3) {
+      const r = [iop[0], iop[1], iop[2]];
+      const c = [iop[3], iop[4], iop[5]];
+      const n = [
+        r[1] * c[2] - r[2] * c[1],
+        r[2] * c[0] - r[0] * c[2],
+        r[0] * c[1] - r[1] * c[0]
+      ];
+      const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
+      const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
+      const zVals: number[] = [];
+      for (const img of images) {
+        const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
+        if (p.length >= 3) {
+          const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
+          zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
         }
       }
-      transformedMRIPositions.current = transformed;
-      
-      // Calculate and store Z-range
-      if (transformed.length > 0) {
-        const zValues = transformed.map(item => item.zInCT);
-        mriZRangeInCTSpace.current = {
-          min: Math.min(...zValues),
-          max: Math.max(...zValues)
-        };
-        console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
-      }
-      
-      // Clear cache to force recomputation with new data
-      mriSliceMappingCache.current.clear();
+      if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
     }
+
+    const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
+
+    // Use CT series' first slice for a stable CT origin/orientation
+    const ctSeriesIOP2 = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
+    const ctSeriesIPP2 = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
+    let transformed = computeTransformedMRIPositions(
+      secondaryImages,
+      registrationMatrix,
+      ctSeriesIOP2,
+      ctSeriesIPP2,
+      secondaryImageCacheRef.current
+    );
+
+    if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
+      const zMin = Math.min(...transformed.map(t => t.zInCT));
+      const zMax = Math.max(...transformed.map(t => t.zInCT));
+      console.log(`🔎 Z-range check (precompute): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
+      if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
+        console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
+        const inv = invertMatrix4x4(registrationMatrix);
+        if (inv) {
+          const transformedInv = computeTransformedMRIPositions(
+            secondaryImages,
+            inv,
+            ctSeriesIOP2,
+            ctSeriesIPP2,
+            secondaryImageCacheRef.current
+          );
+          if (transformedInv.length > 0) {
+            const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
+            const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
+            console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
+            if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
+              console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
+              transformed = transformedInv;
+              setRegistrationMatrix(inv);
+              registrationMatrixRef.current = inv;
+            } else {
+              console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
+            }
+          }
+        }
+      } else {
+        console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
+        // Apply median Z offset correction to remove constant bias
+        const ctZs: number[] = [];
+        const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+        const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+        if (iop2.length >= 6 && origin2.length >= 3) {
+          const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
+          const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
+          const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
+          for (const img of images) {
+            const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
+            if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
+          }
+          ctZs.sort((a,b)=>a-b);
+        }
+        if (ctZs.length > 1) {
+          const nearest = (val: number) => {
+            let lo=0, hi=ctZs.length-1, best=ctZs[0];
+            while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
+            return best;
+          };
+          const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
+          if (diffs.length) {
+            const s = diffs.slice().sort((a,b)=>a-b);
+            const median = s[Math.floor(s.length/2)];
+            if (Math.abs(median) > 0.25) {
+              console.log(`⚙️ Applying median Z-offset correction (precompute path): ${median.toFixed(2)}mm`);
+              transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
+            }
+          }
+        }
+      }
+    }
+    transformedMRIPositions.current = transformed;
+    
+    // Calculate and store Z-range
+    if (transformed.length > 0) {
+      const zValues = transformed.map(item => item.zInCT);
+      mriZRangeInCTSpace.current = {
+        min: Math.min(...zValues),
+        max: Math.max(...zValues)
+      };
+      console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
+    }
+    
+    // Clear cache to force recomputation with new data
+    mriSliceMappingCache.current.clear();
   }, [registrationMatrix, secondaryImages]);
   
   // Re-render current image when secondary images are loaded
@@ -3101,14 +3008,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const nlen = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
               for (const img of images) {
                 const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-                if (p.length >= 3) { const dx = p[0]-origin[0], dy=p[1]-origin[1], dz=p[2]-origin[2]; ctZs.push(dx*nn[0] + dy*nn[1] + dz*nn[2]); }
+                if (p.length >= 3) { const dx = p[0]-origin[0], dy=p[1]-origin[1], dz=p[2]-origin[2]; ctZs.push(dx*nn[0]+dy*nn[1]+dz*nn[2]); }
               }
               ctZs.sort((a,b)=>a-b);
             }
             if (ctZs.length > 1) {
               const nearest = (val: number) => {
                 let lo=0, hi=ctZs.length-1, best=ctZs[0];
-                while (lo<=hi) { const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val) < Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1; }
+                while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
                 return best;
               };
               const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
@@ -5652,8 +5559,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
-                predictionEnabled={brushToolState?.predictionEnabled || false}
-                smartBrushEnabled={brushToolState?.smartBrushEnabled || false}
+                predictionEnabled={false}
+                smartBrushEnabled={false}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 onBrushModeChange={(mode: BrushOperation) => {
@@ -5703,8 +5610,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
-                predictionEnabled={false} // No prediction for erase tool
-                smartBrushEnabled={false} // No smart mode for erase tool
+                predictionEnabled={false}
+                smartBrushEnabled={false}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 isEraseMode={true} // Pass erase mode flag

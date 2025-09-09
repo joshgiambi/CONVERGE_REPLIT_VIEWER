@@ -95,10 +95,10 @@ export interface IStorage {
   }): Promise<RTStructureHistory[]>;
   getRTStructureHistorySnapshot(historyId: number): Promise<RTStructureHistory | null>;
   
-  // Registration operations
-  createRegistration(data: InsertRegistration): Promise<Registration | null>;
-  getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
-  deleteRegistrationByStudyId(studyId: number): Promise<void>;
+  // Registration operations (temporarily disabled for rebuild)
+  // createRegistration(data: InsertRegistration): Promise<Registration | null>;
+  // getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
+  // deleteRegistrationByStudyId(studyId: number): Promise<void>;
   
   // Patient metadata editing
   updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null>;
@@ -510,60 +510,10 @@ export class DatabaseStorage implements IStorage {
     console.log(`Updated RT structure ${structureId} color to: ${color}`);
   }
 
-  // Registration operations
-  async createRegistration(data: InsertRegistration): Promise<Registration | null> {
-    try {
-      // Ensure text columns receive serialized JSON strings
-      const normalized: any = { ...data };
-      if (normalized && typeof normalized.transformationMatrix !== 'string') {
-        try {
-          // Accept 4x4 array or flat 16-length array; store as JSON string
-          normalized.transformationMatrix = JSON.stringify(normalized.transformationMatrix);
-        } catch (_) {
-          // Fallback to identity matrix if serialization fails
-          normalized.transformationMatrix = JSON.stringify([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],
-          ]);
-        }
-      }
-      if (normalized && normalized.metadata && typeof normalized.metadata !== 'string') {
-        try {
-          normalized.metadata = JSON.stringify(normalized.metadata);
-        } catch (_) {
-          normalized.metadata = JSON.stringify({});
-        }
-      }
-
-      const [registration] = await db.insert(registrations).values(normalized).returning();
-      return registration;
-    } catch (error) {
-      console.error('Error creating registration:', error);
-      return null;
-    }
-  }
-
-  async getRegistrationByStudyId(studyId: number): Promise<Registration | null> {
-    try {
-      const [registration] = await db.select().from(registrations).where(eq(registrations.studyId, studyId));
-      return registration || null;
-    } catch (error) {
-      console.error('Error getting registration:', error);
-      return null;
-    }
-  }
-
-  async deleteRegistrationByStudyId(studyId: number): Promise<void> {
-    try {
-      await db.delete(registrations).where(eq(registrations.studyId, studyId));
-      console.log('Deleted registration for study:', studyId);
-    } catch (error) {
-      console.error('Error deleting registration:', error);
-      throw error;
-    }
-  }
+  // Registration operations temporarily disabled for rebuild
+  // async createRegistration(data: InsertRegistration): Promise<Registration | null> { return null; }
+  // async getRegistrationByStudyId(studyId: number): Promise<Registration | null> { return null; }
+  // async deleteRegistrationByStudyId(studyId: number): Promise<void> { return; }
 
   // Patient metadata editing
   async updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null> {
@@ -670,8 +620,7 @@ export class DatabaseStorage implements IStorage {
         // Check for fusion capability
         const hasCT = studySeries.some(s => s.modality === 'CT');
         const hasMRI = studySeries.some(s => s.modality === 'MR');
-        const hasRegistration = await this.getRegistrationByStudyId(study.id);
-        
+        const hasRegistration = null;
         if (hasCT && hasMRI && hasRegistration) {
           const fusionTag = await this.createPatientTag({
             patientId,
