@@ -38,6 +38,7 @@ import { log } from '@/lib/log';
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 // Debug flag - set to true in development, false in production
 const DEBUG = process.env.NODE_ENV !== 'production';
@@ -160,66 +161,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [gpuCheckComplete, setGpuCheckComplete] = useState(false);
   const [cornerstone3DInitialized, setCornerstone3DInitialized] = useState(false);
   const [prefetchProgress, setPrefetchProgress] = useState({ loaded: 0, total: 0 });
-
-  // Initialize Cornerstone3D when GPU is available
-  useEffect(() => {
-    if (gpuCheckComplete && isGPUMode && !cornerstone3DInitialized) {
-      log.debug('Initializing Cornerstone3D for GPU-accelerated rendering...', 'viewer');
-      initializeCornerstone3D().then((success) => {
-        if (success) {
-          log.debug('✅ Cornerstone3D initialized successfully', 'viewer');
-          setCornerstone3DInitialized(true);
-        } else {
-          log.warn('❌ Failed to initialize Cornerstone3D, falling back to Cornerstone Core', 'viewer');
-          setIsGPUMode(false);
-        }
-      });
-    }
-  }, [gpuCheckComplete, isGPUMode, cornerstone3DInitialized]);
-
-  // Update local structures when external ones change
-  useEffect(() => {
-    // Only update if actually changed to prevent unnecessary re-renders
-    log.debug('RT Structures update received', 'viewer');
-    if (externalRTStructures && externalRTStructures !== localRTStructures) {
-      log.debug('Setting local RT structures', 'viewer');
-      setLocalRTStructures(externalRTStructures);
-    }
-  }, [externalRTStructures]);
-
-  // Attach global dice helpers for quick validation
-  useEffect(() => {
-    attachDiceDebug(() => rtStructures);
-  }, [rtStructures]);
-
-  // No longer need to load RT structures here - handled by parent component
-  // Convert external window/level format to internal width/center format
-  const currentWindowLevel = externalWindowLevel
-    ? { width: externalWindowLevel.window, center: externalWindowLevel.level }
-    : { width: 400, center: 40 };
-
-  // Function to update external window/level when internal changes
-  const updateWindowLevel = (newWindowLevel: {
-    width: number;
-    center: number;
-  }) => {
-    if (onWindowLevelChange) {
-      onWindowLevelChange({
-        window: newWindowLevel.width,
-        level: newWindowLevel.center,
-      });
-    }
-  };
-  // Use refs for caches to avoid expensive React re-renders
-  const imageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
-  const secondaryImageCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number }>>(new Map());
-  const mprCacheRef = useRef<Map<string, { data: Uint16Array; width: number; height: number }>>(new Map());
-  // Expose cache for MPRFloating (read-only reference)
-  useEffect(() => {
-    try {
-      (window as any).__WV_CACHE__ = imageCacheRef.current;
-    } catch {}
-  }, []);
+  // Blob tools dialog state
+  const [blobDialogOpen, setBlobDialogOpen] = useState(false);
+  const [blobDialogData, setBlobDialogData] = useState<null | {
+    structureId: number;
+    blobs: Array<{ id: number; volumeCc: number; contours: Array<{ slicePosition: number; points: number[]; numberOfPoints: number }> }>;
+  }>(null);
+  const [selectedBlobIdsToDelete, setSelectedBlobIdsToDelete] = useState<Set<number>>(new Set());
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMeasurementToolActive, setIsMeasurementToolActive] = useState(false);
@@ -320,7 +268,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const secondaryPrefetchCompleteRef = useRef(false);
   const lastFusionRenderRef = useRef<{ ctZ: number; mriIndex: number } | null>(null);
 
-
+  // Missing caches/levels used later in the file
+  const imageCacheRef = useRef<Map<string, any>>(new Map());
+  const mprCacheRef = useRef<Map<string, any>>(new Map());
+  const secondaryImageCacheRef = useRef<Map<string, any>>(new Map());
+  const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
+    props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
+  );
+  const updateWindowLevel = ({ width, center }: { width: number; center: number }) => {
+    setCurrentWindowLevel({ width, center });
+    onWindowLevelChange && onWindowLevelChange({ window: width, level: center });
+  };
 
   // Save contour updates using debounced save
   const saveContourUpdates = (updatedStructures: any, action?: string) => {
@@ -2407,6 +2365,45 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'smooth', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'smooth');
+    } else if (payload.action === 'open_remove_blobs_dialog') {
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (!structure || !Array.isArray(structure.contours)) return;
+      const blobs = groupStructureBlobs(structure, SLICE_TOL_MM).map((b, idx) => ({
+        id: idx + 1,
+        volumeCc: computeBlobVolumeCc(b, imageMetadata),
+        contours: b
+      }));
+      if (!blobs || blobs.length <= 1) {
+        return;
+      }
+      setSelectedBlobIdsToDelete(new Set());
+      setBlobDialogData({ structureId: payload.structureId, blobs });
+      setBlobDialogOpen(true);
+    } else if (payload.action === 'separate_blobs') {
+      const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
+      if (!structure || !Array.isArray(structure.contours)) return;
+      const blobs = groupStructureBlobs(structure, SLICE_TOL_MM);
+      if (!blobs || blobs.length <= 1) {
+        return;
+      }
+      const baseName = String(structure.structureName || 'Structure');
+      const color = Array.isArray(structure.color) ? structure.color : [0, 255, 0];
+      const maxRoi = Math.max(0, ...updatedStructures.structures.map((s: any) => s.roiNumber || 0));
+      let nextRoi = maxRoi + 1;
+      blobs.forEach((blobContours, index) => {
+        updatedStructures.structures.push({
+          roiNumber: nextRoi++,
+          structureName: `${baseName}_${index + 1}`,
+          color,
+          contours: blobContours
+        });
+      });
+      structure.contours = [];
+      setLocalRTStructures(updatedStructures);
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'separate_blobs', payload.structureId, updatedStructures);
+      }
+      saveContourUpdates(updatedStructures, 'separate_blobs');
     }
   };
 
@@ -5329,6 +5326,74 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Group contours into connected blobs (per-slice, same-slice contours considered disconnected unless polygons intersect)
+  function groupStructureBlobs(structure: any, tolMm: number): Array<Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>> {
+    const contours = Array.isArray(structure?.contours) ? structure.contours : [];
+    const bySlice = new Map<number, Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>>();
+    for (const c of contours) {
+      const key = findExistingKeyWithinTolerance(bySlice, c.slicePosition, tolMm);
+      const list = bySlice.get(key) || [];
+      list.push(c);
+      bySlice.set(key, list);
+    }
+    // Start with each contour as its own blob; merge on intersection per slice
+    const blobs: Array<Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>> = [];
+    for (const [, sliceContours] of bySlice) {
+      // Union groups within slice based on polygon intersection
+      const groups: Array<Array<typeof sliceContours[number]>> = [];
+      for (const c of sliceContours) {
+        let placed = false;
+        for (const g of groups) {
+          if (g.some((x) => doPolygonsIntersectSimple(x.points, c.points))) {
+            g.push(c);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) groups.push([c]);
+      }
+      // Append each group as separate blobs; different slices do not connect
+      for (const g of groups) {
+        blobs.push([...g]);
+      }
+    }
+    return blobs;
+  }
+
+  function findExistingKeyWithinTolerance(map: Map<number, any>, value: number, tol: number): number {
+    for (const k of map.keys()) {
+      if (Math.abs(k - value) <= tol) return k;
+    }
+    return value;
+  }
+
+  function computeBlobVolumeCc(blobContours: Array<{ slicePosition: number; points: number[] }>, metadata: any): number {
+    if (!blobContours?.length) return 0;
+    const px = parseFloat(metadata?.pixelSpacing?.split?.("\\")?.[0]) || metadata?.pixelSpacing?.[0] || 1;
+    const py = parseFloat(metadata?.pixelSpacing?.split?.("\\")?.[1]) || metadata?.pixelSpacing?.[1] || px || 1;
+    const dz = parseFloat(metadata?.sliceThickness) || parseFloat(metadata?.spacingBetweenSlices) || 1;
+    const areaPerPixelMm2 = px * py;
+    // Polygon area in mm^2 from world points (assumed mm)
+    const areaOf = (pts: number[]) => {
+      let area = 0;
+      for (let i = 0; i < pts.length; i += 3) {
+        const j = (i + 3) % pts.length;
+        area += pts[i] * pts[j + 1] - pts[j] * pts[i + 1];
+      }
+      return Math.abs(area / 2);
+    };
+    // Integrate per-slice area * dz
+    const slices = new Map<number, number>();
+    for (const c of blobContours) {
+      slices.set(c.slicePosition, (slices.get(c.slicePosition) || 0) + areaOf(c.points));
+    }
+    let volumeMm3 = 0;
+    for (const [, areaMm2] of slices) {
+      volumeMm3 += areaMm2 * dz;
+    }
+    return volumeMm3 / 1000; // cc
+  }
+
   if (isLoading) {
     return (
       <Card className="h-full bg-black border-indigo-800 flex items-center justify-center">
@@ -5767,7 +5832,77 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             />
           )}
 
+          {/* Blob removal dialog */}
+          <AlertDialog open={blobDialogOpen} onOpenChange={(open) => setBlobDialogOpen(open)}>
+            <AlertDialogContent className="max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove blobs</AlertDialogTitle>
+              </AlertDialogHeader>
+              <div className="space-y-2">
+                {blobDialogData?.blobs?.map((b) => (
+                  <label key={b.id} className="flex items-center justify-between gap-3 text-sm text-white/90">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedBlobIdsToDelete.has(b.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedBlobIdsToDelete);
+                          if (e.target.checked) next.add(b.id); else next.delete(b.id);
+                          setSelectedBlobIdsToDelete(next);
+                        }}
+                      />
+                      <span>Blob {b.id}</span>
+                    </div>
+                    <span className="text-xs text-gray-300">{b.volumeCc.toFixed(2)} cc</span>
+                  </label>
+                ))}
+                {(!blobDialogData?.blobs?.length || blobDialogData.blobs.length <= 1) && (
+                  <div className="text-xs text-gray-400">Only one blob detected.</div>
+                )}
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    try {
+                      if (!blobDialogData || !blobDialogData.structureId) return;
+                      const structure = (localRTStructures || rtStructures)?.structures?.find((s: any) => s.roiNumber === blobDialogData.structureId);
+                      if (!structure) return;
+                      const toDelete = new Set(Array.from(selectedBlobIdsToDelete));
+                      if (toDelete.size === 0) return;
 
+                      const keysToRemove = new Set<string>();
+                      blobDialogData.blobs.forEach((b) => {
+                        if (!toDelete.has(b.id)) return;
+                        b.contours.forEach((c) => {
+                          const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                          keysToRemove.add(key);
+                        });
+                      });
+
+                      const updated = structuredClone ? structuredClone(localRTStructures || rtStructures) : JSON.parse(JSON.stringify(localRTStructures || rtStructures));
+                      const s = updated.structures.find((x: any) => x.roiNumber === blobDialogData.structureId);
+                      if (!s) return;
+                      s.contours = s.contours.filter((c: any) => {
+                        const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                        return !keysToRemove.has(key);
+                      });
+
+                      setLocalRTStructures(updated);
+                      if (seriesId) {
+                        undoRedoManager.saveState(seriesId, 'remove_blobs', blobDialogData.structureId, updated);
+                      }
+                      saveContourUpdates(updated, 'remove_blobs');
+                    } finally {
+                      setBlobDialogOpen(false);
+                    }
+                  }}
+                >
+                  Delete Selected
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 

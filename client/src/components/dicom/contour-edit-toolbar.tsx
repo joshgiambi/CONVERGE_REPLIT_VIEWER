@@ -36,7 +36,8 @@ import {
   Workflow,
   Eye,
   Zap,
-  Keyboard
+  Keyboard,
+  SplitSquareHorizontal
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -107,6 +108,7 @@ export function ContourEditToolbar({
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
+  const [showBlobMenu, setShowBlobMenu] = useState(false);
   const [isPreviewEnabled, setIsPreviewEnabled] = useState(true); // Preview mode for grow/shrink operations
   const [previewContours, setPreviewContours] = useState<number[][] | null>(null); // Store preview contours for rendering
   const [isShowingPreview, setIsShowingPreview] = useState(false); // Track if preview is currently shown
@@ -996,7 +998,7 @@ export function ContourEditToolbar({
               <span className="text-xs font-medium">Del Slice</span>
             </Button>
             
-            {/* Interpolate button */}
+            {/* Interpolate button (renamed to Interp) */}
             <Button
               variant="outline"
               size="sm"
@@ -1005,7 +1007,7 @@ export function ContourEditToolbar({
               title="Interpolate missing slices"
             >
               <GitBranch className="w-3 h-3 mr-1" />
-              <span className="text-xs font-medium">Interpolate</span>
+              <span className="text-xs font-medium">Interp</span>
             </Button>
             
             {/* Nth Slice Delete button with hover menu */}
@@ -1018,7 +1020,7 @@ export function ContourEditToolbar({
                 title="Delete every nth slice"
               >
                 <Grid3x3 className="w-3 h-3 mr-1" />
-                <span className="text-xs font-medium">Nth Slice</span>
+                <span className="text-xs font-medium">Nth</span>
                 <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
               
@@ -1064,7 +1066,7 @@ export function ContourEditToolbar({
                   const updatePayload = {
                     action: 'smooth',
                     structureId: selectedStructure.roiNumber,
-                    smoothingFactor: 0.3 // Moderate smoothing to reduce shrinkage
+                    smoothingFactor: 0.15 // Minimal smoothing across all slices
                   };
                   onContourUpdate(updatePayload);
                 }
@@ -1077,6 +1079,50 @@ export function ContourEditToolbar({
               <Sparkles className="w-3 h-3 mr-1" />
               <span className="text-xs font-medium">Smooth</span>
             </Button>
+
+            {/* Blob tools dropdown */}
+            <div className="relative" onMouseLeave={() => setShowBlobMenu(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onMouseEnter={() => setShowBlobMenu(true)}
+                className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+                title="Blob tools"
+              >
+                <SplitSquareHorizontal className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Blob</span>
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+
+              {showBlobMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[180px]">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (!selectedStructure) return;
+                      setShowBlobMenu(false);
+                      onContourUpdate?.({ action: 'open_remove_blobs_dialog', structureId: selectedStructure.roiNumber });
+                    }}
+                    className="w-full justify-start h-7 px-2 text-xs text-purple-300 hover:bg-purple-900/20"
+                  >
+                    Remove blobs…
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (!selectedStructure) return;
+                      setShowBlobMenu(false);
+                      onContourUpdate?.({ action: 'separate_blobs', structureId: selectedStructure.roiNumber });
+                    }}
+                    className="w-full justify-start h-7 px-2 text-xs text-purple-300 hover:bg-purple-900/20"
+                  >
+                    Blob separator
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {/* Clear button with hover menu */}
             <div className="relative" onMouseLeave={() => setShowClearMenu(false)}>
