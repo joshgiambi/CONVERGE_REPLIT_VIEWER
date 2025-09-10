@@ -127,6 +127,21 @@ export function ContourEditToolbar({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isVisible, selectedStructure, currentSlicePosition]);
 
+  // Sync brush size from parent tool state when it changes externally (e.g., right-drag)
+  useEffect(() => {
+    // If the parent (viewer) updates brushToolState.brushSize, we receive it via onToolChange invocations to us.
+    // To keep the slider in sync, we mirror selected structure's brush size through imageMetadata unit context if available via props.
+    // Since ContourEditToolbar owns the activation and initial size, we listen for window events dispatched by viewer when brush size changes.
+    const handler = (e: any) => {
+      const newSize = Number(e?.detail?.brushSize);
+      if (Number.isFinite(newSize)) {
+        setBrushThickness([newSize]);
+      }
+    };
+    window.addEventListener('brush:size:update', handler as EventListener);
+    return () => window.removeEventListener('brush:size:update', handler as EventListener);
+  }, []);
+
   // Notify parent when tool is activated
   const handleToolActivation = (toolId: string) => {
     log.debug(`TOOLBAR: Tool activated: ${toolId}`, 'toolbar');

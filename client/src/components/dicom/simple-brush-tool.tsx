@@ -226,7 +226,8 @@ export function SimpleBrushTool({
     if (cursorPosition) {
         const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
         const pixelSpacing = imageMetadata?.pixelSpacing ? imageMetadata.pixelSpacing.split('\\').map(Number)[0] : 0.9765625;
-        const cursorRadiusInScreenPixels = brushSize * pixelSpacing / (pixelSpacing / transform.scale);
+        const liveBrushSize = isAdjustingSize ? adjustedBrushSize : brushSize;
+        const cursorRadiusInScreenPixels = liveBrushSize * pixelSpacing / (pixelSpacing / transform.scale);
 
         if (smartBrushEnabled && adaptivePreviewPoints && adaptivePreviewPoints.length > 2 && !isEraseMode && !isTemporaryEraseMode) {
             ctx.save();
@@ -364,10 +365,6 @@ export function SimpleBrushTool({
     // The previous logic was preventing the mouse move events from being
     // correctly processed when adjusting the brush size.
     const handleMouseMove = (e: MouseEvent) => {
-        if (!isAdjustingSize && Date.now() - lastUpdateTime.current < updateThrottle) {
-          return;
-        }
-        lastUpdateTime.current = Date.now();
         if (isAdjustingSize && sizeAdjustStart) {
             e.preventDefault();
             e.stopPropagation();
@@ -409,7 +406,7 @@ export function SimpleBrushTool({
             return;
         }
 
-        // Performance optimization: throttle mouse move events
+        // Performance optimization: throttle mouse move events when not drawing
         const now = Date.now();
         if (now - lastUpdateTime.current < updateThrottle && !isDrawing) {
             return;

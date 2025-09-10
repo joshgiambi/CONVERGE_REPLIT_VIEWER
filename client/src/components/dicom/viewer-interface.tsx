@@ -38,6 +38,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
+  const [regAssociations, setRegAssociations] = useState<Record<number, number[]>>({});
   // Single-view mode only; MPR uses floating windows inside WorkingViewer
   const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
   
@@ -145,55 +146,91 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     enabled: !!studyData.studies?.length,
   });
 
+  // Fetch REG associations for this patient and build primary->secondary mapping by series IDs
+  useEffect(() => {
+    const loadAssociations = async () => {
+      try {
+        if (!studyData?.patient?.id) return;
+        if (!seriesData || !Array.isArray(seriesData) || seriesData.length === 0) return;
+
+        // Try patient-wide first, then per-study if empty
+        const tryFetch = async (url: string) => {
+          try {
+            const r = await fetch(url);
+            if (!r.ok) return [] as any[];
+            const j = await r.json();
+            return Array.isArray(j?.associations) ? j.associations : [];
+          } catch { return [] as any[]; }
+        };
+
+        let associations = await tryFetch(`/api/registration/associations?patientId=${studyData.patient.id}`);
+        if (!associations.length && Array.isArray(studyData?.studies)) {
+          const results = await Promise.all(
+            studyData.studies.map((st: any) => tryFetch(`/api/registration/associations?studyId=${st.id}`))
+          );
+          associations = results.flat();
+        }
+
+        // Build mapping preferring ID fields if provided, otherwise map UIDs → IDs
+        const uidToSeries = new Map<string, any>((seriesData as any[]).map(s => [s.seriesInstanceUID, s] as const));
+        const mapping: Record<number, number[]> = {};
+        for (const a of associations) {
+          // Prefer id-based target
+          let primaryId: number | null = Number.isFinite(a?.targetSeriesId) ? a.targetSeriesId : null;
+          if (!primaryId && a?.target) {
+            const s = uidToSeries.get(a.target);
+            if (s) primaryId = s.id;
+          }
+          if (!primaryId) continue;
+
+          let secondaryIds: number[] = Array.isArray(a?.sourcesSeriesIds) ? a.sourcesSeriesIds.filter((x: any) => Number.isFinite(x)).map((x: any) => Number(x)) : [];
+          if (secondaryIds.length === 0 && Array.isArray(a?.sources)) {
+            for (const uid of a.sources) {
+              const sec = uidToSeries.get(uid);
+              if (sec && sec.id !== primaryId) secondaryIds.push(sec.id);
+            }
+          }
+          if (secondaryIds.length) {
+            const prev = mapping[primaryId] || [];
+            const combined = Array.from(new Set([...prev, ...secondaryIds]));
+            mapping[primaryId] = combined;
+          }
+        }
+
+        setRegAssociations(mapping);
+
+        // Auto-select best primary candidate if nothing selected yet
+        if (!selectedSeries && Object.keys(mapping).length > 0) {
+          const ptStudyIds = new Set<number>((seriesData as any[])
+            .filter(s => (s.modality || '').toUpperCase() === 'PT')
+            .map(s => s.studyId));
+
+          const primaryIds = Object.keys(mapping).map(Number).sort((a, b) => (mapping[b]?.length || 0) - (mapping[a]?.length || 0));
+          const preferred = primaryIds.find(pid => {
+            const ser = (seriesData as any[]).find(s => s.id === pid);
+            if (!ser) return false;
+            const modality = (ser.modality || '').toUpperCase();
+            if (modality !== 'CT') return false;
+            return !ptStudyIds.has(ser.studyId);
+          });
+          const chosenId = preferred ?? primaryIds[0];
+          const chosen = (seriesData as any[]).find(s => s.id === chosenId);
+          if (chosen) await handleSeriesSelect(chosen);
+        }
+      } catch {
+        // Silent fail; UI falls back to heuristic
+      }
+    };
+    loadAssociations();
+  }, [studyData?.patient?.id, seriesData]);
+
   useEffect(() => {
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
-      
-      // Auto-select CT series as primary, fallback to first series
-      // IMPORTANT: Always load CT as primary for fusion dataset
-      if (!selectedSeries) {
-        const ctSeries = seriesData.find((s: any) => s.modality === 'CT');
-        if (ctSeries) {
-          log.debug(`Auto-selecting CT series as primary: ${ctSeries.id}`, 'viewer-interface');
-          handleSeriesSelect(ctSeries);
-        } else if (seriesData.length > 0) {
-          log.debug(`No CT series found, selecting first series: ${seriesData[0]?.id}`, 'viewer-interface');
-          handleSeriesSelect(seriesData[0]);
-        }
-      }
-      
-      // Auto-load RT structures if available
-      const rtSeries = seriesData.find((s: any) => s.modality === 'RTSTRUCT');
-      if (rtSeries) {
-        log.debug(`Loading RT structures for study ${rtSeries.studyId}`, 'viewer-interface');
-        handleRTSeriesSelect(rtSeries);
-      } else {
-        // Clear RT structures if no RT series found
-        log.debug(`No RT structures found in any study`, 'viewer-interface');
-        setRTStructures(null);
-        setLoadedRTSeriesId(null);  // Clear loaded RT series ID
-      }
-      
-      // Auto-activate fusion when REG files are present
-      const regSeries = seriesData.find((s: any) => s.modality === 'REG');
-      const ctSeriesForFusion = seriesData.find((s: any) => s.modality === 'CT');
-      const mrSeries = seriesData.find((s: any) => s.modality === 'MR');
-      const ptSeries = seriesData.find((s: any) => s.modality === 'PT');
-      
-      if (regSeries && ctSeriesForFusion && (mrSeries || ptSeries)) {
-        log.debug('Auto-activating fusion: REG detected with CT and secondary series', 'viewer-interface');
-        // Prefer MR over PT for fusion
-        const secondarySeriesForFusion = mrSeries || ptSeries;
-        
-        // Parse registration if needed (disabled during rebuild)
-        // await fetch(`/api/registrations/${ctSeriesForFusion.studyId}/parse`, { method: 'POST' });
-        // Wait briefly and set secondary
-        setTimeout(() => {
-          setSecondarySeriesId(secondarySeriesForFusion!.id);
-        }, 100);
-      }
+      // Do not auto-select here; handled in associations above
+      // Do not auto-load RT here to avoid duplicate RTSTRUCT entries
     }
-  }, [seriesData]); // Remove selectedSeries from dependencies to prevent infinite loop
+  }, [seriesData]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -659,6 +696,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             onWindowLevelChange={setWindowLevel}
             studyId={studyData.studies[0]?.id}
             studyIds={studyData.studies.map((s: any) => s.id)}
+            regAssociations={regAssociations}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
@@ -744,7 +782,13 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   brushToolState={brushToolState}
                   selectedForEdit={selectedForEdit}
                   selectedStructures={selectedStructures}
-                  onBrushSizeChange={(size) => setBrushToolState(prev => ({ ...prev, brushSize: size }))}
+                  onBrushSizeChange={(size) => {
+                    setBrushToolState(prev => ({ ...prev, brushSize: size }));
+                    try {
+                      const evt = new CustomEvent('brush:size:update', { detail: { brushSize: size } });
+                      window.dispatchEvent(evt);
+                    } catch {}
+                  }}
                   onContourUpdate={handleContourUpdate}
                   onSlicePositionChange={setCurrentSlicePosition}
                   contourSettings={contourSettings}

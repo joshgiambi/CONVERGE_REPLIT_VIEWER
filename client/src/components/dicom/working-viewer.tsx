@@ -2494,16 +2494,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
-  // Load registration matrix for fusion - check multiple studies
+  // Resolve registration for current primary (seriesId) and selected secondary
   useEffect(() => {
-    const loadRegistration = async () => {
-      if (!studyId) return;
-      // Registration API removed for rebuild
-      setRegistrationMatrix(null);
-      registrationMatrixRef.current = null;
+    const loadResolvedRegistration = async () => {
+      if (!seriesId || !secondarySeriesId) {
+        setRegistrationMatrix(null);
+        registrationMatrixRef.current = null;
+        return;
+      }
+      try {
+        const url = `/api/registration/resolve?primarySeriesId=${seriesId}&secondarySeriesId=${secondarySeriesId}`;
+        const r = await fetch(url, { cache: 'no-store' as RequestCache });
+        if (!r.ok) {
+          setRegistrationMatrix(null);
+          registrationMatrixRef.current = null;
+          return;
+        }
+        const data = await r.json();
+        const m = Array.isArray(data?.matrixRowMajor4x4) && data.matrixRowMajor4x4.length === 16 ? (data.matrixRowMajor4x4 as number[]) : null;
+        setRegistrationMatrix(m);
+        registrationMatrixRef.current = m;
+      } catch {
+        setRegistrationMatrix(null);
+        registrationMatrixRef.current = null;
+      }
     };
-    loadRegistration();
-  }, [studyId]);
+    loadResolvedRegistration();
+  }, [seriesId, secondarySeriesId]);
   
   // Re-render fusion overlay when registration matrix is loaded
   useEffect(() => {
@@ -5517,7 +5534,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             onContextMenu={(e) => e.preventDefault()}
             className={`max-w-full max-h-full object-contain rounded ${
               brushToolState?.isActive && brushToolState?.tool === "brush"
-                ? ""
+                ? "cursor-none"
                 : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
                 ? ""
                 : "cursor-move"
@@ -5560,13 +5577,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 smoothingEnabled={true}
                 enableSmartMode={true}
                 predictionEnabled={false}
-                smartBrushEnabled={false}
+                smartBrushEnabled={!!brushToolState.smartBrushEnabled}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 onBrushModeChange={(mode: BrushOperation) => {
                   console.log("Brush mode changed:", mode);
                 }}
                 onBrushSizeChange={(newSize: number) => {
+                  if (onBrushSizeChange) {
+                    onBrushSizeChange(newSize);
+                  }
                   if (onBrushToolChange) {
                     onBrushToolChange({
                       ...brushToolState,
@@ -5611,7 +5631,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 smoothingEnabled={true}
                 enableSmartMode={true}
                 predictionEnabled={false}
-                smartBrushEnabled={false}
+                smartBrushEnabled={!!brushToolState.smartBrushEnabled}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
                 isEraseMode={true} // Pass erase mode flag
@@ -5619,6 +5639,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   console.log("Erase mode changed:", mode);
                 }}
                 onBrushSizeChange={(newSize: number) => {
+                  if (onBrushSizeChange) {
+                    onBrushSizeChange(newSize);
+                  }
                   if (onBrushToolChange) {
                     onBrushToolChange({
                       ...brushToolState,
