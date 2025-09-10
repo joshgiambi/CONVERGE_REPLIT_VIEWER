@@ -84,7 +84,8 @@ export function SimpleBrushTool({
   
   // Performance optimization: throttle mouse move events
   const lastUpdateTime = useRef(0);
-  const updateThrottle = 16; // ~60fps
+  // Lower throttle when not drawing for responsiveness; keep tighter while drawing
+  const updateThrottle = isDrawing ? 16 : 8;
 
   // Update adjusted brush size when prop changes
   useEffect(() => {
@@ -408,7 +409,7 @@ export function SimpleBrushTool({
 
         // Performance optimization: throttle mouse move events when not drawing
         const now = Date.now();
-        if (now - lastUpdateTime.current < updateThrottle && !isDrawing) {
+        if (!isAdjustingSize && now - lastUpdateTime.current < updateThrottle && !isDrawing) {
             return;
         }
         lastUpdateTime.current = now;

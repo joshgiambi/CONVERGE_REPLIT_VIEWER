@@ -1557,14 +1557,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         // Perform union of intersecting polygons using simple operations
         const unionResults = unionMultipleContoursSimple(polygonsToUnion);
-        const unionResult = unionResults.length > 0 ? unionResults[0] : [];
         
-        // Add the unified contour
-        if (unionResult.length >= 9) {
+        // Add all unified contours (there can be multiple disjoint polygons)
+        if (unionResults && unionResults.length > 0) {
+          for (const polygon of unionResults) {
+            if (polygon && polygon.length >= 9) {
+              structure.contours.push({
+                slicePosition: payload.slicePosition,
+                points: polygon,
+                numberOfPoints: polygon.length / 3,
+              });
+            }
+          }
+        } else {
+          // Fallback: if union failed/returned empty, do not lose data.
+          // Keep original intersecting contours and add the brush polygon as a new blob.
+          for (const contour of intersectingContours) {
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contour.points,
+              numberOfPoints: contour.numberOfPoints,
+            });
+          }
           structure.contours.push({
             slicePosition: payload.slicePosition,
-            points: unionResult,
-            numberOfPoints: unionResult.length / 3,
+            points: brushPolygon,
+            numberOfPoints: brushPolygon.length / 3,
           });
         }
         
