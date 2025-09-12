@@ -394,32 +394,34 @@ export function interpolateMRI(
   cache: Map<string, {data: Float32Array, width: number, height: number, min?: number, max?: number}>,
   opts?: { ctNormal?: number[] | null; ctOrigin?: number[] | null; mode?: 'nearest'|'blend' }
 ): {data: Float32Array, width: number, height: number, uid?: string, min?: number, max?: number} | null {
+  // Create cache key for this interpolation
+  const cacheKey = `${ctZ.toFixed(2)}_${opts?.mode || 'nearest'}_${transformed.length}`;
+  const cached = fusionCalculationCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   // Use plane-based nearest if CT geometry provided
   const idx = (opts?.ctNormal && opts?.ctOrigin)
     ? findNearestMRIIndexByPlane(ctZ, opts.ctNormal, opts.ctOrigin, transformed as any)
     : findNearestMRIIndex(ctZ, transformed);
   if (idx === null) {
-    console.log(`No MRI index found for CT Z=${ctZ}mm`);
     return null;
   }
 
   const best = transformed[idx];
   const distance = Math.abs(best.zInCT - ctZ);
-  console.log(`Found MRI slice for CT ${ctZ}mm: MRI Z=${best.zInCT.toFixed(1)}mm (distance: ${distance.toFixed(1)}mm)`);
   
   const baseData = cache.get(best.image.sopInstanceUID);
   if (!baseData) {
-    console.error(`CRITICAL: MRI image data not found in cache: ${best.image.sopInstanceUID}`);
-    console.log(`Cache keys available:`, Array.from(cache.keys()).slice(0, 5));
-    console.log(`Cache size:`, cache.size);
     return null;
   }
-  
-  console.log(`✓ Found MRI data in cache: ${baseData.width}x${baseData.height}, ${baseData.data.length} pixels`);
 
   // Fast path: nearest only (default for performance)
   if ((opts?.mode ?? 'nearest') === 'nearest') {
-    return { ...baseData, uid: best.image.sopInstanceUID };
+    const result = { ...baseData, uid: best.image.sopInstanceUID };
+    fusionCalculationCache.set(cacheKey, result);
+    return result;
   }
 
   // Determine neighbor spacing
@@ -427,18 +429,30 @@ export function interpolateMRI(
   const next = transformed[idx + 1];
 
   // If no neighbors or CT is exactly on slice, return base
-  if (!prev || !next) return { ...baseData, uid: best.image.sopInstanceUID };
+  if (!prev || !next) {
+    const result = { ...baseData, uid: best.image.sopInstanceUID };
+    fusionCalculationCache.set(cacheKey, result);
+    return result;
+  }
 
   const lowerZ = prev.zInCT;
   const upperZ = next.zInCT;
-  if (upperZ === lowerZ) return { ...baseData, uid: best.image.sopInstanceUID };
+  if (upperZ === lowerZ) {
+    const result = { ...baseData, uid: best.image.sopInstanceUID };
+    fusionCalculationCache.set(cacheKey, result);
+    return result;
+  }
 
   // Linear weight between prev and next
   const w = (ctZ - lowerZ) / (upperZ - lowerZ);
 
   const prevData = cache.get(prev.image.sopInstanceUID);
   const nextData = cache.get(next.image.sopInstanceUID);
-  if (!prevData || !nextData) return { ...baseData, uid: best.image.sopInstanceUID };
+  if (!prevData || !nextData) {
+    const result = { ...baseData, uid: best.image.sopInstanceUID };
+    fusionCalculationCache.set(cacheKey, result);
+    return result;
+  }
 
   // Always blend with weight w (0→1) no matter how small - eliminates sudden jumps
   const length = baseData.data.length;
@@ -449,13 +463,25 @@ export function interpolateMRI(
   // Provide conservative min/max from neighbors to avoid scanning
   const min = Math.min(prevData.min ?? prevData.data[0], nextData.min ?? nextData.data[0]);
   const max = Math.max(prevData.max ?? prevData.data[0], nextData.max ?? nextData.data[0]);
-  return { data: interp, width: baseData.width, height: baseData.height, min, max };
+  const result = { data: interp, width: baseData.width, height: baseData.height, min, max };
+  fusionCalculationCache.set(cacheKey, result);
+  return result;
 }
 
 /**
  * Simplified fusion render function using the above utilities.
  * Call inside your render loop and after computing transformed positions once.
  */
+// Performance optimization: Cache for expensive calculations
+const fusionCalculationCache = new Map<string, any>();
+
+/**
+ * Clear the global fusion calculation cache - call when switching secondary series
+ */
+export function clearFusionCalculationCache() {
+  fusionCalculationCache.clear();
+}
+
 export async function renderFusionOverlay(
   ctx: CanvasRenderingContext2D,
   primaryImage: any,
@@ -471,11 +497,10 @@ export async function renderFusionOverlay(
   ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null,
   ctSeriesOrigin?: number[] | null,
   ctSeriesIOP?: number[] | string | null,
-  isPET?: boolean,
-  isCT?: boolean
+  secondaryModality?: string
 ) {
   // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
-  console.log('🎯 Rendering fusion overlay in CT coordinate space');
+  // Removed console.log for performance
 
   // Z-range handling: do NOT clamp. If CT is outside the secondary coverage, skip rendering overlay.
   let ctZForInterp = ctSliceZ;
@@ -536,21 +561,20 @@ export async function renderFusionOverlay(
   let min = (mriData as any).min as number | undefined;
   let max = (mriData as any).max as number | undefined;
   if (min === undefined || max === undefined) {
-    let tmin = mriData.data[0], tmax = mriData.data[0];
-    for (let i = 0; i < mriData.data.length; i++) {
-      const v = mriData.data[i];
-      if (v < tmin) tmin = v;
-      if (v > tmax) tmax = v;
-    }
-    min = tmin; max = tmax;
-    // Cache back into secondary cache if we know the UID
-    try {
-      const uid = (mriData as any).uid;
-      if (uid && secondaryImageCache.has(uid)) {
-        const prev = secondaryImageCache.get(uid)!;
-        secondaryImageCache.set(uid, { ...prev, min, max });
+    // Try to read from cache via UID
+    const uid = (mriData as any).uid as string | undefined;
+    if (uid && secondaryImageCache.has(uid)) {
+      const cached = secondaryImageCache.get(uid)! as any;
+      if (typeof cached.min === 'number' && typeof cached.max === 'number') {
+        min = cached.min; max = cached.max;
       }
-    } catch {}
+    }
+  }
+  if (min === undefined || max === undefined) {
+    // Last resort: compute once (should be rare if worker populated)
+    let tmin = mriData.data[0], tmax = mriData.data[0];
+    for (let i = 0; i < mriData.data.length; i++) { const v = mriData.data[i]; if (v < tmin) tmin = v; if (v > tmax) tmax = v; }
+    min = tmin; max = tmax;
   }
   const range = (max! - min!);
   
@@ -577,7 +601,11 @@ export async function renderFusionOverlay(
     return { r: 255, g: 255, b: 255, a: 255 };
   };
 
-  // Secondary CT: apply default window/level on Hounsfield values; MRI: simple min-max normalization
+  // Determine modality-specific color lookup based on actual secondary modality
+  const isPET = secondaryModality === 'PT' || secondaryModality === 'PET';
+  const isCT = secondaryModality === 'CT';
+  
+  // Secondary CT: apply default window/level on Hounsfield values; MRI: simple min-max normalization; PET: FDG LUT
   if (isCT) {
     const WW = 350; // default
     const WC = 40;  // default
@@ -603,6 +631,7 @@ export async function renderFusionOverlay(
         data[idx4 + 2] = b;
         data[idx4 + 3] = a;
       } else {
+        // MRI and other modalities - grayscale
         const v = Math.max(0, Math.min(255, Math.round(normalized * 255)));
         data[idx4] = data[idx4 + 1] = data[idx4 + 2] = v;
         data[idx4 + 3] = 255; // remove per-pixel alpha thresholding to avoid islands
@@ -614,8 +643,6 @@ export async function renderFusionOverlay(
   // PROPER PHYSICAL SCALING using pixel spacings
   const w = mriData.width;
   const h = mriData.height;
-  
-  console.log(`MRI dimensions: ${w}x${h}, Canvas: ${canvasWidth}x${canvasHeight}`);
   
   // Helper function to normalize spacing arrays
   function normalizeSpacing(sp: string|string[]|number[]|undefined|null) {
@@ -629,57 +656,35 @@ export async function renderFusionOverlay(
     (primaryImage as any).pixelSpacing ?? (primaryImage as any).imageMetadata?.pixelSpacing
   );
   
-  // Use the same coordinate system as CT rendering - NO independent centering
+  // Simple centered positioning to prevent offset issues
   let drawX: number = 0;
   let drawY: number = 0;
   let drawW: number = w;
   let drawH: number = h;
   
-  // Get the actual secondary image that was used for interpolation to access its metadata
-  let actualSecondaryImage = null;
-  if (transformedMRI.length > 0) {
-    // Find the MRI image closest to this CT slice
-    const distances = transformedMRI.map(t => ({
-      image: t.image,
-      distance: Math.abs(t.zInCT - ctSliceZ)
-    }));
-    distances.sort((a, b) => a.distance - b.distance);
-    actualSecondaryImage = distances[0]?.image;
-  }
+  // Determine actual secondary slice UID used for normalization/spacing
+  const actualSecondaryUID = ((mriData as any).uid as string | undefined) || null;
 
   // Get MRI pixel spacing from the actual MRI metadata with robust fallbacks
   let mriSpacingArr: number[] | null = null;
-  if (actualSecondaryImage) {
-    const psTop = (actualSecondaryImage as any).pixelSpacing;
-    const psMeta = (actualSecondaryImage as any).imageMetadata?.pixelSpacing;
-    let psCache: any = undefined;
-    try {
-      if (secondaryImageCache?.has((actualSecondaryImage as any).sopInstanceUID)) {
-        psCache = secondaryImageCache.get((actualSecondaryImage as any).sopInstanceUID)?.metadata?.pixelSpacing;
-      }
-    } catch {}
-    const ps = psTop ?? psMeta ?? psCache;
-    mriSpacingArr = normalizeSpacing(ps);
+  if (actualSecondaryUID && secondaryImageCache?.has(actualSecondaryUID)) {
+    const metaPS = secondaryImageCache.get(actualSecondaryUID)?.metadata?.pixelSpacing;
+    mriSpacingArr = normalizeSpacing(metaPS);
   }
   
   if (!mriSpacingArr || mriSpacingArr.length !== 2 || mriSpacingArr.some(v => !isFinite(v) || v <= 0)) {
-    console.error('Invalid or missing MRI pixel spacing - cannot safely render fusion overlay');
-    return; // Do not render fusion without valid pixel spacing
+    // Fallback: draw overlay with neutral pixel spacing to keep fusion visible
+    mriSpacingArr = [1, 1];
   }
   
-  console.log(`CT spacing: [${ctSpacingArr[0]}, ${ctSpacingArr[1]}]mm, MRI spacing: [${mriSpacingArr[0]}, ${mriSpacingArr[1]}]mm`);
-  
-  // Calculate scale factors - MRI should appear at same physical size as CT
-  // If CT spacing is 0.97mm and MRI spacing is 1.95mm, then 1 MRI pixel = 2 CT pixels
-  const scaleX = mriSpacingArr[1] / ctSpacingArr[1]; // How many CT pixels per MRI pixel
-  const scaleY = mriSpacingArr[0] / ctSpacingArr[0]; 
-  
-  // Calculate MRI size in canvas pixels - need to apply both physical scaling AND CT zoom
+  // Simplified scaling - use consistent 1:1 mapping to prevent size variations
+  // This ensures fusion overlay maintains consistent size across slices
   const ctScale = ctTransform?.scale || 1;
-  drawW = w * scaleX * ctScale;  // Apply physical scaling AND CT zoom
-  drawH = h * scaleY * ctScale;
   
-  console.log(`Physical scale: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, CT zoom=${ctScale}, Final MRI size: ${drawW.toFixed(1)}x${drawH.toFixed(1)}`);
+  // For now, use 1:1 pixel mapping to prevent scaling issues
+  // TODO: Implement proper physical scaling after fixing the flashing issues
+  drawW = w * ctScale;  // Simple 1:1 scaling with CT zoom only
+  drawH = h * ctScale;
 
   // Helper function to normalize arrays
   const toNumberArray = (sp: string|string[]|number[]|undefined|null) => {
@@ -705,7 +710,7 @@ export async function renderFusionOverlay(
   };
 
   // Apply full 2D affine derived from 3D registration (includes rotation) when orientations are available
-  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
+  if (registrationMatrix && registrationMatrix.length === 16 && ctTransform) {
     // CT orientation/origin with robust fallbacks to series-level values
     let ctOrigin = toNumberArray((primaryImage as any).imagePosition || (primaryImage as any).imageMetadata?.imagePosition);
     if ((!ctOrigin || ctOrigin.length < 3) && Array.isArray(ctSeriesOrigin) && ctSeriesOrigin.length >= 3) {
@@ -748,9 +753,14 @@ export async function renderFusionOverlay(
       ippPrev[1] * (1 - wPlane) + ippNext[1] * wPlane,
       ippPrev[2] * (1 - wPlane) + ippNext[2] * wPlane,
     ];
-    let mriIOP = toNumberArrayFlexible((actualSecondaryImage.imageOrientation ?? actualSecondaryImage.imageMetadata?.imageOrientation) as any);
-    if ((!mriIOP || mriIOP.length < 6) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
-      const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
+    // MRI orientation from nearest available source (prev/next images), fallback to cache metadata
+    let mriIOP = toNumberArrayFlexible((prev as any)?.image?.imageOrientation);
+    if (!mriIOP || mriIOP.length < 6) {
+      const alt = toNumberArrayFlexible((next as any)?.image?.imageOrientation);
+      if (alt && alt.length >= 6) mriIOP = alt;
+    }
+    if ((!mriIOP || mriIOP.length < 6) && actualSecondaryUID && secondaryImageCache?.has(actualSecondaryUID)) {
+      const meta = secondaryImageCache.get(actualSecondaryUID)?.metadata;
       const v = meta?.imageOrientation;
       if (v) mriIOP = toNumberArrayFlexible(v as any);
     }
@@ -866,26 +876,32 @@ export async function renderFusionOverlay(
         }
       } catch {}
 
-      try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
-        console.log(`✅ AFFINE REGISTRATION:`);
-        console.log(`  Canvas basis U=(${Ux.toFixed(3)}, ${Uy.toFixed(3)}), V=(${Vx.toFixed(3)}, ${Vy.toFixed(3)}) at (${x0.toFixed(1)}, ${y0.toFixed(1)})`);
-      }} catch {}
       return; // Avoid double-draw; we've rendered using affine mapping
     }
   }
 
   // SIMPLIFIED: Apply registration matrix directly
-  if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
+  if (registrationMatrix && registrationMatrix.length === 16 && ctTransform) {
     
     // Get CT and MRI origins in world coordinates
     const ctOrigin = toNumberArray((primaryImage as any).imagePosition || (primaryImage as any).imageMetadata?.imagePosition);  // [X0, Y0, Z0]
     // Try to get MRI origin from secondary image metadata or cache
-    let mriOriginArr: number[] = toNumberArrayFlexible((actualSecondaryImage as any).imagePosition);
-    if ((!mriOriginArr || mriOriginArr.length < 3) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
-      const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
-      const v = meta?.imagePosition;
-      if (v) mriOriginArr = toNumberArrayFlexible(v);
-    }
+    let mriOriginArr: number[] = [];
+    try {
+      // Use nearest by z distance
+      let nearest = transformedMRI[0];
+      let bestD = Math.abs(nearest.zInCT - ctSliceZ);
+      for (let i = 1; i < transformedMRI.length; i++) {
+        const d = Math.abs(transformedMRI[i].zInCT - ctSliceZ);
+        if (d < bestD) { bestD = d; nearest = transformedMRI[i]; }
+      }
+      mriOriginArr = toNumberArrayFlexible((nearest as any)?.image?.imagePosition);
+      if ((!mriOriginArr || mriOriginArr.length < 3) && actualSecondaryUID && secondaryImageCache?.has(actualSecondaryUID)) {
+        const meta = secondaryImageCache.get(actualSecondaryUID)?.metadata;
+        const v = meta?.imagePosition;
+        if (v) mriOriginArr = toNumberArrayFlexible(v as any);
+      }
+    } catch {}
     const mriOrigin = (mriOriginArr && mriOriginArr.length >= 3) ? mriOriginArr : [0,0,ctSliceZ];
     const [rowSpacing, colSpacing] = ctSpacingArr; // CT pixel spacing [row, col]
 
@@ -921,22 +937,21 @@ export async function renderFusionOverlay(
       pixelOffsetY = worldOffset[1] / (rowSpacing || 1);
     }
     
-    // Apply CT's canvas transform to the MRI position
-    drawX = ctTransform.offsetX + (pixelOffsetX * ctTransform.scale);
-    drawY = ctTransform.offsetY + (pixelOffsetY * ctTransform.scale);
+    // Simplified positioning - center the overlay for consistency
+    if (ctTransform) {
+      const ctImageCenterX = ctTransform.offsetX + (ctTransform.imageWidth * ctTransform.scale) / 2;
+      const ctImageCenterY = ctTransform.offsetY + (ctTransform.imageHeight * ctTransform.scale) / 2;
+      
+      drawX = ctImageCenterX - drawW / 2;
+      drawY = ctImageCenterY - drawH / 2;
+    } else {
+      drawX = (canvasWidth - drawW) / 2;
+      drawY = (canvasHeight - drawH) / 2;
+    }
     
-    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
-      console.log(`✅ SIMPLIFIED REGISTRATION:`);
-      console.log(`  CT origin (slice): [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
-      console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
-      console.log(`  MRI→CT origin: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
-      console.log(`  World offset (mm): [${worldOffset[0].toFixed(1)}, ${worldOffset[1].toFixed(1)}, ${worldOffset[2].toFixed(1)}]`);
-      console.log(`  Pixel offset (proj): [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
-      console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
-      console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
-    }} catch {}
+    // Coordinate transformation applied
+    
   } else if (!ctTransform) {
-    console.warn('⚠️ No CT transform available for fusion alignment');
     // Fallback: center the MRI
     drawX = (canvasWidth - drawW) / 2;
     drawY = (canvasHeight - drawH) / 2;
@@ -951,17 +966,15 @@ export async function renderFusionOverlay(
   // Draw the MRI using the already calculated position and size
   if (drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined) {
     ctx.drawImage(temp, drawX, drawY, drawW, drawH);
-    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`); } catch {}
   } else {
     // Fallback to centered positioning if calculations failed
     const centerX = (canvasWidth - w) / 2;
     const centerY = (canvasHeight - h) / 2;
     ctx.drawImage(temp, centerX, centerY, w, h);
-    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`); } catch {}
   }
   
-  try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`); } catch {}
-  // NO RESTORE - caller manages the transform state
+  // Restore to avoid leaking alpha/transform into subsequent draws
+  ctx.restore();
 
   // Optional on-canvas debug overlay when window.__FUSION_DEBUG__ is truthy
   try {
@@ -983,7 +996,7 @@ export async function renderFusionOverlay(
         return (registrationMatrix && registrationMatrix.length === 16 && (Array.isArray(ctSeriesIOP) || (primaryImage as any).imageOrientation)) ? 'AFFINE' : 'SIMPLE';
       })();
       const flags = `${(window as any).__FUSION_SWAP_RC__ ? 'SwapRC ' : ''}${(window as any).__FUSION_HALF_PIXEL__ ? 'HalfPx ' : ''}`.trim();
-      ctx.fillText(`Fusion Z: CT=${ctSliceZ.toFixed(2)}${clamped ? ' (clamped)' : ''} | Secondary=[${minZ.toFixed(1)}, ${maxZ.toFixed(1)}]`, 14, 28);
+      ctx.fillText(`Fusion Z: CT=${ctSliceZ.toFixed(2)} | Secondary=[${minZ.toFixed(1)}, ${maxZ.toFixed(1)}]`, 14, 28);
       ctx.fillText(`Size=${drawW?.toFixed(0)}x${drawH?.toFixed(0)}  Opacity=${Math.round(fusionOpacity*100)}%  Mode=${mode}${flags? '  '+flags : ''}`, 14, 28+fontSize+2);
       ctx.fillText(`CT sp=[${ctSpacingArr.map(v=>v.toFixed(3)).join(', ')}]  Sec sp=[${mriSpacingArr?.map(v=>v.toFixed(3)).join(', ')}]`, 14, 28+2*(fontSize+2));
       ctx.restore();

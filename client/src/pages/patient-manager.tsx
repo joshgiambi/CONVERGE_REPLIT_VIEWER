@@ -132,7 +132,7 @@ export default function PatientManager() {
   // New state for favorites and recent patients
   const [favoritePatients, setFavoritePatients] = useState<Set<number>>(new Set());
   const [recentlyOpenedPatients, setRecentlyOpenedPatients] = useState<number[]>([]);
-  const [recentlyImportedPatients, setRecentlyImportedPatients] = useState<number[]>([]);
+  const [recentlyImportedPatients, setRecentlyImportedPatients] = useState<Array<{patientId: string | number; importDate: number}>>([]);
   const [hasPendingData, setHasPendingData] = useState(false);
   const [selectedPatients, setSelectedPatients] = useState<Set<number>>(new Set());
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -168,30 +168,59 @@ export default function PatientManager() {
   };
 
   // Track when a patient is imported
-  const trackPatientImported = (patientId: number) => {
+  const trackPatientImported = (patientId: number | string, importDate?: number) => {
+    const timestamp = importDate || Date.now();
     setRecentlyImportedPatients(prev => {
-      const newList = [patientId, ...prev.filter(id => id !== patientId)].slice(0, 10);
+      const newEntry = { patientId, importDate: timestamp };
+      const newList = [newEntry, ...prev.filter(item => item.patientId !== patientId)].slice(0, 10);
       localStorage.setItem('recentlyImportedPatients', JSON.stringify(newList));
       return newList;
     });
   };
 
-  // Load saved data from localStorage on mount
+  // Load saved data from localStorage on mount and listen for updates
   useEffect(() => {
-    const savedFavorites = localStorage.getItem('favoritePatients');
-    if (savedFavorites) {
-      setFavoritePatients(new Set(JSON.parse(savedFavorites)));
-    }
+    const loadStoredData = () => {
+      const savedFavorites = localStorage.getItem('favoritePatients');
+      if (savedFavorites) {
+        setFavoritePatients(new Set(JSON.parse(savedFavorites)));
+      }
 
-    const savedRecentlyOpened = localStorage.getItem('recentlyOpenedPatients');
-    if (savedRecentlyOpened) {
-      setRecentlyOpenedPatients(JSON.parse(savedRecentlyOpened));
-    }
+      const savedRecentlyOpened = localStorage.getItem('recentlyOpenedPatients');
+      if (savedRecentlyOpened) {
+        setRecentlyOpenedPatients(JSON.parse(savedRecentlyOpened));
+      }
 
-    const savedRecentlyImported = localStorage.getItem('recentlyImportedPatients');
-    if (savedRecentlyImported) {
-      setRecentlyImportedPatients(JSON.parse(savedRecentlyImported));
-    }
+      const savedRecentlyImported = localStorage.getItem('recentlyImportedPatients');
+      if (savedRecentlyImported) {
+        const parsed = JSON.parse(savedRecentlyImported);
+        // Handle both old format (array of IDs) and new format (array of objects)
+        if (parsed.length > 0 && typeof parsed[0] === 'object' && 'patientId' in parsed[0]) {
+          setRecentlyImportedPatients(parsed);
+        } else {
+          // Convert old format to new format
+          const converted = parsed.map((id: number) => ({ patientId: id, importDate: Date.now() }));
+          setRecentlyImportedPatients(converted);
+          localStorage.setItem('recentlyImportedPatients', JSON.stringify(converted));
+        }
+      }
+    };
+    
+    loadStoredData();
+    
+    // Listen for recently imported updates from other components
+    const handleRecentlyImportedUpdate = () => {
+      const savedRecentlyImported = localStorage.getItem('recentlyImportedPatients');
+      if (savedRecentlyImported) {
+        setRecentlyImportedPatients(JSON.parse(savedRecentlyImported));
+      }
+    };
+    
+    window.addEventListener('recentlyImportedUpdated', handleRecentlyImportedUpdate);
+    
+    return () => {
+      window.removeEventListener('recentlyImportedUpdated', handleRecentlyImportedUpdate);
+    };
   }, []);
 
   // Auto-populate demo data on component mount
@@ -1348,17 +1377,29 @@ export default function PatientManager() {
                     {recentlyImportedPatients.length === 0 ? (
                       <p className="text-gray-500 text-sm py-3 px-3">No recently imported patients</p>
                     ) : (
-                      recentlyImportedPatients.map(patientId => {
-                        const patient = patients.find(p => p.id === patientId);
+                      recentlyImportedPatients.map(importEntry => {
+                        const patient = patients.find(p => p.id === importEntry.patientId || p.patientID === importEntry.patientId);
                         return patient ? (
                           <Link 
-                            key={patientId}
+                            key={importEntry.patientId}
                             href={`/enhanced-viewer?patientId=${patient.patientID}`}
-                            className="block p-3 rounded-lg bg-green-500/5 hover:bg-green-500/15 transition-all border border-green-500/20 hover:border-green-500/30 hover:shadow-lg hover:shadow-green-500/10"
-                            onClick={() => trackPatientOpened(patientId)}
+                            className="block p-4 rounded-lg bg-gradient-to-r from-green-500/5 to-emerald-500/5 hover:from-green-500/15 hover:to-emerald-500/15 transition-all border border-green-500/20 hover:border-green-500/30 hover:shadow-lg hover:shadow-green-500/10"
+                            onClick={() => trackPatientOpened(typeof importEntry.patientId === 'number' ? importEntry.patientId : parseInt(importEntry.patientId.toString()))}
                           >
-                            <div className="text-white text-sm font-medium">{patient.patientName}</div>
-                            <div className="text-green-400 text-xs mt-1">ID: {patient.patientID}</div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="text-white text-sm font-medium">{patient.patientName}</div>
+                                <div className="text-green-400 text-xs mt-1">ID: {patient.patientID}</div>
+                              </div>
+                              <div className="text-right ml-3">
+                                <div className="text-green-300 text-xs font-medium">
+                                  {new Date(importEntry.importDate).toLocaleDateString()}
+                                </div>
+                                <div className="text-green-400/70 text-[10px] mt-0.5">
+                                  {new Date(importEntry.importDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            </div>
                           </Link>
                         ) : null;
                       })

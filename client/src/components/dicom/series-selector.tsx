@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -42,6 +42,8 @@ interface SeriesSelectorProps {
   loadedRTSeriesId?: number | null;
   previewStructureInfo?: { targetName: string; isNewStructure: boolean } | null;
   highlightedStructures?: { inputs: string[]; output: string };
+  secondaryLoadingStates?: Map<number, {progress: number, isLoading: boolean}>;
+  currentlyLoadingSecondary?: number | null;
 }
 
 export function SeriesSelector({
@@ -71,8 +73,12 @@ export function SeriesSelector({
   localizationMode = false,
   loadedRTSeriesId,
   previewStructureInfo,
-  highlightedStructures = { inputs: [], output: '' }
+  highlightedStructures = { inputs: [], output: '' },
+  secondaryLoadingStates,
+  currentlyLoadingSecondary
 }: SeriesSelectorProps) {
+  
+  // Debug logging removed for performance
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
@@ -82,6 +88,9 @@ export function SeriesSelector({
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [groupingEnabled, setGroupingEnabled] = useState(true);
   const [hoveredRegSeries, setHoveredRegSeries] = useState<number | null>(null);
+  const [otherSeriesExpanded, setOtherSeriesExpanded] = useState(false);
+  const [accordionValues, setAccordionValues] = useState<string[]>(["series"]); // Control which accordion sections are open
+  const [windowLevelExpanded, setWindowLevelExpanded] = useState(true); // Track window/level accordion state
   // Calculate allVisible dynamically based on current visibility state
   const allVisible = useMemo(() => {
     if (!rtStructures?.structures || structureVisibility.size === 0) return true;
@@ -205,6 +214,8 @@ export function SeriesSelector({
   };
 
   // Load RT structure series for all studies (memoized to prevent excessive API calls)
+  const rtSeriesLoadedRef = useRef<Set<number>>(new Set());
+  
   useEffect(() => {
     if (preventRTLoading) {
       console.log('Skipping RT structure loading - handled by parent component');
@@ -214,11 +225,10 @@ export function SeriesSelector({
     const studyIdsToLoad = studyIds || (studyId ? [studyId] : []);
     if (studyIdsToLoad.length === 0) return;
     
-    // Skip loading if we already have RT series for these studies
-    const studyIdsKey = studyIdsToLoad.sort().join(',');
-    const currentRTSeriesKey = rtSeries.map(s => s.studyId).sort().join(',');
-    if (studyIdsKey === currentRTSeriesKey && rtSeries.length > 0) {
-      console.log('RT series already loaded for studies:', studyIdsToLoad);
+    // Check if all studies are already loaded
+    const needsLoading = studyIdsToLoad.some(id => !rtSeriesLoadedRef.current.has(id));
+    if (!needsLoading) {
+      console.log('RT series already loaded for all studies:', studyIdsToLoad);
       return;
     }
     
@@ -232,10 +242,14 @@ export function SeriesSelector({
         for (const id of studyIdsToLoad) {
           if (isCancelled) break;
           
+          // Skip if already loaded
+          if (rtSeriesLoadedRef.current.has(id)) continue;
+          
           const response = await fetch(`/api/studies/${id}/rt-structures`);
           if (response.ok) {
             const rtSeriesData = await response.json();
             allRTSeries.push(...rtSeriesData);
+            rtSeriesLoadedRef.current.add(id); // Mark as loaded
           }
         }
         
@@ -248,6 +262,7 @@ export function SeriesSelector({
           }
           const deduped = Array.from(unique.values());
           setRTSeries(deduped);
+          console.log(`✅ Loaded RT series for studies: ${studyIdsToLoad.join(',')}`);
         }
       } catch (error) {
         if (!isCancelled) {
@@ -261,7 +276,7 @@ export function SeriesSelector({
     return () => {
       isCancelled = true;
     };
-  }, [studyId, studyIds, preventRTLoading]);
+  }, [studyId, studyIds?.join(','), preventRTLoading]); // Stable dependency for studyIds array
 
   // Initialize structure visibility when RT structures are loaded
   useEffect(() => {
@@ -274,20 +289,47 @@ export function SeriesSelector({
     }
   }, [rtStructures]);
 
-  // Sync selectedRTSeries with loadedRTSeriesId when RT series are loaded
+  // Auto-select most recent RT structure set and sync with loadedRTSeriesId
   useEffect(() => {
-    if (loadedRTSeriesId && rtSeries.length > 0) {
-      const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
-      if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
-        console.log('Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
-        setSelectedRTSeries(loadedSeries);
+    if (rtSeries.length > 0) {
+      // If loadedRTSeriesId is provided, prioritize that
+      if (loadedRTSeriesId) {
+        const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
+        if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
+          console.log('Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
+          setSelectedRTSeries(loadedSeries);
+        }
+      } 
+      // Otherwise, auto-select the most recent RT structure set
+      else if (!selectedRTSeries) {
+        const mostRecentRT = rtSeries.reduce((latest, current) => {
+          // Prefer by series date/time first, then by series number
+          const latestDate = latest.seriesDate || latest.createdAt || '';
+          const currentDate = current.seriesDate || current.createdAt || '';
+          
+          if (currentDate > latestDate) return current;
+          if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
+          return latest;
+        });
+        
+        console.log(`🎯 Auto-selecting most recent RT structure set: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
+        handleRTSeriesSelect(mostRecentRT);
       }
     }
-  }, [loadedRTSeriesId, rtSeries]);
+  }, [loadedRTSeriesId, rtSeries, selectedRTSeries]);
 
   async function handleRTSeriesSelect(rtSeries: any) {
     try {
       setSelectedRTSeries(rtSeries);
+      
+      // Auto-expand structures accordion section when an RT structure set is selected
+      setAccordionValues(prev => {
+        if (!prev.includes('structures')) {
+          return [...prev, 'structures'];
+        }
+        return prev;
+      });
+      
       // Load RT structure contours
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
       if (response.ok) {
@@ -635,7 +677,12 @@ export function SeriesSelector({
         <Card className="flex-1 bg-gray-950/90 backdrop-blur-xl border border-gray-600/60 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
           <CardContent className="p-0 h-full flex flex-col">
             <div className="flex-1 overflow-hidden flex flex-col">
-              <Accordion type="multiple" defaultValue={["series"]} className="h-full flex flex-col">
+              <Accordion 
+                type="multiple" 
+                value={accordionValues}
+                onValueChange={setAccordionValues}
+                className="h-full flex flex-col"
+              >
             
             {/* Series Section */}
             <AccordionItem value="series" className="border-gray-800/50">
@@ -646,7 +693,7 @@ export function SeriesSelector({
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-3 pb-3">
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-[40vh] overflow-y-auto">
                   {/* Organize series hierarchically */}
                   {(() => {
                     // Build top-level modality buckets
@@ -841,11 +888,19 @@ export function SeriesSelector({
                                    </div>
                                    
                                    {/* MR Series that can be fused */}
-                                   {mrAssoc.map((mrS) => (
+                                   {mrAssoc.map((mrS) => {
+                                     const loadingState = secondaryLoadingStates?.get?.(mrS.id);
+                                     const isCurrentlyLoading = currentlyLoadingSecondary === mrS.id;
+                                     const progress = loadingState?.progress || 0;
+                                     const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                     
+                                     // Loading states handled via UI only
+                                     
+                                     return (
                                      <div
                                        key={mrS.id}
                                        className={`
-                                         w-full p-2 text-left text-xs rounded-lg transition-all
+                                         relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all
                                          ${secondarySeriesId === mrS.id
                                            ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
                                            : selectedSeries?.id === mrS.id
@@ -857,7 +912,15 @@ export function SeriesSelector({
                                        `}
                                        onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(mrS.id); }}
                                      >
-                                       <div className="flex items-center justify-between">
+                                       {/* Loading progress background */}
+                                       {isLoading && (
+                                         <div 
+                                           className="absolute inset-0 bg-gradient-to-r from-green-500/40 to-green-500/10 transition-all duration-300"
+                                           style={{ width: `${progress}%` }}
+                                         />
+                                       )}
+                                       
+                                       <div className="relative z-10 flex items-center justify-between">
                                          <div className="flex items-center space-x-2 flex-1">
                                            <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
                                              MR
@@ -968,7 +1031,8 @@ export function SeriesSelector({
                                          </div>
                                        )}
                                      </div>
-                                   ))}
+                                   );
+                                   })}
                                  </div>
                                 );
                               })()}
@@ -995,11 +1059,16 @@ export function SeriesSelector({
                                     {/* PT + Related CT cards as siblings */}
                                    {ptAssoc.flatMap((ptS) => {
                                      const ctSiblings = series.filter(s => s.modality === 'CT' && s.studyId === ptS.studyId && s.id !== seriesItem.id);
+                                     const loadingState = secondaryLoadingStates?.get?.(ptS.id);
+                                     const isCurrentlyLoading = currentlyLoadingSecondary === ptS.id;
+                                     const progress = loadingState?.progress || 0;
+                                     const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                     
                                        const petCard = (
                                        <div
                                          key={`pt-${ptS.id}`}
                                          className={`
-                                           w-full p-2 text-left text-xs rounded-lg transition-all
+                                           relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all
                                            ${secondarySeriesId === ptS.id
                                              ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
                                              : selectedSeries?.id === ptS.id
@@ -1011,7 +1080,15 @@ export function SeriesSelector({
                                          `}
                                          onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }}
                                        >
-                                         <div className="flex items-center justify-between">
+                                         {/* Loading progress background */}
+                                         {isLoading && (
+                                           <div 
+                                             className="absolute inset-0 bg-gradient-to-r from-yellow-500/40 to-yellow-500/10 transition-all duration-300"
+                                             style={{ width: `${progress}%` }}
+                                           />
+                                         )}
+                                         
+                                         <div className="relative z-10 flex items-center justify-between">
                                            <div className="flex items-center space-x-2 flex-1">
                                              <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">PT</Badge>
                                              <span className="truncate text-xs">{ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)</span>
@@ -1039,10 +1116,15 @@ export function SeriesSelector({
                                      );
                                        const ctCards = ctSiblings.map(ctS => {
                                          const rtForCt = (rtSeries || []).filter((rtS: any) => rtS.referencedSeriesId === ctS.id);
+                                         const loadingState = secondaryLoadingStates?.get?.(ctS.id);
+                                         const isCurrentlyLoading = currentlyLoadingSecondary === ctS.id;
+                                         const progress = loadingState?.progress || 0;
+                                         const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                         
                                          return (
                                            <div key={`ptct-${ptS.id}-${ctS.id}`} className="space-y-1">
                                              <div
-                                               className={`w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                               className={`relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all border ${
                                                  secondarySeriesId === ctS.id
                                                    ? 'bg-blue-500/40 border-blue-300 shadow-lg ring-2 ring-blue-300/50'
                                                    : selectedSeries?.id === ctS.id
@@ -1051,7 +1133,15 @@ export function SeriesSelector({
                                                }`}
                                                onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }}
                                              >
-                                             <div className="flex items-center justify-between">
+                                               {/* Loading progress background */}
+                                               {isLoading && (
+                                                 <div 
+                                                   className="absolute inset-0 bg-gradient-to-r from-blue-500/40 to-blue-500/10 transition-all duration-300"
+                                                   style={{ width: `${progress}%` }}
+                                                 />
+                                               )}
+                                               
+                                               <div className="relative z-10 flex items-center justify-between">
                                                <div className="flex items-center space-x-2 flex-1">
                                                  <Badge variant="outline" className="border-blue-400 text-blue-300 text-xs font-semibold">CT</Badge>
                                                  <span className="truncate text-xs">{ctS.seriesDescription || 'CT Series'} ({ctS.imageCount} images)</span>
@@ -1151,46 +1241,70 @@ export function SeriesSelector({
                           </div>
                         ))}
                         
-                        {/* Other modalities (if any) - only show if not already displayed as primary */}
-                        {primarySeries !== otherSeries && otherSeries.map((seriesItem) => (
-                          <div key={seriesItem.id}>
+                        {/* Other modalities grouped under collapsible dropdown */}
+                        {primarySeries !== otherSeries && otherSeries.length > 0 && (
+                          <div className="mt-4">
+                            {/* Other Series Header */}
                             <div
-                              className={`
-                                p-2 rounded-lg border cursor-pointer transition-all duration-200
-                                ${selectedSeries?.id === seriesItem.id
-                                  ? 'bg-blue-500/20 border-blue-500 shadow-lg'
-                                  : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
-                                }
-                              `}
-                              onClick={() => onSeriesSelect(seriesItem)}
+                              className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-800/30 border border-gray-700/30 cursor-pointer hover:bg-gray-700/40 transition-colors"
+                              onClick={() => setOtherSeriesExpanded(!otherSeriesExpanded)}
                             >
-                              <div className="flex items-center justify-between mb-1">
-                                <Badge 
-                                  variant="outline" 
-                                  className={`
-                                    text-xs font-semibold
-                                    ${selectedSeries?.id === seriesItem.id
-                                      ? 'border-blue-400 text-blue-400'
-                                      : 'border-blue-500 text-blue-500'
-                                    }
-                                  `}
-                                >
-                                  {seriesItem.modality}
-                                </Badge>
-                                <span className="text-xs text-gray-400">
-                                  {seriesItem.imageCount} images
-                                </span>
-                              </div>
-                              
-                              <h4 className={`
-                                text-sm font-medium truncate
-                                ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
-                              `}>
-                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
-                              </h4>
+                              {otherSeriesExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-gray-400" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                              )}
+                              <span className="text-sm text-gray-300 font-medium">
+                                Other ({otherSeries.length})
+                              </span>
                             </div>
+                            
+                            {/* Collapsible Content */}
+                            {otherSeriesExpanded && (
+                              <div className="mt-2 ml-4 space-y-1">
+                                {otherSeries.map((seriesItem) => (
+                                  <div key={seriesItem.id}>
+                                    <div
+                                      className={`
+                                        p-2 rounded-lg border cursor-pointer transition-all duration-200
+                                        ${selectedSeries?.id === seriesItem.id
+                                          ? 'bg-blue-500/20 border-blue-500 shadow-lg'
+                                          : 'bg-blue-500/5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10'
+                                        }
+                                      `}
+                                      onClick={() => onSeriesSelect(seriesItem)}
+                                    >
+                                      <div className="flex items-center justify-between mb-1">
+                                        <Badge 
+                                          variant="outline" 
+                                          className={`
+                                            text-xs font-semibold
+                                            ${selectedSeries?.id === seriesItem.id
+                                              ? 'border-blue-400 text-blue-400'
+                                              : 'border-blue-500 text-blue-500'
+                                            }
+                                          `}
+                                        >
+                                          {seriesItem.modality}
+                                        </Badge>
+                                        <span className="text-xs text-gray-400">
+                                          {seriesItem.imageCount} images
+                                        </span>
+                                      </div>
+                                      
+                                      <h4 className={`
+                                        text-sm font-medium truncate
+                                        ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
+                                      `}>
+                                        {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                                      </h4>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        ))}
+                        )}
                         
                         {/* Registration Series - Simple pill-shaped display */}
                         {regSeries.length > 0 && (
@@ -1264,7 +1378,9 @@ export function SeriesSelector({
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-4">
                 {rtStructures?.structures ? (
-                  <div className="space-y-3 flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)', overflowY: 'auto' }}>
+                  <div className={`space-y-3 flex flex-col overflow-y-auto pb-4 ${
+                    windowLevelExpanded ? 'max-h-[55vh]' : 'max-h-[85vh]'
+                  }`}>
                     {/* Search Bar */}
                     <div className="relative mb-4">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
@@ -1557,7 +1673,9 @@ export function SeriesSelector({
                     )}
 
                     {/* Structures List - Grouped and Individual */}
-                    <div className="space-y-1 overflow-y-auto" style={{ height: 'calc(100vh - 600px)', minHeight: '200px' }}>
+                    <div className={`space-y-1 overflow-y-auto pb-4 ${
+                      windowLevelExpanded ? 'max-h-[40vh]' : 'max-h-[65vh]'
+                    }`}>
                       {rtStructures?.structures && (() => {
                         // Filter and sort structures
                         const filtered = rtStructures.structures.filter((structure: any) =>
@@ -1982,7 +2100,14 @@ export function SeriesSelector({
       {/* Window/Level Controls - Separate collapsible panel */}
       <Card className="bg-gray-950/90 backdrop-blur-xl border border-orange-500/30 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
         <CardContent className="p-0">
-          <Accordion type="single" collapsible defaultValue="window-level">
+          <Accordion 
+            type="single" 
+            collapsible 
+            defaultValue="window-level"
+            onValueChange={(value) => {
+              setWindowLevelExpanded(value === "window-level");
+            }}
+          >
             <AccordionItem value="window-level" className="border-gray-800/50">
               <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10 backdrop-blur-sm">
                 <div className="flex items-center text-gray-100 font-medium text-sm">

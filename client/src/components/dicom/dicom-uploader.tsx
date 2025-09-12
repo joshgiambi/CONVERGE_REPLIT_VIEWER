@@ -104,6 +104,12 @@ export function DICOMUploader() {
   const [triageSessions, setTriageSessions] = useState<any[]>([]);
   const [processingMessage, setProcessingMessage] = useState<string>('');
   const [importMessage, setImportMessage] = useState<string>('');
+  const [importSuccess, setImportSuccess] = useState<{
+    patientCount: number;
+    imageCount: number;
+    patientPreviews?: any[];
+    timestamp: number;
+  } | null>(null);
 
   const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -237,6 +243,7 @@ export function DICOMUploader() {
     setIsUploading(true);
     setParseResult(null);
     setParseSession(null);
+    setImportSuccess(null); // Clear any previous import success state
     setUploadProgress(0);
     
     // Set upload active flag for global tracking
@@ -339,15 +346,36 @@ export function DICOMUploader() {
             description: `Successfully imported ${parseResult.patientPreviews?.length || 1} patients with ${parseResult.data?.length || 0} images.`,
           });
           
+          // Track recently imported patients with timestamps
+          if (parseResult.patientPreviews) {
+            const importTimestamp = Date.now();
+            parseResult.patientPreviews.forEach(patient => {
+              // Update recently imported with timestamp
+              const recentlyImported = JSON.parse(localStorage.getItem('recentlyImportedPatients') || '[]');
+              const newEntry = { patientId: patient.patientId || patient.id, importDate: importTimestamp };
+              const updated = [newEntry, ...recentlyImported.filter((item: any) => item.patientId !== newEntry.patientId)].slice(0, 10);
+              localStorage.setItem('recentlyImportedPatients', JSON.stringify(updated));
+            });
+            // Trigger storage event to update patient manager
+            window.dispatchEvent(new Event('recentlyImportedUpdated'));
+          }
+          
           // Invalidate queries to refresh the UI
           queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
           queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
           queryClient.invalidateQueries({ queryKey: ['/api/series'] });
           
-          // Clean up and navigate
+          // Show import success summary instead of immediately redirecting
+          setImportSuccess({
+            patientCount: parseResult.patientPreviews?.length || 1,
+            imageCount: parseResult.data?.length || 0,
+            patientPreviews: parseResult.patientPreviews,
+            timestamp: Date.now()
+          });
+          
+          // Clean up but don't redirect yet - let user see the success summary
           setParseResult(null);
           setParseSession(null);
-          setLocation('/');
           return;
         }
       }
@@ -368,6 +396,20 @@ export function DICOMUploader() {
         description: `Successfully imported ${parseResult.patientPreviews?.length || 0} patients with their studies and series.`,
       });
 
+      // Track recently imported patients with timestamps
+      if (parseResult.patientPreviews) {
+        const importTimestamp = Date.now();
+        parseResult.patientPreviews.forEach(patient => {
+          // Update recently imported with timestamp
+          const recentlyImported = JSON.parse(localStorage.getItem('recentlyImportedPatients') || '[]');
+          const newEntry = { patientId: patient.patientId || patient.id, importDate: importTimestamp };
+          const updated = [newEntry, ...recentlyImported.filter((item: any) => item.patientId !== newEntry.patientId)].slice(0, 10);
+          localStorage.setItem('recentlyImportedPatients', JSON.stringify(updated));
+        });
+        // Trigger storage event to update patient manager
+        window.dispatchEvent(new Event('recentlyImportedUpdated'));
+      }
+
       // Invalidate queries to refresh the UI
       queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
       queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
@@ -383,12 +425,16 @@ export function DICOMUploader() {
         }
       }
 
-      setParseResult(null); // Clear results after successful import
+      // Show import success summary instead of immediately redirecting
+      setImportSuccess({
+        patientCount: parseResult.patientPreviews?.length || 0,
+        imageCount: parseResult.data?.length || 0,
+        patientPreviews: parseResult.patientPreviews,
+        timestamp: Date.now()
+      });
       
-      // Navigate to patient manager
-      setTimeout(() => {
-        setLocation('/');
-      }, 1000);
+      // Clear results but don't redirect yet - let user see the success summary
+      setParseResult(null);
       
     } catch (error) {
       console.error('Import error:', error);
@@ -498,6 +544,9 @@ export function DICOMUploader() {
       setError(null);
       setImportMessage('Moving files to permanent storage...');
       
+      // Get the session data to track imported patients
+      const sessionData = triageSessions.find(s => s.sessionId === sessionId);
+      
       // Use the enhanced triage import endpoint
       const response = await fetch('/api/import-triage', {
         method: 'POST',
@@ -518,25 +567,44 @@ export function DICOMUploader() {
       updateStepStatus('complete', 'complete');
       
       // Show success toast
+      const patientCount = sessionData?.parseResult?.patientPreviews?.length || 0;
+      const imageCount = sessionData?.parseResult?.data?.length || 0;
       toast({
         title: "Import successful",
-        description: "Successfully imported DICOM files to database.",
+        description: `Successfully imported ${patientCount} patient${patientCount !== 1 ? 's' : ''} with ${imageCount} images.`,
       });
+      
+      // Track recently imported patients with timestamps
+      if (sessionData?.parseResult?.patientPreviews) {
+        const importTimestamp = Date.now();
+        sessionData.parseResult.patientPreviews.forEach(patient => {
+          // Update recently imported with timestamp
+          const recentlyImported = JSON.parse(localStorage.getItem('recentlyImportedPatients') || '[]');
+          const newEntry = { patientId: patient.patientId || patient.patientID || patient.id, importDate: importTimestamp };
+          const updated = [newEntry, ...recentlyImported.filter((item: any) => item.patientId !== newEntry.patientId)].slice(0, 10);
+          localStorage.setItem('recentlyImportedPatients', JSON.stringify(updated));
+        });
+        // Trigger storage event to update patient manager
+        window.dispatchEvent(new Event('recentlyImportedUpdated'));
+      }
       
       // Invalidate queries to refresh the UI
       queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
       queryClient.invalidateQueries({ queryKey: ['/api/studies'] });
       queryClient.invalidateQueries({ queryKey: ['/api/series'] });
       
+      // Show import success summary instead of immediately redirecting
+      setImportSuccess({
+        patientCount: patientCount,
+        imageCount: imageCount,
+        patientPreviews: sessionData?.parseResult?.patientPreviews,
+        timestamp: Date.now()
+      });
+      
       // Remove from triage list and refresh
       setTriageSessions(prev => prev.filter(s => s.sessionId !== sessionId));
       checkTriageSessions();
       checkUnprocessedFiles();
-      
-      // Navigate to patient manager
-      setTimeout(() => {
-        setLocation('/');
-      }, 1000);
       
     } catch (error) {
       console.error('Error importing triage session:', error);
@@ -720,44 +788,46 @@ export function DICOMUploader() {
         </Card>
       )}
 
-      {/* Ready to Import - Triage Sessions */}
-      {triageSessions.length > 0 && !isUploading && (
-        <Card className="border-green-600 bg-green-900/20">
+      {/* Ready to Import - Triage Sessions (Only show when no current parseResult to avoid confusion) */}
+      {triageSessions.length > 0 && !isUploading && !parseResult && (
+        <Card className="border-amber-500/40 bg-gradient-to-br from-amber-900/20 to-orange-900/20 backdrop-blur-xl shadow-2xl">
           <CardHeader>
-            <CardTitle className="text-green-300 flex items-center gap-2">
-              <FileCheck className="w-5 h-5" />
-              Ready to Import
+            <CardTitle className="text-amber-300 flex items-center gap-3">
+              <FileCheck className="w-6 h-6" />
+              Previously Uploaded Sessions
             </CardTitle>
-            <p className="text-green-200 text-sm">Parsed DICOM files ready for database import</p>
+            <p className="text-amber-200 text-sm leading-relaxed">
+              Found {triageSessions.length} session{triageSessions.length > 1 ? 's' : ''} ready for import. These files have been analyzed and can be imported directly.
+            </p>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4">
             {triageSessions.map((session) => (
-              <div key={session.sessionId} className="space-y-3 p-4 bg-green-800/20 rounded-lg">
+              <div key={session.sessionId} className="border border-amber-500/20 bg-black/20 backdrop-blur-sm rounded-xl p-5 hover:bg-black/30 transition-all duration-200">
                 {/* Session Summary */}
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-white font-medium">
-                      {session.parseResult?.patientPreviews?.length || 1} patients, {session.parseResult?.data?.length || session.parseResult?.totalFiles || 0} images
+                    <p className="text-white font-semibold mb-1">
+                      {session.parseResult?.patientPreviews?.length || 1} patient{(session.parseResult?.patientPreviews?.length || 1) !== 1 ? 's' : ''} • {session.parseResult?.data?.length || session.parseResult?.totalFiles || 0} images
                     </p>
-                    <p className="text-sm text-gray-400">
-                      Parsed {new Date(session.timestamp).toLocaleString()}
+                    <p className="text-sm text-amber-200">
+                      Uploaded {new Date(session.timestamp).toLocaleDateString()} at {new Date(session.timestamp).toLocaleTimeString()}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <Button
                       size="sm"
                       onClick={() => handleImportTriageSession(session.sessionId)}
                       disabled={isImporting}
-                      className="bg-blue-600 hover:bg-blue-700"
+                      className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-semibold shadow-lg hover:shadow-amber-500/25 transition-all duration-200"
                     >
                       <Database className="w-4 h-4 mr-2" />
-                      {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
+                      {isImporting ? (importMessage || 'Importing...') : 'Import Session'}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => handleDeleteTriageSession(session.sessionId)}
-                      className="border-red-600 text-red-300 hover:bg-red-600/20"
+                      className="border-red-500/50 text-red-300 hover:bg-red-600/20 hover:border-red-500 transition-all duration-200"
                     >
                       Delete
                     </Button>
@@ -923,25 +993,101 @@ export function DICOMUploader() {
             </div>
           )}
 
-          {/* Import Action Card */}
-          <Card className="border-blue-600 bg-blue-900/20">
-            <div className="p-6 text-center">
-              <CheckCircle className="w-12 h-12 text-blue-400 mx-auto mb-4" />
-              <h4 className="text-white font-semibold mb-2">Ready to Import</h4>
-              <p className="text-gray-400 mb-4">
-                Review the patient data above. Click import to add to your database.
+          {/* Import Action Card - Glassmorphic Style */}
+          <Card className="border-emerald-500/40 bg-gradient-to-br from-emerald-900/30 to-green-900/20 backdrop-blur-xl shadow-2xl shadow-emerald-900/20">
+            <div className="p-8 text-center">
+              <div className="relative mb-6">
+                <div className="absolute inset-0 bg-emerald-400/20 blur-xl rounded-full" />
+                <CheckCircle className="relative w-16 h-16 text-emerald-400 mx-auto animate-pulse" />
+              </div>
+              <h4 className="text-white font-bold text-xl mb-3 bg-gradient-to-r from-emerald-300 to-green-300 bg-clip-text text-transparent">
+                Ready to Import
+              </h4>
+              <p className="text-gray-300 mb-6 leading-relaxed">
+                {parseResult?.patientPreviews?.length || 0} patient{(parseResult?.patientPreviews?.length || 0) !== 1 ? 's' : ''} analyzed with {parseResult?.data?.length || 0} images. 
+                Review the data above and click to import to your database.
               </p>
               <Button
                 onClick={handleImportToDatabase}
                 disabled={isImporting}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-semibold px-8 py-3 rounded-xl shadow-lg hover:shadow-emerald-500/25 transform hover:scale-105 transition-all duration-200"
+                size="lg"
               >
-                <Database className="w-4 h-4 mr-2" />
-                {isImporting ? (importMessage || 'Importing...') : 'Import to Database'}
+                <Database className="w-5 h-5 mr-2" />
+                {isImporting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {importMessage || 'Importing...'}
+                  </>
+                ) : (
+                  'Import to Database'
+                )}
               </Button>
             </div>
           </Card>
         </div>
+      )}
+      
+      {/* Import Success Summary */}
+      {importSuccess && (
+        <Card className="border-emerald-500/60 bg-gradient-to-br from-emerald-900/40 to-green-900/30 backdrop-blur-xl shadow-2xl shadow-emerald-900/30">
+          <div className="p-8 text-center">
+            <div className="relative mb-6">
+              <div className="absolute inset-0 bg-emerald-400/30 blur-2xl rounded-full animate-pulse" />
+              <CheckCircle className="relative w-20 h-20 text-emerald-400 mx-auto" />
+            </div>
+            
+            <h3 className="text-2xl font-bold text-white mb-2 bg-gradient-to-r from-emerald-300 to-green-300 bg-clip-text text-transparent">
+              Import Successful! 🎉
+            </h3>
+            
+            <div className="text-lg text-gray-200 mb-6">
+              <p className="mb-2">
+                Successfully imported <span className="font-semibold text-emerald-300">{importSuccess.patientCount} patient{importSuccess.patientCount !== 1 ? 's' : ''}</span> 
+                {' '}with <span className="font-semibold text-emerald-300">{importSuccess.imageCount} images</span>
+              </p>
+              <p className="text-sm text-gray-400">
+                Completed at {new Date(importSuccess.timestamp).toLocaleTimeString()}
+              </p>
+            </div>
+            
+            {/* Patient Summary */}
+            {importSuccess.patientPreviews && importSuccess.patientPreviews.length > 0 && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border border-emerald-500/20">
+                <h4 className="text-white font-semibold mb-3">Imported Patients</h4>
+                <div className="space-y-2">
+                  {importSuccess.patientPreviews.map((patient, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-300">{patient.patientName || 'Anonymous'}</span>
+                      <span className="text-emerald-400 font-medium">
+                        {patient.studies?.length || 1} studies • {patient.totalImages || 0} images
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="flex gap-4 justify-center">
+              <Button
+                onClick={() => setLocation('/')}
+                className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-emerald-500/25 transform hover:scale-105 transition-all duration-200"
+                size="lg"
+              >
+                Go to Patient Manager
+              </Button>
+              
+              <Button
+                onClick={() => setImportSuccess(null)}
+                variant="outline"
+                className="border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/20 px-6 py-3 rounded-xl"
+                size="lg"
+              >
+                Import More Files
+              </Button>
+            </div>
+          </div>
+        </Card>
       )}
     </div>
   );

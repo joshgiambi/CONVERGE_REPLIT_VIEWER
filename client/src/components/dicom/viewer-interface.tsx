@@ -17,6 +17,7 @@ import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract }
 import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
+import { LoadingProgress } from './loading-progress';
 
 // TypeScript declaration for cornerstone
 declare global {
@@ -67,6 +68,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showFusionPanel, setShowFusionPanel] = useState(false);
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
   const [fusionOpacity, setFusionOpacity] = useState(0.5);
+  // Secondary loading states for visual feedback
+  const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
+  const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
   
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
@@ -237,10 +241,35 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   useEffect(() => {
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
-      // Do not auto-select here; handled in associations above
-      // Do not auto-load RT here to avoid duplicate RTSTRUCT entries
+      
+      // Auto-select planning CT if no series is selected yet
+      if (!selectedSeries && seriesData.length > 0) {
+        // Use the same planning CT selection logic as in series-selector.tsx
+        const ctSeries = seriesData.filter(s => s.modality === 'CT');
+        
+        if (ctSeries.length > 0) {
+          // Score CT series to find the best planning CT
+          const scoreCT = (ct: any) => {
+            let score = 0;
+            // Prefer larger image counts (indicates comprehensive scan)
+            score += Math.min(200, (ct.imageCount || 0));
+            // Prefer series with certain keywords in description
+            const desc = (ct.seriesDescription || '').toLowerCase();
+            if (desc.includes('planning') || desc.includes('plan')) score += 100;
+            if (desc.includes('ctac')) score -= 200; // Avoid CTAC
+            return score;
+          };
+
+          // Pick best CT by score
+          const bestCT = ctSeries.sort((a, b) => scoreCT(b) - scoreCT(a))[0];
+          if (bestCT) {
+            console.log(`🎯 Auto-selecting planning CT: ${bestCT.seriesDescription} (ID: ${bestCT.id})`);
+            handleSeriesSelect(bestCT);
+          }
+        }
+      }
     }
-  }, [seriesData]);
+  }, [seriesData, selectedSeries]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -261,6 +290,50 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             level: parseFloat(firstImage.windowCenter),
             window: parseFloat(firstImage.windowWidth)
           });
+        }
+      }
+      
+      // Auto-load most recent RT structure set if this is a CT series (primary series)
+      if (seriesData.modality === 'CT' && !rtStructures) {
+        try {
+          console.log(`🔄 Auto-loading RT structures for CT series ${seriesData.id}...`);
+          const rtResponse = await fetch(`/api/studies/${seriesData.studyId}/rt-structures`);
+          if (rtResponse.ok) {
+            const rtSeries = await rtResponse.json();
+            if (rtSeries && rtSeries.length > 0) {
+              // Find the most recent RT structure (by date or series number)
+              const mostRecentRT = rtSeries.reduce((latest: any, current: any) => {
+                // Prefer by series date/time first, then by series number
+                const latestDate = latest.seriesDate || latest.createdAt || '';
+                const currentDate = current.seriesDate || current.createdAt || '';
+                
+                if (currentDate > latestDate) return current;
+                if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
+                return latest;
+              });
+              
+              console.log(`🔄 Auto-loading most recent RT structure (ID: ${mostRecentRT.id}) for primary CT`);
+              
+              // Load the RT structure contours
+              const contourResponse = await fetch(`/api/rt-structures/${mostRecentRT.id}/contours`);
+              if (contourResponse.ok) {
+                const rtStructData = await contourResponse.json();
+                handleRTStructureLoad(rtStructData);
+                
+                // Notify parent about loaded RT series for selection state
+                if (onLoadedRTSeriesChange) {
+                  onLoadedRTSeriesChange(mostRecentRT.id);
+                }
+                
+                console.log(`✅ Auto-loaded RT structures with ${rtStructData.structures.length} ROIs`);
+              }
+            }
+          } else {
+            console.log('No RT structures available for this CT study');
+          }
+        } catch (rtError) {
+          console.log('No RT structures found for auto-loading:', rtError);
+          // Don't throw error - RT structures are optional
         }
       }
       
@@ -746,6 +819,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             // Pass highlighted structures for boolean operations
             highlightedStructures={highlightedStructures}
             loadedRTSeriesId={loadedRTSeriesId}
+            secondaryLoadingStates={secondaryLoadingStates}
+            currentlyLoadingSecondary={currentlyLoadingSecondary}
           />
         </div>
 
@@ -814,6 +889,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
                   onMPRToggle={() => setMprVisible(!mprVisible)}
+                  // @ts-ignore - Added for loading state feedback  
+                  onSecondaryLoadingStateChange={(currentlyLoading: number | null, loadingStates: Map<number, {progress: number, isLoading: boolean}>) => {
+                    setSecondaryLoadingStates(loadingStates);
+                    setCurrentlyLoadingSecondary(currentlyLoading);
+                  }}
                   isMPRVisible={mprVisible}
                 />
               
@@ -1336,6 +1416,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onOpacityChange={setFusionOpacity}
           isVisible={true}
           selectedSecondaryId={secondarySeriesId}
+          secondaryModality={series.find(s => s.id === secondarySeriesId)?.modality || 'MR'}
         />
       )}
 
@@ -1413,6 +1494,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }
         }}
         error={error || { title: '', message: '' }}
+      />
+      
+      {/* Background Loading Progress */}
+      <LoadingProgress 
+        loadingStates={secondaryLoadingStates as any}
+        className="animate-in slide-in-from-right-2 duration-300"
       />
     </div>
   );

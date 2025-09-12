@@ -127,6 +127,10 @@ const rtStructureModifications = new Map<number, {
 // Cache for parsed RT structure sets to improve performance
 const rtStructureCache = new Map<string, any>();
 
+// Request deduplication for RT structure loading to prevent concurrent requests
+const rtStructureLoadingPromises = new Map<number, Promise<any>>();
+const rtStructureStudyLoadingPromises = new Map<number, Promise<any>>();
+
 // Store parsing sessions server-side
 const parsingSessions = new Map<string, {
   sessionId: string;
@@ -2031,10 +2035,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const studyId = parseInt(req.params.studyId);
-      const study = await storage.getStudy(studyId);
-      if (!study) {
-        return res.status(404).json({ error: 'Study not found' });
+      
+      // Check if there's already a loading promise for this study (request deduplication)
+      if (rtStructureStudyLoadingPromises.has(studyId)) {
+        const result = await rtStructureStudyLoadingPromises.get(studyId);
+        return res.json(result);
       }
+      
+      // Create loading promise for this study
+      const loadingPromise = (async () => {
+        const study = await storage.getStudy(studyId);
+        if (!study) {
+          throw new Error('Study not found');
+        }
 
       // Gather all series across all studies for this patient
       let allSeriesForPatient: any[] = [];
@@ -2089,7 +2102,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         referencedSeriesId: (rt as any).referencedSeriesId,
         referencedSeriesDescription: (rt as any).referencedSeriesDescription
       }))), 'rtstruct');
-      res.json(rtSeriesWithAssociations);
+      return rtSeriesWithAssociations;
+      })();
+      
+      // Store the promise to prevent duplicate requests
+      rtStructureStudyLoadingPromises.set(studyId, loadingPromise);
+      
+      // Execute the promise and clean up
+      try {
+        const result = await loadingPromise;
+        res.json(result);
+      } finally {
+        // Clean up the promise after completion
+        rtStructureStudyLoadingPromises.delete(studyId);
+      }
+      
     } catch (error: any) {
       console.error('Error fetching RT structure series:', error);
       res.status(500).json({ error: 'Failed to fetch RT structure series', details: error.message });
@@ -2153,68 +2180,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/rt-structures/:seriesId/contours", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const seriesId = parseInt(req.params.seriesId);
-      const rtStructSeries = await storage.getSeriesById(seriesId);
       
-      if (!rtStructSeries || rtStructSeries.modality !== 'RTSTRUCT') {
-        return res.status(404).json({ error: "RT Structure Set not found" });
-      }
-
-      // Get the actual RT structure file path from the database
-      let rtStructPath: string | null = null;
-      
-      try {
-        const images = await db.select()
-          .from(imagesTable)
-          .where(eq(imagesTable.seriesId, seriesId))
-          .limit(1);
-        
-        if (images.length > 0 && images[0].filePath) {
-          rtStructPath = images[0].filePath;
-          console.log('Using RT structure file:', rtStructPath);
-        } else {
-          return res.status(404).json({ error: "RT Structure file not found in database for series " + seriesId });
-        }
-      } catch (e) {
-        console.error('Error fetching RT structure image:', e);
-        return res.status(500).json({ error: "Failed to fetch RT structure file", details: e });
+      // Check if there's already a loading promise for this series (request deduplication)
+      if (rtStructureLoadingPromises.has(seriesId)) {
+        const result = await rtStructureLoadingPromises.get(seriesId);
+        return res.json(result);
       }
       
-      if (!fs.existsSync(rtStructPath)) {
-        return res.status(404).json({ error: "RT Structure file not found at: " + rtStructPath });
-      }
-
-      // Use cached parsed structure set or parse and cache it
-      let rtStructureSet;
-      if (rtStructureCache.has(rtStructPath)) {
-        rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
-      } else {
-        rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
-        rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
-      }
-      
-      // Merge with in-memory modifications
-      const modifications = rtStructureModifications.get(seriesId);
-      if (modifications) {
-        // Add new structures
-        if (modifications.newStructures.length > 0) {
-          rtStructureSet.structures.push(...modifications.newStructures);
-        }
-        
-        // Apply modifications to existing structures
-        modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
-          const structureIndex = rtStructureSet.structures.findIndex(s => s.roiNumber === roiNumber);
-          if (structureIndex >= 0) {
-            rtStructureSet.structures[structureIndex] = {
-              ...rtStructureSet.structures[structureIndex],
-              ...modifiedData
-            };
+      // Create loading promise for this series
+      const loadingPromise = (async () => {
+        try {
+          const rtStructSeries = await storage.getSeriesById(seriesId);
+          
+          if (!rtStructSeries || rtStructSeries.modality !== 'RTSTRUCT') {
+            throw new Error("RT Structure Set not found");
           }
-        });
+
+          // Get the actual RT structure file path from the database
+          let rtStructPath: string | null = null;
+          
+          const images = await db.select()
+            .from(imagesTable)
+            .where(eq(imagesTable.seriesId, seriesId))
+            .limit(1);
+          
+          if (images.length > 0 && images[0].filePath) {
+            rtStructPath = images[0].filePath;
+          } else {
+            throw new Error("RT Structure file not found in database for series " + seriesId);
+          }
+          
+          if (!fs.existsSync(rtStructPath)) {
+            throw new Error("RT Structure file not found at: " + rtStructPath);
+          }
+
+          // Use optimized cached parsed structure set or parse and cache it
+          let rtStructureSet;
+          if (rtStructureCache.has(rtStructPath)) {
+            const cached = rtStructureCache.get(rtStructPath);
+            // Use structured cloning if available, otherwise shallow clone with deep structure array copy
+            if (typeof structuredClone !== 'undefined') {
+              rtStructureSet = structuredClone(cached);
+            } else {
+              rtStructureSet = {
+                ...cached,
+                structures: cached.structures.map((s: any) => ({
+                  ...s,
+                  contours: s.contours.map((c: any) => ({ ...c, points: [...c.points] }))
+                }))
+              };
+            }
+          } else {
+            rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
+            rtStructureCache.set(rtStructPath, rtStructureSet);
+          }
+          
+          // Merge with in-memory modifications
+          const modifications = rtStructureModifications.get(seriesId);
+          if (modifications) {
+            // Add new structures
+            if (modifications.newStructures.length > 0) {
+              rtStructureSet.structures.push(...modifications.newStructures);
+            }
+            
+            // Apply modifications to existing structures
+            modifications.modifiedStructures.forEach((modifiedData, roiNumber) => {
+              const structureIndex = rtStructureSet.structures.findIndex((s: any) => s.roiNumber === roiNumber);
+              if (structureIndex >= 0) {
+                rtStructureSet.structures[structureIndex] = {
+                  ...rtStructureSet.structures[structureIndex],
+                  ...modifiedData
+                };
+              }
+            });
+          }
+          
+          return rtStructureSet;
+        } catch (error: any) {
+          console.error('Error parsing RT structures:', error);
+          throw error;
+        }
+      })();
+      
+      // Store the promise to prevent duplicate requests
+      rtStructureLoadingPromises.set(seriesId, loadingPromise);
+      
+      // Execute the promise and clean up
+      try {
+        const result = await loadingPromise;
+        res.json(result);
+      } finally {
+        // Clean up the promise after completion
+        rtStructureLoadingPromises.delete(seriesId);
       }
       
-      res.json(rtStructureSet);
     } catch (error: any) {
-      console.error('Error parsing RT structures:', error);
+      console.error('Error in RT structure endpoint:', error);
       res.status(500).json({ error: 'Failed to parse RT structures', details: error.message });
     }
   });
@@ -2273,6 +2334,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching images:', error);
       res.status(500).json({ message: "Failed to fetch images" });
+    }
+  });
+
+  // Get batch metadata for all images in a series (performance optimization)
+  app.get("/api/series/:id/batch-metadata", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.id);
+      const images = await storage.getImagesBySeriesId(seriesId);
+      
+      if (!images || images.length === 0) {
+        return res.json([]);
+      }
+
+      const metadataResults: any[] = [];
+      
+      // Process in chunks to avoid memory issues with large series
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < images.length; i += CHUNK_SIZE) {
+        const chunk = images.slice(i, i + CHUNK_SIZE);
+        
+        const chunkResults = await Promise.all(
+          chunk.map(async (img: any) => {
+            try {
+              if (!img.filePath || !fs.existsSync(img.filePath)) {
+              return {
+                sopInstanceUID: img.sopInstanceUID,
+                parsedSliceLocation: null,
+                parsedZPosition: null,
+                parsedInstanceNumber: (img as any).instanceNumber,
+                error: 'File not found'
+              };
+              }
+
+              const buffer = fs.readFileSync(img.filePath);
+              const byteArray = new Uint8Array(buffer);
+              const dataSet = dicomParser.parseDicom(byteArray);
+
+              // Extract spatial metadata for sorting and fusion
+              const sliceLocation = dataSet.floatString?.("x00201041");
+              const imagePosition = dataSet.string?.("x00200032");
+              const imageOrientation = dataSet.string?.("x00200037");
+              const pixelSpacing = dataSet.string?.("x00280030");
+              const instanceNumber = dataSet.intString?.("x00200013");
+
+              // Parse image position (z-coordinate is third value)
+              let zPosition = null;
+              if (imagePosition) {
+                const positions = imagePosition
+                  .split("\\")
+                  .map((p: string) => parseFloat(p));
+                zPosition = positions[2];
+              }
+
+              return {
+                sopInstanceUID: img.sopInstanceUID,
+                parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
+                parsedZPosition: zPosition,
+                parsedInstanceNumber: instanceNumber || (img as any).instanceNumber,
+                imagePosition,
+                imageOrientation,
+                pixelSpacing,
+              };
+            } catch (error) {
+              console.warn(`Failed to parse metadata for ${img.fileName}:`, error);
+              return {
+                sopInstanceUID: img.sopInstanceUID,
+                parsedSliceLocation: null,
+                parsedZPosition: null,
+                parsedInstanceNumber: (img as any).instanceNumber,
+                error: error instanceof Error ? error.message : 'Parse error'
+              };
+            }
+          })
+        );
+        
+        metadataResults.push(...chunkResults);
+      }
+
+      res.json(metadataResults);
+    } catch (error) {
+      console.error('Error fetching batch metadata:', error);
+      res.status(500).json({ error: 'Failed to fetch batch metadata' });
     }
   });
 
@@ -2623,6 +2766,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const p = parseDicomRegistrationFromFile(f.filePath);
           if (p && p.matrixRowMajor4x4) candidates.push({ file: f, parsed: p });
         }
+      }
+      // Additional fallback: check the secondary study as well (REG may be stored with CTAC/contrast study)
+      if (candidates.length === 0) {
+        try {
+          const f2 = await findRegFileForStudy(secondarySeries.studyId);
+          if (f2) {
+            const p2 = parseDicomRegistrationFromFile(f2.filePath);
+            if (p2 && p2.matrixRowMajor4x4) candidates.push({ file: f2, parsed: p2 });
+          }
+        } catch {}
       }
       const primaryUID = primarySeries.seriesInstanceUID;
       const secondaryUID = secondarySeries.seriesInstanceUID;
@@ -3832,13 +3985,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       throw new Error(`RT Structure file not found at: ${rtStructPath}`);
     }
 
-    // Parse or use cache
+    // Parse or use cache - optimized to avoid expensive deep cloning
     let rtStructureSet: any;
     if (rtStructureCache.has(rtStructPath)) {
-      rtStructureSet = JSON.parse(JSON.stringify(rtStructureCache.get(rtStructPath)));
+      const cached = rtStructureCache.get(rtStructPath);
+      // Use structured cloning if available, otherwise shallow clone with deep structure array copy
+      if (typeof structuredClone !== 'undefined') {
+        rtStructureSet = structuredClone(cached);
+      } else {
+        rtStructureSet = {
+          ...cached,
+          structures: cached.structures.map((s: any) => ({
+            ...s,
+            contours: s.contours.map((c: any) => ({ ...c, points: [...c.points] }))
+          }))
+        };
+      }
     } else {
       rtStructureSet = RTStructureParser.parseRTStructureSet(rtStructPath);
-      rtStructureCache.set(rtStructPath, JSON.parse(JSON.stringify(rtStructureSet)));
+      rtStructureCache.set(rtStructPath, rtStructureSet);
     }
 
     // Apply in-memory modifications if any

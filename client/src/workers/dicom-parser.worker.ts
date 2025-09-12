@@ -75,14 +75,28 @@ const parseDicomImage = async (arrayBuffer: ArrayBuffer): Promise<any> => {
       
       // Convert to Hounsfield Units - this is the heavy computation
       const huPixelArray = new Float32Array(rawPixelArray.length);
+      let min = Infinity, max = -Infinity;
       for (let i = 0; i < rawPixelArray.length; i++) {
-        huPixelArray[i] = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
+        const v = rawPixelArray[i] * rescaleSlope + rescaleIntercept;
+        huPixelArray[i] = v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+
+      // Pixel spacing
+      const psStr = dataSet.string?.("x00280030");
+      let pixelSpacing: number[] | undefined = undefined;
+      if (psStr) {
+        try { pixelSpacing = psStr.split('\\').map((s: string)=>parseFloat(s)); } catch {}
       }
 
       return {
         data: huPixelArray,
         width: cols,
         height: rows,
+        min,
+        max,
+        metadata: { pixelSpacing }
       };
     } else {
       throw new Error("Only 16-bit images supported");

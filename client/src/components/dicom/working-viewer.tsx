@@ -24,7 +24,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4, findNearestMRIIndexByPlane } from "@/lib/fusion-utils";
+import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4, findNearestMRIIndexByPlane, clearFusionCalculationCache } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -39,9 +39,11 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { backgroundLoader } from "@/lib/background-loader";
 
-// Debug flag - set to true in development, false in production
-const DEBUG = process.env.NODE_ENV !== 'production';
+// Debug flags - more granular control over logging
+const DEBUG = false; // Set to true only when specifically debugging rendering issues
+const RT_STRUCTURE_DEBUG = false; // Set to true when specifically debugging RT structures
 
 // Typed preview contour interface for consistency
 type PreviewContour = { 
@@ -99,6 +101,7 @@ interface WorkingViewerProps {
   orientation?: 'axial' | 'sagittal' | 'coronal';
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
+  onSecondaryLoadingStateChange?: (seriesId: number, state: { isLoading: boolean; progress: number }) => void;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -132,6 +135,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     allStructuresVisible = true,
     imageCache,
     orientation = 'axial',
+    onSecondaryLoadingStateChange, // @ts-ignore - Added for loading state feedback
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,9 +187,113 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
+  // Secondary series loading states
+  const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
+  const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
+  
+  // Background loaded secondary series cache (keep multiple series in memory)
+  const backgroundSecondaryCache = useRef<Map<number, {
+    images: any[];
+    imageCache: Map<string, any>;
+    transformedPositions: any[];
+    modality: string;
+  }>>(new Map());
+  
+  // Track which series have been background loaded
+  const backgroundLoadedSeries = useRef<Set<number>>(new Set());
+  
+  // Background loading of secondary series
+  const startBackgroundLoading = useCallback(async () => {
+    if (!studyId || !registrationMatrix) return;
+    
+    try {
+      // Fetch all series for this study
+      const seriesResponse = await fetch(`/api/studies/${studyId}/series`);
+      if (!seriesResponse.ok) return;
+      
+      const allSeries = await seriesResponse.json();
+      
+      // Filter for secondary series (exclude primary and non-imaging modalities)
+      const secondarySeries = allSeries.filter((s: any) => 
+        s.id !== seriesId && 
+        s.modality && 
+        (s.modality === 'MR' || s.modality === 'PT' || s.modality === 'PET' || s.modality === 'CT') &&
+        s.modality !== 'RTSTRUCT' && 
+        s.modality !== 'REG'
+      );
+      
+      // Found secondary series for background loading
+      
+      // Start background loading for each secondary series
+      for (const series of secondarySeries) {
+        if (backgroundLoadedSeries.current.has(series.id)) {
+          continue;
+        }
+        
+        backgroundLoadSecondary(series.id, series.modality);
+      }
+      
+    } catch (error) {
+      console.error('Error starting background loading:', error);
+    }
+  }, [studyId, seriesId, registrationMatrix]);
+  
+  // Background load a specific secondary series
+  const backgroundLoadSecondary = useCallback(async (secondaryId: number, modality: string) => {
+    try {
+      // Fetch series info and images
+      const imagesResponse = await fetch(`/api/series/${secondaryId}/images`);
+      if (!imagesResponse.ok) return;
+      
+      const imageList = await imagesResponse.json();
+      
+      // Use background loader service for progressive loading
+      const cache = await backgroundLoader.loadSecondarySeriesBackground(
+        secondaryId,
+        imageList,
+        (state) => {
+          // Update loading state for UI feedback
+          const newStates = new Map(secondaryLoadingStates);
+          newStates.set(secondaryId, { progress: state.progress, isLoading: state.isLoading });
+          setSecondaryLoadingStates(newStates);
+          // Reduced logging for background loading
+        },
+        'medium' // Lower priority than active fusion loading
+      );
+      // Store in background cache when complete
+      if (cache && cache.size > 0) {
+        // Process images to add metadata for fusion geometry
+        const processedImages = imageList.map((img: any) => ({
+          ...img,
+          metadata: {
+            imagePosition: img.imagePosition || img.imageMetadata?.imagePosition || null,
+            imageOrientation: img.imageOrientation || img.imageMetadata?.imageOrientation || null,
+            pixelSpacing: img.pixelSpacing || img.imageMetadata?.pixelSpacing || null,
+          }
+        }));
+        
+        backgroundSecondaryCache.current.set(secondaryId, {
+          images: processedImages,
+          imageCache: cache,
+          transformedPositions: [], // Will be computed when needed
+          modality
+        });
+        backgroundLoadedSeries.current.add(secondaryId);
+        
+        // Also update the loading state to show completion
+        const completeStates = new Map(secondaryLoadingStates);
+        completeStates.set(secondaryId, { progress: 100, isLoading: false });
+        setSecondaryLoadingStates(completeStates);
+      }
+      
+    } catch (error) {
+      console.error(`Error background loading series ${secondaryId}:`, error);
+    }
+  }, [secondaryLoadingStates]);
   // Fusion debug support
   const [showFusionDebug, setShowFusionDebug] = useState(false);
   const [fusionDebugText, setFusionDebugText] = useState('');
+  const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const [showRegDetails, setShowRegDetails] = useState(false);
   const [regDetailsText, setRegDetailsText] = useState('');
   const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
@@ -262,12 +370,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         transformedCount: trLen,
         transformedZRange: trLen ? [zMin, zMax] : null,
         ctTransform: ctTransform.current,
+        logs: fusionLogs.slice(-50),
       };
       return JSON.stringify(debug, null, 2);
     } catch (e) {
       return `Failed to compile debug: ${String(e)}`;
     }
-  }, [images, secondaryImages, seriesId, secondarySeriesId, registrationMatrix, lastResolveInfo]);
+  }, [images, secondaryImages, seriesId, secondarySeriesId, registrationMatrix, lastResolveInfo, fusionLogs]);
+
+  const pushFusionLog = useCallback((msg: string, data?: any) => {
+    const line = `[${new Date().toISOString()}] ${msg}${data !== undefined ? ' ' + (()=>{ try { return JSON.stringify(data); } catch { return String(data); } })() : ''}`;
+    setFusionLogs(prev => {
+      const next = [...prev, line];
+      return next.length > 200 ? next.slice(next.length - 200) : next;
+    });
+  }, []);
 
   const openFusionDebug = useCallback((reason: string) => {
     fusionIssueRef.current = reason;
@@ -337,12 +454,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     try {
       (window as any).__OPEN_FUSION_DEBUG__ = () => openFusionDebug('manual');
       (window as any).__OPEN_REG_DETAILS__ = () => openRegDetails();
+      (window as any).__FUSION_PUSH_LOG__ = (m: any, d?: any) => pushFusionLog(String(m), d);
     } catch {}
     return () => {
       try { delete (window as any).__OPEN_FUSION_DEBUG__; } catch {}
       try { delete (window as any).__OPEN_REG_DETAILS__; } catch {}
+      try { delete (window as any).__FUSION_PUSH_LOG__; } catch {}
     };
-  }, [openFusionDebug, openRegDetails]);
+  }, [openFusionDebug, openRegDetails, pushFusionLog]);
 
   // Expose quick matrix toggles for debugging (invert/transpose/reset)
   useEffect(() => {
@@ -394,9 +513,48 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [registrationMatrix, seriesId, secondarySeriesId]);
   // Crosshair position for MPR views (in pixel coordinates)
-  const [crosshairPos, setCrosshairPos] = useState({ x: 256, y: 256 });
+  // Initialize to center of first image, fallback to 256 for 512x512 default
+  const [crosshairPos, setCrosshairPos] = useState(() => {
+    const defaultWidth = 512;
+    const defaultHeight = 512;
+    return { x: defaultWidth / 2, y: defaultHeight / 2 };
+  });
   const [crosshairMode, setCrosshairMode] = useState(false);
   const [isPanMode, setIsPanMode] = useState(true); // Pan mode is default
+  
+  // Update crosshair position to image center when images load
+  useEffect(() => {
+    if (images.length > 0 && images[0]) {
+      const imageWidth = images[0].columns || images[0].width || 512;
+      const imageHeight = images[0].rows || images[0].height || 512;
+      setCrosshairPos(prev => {
+        // Only update if the dimensions are different from current calculation
+        const expectedX = imageWidth / 2;
+        const expectedY = imageHeight / 2;
+        if (Math.abs(prev.x - expectedX) > 1 || Math.abs(prev.y - expectedY) > 1) {
+          console.log(`🐟 FUSION: Updating crosshair position to image center: ${expectedX}, ${expectedY}`);
+          return { x: expectedX, y: expectedY };
+        }
+        return prev;
+      });
+    }
+  }, [images]);
+  
+  // Monitor currentIndex changes to detect unexpected auto-scrolling
+  const lastCurrentIndex = useRef<number>(0);
+  useEffect(() => {
+    const prev = lastCurrentIndex.current;
+    const current = currentIndex;
+    
+    // Detect large jumps that weren't triggered by user navigation
+    const jumpSize = Math.abs(current - prev);
+    if (jumpSize > 10 && images.length > 0) {
+      console.warn(`🚨 UNEXPECTED SLICE JUMP: ${prev} → ${current} (jump: ${jumpSize})`);
+      console.trace('Slice jump stack trace');
+    }
+    
+    lastCurrentIndex.current = current;
+  }, [currentIndex, images.length]);
   
   // Render scheduling to prevent redundant renders
   const needsRenderRef = useRef(false);
@@ -451,6 +609,87 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       });
     }
   }, [fusionOpacity, secondarySeriesId]);
+
+  // When fusion opacity changes, redraw base CT from offscreen + cached overlay only (no full CT re-render)
+  useEffect(() => {
+    try {
+      if (!canvasRef.current) return;
+      if (!secondarySeriesId) return;
+      const currentImage = images[currentIndex];
+      if (!currentImage) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const cacheKey = `${currentImage.sopInstanceUID}_${secondarySeriesId}`;
+      const cached = fusionRenderCache.current.get(cacheKey);
+      const t = ctTransform.current;
+      const src = offscreenCanvasRef.current;
+
+      if (cached && t && src) {
+        ctx.save();
+        // Redraw CT from offscreen canvas with existing transform
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
+
+        // Draw cached fusion overlay with new opacity
+        ctx.globalAlpha = fusionOpacity;
+        if (cached.bitmap) {
+          ctx.drawImage(cached.bitmap, 0, 0);
+        } else if (cached.canvas) {
+          ctx.drawImage(cached.canvas, 0, 0);
+        }
+        ctx.restore();
+
+        // Redraw RT structures on top
+        try {
+          const imageWithMetadata = { ...currentImage, imageMetadata };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
+        } catch {}
+
+        // Redraw crosshairs if axial
+        try {
+          if (orientation === 'axial') {
+            const imageWidth = currentImage.columns || currentImage.width || 512;
+            const imageHeight = currentImage.rows || currentImage.height || 512;
+            const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+            const totalScale = baseScale * zoom;
+            const scaledWidth = imageWidth * totalScale;
+            const scaledHeight = imageHeight * totalScale;
+            const imageX = (canvas.width - scaledWidth) / 2 + panX;
+            const imageY = (canvas.height - scaledHeight) / 2 + panY;
+            const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
+            const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(crosshairCanvasX, 0);
+            ctx.lineTo(crosshairCanvasX, canvas.height);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, crosshairCanvasY);
+            ctx.lineTo(canvas.width, crosshairCanvasY);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+          }
+        } catch {}
+      } else {
+        // Fallback to scheduled render if no cache/base available
+        scheduleRender();
+      }
+    } catch {
+      // Ignore errors and let scheduled render handle it
+      scheduleRender();
+    }
+  }, [fusionOpacity, secondarySeriesId, currentIndex, images, scheduleRender, imageMetadata, orientation, crosshairPos, panX, panY, zoom]);
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
@@ -781,9 +1020,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const { structureId, slicePosition, distance, direction = 'all' } = payload;
     const isGrowing = distance > 0;
-    if (DEBUG) console.log(
-      `${isGrowing ? 'Growing' : 'Shrinking'} contour for structure ${structureId} by ${Math.abs(distance)}mm ${direction !== 'all' ? `in ${direction} direction` : 'in all directions'} at slice ${slicePosition}`,
-    );
+    if (RT_STRUCTURE_DEBUG) {
+      console.log(
+        `${isGrowing ? 'Growing' : 'Shrinking'} contour for structure ${structureId} by ${Math.abs(distance)}mm ${direction !== 'all' ? `in ${direction} direction` : 'in all directions'} at slice ${slicePosition}`,
+      );
+    }
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
@@ -1337,9 +1578,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const { structureId, distance, direction = 'all' } = payload;
     const isGrowing = distance > 0;
-    if (DEBUG) console.log(
-      `🔹 ${isGrowing ? 'Growing' : 'Shrinking'} ENTIRE STRUCTURE ${structureId} by ${Math.abs(distance)}mm on ALL slices`,
-    );
+    if (RT_STRUCTURE_DEBUG) {
+      console.log(
+        `🔹 ${isGrowing ? 'Growing' : 'Shrinking'} ENTIRE STRUCTURE ${structureId} by ${Math.abs(distance)}mm on ALL slices`,
+      );
+    }
 
     // Create a deep copy of RT structures to avoid mutation
     const updatedRTStructures = structuredClone ? structuredClone(localRTStructures) : JSON.parse(JSON.stringify(localRTStructures));
@@ -1849,7 +2092,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
     } else if (payload.action === "smart_brush_stroke") {
       // Handle smart brush stroke - add already processed contour points
-      if (DEBUG) console.log("🎯 Processing smart brush stroke:", payload);
+      if (false) console.log("🎯 Processing smart brush stroke:", payload);
       
       const structure = updatedStructures.structures.find(
         (s: any) => s.roiNumber === payload.structureId,
@@ -1927,7 +2170,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      if (DEBUG) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
+      if (false) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
       setLocalRTStructures(updatedStructures);
       
       // Save state to undo system
@@ -2987,35 +3230,75 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render current image when secondary images are loaded
   useEffect(() => {
     if (secondaryImages.length > 0 && images.length > 0) {
-      console.log('Secondary images loaded, triggering re-render for fusion');
       displayCurrentImage();
     }
   }, [secondaryImages]);
 
-  // Load secondary series images for fusion
+  // Load secondary series images for fusion - Using Background Loading Service
   useEffect(() => {
-    console.log('🎯 secondarySeriesId changed to:', secondarySeriesId, 'Type:', typeof secondarySeriesId);
     
     const loadSecondaryImages = async () => {
       // Check if secondarySeriesId is valid (not null)
       if (!secondarySeriesId) {
-        console.log('❌ No secondary series ID, clearing secondary images');
+        // Clear all fusion state when disabling
+        
+        // Cancel any existing background loading
+        // Note: secondarySeriesId is null here, so cancel any active loading
+        for (const seriesId of backgroundLoadedSeries.current) {
+          backgroundLoader.cancelSeriesLoading(seriesId);
+        }
+        
         setSecondaryImages([]);
         secondaryImageCacheRef.current = new Map();
-        mriSliceMappingCache.current.clear(); // Clear MRI mapping cache
+        mriSliceMappingCache.current.clear();
+        fusionRenderCache.current.clear(); // Clear fusion cache when disabling
+        clearFusionCalculationCache(); // Clear calculation cache
+        transformedMRIPositions.current = [];
         setSecondaryModality('MR'); // Reset to default
+        setFusionAvailable(false); // Reset fusion availability flag
+        setFusionDebugText(''); // Clear debug text
+        setFusionLogs([]); // Clear fusion logs
+        setCurrentlyLoadingSecondary(null); // Clear loading state
         return;
       }
 
-      console.log('✅ Loading secondary series images for series:', secondarySeriesId);
+      // TEMPORARILY DISABLE background loading to fix flashing issues
+      // TODO: Re-enable after stabilizing basic fusion
+      // const backgroundLoaded = backgroundSecondaryCache.current.get(secondarySeriesId);
+      // if (backgroundLoaded) { ... }
+
+      // Normal loading for series not background loaded
+      setCurrentlyLoadingSecondary(secondarySeriesId);
+      const newState = new Map(secondaryLoadingStates);
+      newState.set(secondarySeriesId, { progress: 0, isLoading: true });
+      setSecondaryLoadingStates(newState);
+      onSecondaryLoadingStateChange?.(secondarySeriesId, newState as any);
+
+      // Clear fusion caches when switching secondary series
+      fusionRenderCache.current.clear(); // Clear fusion render cache for new series
+      clearFusionCalculationCache(); // Clear calculation cache for new series
+      transformedMRIPositions.current = []; // Clear transformed positions for new series
+      
+      pushFusionLog('load-secondary-begin', { seriesId: secondarySeriesId });
       try {
         // First fetch series info to get modality
+        const updateState = (progress: number) => {
+          const newState = new Map(secondaryLoadingStates);
+          newState.set(secondarySeriesId, { progress, isLoading: true });
+          setSecondaryLoadingStates(newState);
+          onSecondaryLoadingStateChange?.(secondarySeriesId, newState as any);
+        };
+        
+        updateState(10);
+        
         const seriesResponse = await fetch(`/api/series/${secondarySeriesId}`);
         if (seriesResponse.ok) {
           const seriesData = await seriesResponse.json();
           setSecondaryModality(seriesData.modality || 'MR');
-          console.log(`Secondary series modality: ${seriesData.modality}`);
+          pushFusionLog('secondary-modality', { modality: seriesData.modality });
         }
+        
+        updateState(20);
         
         const response = await fetch(`/api/series/${secondarySeriesId}/images`);
         if (!response.ok) {
@@ -3023,6 +3306,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
 
         const imageList = await response.json();
+        
+        updateState(30);
         
         // Robust ordering using ImagePositionPatient projected along MRI series normal
         const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
@@ -3071,24 +3356,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         setSecondaryImages(sortedImages);
         mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
-        console.log(`Loaded ${sortedImages.length} secondary images for fusion`);
-        console.log("Secondary series ID:", secondarySeriesId);
-        console.log("Images available:", sortedImages.length > 0 ? "YES" : "NO");
+        // Force re-calculation of transformed positions for new secondary series
+        transformedMRIPositions.current = [];
+        pushFusionLog('secondary-images-loaded', { count: sortedImages.length, seriesId: secondarySeriesId });
         
         // Debug log the sorted order
-        console.log('MRI sorted order (first 5 and last 5):');
-        const debugImages = [...sortedImages.slice(0, 5), ...sortedImages.slice(-5)];
-        debugImages.forEach((img: any, idx: number) => {
-          console.log(`  [${idx < 5 ? idx : sortedImages.length - 5 + (idx - 5)}] Instance ${img.instanceNumber}, SliceLoc: ${img.sliceLocation}`);
-        });
+        try {
+          const debugImages = [...sortedImages.slice(0, 2), ...sortedImages.slice(-2)];
+          pushFusionLog('secondary-order-sample', debugImages.map((img: any) => ({ inst: img.instanceNumber, z: img.sliceLocation })));
+        } catch {}
         
         // Preload secondary images with concurrency limits
         const newCache = new Map();
         const CONCURRENT_LIMIT = 4;
         
-        // Process secondary images in chunks
+        // Process secondary images in chunks with progress updates
         for (let i = 0; i < sortedImages.length; i += CONCURRENT_LIMIT) {
           const chunk = sortedImages.slice(i, i + CONCURRENT_LIMIT);
+          
+          // Update progress as we load chunks (30% base + 60% for loading)
+          const baseProgress = 30;
+          const loadingProgress = 60;
+          const chunkProgress = Math.floor(baseProgress + (loadingProgress * (i / sortedImages.length)));
+          updateState(Math.min(chunkProgress, 90));
           
           await Promise.all(chunk.map(async (image: any, chunkIndex: number) => {
             const index = i + chunkIndex;
@@ -3128,6 +3418,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
         
         // Store cache reference to avoid closure issues
+        // Publish cache to refs for render path and fusion utils
+        secondaryImageCacheRef.current = newCache;
         (window as any).secondaryImageCacheRef = newCache;
         
         // Trigger re-render of current image to show fusion
@@ -3280,29 +3572,55 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             scheduleRender();
           }, 100);
         }
+        
+        // Mark secondary series loading as complete
+        const completeState = new Map(secondaryLoadingStates);
+        completeState.set(secondarySeriesId, { progress: 100, isLoading: false });
+        setSecondaryLoadingStates(completeState);
+        setCurrentlyLoadingSecondary(null);
+        if (secondarySeriesId) onSecondaryLoadingStateChange?.(null, completeState as any);
+        
       } catch (err) {
         console.error("Error loading secondary images:", err);
+        // Mark as error state
+        const errorState = new Map(secondaryLoadingStates);
+        errorState.set(secondarySeriesId, { progress: 0, isLoading: false });
+        setSecondaryLoadingStates(errorState);
+        setCurrentlyLoadingSecondary(null);
+        if (secondarySeriesId) onSecondaryLoadingStateChange?.(null, errorState as any);
       }
     };
 
     loadSecondaryImages();
   }, [secondarySeriesId]);
 
+  // Auto-trigger background loading when primary images and registration are ready
+  // TEMPORARILY DISABLED to fix scrolling and flashing issues
+  // useEffect(() => {
+  //   if (images.length > 0 && registrationMatrix && registrationMatrix.length === 16) {
+  //     // Small delay to ensure primary is fully loaded before starting background tasks
+  //     const timer = setTimeout(() => {
+  //       startBackgroundLoading();
+  //     }, 1000);
+  //     
+  //     return () => clearTimeout(timer);
+  //   }
+  // }, [images.length, registrationMatrix, startBackgroundLoading]);
+
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      // Add a small delay to ensure state is stable after contour operations
-      const timeoutId = setTimeout(() => {
-        scheduleRender();
-        // Load metadata for current image
-        const currentImage = images[currentIndex];
-        if (currentImage?.id) {
-          loadImageMetadata(currentImage.id);
-        }
-      }, 10);
+      // Immediate rendering for smooth scrolling - this is critical for DICOM viewer performance
+      scheduleRender();
       
-      return () => clearTimeout(timeoutId);
+      // Load metadata for current image with minimal delay
+      const currentImage = images[currentIndex];
+      if (currentImage?.id) {
+        setTimeout(() => {
+          loadImageMetadata(currentImage.id);
+        }, 5); // Minimal delay only for metadata
+      }
     }
-  }, [images, currentIndex, isPreloading]); // Removed currentWindowLevel from dependencies to prevent infinite loop
+  }, [images, currentIndex, isPreloading]);
 
   // Separate effect for window level changes - only re-render, don't reload metadata
   useEffect(() => {
@@ -3370,38 +3688,74 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const seriesImages = await response.json();
 
-      // First parse DICOM metadata for proper spatial ordering
-      // Use web worker for metadata parsing to keep UI responsive
-      const workerManager = getDicomWorkerManager();
-      const imagesWithMetadata = await Promise.all(
-        seriesImages.map(async (img: any) => {
-          try {
-            const response = await fetch(`/api/images/${img.sopInstanceUID}`, { signal });
-            const arrayBuffer = await response.arrayBuffer();
+      // Use batch metadata parsing for much better performance (1 request vs 300+)
+      console.log(`📊 Loading metadata for ${seriesImages.length} images using batch API...`);
+      let imagesWithMetadata;
+      try {
+        const batchResponse = await fetch(`/api/series/${seriesId}/batch-metadata`, { signal });
+        if (batchResponse.ok) {
+          const batchMetadata = await batchResponse.json();
+          
+          // Create lookup map for faster matching
+          const metadataMap = new Map();
+          batchMetadata.forEach((meta: any) => {
+            metadataMap.set(meta.sopInstanceUID, meta);
+          });
+          
+          // Merge batch metadata with series images
+          imagesWithMetadata = seriesImages.map((img: any) => {
+            const metadata = metadataMap.get(img.sopInstanceUID);
+            if (metadata && !metadata.error) {
+              return {
+                ...img,
+                parsedSliceLocation: metadata.parsedSliceLocation,
+                parsedZPosition: metadata.parsedZPosition,
+                parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+              };
+            } else {
+              return {
+                ...img,
+                parsedSliceLocation: null,
+                parsedZPosition: null,
+                parsedInstanceNumber: img.instanceNumber,
+              };
+            }
+          });
+          
+          console.log(`✅ Batch metadata loaded successfully for ${imagesWithMetadata.length} images`);
+        } else {
+          throw new Error('Batch metadata endpoint failed');
+        }
+      } catch (error) {
+        console.warn('Batch metadata loading failed, falling back to individual parsing:', error);
+        
+        // Fallback to individual metadata parsing if batch fails
+        const workerManager = getDicomWorkerManager();
+        imagesWithMetadata = await Promise.all(
+          seriesImages.map(async (img: any) => {
+            try {
+              const response = await fetch(`/api/images/${img.sopInstanceUID}`, { signal });
+              const arrayBuffer = await response.arrayBuffer();
+              const metadata = await workerManager.parseDicomMetadata(arrayBuffer);
 
-            // Use web worker for metadata parsing
-            const metadata = await workerManager.parseDicomMetadata(arrayBuffer);
-
-            return {
-              ...img,
-              parsedSliceLocation: metadata.parsedSliceLocation,
-              parsedZPosition: metadata.parsedZPosition,
-              parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
-            };
-          } catch (error) {
-            console.warn(
-              `Failed to parse DICOM metadata for ${img.fileName}:`,
-              error,
-            );
-            return {
-              ...img,
-              parsedSliceLocation: null,
-              parsedZPosition: null,
-              parsedInstanceNumber: img.instanceNumber,
-            };
-          }
-        }),
-      );
+              return {
+                ...img,
+                parsedSliceLocation: metadata.parsedSliceLocation,
+                parsedZPosition: metadata.parsedZPosition,
+                parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+              };
+            } catch (error) {
+              console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
+              return {
+                ...img,
+                parsedSliceLocation: null,
+                parsedZPosition: null,
+                parsedInstanceNumber: img.instanceNumber,
+              };
+            }
+          }),
+        );
+      }
 
       // Sort by spatial position - prefer slice location, then z-position, then instance number
       const sortedImages = imagesWithMetadata.sort((a: any, b: any) => {
@@ -4238,25 +4592,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
-      console.log('Fusion check:', {
-        secondarySeriesId,
-        secondaryImagesLength: secondaryImages.length,
-        condition: !!(secondarySeriesId && secondaryImages.length > 0)
-      });
-      
       if (secondarySeriesId && secondaryImages.length > 0) {
-        console.log(`Rendering fusion for CT slice ${currentIndex}`);
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
           console.error("Error rendering fusion overlay:", fusionError);
-          console.error("Fusion error details:", {
-            message: fusionError.message,
-            stack: fusionError.stack,
-            secondarySeriesId,
-            secondaryImagesCount: secondaryImages.length,
-            fusionOpacity
-          });
           // Continue without fusion rather than failing entire image display
         }
       }
@@ -4479,96 +4819,154 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.putImageData(imageData, 0, 0);
   };
   
-  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    // Always render fusion; previous scroll-skip caused overlays to never appear
-    
-    const FDEBUG = (() => { try { return !!((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG); } catch { return false; } })();
-    if (FDEBUG) console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
-    if (FDEBUG) console.log('🎯 FUSION RENDER DEBUG: Full state:', {
-      secondaryImagesLength: secondaryImages.length,
-      secondarySeriesId,
-      secondarySeriesType: typeof secondarySeriesId,
-      fusionOpacity,
-      hasRegistrationMatrix: !!registrationMatrix,
-      registrationMatrixLength: registrationMatrix?.length,
-      hasTransformedPositions: !!transformedMRIPositions.current?.length,
-      transformedPositionsLength: transformedMRIPositions.current?.length || 0
-    });
-    
-    if (!secondaryImages.length || !secondarySeriesId) {
-      if (FDEBUG) console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
-      if (secondarySeriesId) openFusionDebug('no-secondary-images');
-      return;
-    }
-    
-    // If opacity is 0, skip rendering entirely
-    if (fusionOpacity === 0) {
-      if (FDEBUG) console.log("❌ Fusion opacity is 0, skipping overlay render");
-      return;
-    }
-    
-    if (!registrationMatrix || registrationMatrix.length !== 16) {
-      console.error("CRITICAL: No registration matrix available - fusion cannot be displayed");
-      setFusionAvailable(false);
-      openFusionDebug('no-registration-matrix');
-      return;
-    }
-    
-    if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
-      if (FDEBUG) console.log("No transformed MRI positions available");
-      openFusionDebug('no-transformed-positions');
-      return;
-    }
-    
-    // Compute CT slice Z by projecting onto CT normal for consistent MRI matching
-    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
-    try {
-      const toNumArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-      const iopStr = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation;
-      const iop = toNumArr(iopStr);
-      const seriesOriginStr = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
-      const seriesOrigin = toNumArr(seriesOriginStr);
-      const thisPosStr = primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition;
-      const thisPos = toNumArr(thisPosStr);
+  // Stable fusion cache that persists across renders
+  const fusionRenderCache = useRef<Map<string, {
+    bitmap?: ImageBitmap;
+    canvas?: HTMLCanvasElement;
+    timestamp: number;
+  }>>(new Map());
+  
+  const lastFusionState = useRef<{
+    ctSliceZ: number;
+    fusionOpacity: number;
+    secondarySeriesId: number | null;
+    registrationMatrix: number[] | null;
+  }>({ ctSliceZ: 0, fusionOpacity: 0, secondarySeriesId: null, registrationMatrix: null });
+  
+  // Keep fusion rendering simple and stable
 
-      if (iop.length >= 6 && seriesOrigin.length >= 3 && thisPos.length >= 3) {
-        const rx = iop[0], ry = iop[1], rz = iop[2];
-        const cx = iop[3], cy = iop[4], cz = iop[5];
-        const nx = ry * cz - rz * cy;
-        const ny = rz * cx - rx * cz;
-        const nz = rx * cy - ry * cx;
-        const nlen = Math.hypot(nx, ny, nz) || 1;
-        const n = [nx / nlen, ny / nlen, nz / nlen];
-        const dx = thisPos[0] - seriesOrigin[0];
-        const dy = thisPos[1] - seriesOrigin[1];
-        const dz = thisPos[2] - seriesOrigin[2];
-        ctSliceZ = dx * n[0] + dy * n[1] + dz * n[2];
-      } else {
-        // Fallback to legacy heuristics
-        if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
-          ctSliceZ = primaryImage.parsedSliceLocation;
-        } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
-          ctSliceZ = primaryImage.parsedZPosition;
-        } else if (primaryImage.sliceLocation) {
-          const parsed = parseFloat(primaryImage.sliceLocation);
-          if (!isNaN(parsed)) ctSliceZ = parsed;
-        } else if (primaryImage.imagePosition) {
-          const imagePos = typeof primaryImage.imagePosition === 'string'
-            ? primaryImage.imagePosition.split("\\")
-            : primaryImage.imagePosition;
-          if (imagePos && imagePos.length >= 3) {
-            const parsed = parseFloat(imagePos[2]);
-            if (!isNaN(parsed)) ctSliceZ = parsed;
-          }
+  // Clean up old cache entries periodically
+  useEffect(() => {
+    const cleanupCache = () => {
+      const now = Date.now();
+      const maxAge = 5000; // 5 seconds
+      for (const [key, value] of fusionRenderCache.current.entries()) {
+        if (now - value.timestamp > maxAge) {
+          fusionRenderCache.current.delete(key);
         }
       }
-    } catch (e) {
-      // Keep fallback value on error
+    };
+    
+    const interval = setInterval(cleanupCache, 2000); // Clean every 2 seconds
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
+  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    // Early exit conditions
+    if (!secondaryImages.length || !secondarySeriesId || fusionOpacity === 0 || !registrationMatrix) {
+      return;
+    }
+    
+    // Check if still loading
+    const loadingState = secondaryLoadingStates.get(secondarySeriesId);
+    if (loadingState?.isLoading || currentlyLoadingSecondary === secondarySeriesId) {
+      return;
+    }
+    
+    // Validate required data
+    if (!primaryImage?.sopInstanceUID || !secondaryImageCacheRef.current?.size) {
+      return;
+    }
+    
+    try {
+      // Ensure transformed positions are computed
+      if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
+        if (registrationMatrix && secondaryImages.length > 0) {
+          const transformed = computeTransformedMRIPositions(
+            secondaryImages,
+            registrationMatrix,
+            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
+            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
+            secondaryImageCacheRef.current
+          );
+          transformedMRIPositions.current = transformed;
+        } else {
+          return;
+        }
+      }
+    
+    // No debouncing - render fusion immediately for stability
+    
+    // Compute CT slice Z - use cached value if possible
+    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
+    
+    // Check if we can use cached state to avoid expensive calculations
+    const currentState = { ctSliceZ: 0, fusionOpacity, secondarySeriesId, registrationMatrix };
+    const stateChanged = lastFusionState.current.ctSliceZ !== ctSliceZ || 
+                        lastFusionState.current.fusionOpacity !== fusionOpacity ||
+                        lastFusionState.current.secondarySeriesId !== secondarySeriesId ||
+                        lastFusionState.current.registrationMatrix !== registrationMatrix;
+    
+    // Only recalculate if state changed significantly
+    if (stateChanged) {
+      try {
+        const toNumArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        const iopStr = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation;
+        const iop = toNumArr(iopStr);
+        const seriesOriginStr = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
+        const seriesOrigin = toNumArr(seriesOriginStr);
+        const thisPosStr = primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition;
+        const thisPos = toNumArr(thisPosStr);
+
+        if (iop.length >= 6 && seriesOrigin.length >= 3 && thisPos.length >= 3) {
+          const rx = iop[0], ry = iop[1], rz = iop[2];
+          const cx = iop[3], cy = iop[4], cz = iop[5];
+          const nx = ry * cz - rz * cy;
+          const ny = rz * cx - rx * cz;
+          const nz = rx * cy - ry * cx;
+          const nlen = Math.hypot(nx, ny, nz) || 1;
+          const n = [nx / nlen, ny / nlen, nz / nlen];
+          const dx = thisPos[0] - seriesOrigin[0];
+          const dy = thisPos[1] - seriesOrigin[1];
+          const dz = thisPos[2] - seriesOrigin[2];
+          ctSliceZ = dx * n[0] + dy * n[1] + dz * n[2];
+        } else {
+          // Fallback to legacy heuristics
+          if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
+            ctSliceZ = primaryImage.parsedSliceLocation;
+          } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
+            ctSliceZ = primaryImage.parsedZPosition;
+          } else if (primaryImage.sliceLocation) {
+            const parsed = parseFloat(primaryImage.sliceLocation);
+            if (!isNaN(parsed)) ctSliceZ = parsed;
+          } else if (primaryImage.imagePosition) {
+            const imagePos = typeof primaryImage.imagePosition === 'string'
+              ? primaryImage.imagePosition.split("\\")
+              : primaryImage.imagePosition;
+            if (imagePos && imagePos.length >= 3) {
+              const parsed = parseFloat(imagePos[2]);
+              if (!isNaN(parsed)) ctSliceZ = parsed;
+            }
+          }
+        }
+      } catch (e) {
+        // Keep fallback value on error
+      }
     }
     
     const actualCache = secondaryImageCacheRef.current;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
+      // Create simple cache key without opacity to reduce cache misses
+      const cacheKey = `${primaryImage.sopInstanceUID}_${secondarySeriesId}`;
+      const cached = fusionRenderCache.current.get(cacheKey);
+      const now = Date.now();
+      
+      // Use cached result if available and recent (but re-apply current opacity)
+      if (cached && (now - cached.timestamp) < 100) {
+        ctx.save();
+        ctx.globalAlpha = fusionOpacity; // Always use current opacity
+        if (cached.bitmap) {
+          ctx.drawImage(cached.bitmap, 0, 0);
+        } else if (cached.canvas) {
+          ctx.drawImage(cached.canvas, 0, 0);
+        }
+        ctx.restore();
+        return;
+      }
     
     // Project current CT slice Z into same CT-relative coordinate as transformed MRI
     let ctSliceZProjected = ctSliceZ;
@@ -4588,16 +4986,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctSliceZProjected = dx*nn[0] + dy*nn[1] + dz*nn[2];
       }
     } catch {}
-
-    if (FDEBUG) console.log('🚀 About to call renderFusionOverlay with:', {
-      ctSliceZ: ctSliceZProjected,
-      fusionOpacity,
-      canvasSize: `${canvas.width}x${canvas.height}`,
-      actualCacheSize: actualCache.size,
-      transformedMRILength: transformedMRIPositions.current?.length
-    });
     
-    // Ensure nearest MRI slice is available in cache; if not, lazy-load it
+    // Ensure nearest MRI slice and neighbors are available in cache; if not, lazy-load them (non-blocking)
     try {
       if (transformedMRIPositions.current && transformedMRIPositions.current.length > 0) {
         const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
@@ -4609,31 +4999,43 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]]; const nl = Math.hypot(n[0],n[1],n[2])||1; ctNorm = [n[0]/nl,n[1]/nl,n[2]/nl];
         }
         const nearestIdx = findNearestMRIIndexByPlane(ctSliceZProjected, ctNorm, (basePos.length>=3?basePos:null), transformedMRIPositions.current as any);
-        if (nearestIdx !== null && nearestIdx >= 0) {
-          const uid = transformedMRIPositions.current[nearestIdx]?.image?.sopInstanceUID;
-          if (uid && !secondaryImageCacheRef.current.has(uid)) {
-            console.log('🔄 Lazy-loading nearest MRI slice into cache:', uid);
+        const queueUid = (uid?: string) => {
+          if (!uid) return;
+          if (secondaryImageCacheRef.current.has(uid)) return;
+          (async () => {
             try {
               const resp = await fetch(`/api/images/${uid}`);
               if (resp.ok) {
                 const buf = await resp.arrayBuffer();
                 const imgData = await parseDicomImage(buf);
-                if (imgData) {
-                  secondaryImageCacheRef.current.set(uid, imgData);
-                }
+                if (imgData) secondaryImageCacheRef.current.set(uid, imgData);
               }
-            } catch (e) {
-              console.warn('Failed to lazy-load nearest MRI slice:', e);
+            } catch (e) { 
+              // Silently handle errors for performance
             }
+          })();
+        };
+        if (nearestIdx !== null && nearestIdx >= 0) {
+          for (let k = -2; k <= 2; k++) {
+            const idx = nearestIdx + k;
+            if (idx < 0 || idx >= transformedMRIPositions.current.length) continue;
+            queueUid(transformedMRIPositions.current[idx]?.image?.sopInstanceUID);
           }
         }
       }
     } catch {}
 
+    // Create a temporary canvas for fusion rendering
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
     // Call the new fusion utility function with registration matrix and shared CT coordinate system
     // DO NOT apply transform here - fusion-utils handles its own transforms
     await renderFusionOverlay(
-      ctx,
+      tempCtx,
       primaryImage,
       transformedMRIPositions.current,
       actualCache,
@@ -4654,13 +5056,40 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         : null),
       // Pass CT series IOP as a stable fallback
       (images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || null),
-      secondaryModality === 'PT',
-      secondaryModality === 'CT'
+      secondaryModality
     );
-    // Mark fusion healthy now that we rendered successfully
-    try { fusionIssueRef.current = null; setFusionAvailable(true); } catch {}
 
-    console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
+      // Cache the result for future use (without opacity since we apply it dynamically)
+      let bitmap: ImageBitmap | null = null;
+      try {
+        if (typeof createImageBitmap === 'function') {
+          bitmap = await createImageBitmap(tempCanvas);
+        }
+      } catch {}
+      fusionRenderCache.current.set(cacheKey, {
+        bitmap: bitmap || undefined,
+        canvas: bitmap ? undefined : tempCanvas,
+        timestamp: now
+      });
+
+      // Draw the cached result to the main canvas with proper blending
+      ctx.save();
+      ctx.globalAlpha = fusionOpacity;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(tempCanvas, 0, 0);
+      ctx.restore();
+
+      // Mark fusion healthy (reduce state updates)
+      fusionIssueRef.current = null;
+
+      // Update last fusion state
+      lastFusionState.current = { ctSliceZ, fusionOpacity, secondarySeriesId, registrationMatrix };
+      
+    } catch (error) {
+      console.error('Fusion render error:', error);
+    }
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied
@@ -4811,21 +5240,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
       const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
       
-      // Debug visibility map
-      if (DEBUG) console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
-        isVisible,
-        visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
-        allStructuresVisible,
-        willShow: isSelectedForEdit || isSelectedStructure || 
-                 (allStructuresVisible ? isVisible !== false : isVisible === true)
-      });
-
-      if (DEBUG) {
-        console.log(`Structure ${structure.structureName} (${structure.roiNumber}):`, {
+      // Debug visibility map - only when specifically debugging RT structures
+      if (RT_STRUCTURE_DEBUG) {
+        console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
           isVisible,
+          visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
+          allStructuresVisible,
+          willShow: isSelectedForEdit || isSelectedStructure || 
+                   (allStructuresVisible ? isVisible !== false : isVisible === true),
           isSelectedForEdit,
           isSelectedStructure,
-          allStructuresVisible,
           selectedStructuresSet: selectedStructures ? Array.from(selectedStructures) : []
         });
       }
@@ -4867,9 +5291,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           contour.slicePosition - currentSlicePosition,
         );
         if (positionDiff <= metaTol) {
-          if (DEBUG) console.log(
-            `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
-          );
+          if (RT_STRUCTURE_DEBUG) {
+            console.log(
+              `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
+            );
+          }
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
         }
       });
@@ -5053,8 +5479,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const goToPrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+    const prevIndex = currentIndex - 1;
+    if (prevIndex >= 0 && prevIndex < images.length) {
+      console.log(`📍 Navigate: ${currentIndex} → ${prevIndex}`);
+      setCurrentIndex(prevIndex);
     }
   };
 
@@ -5069,8 +5497,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       maxSlices = images[0]?.rows || 512;
     }
     
-    if (currentIndex < maxSlices - 1) {
-      setCurrentIndex(currentIndex + 1);
+    // Add protection against unexpected navigation
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < maxSlices && nextIndex >= 0) {
+      console.log(`📍 Navigate: ${currentIndex} → ${nextIndex} (max: ${maxSlices})`);
+      setCurrentIndex(nextIndex);
     }
   };
 
@@ -5319,8 +5750,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
       setZoom((prev) => Math.max(0.1, Math.min(5, prev * zoomFactor)));
+      console.log(`🔍 Zoom: ${e.deltaY > 0 ? 'out' : 'in'} (factor: ${zoomFactor})`);
     } else {
       // Regular scroll for slice navigation
+      console.log(`🖱️ Scroll: deltaY=${e.deltaY} currentIndex=${currentIndex}`);
       if (e.deltaY > 0) {
         goToNext();
       } else {
@@ -5489,7 +5922,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handlePredictionConfirm = (structureId: number, slicePosition: number) => {
     if (!rtStructures) return;
     
-    if (DEBUG) console.log(`🔄 Confirming prediction for structure ${structureId} at slice ${slicePosition}`);
+    if (false) console.log(`🔄 Confirming prediction for structure ${structureId} at slice ${slicePosition}`);
     
     // Deep copy the structures
     const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -5695,15 +6128,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               <Badge className={`flex items-center gap-1 border backdrop-blur-sm ${
                 secondaryModality === 'PT' 
                   ? 'bg-yellow-900/40 text-yellow-200 border-yellow-600/30' 
+                  : secondaryModality === 'CT'
+                  ? 'bg-blue-900/40 text-blue-200 border-blue-600/30'
                   : 'bg-purple-900/40 text-purple-200 border-purple-600/30'
               }`}>
                 <div className={`w-2 h-2 rounded-full animate-pulse ${
                   secondaryModality === 'PT' 
                     ? 'bg-yellow-400' 
+                    : secondaryModality === 'CT'
+                    ? 'bg-blue-400'
                     : 'bg-purple-400'
                 }`} />
-                {secondaryModality === 'PT' ? 'PT' : 'MR'} Fusion
-                <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
+                {secondaryModality === 'PT' ? 'PT' : secondaryModality === 'CT' ? 'CT' : 'MR'} Fusion
+                <span className={
+                  secondaryModality === 'PT' 
+                    ? 'text-yellow-300' 
+                    : secondaryModality === 'CT'
+                    ? 'text-blue-300'
+                    : 'text-purple-300'
+                }>
                   ({Math.round(fusionOpacity * 100)}%)
                 </span>
                 <Button size="sm" variant="ghost" className="h-5 px-2 ml-2 text-[10px] hover:bg-gray-700/40"
@@ -6178,6 +6621,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               onMriWindowLevelChange={setMriWindowLevel}
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
               onOpenDebug={() => openFusionDebug('manual')}
+              secondaryModality={secondaryModality}
             />
           )}
           

@@ -91,10 +91,14 @@ export class RTStructureParser {
         }
       }
 
-      console.log(`Parsed RT Structure Set with ${rtStructureSet.structures.length} structures`);
-      if (rtStructureSet.referencedSeriesUID) {
-        console.log(`RT Structure references series: ${rtStructureSet.referencedSeriesUID}`);
-      }
+      try {
+        if (process.env.RTSTRUCT_DEBUG === '1') {
+          console.log(`Parsed RT Structure Set with ${rtStructureSet.structures.length} structures`);
+          if (rtStructureSet.referencedSeriesUID) {
+            console.log(`RT Structure references series: ${rtStructureSet.referencedSeriesUID}`);
+          }
+        }
+      } catch {}
       return rtStructureSet;
 
     } catch (error: any) {

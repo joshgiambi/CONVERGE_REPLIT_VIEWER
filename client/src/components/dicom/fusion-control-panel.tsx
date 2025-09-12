@@ -24,6 +24,7 @@ interface FusionControlPanelProps {
   primaryModality?: string;
   availableModalities?: string[];
   onOpenDebug?: () => void; // Open debug popup (from parent)
+  secondaryModality?: string; // Dynamic secondary modality for colors
 }
 
 export function FusionControlPanel({
@@ -38,46 +39,113 @@ export function FusionControlPanel({
   selectedSecondaryId,
   primaryModality = 'CT',
   availableModalities = [],
-  onOpenDebug
+  onOpenDebug,
+  secondaryModality = 'MR'
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
   const [overlayDebug, setOverlayDebug] = useState<boolean>((window as any).FUSION_DEBUG === true);
   
-  // Fetch available MR series for fusion
+  // Dynamic color schemes based on secondary modality
+  const getColorScheme = (modality: string) => {
+    switch (modality) {
+      case 'PT':
+      case 'PET':
+        return {
+          gradient: 'from-black/70 to-yellow-900/20',
+          border: 'border-yellow-500/40',
+          shadow: 'shadow-yellow-900/30',
+          iconBg: 'from-yellow-500/30 to-yellow-600/30',
+          iconText: 'text-yellow-300',
+          buttonHover: 'hover:bg-yellow-500/20',
+          buttonText: 'text-yellow-300 hover:text-yellow-200',
+          sliderThumb: 'bg-yellow-500',
+          sliderTrack: 'bg-yellow-500/20',
+          modalityName: 'PT'
+        };
+      case 'CT':
+        return {
+          gradient: 'from-black/70 to-blue-900/20',
+          border: 'border-blue-500/40',
+          shadow: 'shadow-blue-900/30',
+          iconBg: 'from-blue-500/30 to-blue-600/30',
+          iconText: 'text-blue-300',
+          buttonHover: 'hover:bg-blue-500/20',
+          buttonText: 'text-blue-300 hover:text-blue-200',
+          sliderThumb: 'bg-blue-500',
+          sliderTrack: 'bg-blue-500/20',
+          modalityName: 'CT'
+        };
+      default: // MR
+        return {
+          gradient: 'from-black/70 to-purple-900/20',
+          border: 'border-purple-500/40',
+          shadow: 'shadow-purple-900/30',
+          iconBg: 'from-purple-500/30 to-purple-600/30',
+          iconText: 'text-purple-300',
+          buttonHover: 'hover:bg-purple-500/20',
+          buttonText: 'text-purple-300 hover:text-purple-200',
+          sliderThumb: 'bg-purple-500',
+          sliderTrack: 'bg-purple-500/20',
+          modalityName: 'MR'
+        };
+    }
+  };
+  
+  const colors = getColorScheme(secondaryModality);
+  
+  // Get individual series color scheme for each button
+  const getSeriesColorScheme = (seriesModality: string) => getColorScheme(seriesModality);
+  
+  // Fetch available series for fusion
   const { data: availableSeries } = useQuery({
     queryKey: [`/api/studies/${studyId}/series`],
     enabled: !!studyId
   });
   
-  // Filter for candidate secondary series (exclude CT/RTSTRUCT)
+  // Filter for candidate secondary series - include ALL fuseable imaging modalities
   type SeriesItem = { id: number; modality: string; seriesDescription?: string; imageCount?: number };
   const seriesList = (availableSeries as SeriesItem[]) || [];
-  const candidateSeries: SeriesItem[] = seriesList.filter((s) => s.id !== primarySeriesId && s.modality && s.modality !== 'CT' && s.modality !== 'RTSTRUCT');
+  const candidateSeries: SeriesItem[] = seriesList.filter((s) => {
+    // Exclude non-imaging modalities and primary series
+    if (s.id === primarySeriesId) return false;
+    if (!s.modality) return false;
+    
+    // Exclude non-imaging modalities
+    const excludedModalities = ['RTSTRUCT', 'REG', 'PLAN', 'RTPLAN', 'RTDOSE', 'RTIMAGE', 'PR', 'KO', 'SR'];
+    if (excludedModalities.includes(s.modality)) return false;
+    
+    // Include all imaging modalities (including multiple MR series)
+    const imagingModalities = ['MR', 'PT', 'PET', 'CT', 'NM', 'US', 'XA'];
+    return imagingModalities.includes(s.modality);
+  });
+  
+  // All imaging modalities are included, including multiple MR series
   
   // Get primary series info
   const primarySeries = seriesList.find((s) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
   
-  // Determine secondary modality label
-  const secondaryModality = candidateSeries.length > 0 ? candidateSeries[0].modality : 'Secondary';
+  // Determine dynamic secondary modality label from available series
+  const dynamicSecondaryModality = candidateSeries.length > 0 ? candidateSeries[0].modality : 'Secondary';
   
-  // Auto-select first MR series with valid slice locations (only on initial mount)
-  // Use a ref to track if we've already auto-selected
-  const hasAutoSelected = useRef(false);
+  // Debug logging removed for performance
   
-  useEffect(() => {
-    if (candidateSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
-      // Prefer MR when available, else PT; otherwise first candidate
-      const preferredSeries = candidateSeries.find((s: any) => s.modality === 'MR')
-        || candidateSeries.find((s: any) => s.modality === 'PT')
-        || candidateSeries[0];
-      const seriestoSelect = preferredSeries;
-      log.debug(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`, 'fusion');
-      
-      hasAutoSelected.current = true;
-      onSecondarySeriesSelect(seriestoSelect.id);
-    }
-  }, [candidateSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
+  // Disable auto-selection to prevent conflicts with manual selection
+  // Auto-selection should be handled by the main viewer interface, not the control panel
+  // const hasAutoSelected = useRef(false);
+  // 
+  // useEffect(() => {
+  //   if (candidateSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
+  //     const preferredSeries = candidateSeries.find((s: any) => s.modality === 'MR')
+  //       || candidateSeries.find((s: any) => s.modality === 'PT')
+  //       || candidateSeries[0];
+  //     const seriestoSelect = preferredSeries;
+  //     log.debug(`Auto-selecting series: ${seriestoSelect.id} (${seriestoSelect.modality}) - ${seriestoSelect.seriesDescription || 'No description'}`, 'fusion');
+  //     
+  //     hasAutoSelected.current = true;
+  //     onSecondarySeriesSelect(seriestoSelect.id);
+  //   }
+  // }, [candidateSeries]);
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
@@ -99,27 +167,29 @@ export function FusionControlPanel({
   if (isMinimized) {
     return (
       <div className="fixed bottom-4 right-8 z-50 flex flex-col items-end gap-3">
-        {/* Floating MRI selection buttons */}
+        {/* Floating secondary series selection buttons */}
         <div className="flex gap-2">
-          {candidateSeries.map((series: any, index: number) => (
+          {candidateSeries.map((series: any, index: number) => {
+            const seriesColors = getSeriesColorScheme(series.modality);
+            return (
             <button
               key={series.id}
               onClick={() => handleSecondarySelect(series.id.toString())}
               className={`
                 group relative p-3 rounded-2xl transition-all duration-300
                 ${selectedSecondaryId === series.id
-                  ? 'bg-gradient-to-br from-purple-500/30 to-purple-600/30 backdrop-blur-xl border-2 border-purple-400/60 shadow-lg shadow-purple-500/30'
-                  : 'bg-black/40 backdrop-blur-md border border-purple-500/30 hover:bg-purple-900/30 hover:border-purple-400/50 hover:shadow-md hover:shadow-purple-500/20'
+                  ? `bg-gradient-to-br ${seriesColors.iconBg} backdrop-blur-xl border-2 ${seriesColors.border} shadow-lg ${seriesColors.shadow}`
+                  : `bg-black/40 backdrop-blur-md border ${seriesColors.border} ${seriesColors.buttonHover}`
                 }
               `}
             >
-              <Brain className={`w-5 h-5 ${selectedSecondaryId === series.id ? 'text-purple-300' : 'text-purple-400'}`} />
+              <Brain className={`w-5 h-5 ${seriesColors.iconText}`} />
               <div className="absolute -top-1 -right-1">
                 <span className={`
                   text-[10px] font-bold px-1.5 py-0.5 rounded-full
                   ${selectedSecondaryId === series.id 
-                    ? 'bg-purple-400 text-black' 
-                    : 'bg-purple-600/50 text-purple-200'
+                    ? `${seriesColors.sliderThumb} text-black` 
+                    : `${seriesColors.sliderTrack} ${seriesColors.iconText}`
                   }
                 `}>
                   {series.modality || 'S'}{index + 1}
@@ -127,17 +197,18 @@ export function FusionControlPanel({
               </div>
               {selectedSecondaryId === series.id && (
                 <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2">
-                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                  <div className={`w-2 h-2 ${seriesColors.sliderThumb} rounded-full animate-pulse`} />
                 </div>
               )}
               {/* Tooltip */}
               <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                <div className="bg-gradient-to-br from-purple-600/90 to-purple-700/90 backdrop-blur-xl text-white text-xs px-2 py-1 rounded-lg border border-purple-400/30">
-                  MR {index + 1} ({series.imageCount} images)
+                <div className={`bg-gradient-to-br ${seriesColors.iconBg} backdrop-blur-xl text-white text-xs px-2 py-1 rounded-lg border ${seriesColors.border}`}>
+                  {seriesColors.modalityName} {index + 1} - {series.seriesDescription || `${series.modality} Series`} ({series.imageCount} images)
                 </div>
               </div>
             </button>
-          ))}
+            );
+          })}
           
           {/* No fusion button */}
           {selectedSecondaryId !== null && (
@@ -184,7 +255,7 @@ export function FusionControlPanel({
                 />
               </div>
               <Badge variant="outline" className="text-[10px] border-purple-500/30 bg-purple-900/50 backdrop-blur text-purple-300 px-1.5 py-0">
-                {secondaryModality}
+                {dynamicSecondaryModality}
               </Badge>
             </div>
             <span className="text-xs text-purple-300 min-w-[6ch] font-medium">
@@ -199,20 +270,20 @@ export function FusionControlPanel({
   // Expanded view with enhanced glassmorphic design
   return (
     <div className="fixed bottom-4 right-8 z-50">
-      <Card className="bg-gradient-to-br from-black/70 to-purple-900/20 backdrop-blur-xl border border-purple-500/40 p-4 w-80 shadow-2xl shadow-purple-900/30">
+      <Card className={`bg-gradient-to-br ${colors.gradient} backdrop-blur-xl border ${colors.border} p-4 w-80 shadow-2xl ${colors.shadow}`}>
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-gradient-to-br from-purple-500/30 to-purple-600/30 rounded-lg backdrop-blur">
-              <Layers className="h-4 w-4 text-purple-300" />
+            <div className={`p-1.5 bg-gradient-to-br ${colors.iconBg} rounded-lg backdrop-blur`}>
+              <Layers className={`h-4 w-4 ${colors.iconText}`} />
             </div>
-            <span className="text-sm font-semibold text-white">Image Fusion Control</span>
+            <span className="text-sm font-semibold text-white">{colors.modalityName} Fusion Control</span>
           </div>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setIsMinimized(true)}
-            className="h-7 w-7 text-purple-300 hover:text-purple-200 hover:bg-purple-500/20 rounded-lg"
+            className={`h-7 w-7 ${colors.buttonText} ${colors.buttonHover} rounded-lg`}
           >
             <Minimize2 className="h-4 w-4" />
           </Button>
