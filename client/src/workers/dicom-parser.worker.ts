@@ -103,9 +103,11 @@ const parseDicomMetadata = async (arrayBuffer: ArrayBuffer): Promise<any> => {
     const byteArray = new Uint8Array(arrayBuffer);
     const dataSet = dicomParser.parseDicom(byteArray);
 
-    // Extract spatial metadata for sorting
+    // Extract spatial metadata for sorting and fusion
     const sliceLocation = dataSet.floatString("x00201041");
     const imagePosition = dataSet.string("x00200032");
+    const imageOrientation = dataSet.string("x00200037");
+    const pixelSpacing = dataSet.string("x00280030");
     const instanceNumber = dataSet.intString("x00200013");
 
     // Parse image position (z-coordinate is third value)
@@ -121,6 +123,9 @@ const parseDicomMetadata = async (arrayBuffer: ArrayBuffer): Promise<any> => {
       parsedSliceLocation: sliceLocation ? parseFloat(sliceLocation) : null,
       parsedZPosition: zPosition,
       parsedInstanceNumber: instanceNumber || null,
+      imagePosition,
+      imageOrientation,
+      pixelSpacing,
     };
   } catch (error: any) {
     console.error("Error parsing DICOM metadata in worker:", error);

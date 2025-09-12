@@ -147,6 +147,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   });
 
   // Fetch REG associations for this patient and build primary->secondary mapping by series IDs
+  const [regCtacIds, setRegCtacIds] = useState<number[]>([]);
   useEffect(() => {
     const loadAssociations = async () => {
       try {
@@ -157,18 +158,23 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         const tryFetch = async (url: string) => {
           try {
             const r = await fetch(url);
-            if (!r.ok) return [] as any[];
+            if (!r.ok) return { associations: [] as any[], ctacSeriesIds: [] as number[] };
             const j = await r.json();
-            return Array.isArray(j?.associations) ? j.associations : [];
-          } catch { return [] as any[]; }
+            const assocs = Array.isArray(j?.associations) ? j.associations : [];
+            const ctac = Array.isArray(j?.ctacSeriesIds) ? j.ctacSeriesIds : [];
+            return { associations: assocs, ctacSeriesIds: ctac };
+          } catch { return { associations: [] as any[], ctacSeriesIds: [] as number[] }; }
         };
 
-        let associations = await tryFetch(`/api/registration/associations?patientId=${studyData.patient.id}`);
+        let result = await tryFetch(`/api/registration/associations?patientId=${studyData.patient.id}`);
+        let associations = result.associations;
+        let ctacUnion = new Set<number>(result.ctacSeriesIds || []);
         if (!associations.length && Array.isArray(studyData?.studies)) {
           const results = await Promise.all(
             studyData.studies.map((st: any) => tryFetch(`/api/registration/associations?studyId=${st.id}`))
           );
-          associations = results.flat();
+          associations = results.flatMap(r => r.associations);
+          results.forEach(r => (r.ctacSeriesIds||[]).forEach((id:number)=>ctacUnion.add(id)));
         }
 
         // Build mapping preferring ID fields if provided, otherwise map UIDs → IDs
@@ -198,6 +204,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
 
         setRegAssociations(mapping);
+        setRegCtacIds(Array.from(ctacUnion));
 
         // Auto-select best primary candidate if nothing selected yet
         if (!selectedSeries && Object.keys(mapping).length > 0) {
@@ -211,7 +218,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             if (!ser) return false;
             const modality = (ser.modality || '').toUpperCase();
             if (modality !== 'CT') return false;
-            return !ptStudyIds.has(ser.studyId);
+            // Prefer CT not in PT study and not marked CTAC by server
+            if (ptStudyIds.has(ser.studyId)) return false;
+            if ((regCtacIds||[]).includes(ser.id)) return false;
+            return true;
           });
           const chosenId = preferred ?? primaryIds[0];
           const chosen = (seriesData as any[]).find(s => s.id === chosenId);
@@ -697,6 +707,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             studyId={studyData.studies[0]?.id}
             studyIds={studyData.studies.map((s: any) => s.id)}
             regAssociations={regAssociations}
+            regCtacSeriesIds={regCtacIds}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}

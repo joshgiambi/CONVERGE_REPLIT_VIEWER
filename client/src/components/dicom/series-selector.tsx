@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink, Bug } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -22,6 +22,8 @@ interface SeriesSelectorProps {
   onWindowLevelChange: (windowLevel: WindowLevel) => void;
   studyId?: number;
   studyIds?: number[];
+  regAssociations?: Record<number, number[]>;
+  regCtacSeriesIds?: number[];
   rtStructures?: any;
   onRTStructureLoad?: (rtStructures: any) => void;
   onStructureVisibilityChange?: (structureId: number, visible: boolean) => void;
@@ -50,6 +52,8 @@ export function SeriesSelector({
   onWindowLevelChange,
   studyId,
   studyIds,
+  regAssociations,
+  regCtacSeriesIds = [],
   rtStructures,
   onRTStructureLoad,
   onStructureVisibilityChange,
@@ -236,15 +240,14 @@ export function SeriesSelector({
         }
         
         if (!isCancelled) {
-          console.log('Loaded RT series for studies:', studyIdsToLoad, 'Found:', allRTSeries);
-          console.log('RT series details:', allRTSeries);
-          console.log('RT series with associations:', allRTSeries.map(rt => ({
-            id: rt.id,
-            description: rt.seriesDescription,
-            referencedSeriesId: rt.referencedSeriesId,
-            studyId: rt.studyId
-          })));
-          setRTSeries(allRTSeries);
+          // De-duplicate by composite key id|seriesInstanceUID to avoid duplicates from patient-wide lookup
+          const unique = new Map<string, any>();
+          for (const rt of allRTSeries) {
+            const key = `${Number(rt?.id) || 0}|${rt?.seriesInstanceUID || ''}`;
+            if (!unique.has(key)) unique.set(key, rt);
+          }
+          const deduped = Array.from(unique.values());
+          setRTSeries(deduped);
         }
       } catch (error) {
         if (!isCancelled) {
@@ -282,10 +285,9 @@ export function SeriesSelector({
     }
   }, [loadedRTSeriesId, rtSeries]);
 
-  const handleRTSeriesSelect = async (rtSeries: any) => {
+  async function handleRTSeriesSelect(rtSeries: any) {
     try {
       setSelectedRTSeries(rtSeries);
-      
       // Load RT structure contours
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
       if (response.ok) {
@@ -293,11 +295,13 @@ export function SeriesSelector({
         if (onRTStructureLoad) {
           onRTStructureLoad(rtStructData);
         }
+      } else {
+        console.error('Failed to fetch RT contours:', response.status);
       }
     } catch (error) {
       console.error('Error loading RT structure contours:', error);
     }
-  };
+  }
 
   const handleStructureVisibilityToggle = (structureId: number) => {
     const currentVisibility = structureVisibility.get(structureId);
@@ -645,21 +649,58 @@ export function SeriesSelector({
                 <div className="space-y-1">
                   {/* Organize series hierarchically */}
                   {(() => {
-                    const ctSeries = series.filter(s => s.modality === 'CT');
+                    // Build top-level modality buckets
                     const mrSeries = series.filter(s => s.modality === 'MR');
                     const ptSeries = series.filter(s => s.modality === 'PT');
                     const regSeries = series.filter(s => s.modality === 'REG');
                     const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'REG', 'RTSTRUCT'].includes(s.modality));
-                    
-                    // Check if we have registration data
-                    const hasRegistration = regSeries.length > 0;
-                    
-                    // Determine primary series (CT if available, otherwise MR, PT, or others)
-                    const primarySeries = ctSeries.length > 0 ? ctSeries : 
-                                        mrSeries.length > 0 ? mrSeries : 
-                                        ptSeries.length > 0 ? ptSeries : 
-                                        otherSeries;
-                    
+
+                    // Helper: choose a single Planning CT as the parent (if any CT exists)
+                    const choosePlanningCT = () => {
+                      const allCTSeries = series.filter(s => s.modality === 'CT');
+                      if (allCTSeries.length === 0) return null;
+
+                      // Gather signals
+                      const assocArrays = regAssociations ? Object.values(regAssociations) : [];
+                      const assocIdsFlat: number[] = assocArrays.flat();
+                      const regPrimaryIds = new Set<number>(
+                        regAssociations ? Object.keys(regAssociations).map(k => Number(k)).filter(n => Number.isFinite(n)) : []
+                      );
+                      const planningCTIds = new Set<number>((rtSeries || [])
+                        .map((r: any) => Number(r?.referencedSeriesId))
+                        .filter((id: number) => Number.isFinite(id))
+                      );
+                      const ptStudyIdsAll = new Set<number>(ptSeries.map(s => s.studyId));
+
+                      // Score CTs with weighted criteria
+                      const scoreCT = (ct: any) => {
+                        let score = 0;
+                        // Strong signal: referenced by RTSTRUCT
+                        if (planningCTIds.has(ct.id)) score += 1000;
+                        // Strong signal: is a REG primary
+                        if (regPrimaryIds.has(ct.id)) score += 500 + (regAssociations?.[ct.id]?.length || 0) * 5;
+                        // Prefer non-PET study CTs
+                        if (!ptStudyIdsAll.has(ct.studyId)) score += 100;
+                        // Avoid CTACs if provided by server
+                        if (regCtacSeriesIds?.includes?.(ct.id)) score -= 200;
+                        // Prefer larger image counts
+                        score += Math.min(200, (ct.imageCount || 0));
+                        return score;
+                      };
+
+                      // Pick best by score
+                      const sorted = [...allCTSeries].sort((a, b) => scoreCT(b) - scoreCT(a));
+                      return sorted[0] || null;
+                    };
+
+                    const mainCT = choosePlanningCT();
+                    const ctSeriesTop = mainCT ? [mainCT] : [];
+
+                    // Determine primary list: if any CT exists, the single Planning CT is the parent; otherwise fallback
+                    const primarySeries = ctSeriesTop.length > 0
+                      ? ctSeriesTop
+                      : (mrSeries.length > 0 ? mrSeries : (ptSeries.length > 0 ? ptSeries : otherSeries));
+
                     return (
                       <>
                         {/* Primary Series (CT, MR, PT, or others) */}
@@ -670,7 +711,7 @@ export function SeriesSelector({
                                 p-2 rounded-lg border cursor-pointer transition-all duration-200 backdrop-blur-sm
                                 ${selectedSeries?.id === seriesItem.id
                                   ? 'bg-blue-500/20 border-blue-400/50 shadow-lg shadow-blue-500/20'
-                                  : hoveredRegSeries && (ctSeries.length > 0 || mrSeries.length > 0 || ptSeries.length > 0)
+                                  : hoveredRegSeries && (ctSeriesTop.length > 0 || mrSeries.length > 0 || ptSeries.length > 0)
                                   ? 'bg-green-500/10 border-green-400/50 shadow-md shadow-green-500/20'
                                   : 'bg-gray-800/30 border-gray-700/30 hover:border-gray-600/50 hover:bg-gray-700/40'
                                 }
@@ -689,6 +730,7 @@ export function SeriesSelector({
                                   `}
                                 >
                                   {seriesItem.modality}
+                                  {seriesItem.modality === 'CT' && ctSeriesTop.length > 0 && seriesItem.id === ctSeriesTop[0].id ? ' • Planning' : ''}
                                 </Badge>
                                 <span className="text-xs text-gray-400">
                                   {seriesItem.imageCount} images
@@ -705,19 +747,57 @@ export function SeriesSelector({
 
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
+                              {/* Registered CT secondaries (REG-derived only; PET/CT CTs are shown under PET) */}
+                              {(() => {
+                                const explicitSecIds = new Set<number>(
+                                  regAssociations && regAssociations[seriesItem.id]
+                                    ? regAssociations[seriesItem.id]
+                                    : []
+                                );
+                                if (explicitSecIds.size === 0) return null;
+                                const ctAssoc = series.filter(s => s.modality === 'CT' && explicitSecIds.has(s.id));
+                                if (ctAssoc.length === 0) return null;
+                                return (
+                                  <div className="space-y-1 border-l-2 border-blue-500/30 pl-3">
+                                    <div className="text-xs text-blue-300 mb-1">Registered CT</div>
+                                    {ctAssoc.map(ctS => (
+                                      <div
+                                        key={ctS.id}
+                                        className={`w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                          secondarySeriesId === ctS.id
+                                            ? 'bg-blue-500/40 border-blue-400'
+                                            : 'bg-blue-600/10 border-blue-500/30 hover:bg-blue-600/20'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center space-x-2 flex-1">
+                                            <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs font-semibold">CT</Badge>
+                                            <span className="truncate text-xs">{ctS.seriesDescription || 'CT Series'} ({ctS.imageCount} images)</span>
+                                          </div>
+                                          {onSecondarySeriesSelect && (
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 hover:bg-green-700/30"
+                                              onClick={(e) => { e.stopPropagation(); onSecondarySeriesSelect(ctS.id); }}
+                                              title="Fuse this CT"
+                                            >
+                                              <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                               {/* RT Structure Series nested under CT - only show those that reference this CT */}
                               {rtSeries && rtSeries.length > 0 && rtSeries.filter((rtS: any) => {
                                 // Debug log for RT series filtering
                                 const isMatch = rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1);
-                                console.log('RT Series filter:', {
-                                  rtSeriesId: rtS.id, 
-                                  referencedSeriesId: rtS.referencedSeriesId, 
-                                  ctSeriesId: seriesItem.id,
-                                  isMatch,
-                                  rtSeriesLength: rtSeries.length
-                                });
-                                return isMatch;
-                              }).length > 0 && (
+                                // Debug suppressed by default to avoid console noise
+                              return isMatch;
+                            }).length > 0 && (
                                 <div className="space-y-1 border-l-2 border-green-500/30 pl-3">
                                   {rtSeries.filter((rtS: any) => 
                                     rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1)
@@ -745,261 +825,293 @@ export function SeriesSelector({
                                 </div>
                               )}
                               
-                              {/* Registration and MR Series that can be fused */}
-                              {hasRegistration && mrSeries.length > 0 && (
-                                <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
-                                  <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                    </svg>
-                                    Fusion-ready MRI (Registered)
-                                  </div>
-                                  
-                                  {/* MR Series that can be fused */}
-                                  {mrSeries.map((mrS) => (
-                                    <div
-                                      key={mrS.id}
-                                      className={`
-                                        w-full p-2 text-left text-xs rounded-lg transition-all
-                                        ${secondarySeriesId === mrS.id
-                                          ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
-                                          : selectedSeries?.id === mrS.id
-                                          ? 'bg-purple-500/20 border-purple-500 shadow-lg'
-                                          : hoveredRegSeries
-                                          ? 'bg-green-500/10 border-green-500/50 shadow-md'
-                                          : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
-                                        } border
-                                      `}
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-2 flex-1">
-                                          <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                            MR
-                                          </Badge>
-                                          <span className="truncate text-xs">
-                                            {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6 hover:bg-purple-700/30"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Open MRI as primary series (view standalone)
-                                              onSeriesSelect(mrS);
-                                              // Clear secondary series
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(null);
-                                              }
-                                            }}
-                                            title="View MRI standalone"
-                                          >
-                                            <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
-                                          </Button>
-                                          {secondarySeriesId === mrS.id ? (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion off
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(null);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-white" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                  <p className="font-medium">Fusion Active - Click to disable</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          ) : (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 hover:bg-green-700/30"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
-                                                      // Toggle fusion on
-                                                      if (onSecondarySeriesSelect) {
-                                                        console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
-                                                        onSecondarySeriesSelect(mrS.id);
-                                                      } else {
-                                                        console.error('❌ onSecondarySeriesSelect is not defined!');
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                  <p className="font-medium">Enable fusion overlay</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          )}
-                                        </div>
-                                      </div>
-                                      {/* RT Structure Series that reference this MRI */}
-                                      {rtSeries && rtSeries.length > 0 && (
-                                        <div className="mt-2 space-y-1 border-l-2 border-green-500/30 pl-3">
-                                          {rtSeries
-                                            .filter((rtS: any) => rtS.referencedSeriesId === mrS.id)
-                                            .map((rtS: any) => (
-                                              <Button
-                                                key={rtS.id}
-                                                variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
-                                                className={`w-full p-2 h-auto text-left justify-start text-xs ${
-                                                  selectedRTSeries?.id === rtS.id 
-                                                    ? 'bg-green-600 text-white border-green-500' 
-                                                    : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
-                                                } border rounded-lg`}
-                                                onClick={() => handleRTSeriesSelect(rtS)}
-                                              >
-                                                <div className="flex items-center space-x-2">
-                                                  <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
-                                                    RT
-                                                  </Badge>
-                                                  <span className="truncate text-xs">
-                                                    {rtS.seriesDescription || 'Structure Set'}
-                                                  </span>
-                                                </div>
-                                              </Button>
-                                            ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              {/* Registration and MR Series that can be fused (REG-preferred; fallback: all MR) */}
+                              {(() => {
+                                const secSet = new Set<number>(regAssociations && regAssociations[seriesItem.id] ? regAssociations[seriesItem.id] : []);
+                                let mrAssoc = mrSeries.filter(s => secSet.has(s.id));
+                                if (mrAssoc.length === 0) mrAssoc = mrSeries; // fallback to all MR for patient
+                                if (mrAssoc.length === 0) return null;
+                                return (
+                                 <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
+                                   <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
+                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                     </svg>
+                                     Fusion-ready MRI (Registered)
+                                   </div>
+                                   
+                                   {/* MR Series that can be fused */}
+                                   {mrAssoc.map((mrS) => (
+                                     <div
+                                       key={mrS.id}
+                                       className={`
+                                         w-full p-2 text-left text-xs rounded-lg transition-all
+                                         ${secondarySeriesId === mrS.id
+                                           ? 'bg-purple-500/40 border-purple-400 shadow-lg ring-2 ring-purple-400/50'
+                                           : selectedSeries?.id === mrS.id
+                                           ? 'bg-purple-500/20 border-purple-500 shadow-lg'
+                                           : hoveredRegSeries
+                                           ? 'bg-green-500/10 border-green-500/50 shadow-md'
+                                           : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
+                                         } border
+                                       `}
+                                       onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(mrS.id); }}
+                                     >
+                                       <div className="flex items-center justify-between">
+                                         <div className="flex items-center space-x-2 flex-1">
+                                           <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                             MR
+                                           </Badge>
+                                           <span className="truncate text-xs">
+                                             {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
+                                           </span>
+                                         </div>
+                                         <div className="flex items-center gap-1">
+                                           <Button
+                                             size="icon"
+                                             variant="ghost"
+                                             className="h-6 w-6 hover:bg-purple-700/30"
+                                             onClick={(e) => {
+                                               e.stopPropagation();
+                                               // Open MRI as primary series (view standalone)
+                                               onSeriesSelect(mrS);
+                                               // Clear secondary series
+                                               if (onSecondarySeriesSelect) {
+                                                 onSecondarySeriesSelect(null);
+                                               }
+                                             }}
+                                             title="View MRI standalone"
+                                           >
+                                             <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
+                                           </Button>
+                                           {secondarySeriesId === mrS.id ? (
+                                             <TooltipProvider delayDuration={0}>
+                                               <Tooltip>
+                                                 <TooltipTrigger asChild>
+                                                   <Button
+                                                     size="icon"
+                                                     variant="ghost"
+                                                     className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                     onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       // Toggle fusion off
+                                                       if (onSecondarySeriesSelect) {
+                                                         onSecondarySeriesSelect(null);
+                                                       }
+                                                     }}
+                                                   >
+                                                     <Anchor className="h-3.5 w-3.5 text-white" />
+                                                   </Button>
+                                                 </TooltipTrigger>
+                                                 <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
+                                                   <p className="font-medium">Fusion Active - Click to disable</p>
+                                                 </TooltipContent>
+                                               </Tooltip>
+                                             </TooltipProvider>
+                                           ) : (
+                                             <TooltipProvider delayDuration={0}>
+                                               <Tooltip>
+                                                 <TooltipTrigger asChild>
+                                                   <Button
+                                                     size="icon"
+                                                     variant="ghost"
+                                                     className="h-6 w-6 hover:bg-green-700/30"
+                                                     onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
+                                                       // Toggle fusion on
+                                                       if (onSecondarySeriesSelect) {
+                                                         console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
+                                                         onSecondarySeriesSelect(mrS.id);
+                                                       } else {
+                                                         console.error('❌ onSecondarySeriesSelect is not defined!');
+                                                       }
+                                                     }}
+                                                   >
+                                                     <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                   </Button>
+                                                 </TooltipTrigger>
+                                                 <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
+                                                   <p className="font-medium">Enable fusion overlay</p>
+                                                 </TooltipContent>
+                                               </Tooltip>
+                                             </TooltipProvider>
+                                           )}
+                                         </div>
+                                       </div>
+                                       {/* RT Structure Series that reference this MRI */}
+                                       {rtSeries && rtSeries.length > 0 && (
+                                         <div className="mt-2 space-y-1 border-l-2 border-green-500/30 pl-3">
+                                           {rtSeries
+                                             .filter((rtS: any) => rtS.referencedSeriesId === mrS.id)
+                                             .map((rtS: any) => (
+                                               <Button
+                                                 key={rtS.id}
+                                                 variant={selectedRTSeries?.id === rtS.id ? "default" : "ghost"}
+                                                 className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                                                   selectedRTSeries?.id === rtS.id 
+                                                     ? 'bg-green-600 text-white border-green-500' 
+                                                     : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
+                                                 } border rounded-lg`}
+                                                 onClick={() => handleRTSeriesSelect(rtS)}
+                                               >
+                                                 <div className="flex items-center space-x-2">
+                                                   <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">
+                                                     RT
+                                                   </Badge>
+                                                   <span className="truncate text-xs">
+                                                     {rtS.seriesDescription || 'Structure Set'}
+                                                   </span>
+                                                 </div>
+                                               </Button>
+                                             ))}
+                                         </div>
+                                       )}
+                                     </div>
+                                   ))}
+                                 </div>
+                                );
+                              })()}
                               
-                              {/* PT Series that can be fused with CT */}
-                              {ptSeries.length > 0 && (
-                                <div className="space-y-1 border-l-2 border-yellow-500/30 pl-3">
-                                  <div className="text-xs text-yellow-300 mb-1 flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                    </svg>
-                                    PET/CT Fusion
-                                  </div>
-                                  
-                                  {/* PT Series */}
-                                  {ptSeries.map((ptS) => (
-                                    <div
-                                      key={ptS.id}
-                                      className={`
-                                        w-full p-2 text-left text-xs rounded-lg transition-all
-                                        ${secondarySeriesId === ptS.id
-                                          ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
-                                          : selectedSeries?.id === ptS.id
-                                          ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
-                                          : hoveredRegSeries
-                                          ? 'bg-green-500/10 border-green-500/50 shadow-md'
-                                          : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
-                                        } border
-                                      `}
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-2 flex-1">
-                                          <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">
-                                            PT
-                                          </Badge>
-                                          <span className="truncate text-xs">
-                                            {ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6 hover:bg-yellow-700/30"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Open PT as primary series (view standalone)
-                                              onSeriesSelect(ptS);
-                                              // Clear secondary series
-                                              if (onSecondarySeriesSelect) {
-                                                onSecondarySeriesSelect(null);
-                                              }
-                                            }}
-                                            title="View PET standalone"
-                                          >
-                                            <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
-                                          </Button>
-                                          {secondarySeriesId === ptS.id ? (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion off
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(null);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-white" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 backdrop-blur-xl border-yellow-400/50 text-white">
-                                                  <p className="font-medium">Fusion Active - Click to disable</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          ) : (
-                                            <TooltipProvider delayDuration={0}>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 hover:bg-green-700/30"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      // Toggle fusion on
-                                                      if (onSecondarySeriesSelect) {
-                                                        onSecondarySeriesSelect(ptS.id);
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent className="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 backdrop-blur-xl border-yellow-400/50 text-white">
-                                                  <p className="font-medium">Enable PET fusion overlay</p>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                          )}
-                                        </div>
-                                      </div>
+                              {/* PET Series that can be fused with CT (REG preferred; fallback: all PET for patient) */}
+                              {(() => {
+                                const secSet = new Set<number>(
+                                  regAssociations && regAssociations[seriesItem.id]
+                                    ? regAssociations[seriesItem.id]
+                                    : []
+                                );
+                                let ptAssoc = ptSeries.filter(s => secSet.has(s.id));
+                                if (ptAssoc.length === 0) ptAssoc = ptSeries;
+                                if (ptAssoc.length === 0) return null;
+                                return (
+                                  <div className="space-y-1 border-l-2 border-yellow-500/30 pl-3">
+                                    <div className="text-xs text-yellow-300 mb-1 flex items-center gap-1">
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                      </svg>
+                                      PET/CT Fusion
                                     </div>
-                                  ))}
-                                </div>
-                              )}
+                                    
+                                    {/* PT + Related CT cards as siblings */}
+                                   {ptAssoc.flatMap((ptS) => {
+                                     const ctSiblings = series.filter(s => s.modality === 'CT' && s.studyId === ptS.studyId && s.id !== seriesItem.id);
+                                       const petCard = (
+                                       <div
+                                         key={`pt-${ptS.id}`}
+                                         className={`
+                                           w-full p-2 text-left text-xs rounded-lg transition-all
+                                           ${secondarySeriesId === ptS.id
+                                             ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
+                                             : selectedSeries?.id === ptS.id
+                                             ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
+                                             : hoveredRegSeries
+                                             ? 'bg-green-500/10 border-green-500/50 shadow-md'
+                                             : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
+                                           } border
+                                         `}
+                                         onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }}
+                                       >
+                                         <div className="flex items-center justify-between">
+                                           <div className="flex items-center space-x-2 flex-1">
+                                             <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">PT</Badge>
+                                             <span className="truncate text-xs">{ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)</span>
+                                           </div>
+                                           <div className="flex items-center gap-1">
+                                             <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-yellow-700/30"
+                                               onClick={(e) => { e.stopPropagation(); onSeriesSelect(ptS); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
+                                               title="View PET standalone">
+                                               <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
+                                             </Button>
+                                             {secondarySeriesId === ptS.id ? (
+                                               <Button size="icon" variant="ghost" className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                 onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }} title="Disable fusion">
+                                                 <Anchor className="h-3.5 w-3.5 text-white" />
+                                               </Button>
+                                             ) : (
+                                               <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-700/30"
+                                                 onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }} title="Enable PET fusion">
+                                                 <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                               </Button>
+                                             )}
+                                           </div>
+                                         </div>
+                                       </div>
+                                     );
+                                       const ctCards = ctSiblings.map(ctS => {
+                                         const rtForCt = (rtSeries || []).filter((rtS: any) => rtS.referencedSeriesId === ctS.id);
+                                         return (
+                                           <div key={`ptct-${ptS.id}-${ctS.id}`} className="space-y-1">
+                                             <div
+                                               className={`w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                                 secondarySeriesId === ctS.id
+                                                   ? 'bg-blue-500/40 border-blue-300 shadow-lg ring-2 ring-blue-300/50'
+                                                   : selectedSeries?.id === ctS.id
+                                                   ? 'bg-blue-500/25 border-blue-300 shadow-lg'
+                                                   : 'bg-blue-500/15 border-blue-400/50 hover:bg-blue-500/20'
+                                               }`}
+                                               onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }}
+                                             >
+                                             <div className="flex items-center justify-between">
+                                               <div className="flex items-center space-x-2 flex-1">
+                                                 <Badge variant="outline" className="border-blue-400 text-blue-300 text-xs font-semibold">CT</Badge>
+                                                 <span className="truncate text-xs">{ctS.seriesDescription || 'CT Series'} ({ctS.imageCount} images)</span>
+                                               </div>
+                                               <div className="flex items-center gap-1">
+                                                 <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-blue-700/30"
+                                                   onClick={(e) => { e.stopPropagation(); onSeriesSelect(ctS); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
+                                                   title="View CT standalone">
+                                                   <ExternalLink className="h-3.5 w-3.5 text-blue-300" />
+                                                 </Button>
+                                                 {secondarySeriesId === ctS.id ? (
+                                                   <Button size="icon" variant="ghost" className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }} title="Disable fusion">
+                                                     <Anchor className="h-3.5 w-3.5 text-white" />
+                                                   </Button>
+                                                 ) : (
+                                                   <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-700/30"
+                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }} title="Fuse this CT">
+                                                     <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                   </Button>
+                                                 )}
+                                               </div>
+                                             </div>
+                                             {/* RT sets for this CT, shown within the card */}
+                                             {rtForCt.length > 0 && (
+                                               <div className="mt-2 pt-1 space-y-1 border-t border-green-500/20">
+                                                 {rtForCt.map((rtS: any) => (
+                                                   <Button
+                                                     key={rtS.id}
+                                                     variant={selectedRTSeries?.id === rtS.id ? 'default' : 'ghost'}
+                                                     className={`w-full p-2 h-auto text-left justify-start text-xs ${
+                                                       selectedRTSeries?.id === rtS.id
+                                                         ? 'bg-green-600 text-white border-green-500'
+                                                         : 'hover:bg-green-600/20 text-gray-300 border-green-500/30'
+                                                     } border rounded-md`}
+                                                     onClick={() => handleRTSeriesSelect(rtS)}
+                                                   >
+                                                     <div className="flex items-center space-x-2">
+                                                       <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-semibold">RT</Badge>
+                                                       <span className="truncate text-xs">{rtS.seriesDescription || 'Structure Set'}</span>
+                                                     </div>
+                                                   </Button>
+                                                 ))}
+                                               </div>
+                                             )}
+                                           </div>
+                                         </div>
+                                       );
+                                     });
+                                     return [petCard, ...ctCards];
+                                   })}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         ))}
                         
                         {/* MR Series as standalone when no CT present */}
-                        {ctSeries.length === 0 && mrSeries.length > 0 && mrSeries.map((seriesItem) => (
+                        {ctSeriesTop.length === 0 && mrSeries.length > 0 && mrSeries.map((seriesItem) => (
                           <div key={seriesItem.id}>
                             <div
                               className={`

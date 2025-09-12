@@ -8,6 +8,13 @@ export interface ParsedRegistration {
   targetFrameOfReferenceUid?: string;
   referencedSeriesInstanceUids?: string[];
   notes?: string[];
+  // Detailed candidates parsed from the file (if multiple transforms exist)
+  candidates?: Array<{
+    matrix: number[];
+    sourceFoR?: string;
+    targetFoR?: string;
+    referenced?: string[];
+  }>;
 }
 
 function invert3x3(m: number[][]): number[][] | null {
@@ -88,8 +95,8 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
   const dataSet = dicomParser.parseDicom(new Uint8Array(bytes));
   const notes: string[] = [];
 
-  // Collect candidate matrices in flat row-major form
-  const candidates: number[][] = [];
+  // Collect candidate matrices with metadata
+  const candidates: Array<{ matrix: number[]; sourceFoR?: string; targetFoR?: string; referenced?: string[] }> = [];
 
   // Extract FoR UIDs and referenced series if available
   let sourceFoR: string | undefined;
@@ -101,8 +108,9 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     if (regSeq?.items?.length) {
       for (const regItem of regSeq.items) {
         const ds = regItem.dataSet;
-        const s1 = ds?.string?.('x30060062');
-        const t1 = ds?.string?.('x30060061');
+        // Try Spatial Registration (0070,0308...) and RT Frame-of-Reference tags (3006,00C0/00C2)
+        const s1 = ds?.string?.('x300600c2') || ds?.string?.('x30060062') || ds?.string?.('x00200052');
+        const t1 = ds?.string?.('x300600c0') || ds?.string?.('x30060061') || ds?.string?.('x00200052');
         if (!sourceFoR && typeof s1 === 'string') sourceFoR = s1;
         if (!targetFoR && typeof t1 === 'string') targetFoR = t1;
         const refSeriesAtLevel = ds?.string?.('x0020000e');
@@ -112,8 +120,8 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
         if (mrs?.items?.length) {
           for (const mi of mrs.items) {
             const mds = mi.dataSet;
-            const s2 = mds?.string?.('x30060062');
-            const t2 = mds?.string?.('x30060061');
+            const s2 = mds?.string?.('x300600c2') || mds?.string?.('x30060062') || mds?.string?.('x00200052');
+            const t2 = mds?.string?.('x300600c0') || mds?.string?.('x30060061') || mds?.string?.('x00200052');
             if (!sourceFoR && typeof s2 === 'string') sourceFoR = s2;
             if (!targetFoR && typeof t2 === 'string') targetFoR = t2;
             const nestedRef = mds?.string?.('x0020000e');
@@ -125,10 +133,10 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
                 const fdEl = mItem.dataSet?.elements?.['x0070030c'];
                 const fdVals = fdEl ? tryParseFD16(mItem.dataSet, fdEl) : null;
                 if (fdVals && fdVals.length === 16) {
-                  candidates.push(fdVals);
+                  candidates.push({ matrix: fdVals, sourceFoR: s2 || sourceFoR, targetFoR: t2 || targetFoR, referenced: [nestedRef].filter(Boolean) as string[] });
                 }
                 const dsVals = tryParseDS16(mItem.dataSet?.string?.('x300600c6'));
-                if (dsVals) candidates.push(dsVals);
+                if (dsVals) candidates.push({ matrix: dsVals, sourceFoR: s2 || sourceFoR, targetFoR: t2 || targetFoR, referenced: [nestedRef].filter(Boolean) as string[] });
               }
             }
           }
@@ -144,8 +152,8 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     const visit = (ds: any) => {
       if (!ds) return;
       try {
-        const s = ds.string?.('x30060062');
-        const t = ds.string?.('x30060061');
+        const s = ds.string?.('x300600c2') || ds.string?.('x30060062') || ds.string?.('x00200052');
+        const t = ds.string?.('x300600c0') || ds.string?.('x30060061') || ds.string?.('x00200052');
         const rid = ds.string?.('x0020000e');
         if (!sourceFoR && typeof s === 'string') sourceFoR = s;
         if (!targetFoR && typeof t === 'string') targetFoR = t;
@@ -170,16 +178,16 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
 
   // De-duplicate and validate
   const unique: string[] = [];
-  const uniqueMats: number[][] = [];
+  const uniqueCands: typeof candidates = [];
   for (const c of candidates) {
-    const key = c.map(v => (Number.isFinite(v) ? v.toFixed(6) : 'NaN')).join(',');
-    if (!unique.includes(key)) { unique.push(key); uniqueMats.push(c); }
+    const key = c.matrix.map(v => (Number.isFinite(v) ? v.toFixed(6) : 'NaN')).join(',');
+    if (!unique.includes(key)) { unique.push(key); uniqueCands.push(c); }
   }
 
   // Prefer the last valid rigid matrix that is non-identity
   let selected: number[] | null = null;
-  for (let i = uniqueMats.length - 1; i >= 0; i--) {
-    const m = uniqueMats[i];
+  for (let i = uniqueCands.length - 1; i >= 0; i--) {
+    const m = uniqueCands[i].matrix;
     const flat = Array.isArray(m[0]) ? (toRowMajorFlat(m as any) as any) : m;
     if (!flat || flat.length !== 16) continue;
     if (isIdentity4x4(flat)) { notes.push(`candidate ${i} is identity`); continue; }
@@ -202,6 +210,8 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
       continue;
     }
     if (adjusted) notes.push(`candidate ${i} rotation projected to nearest rigid`);
+    // Replace the candidate matrix with corrected rigid
+    uniqueCands[i].matrix = corrected;
     selected = corrected;
     break;
   }
@@ -212,7 +222,6 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     targetFrameOfReferenceUid: targetFoR,
     referencedSeriesInstanceUids: referencedSeries.length ? Array.from(new Set(referencedSeries)) : undefined,
     notes,
+    candidates: uniqueCands,
   };
 }
-
-

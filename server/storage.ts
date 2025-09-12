@@ -96,9 +96,9 @@ export interface IStorage {
   getRTStructureHistorySnapshot(historyId: number): Promise<RTStructureHistory | null>;
   
   // Registration operations (temporarily disabled for rebuild)
-  // createRegistration(data: InsertRegistration): Promise<Registration | null>;
-  // getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
-  // deleteRegistrationByStudyId(studyId: number): Promise<void>;
+  createRegistration(data: InsertRegistration): Promise<Registration | null>;
+  getRegistrationByStudyId(studyId: number): Promise<Registration | null>;
+  deleteRegistrationByStudyId(studyId: number): Promise<void>;
   
   // Patient metadata editing
   updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null>;
@@ -510,10 +510,51 @@ export class DatabaseStorage implements IStorage {
     console.log(`Updated RT structure ${structureId} color to: ${color}`);
   }
 
-  // Registration operations temporarily disabled for rebuild
-  // async createRegistration(data: InsertRegistration): Promise<Registration | null> { return null; }
-  // async getRegistrationByStudyId(studyId: number): Promise<Registration | null> { return null; }
-  // async deleteRegistrationByStudyId(studyId: number): Promise<void> { return; }
+  // Registration operations (re-enabled as cache persistence for REG parsing)
+  async createRegistration(data: InsertRegistration): Promise<Registration | null> {
+    try {
+      const normalized: any = { ...data };
+      if (normalized && typeof normalized.transformationMatrix !== 'string') {
+        try {
+          normalized.transformationMatrix = JSON.stringify(normalized.transformationMatrix);
+        } catch (_) {
+          normalized.transformationMatrix = JSON.stringify([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+          ]);
+        }
+      }
+      if (normalized && normalized.metadata && typeof normalized.metadata !== 'string') {
+        try { normalized.metadata = JSON.stringify(normalized.metadata); } catch { normalized.metadata = JSON.stringify({}); }
+      }
+      const [registration] = await db.insert(registrations).values(normalized).returning();
+      return registration;
+    } catch (error) {
+      console.error('Error creating registration:', error);
+      return null;
+    }
+  }
+
+  async getRegistrationByStudyId(studyId: number): Promise<Registration | null> {
+    try {
+      const [registration] = await db.select().from(registrations).where(eq(registrations.studyId, studyId));
+      return registration || null;
+    } catch (error) {
+      console.error('Error getting registration:', error);
+      return null;
+    }
+  }
+
+  async deleteRegistrationByStudyId(studyId: number): Promise<void> {
+    try {
+      await db.delete(registrations).where(eq(registrations.studyId, studyId));
+    } catch (error) {
+      console.error('Error deleting registration:', error);
+      throw error;
+    }
+  }
 
   // Patient metadata editing
   async updatePatientMetadata(patientId: number, metadata: Partial<InsertPatient>): Promise<Patient | null> {

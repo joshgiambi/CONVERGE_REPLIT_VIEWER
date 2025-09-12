@@ -23,6 +23,7 @@ interface FusionControlPanelProps {
   selectedSecondaryId?: number | null;
   primaryModality?: string;
   availableModalities?: string[];
+  onOpenDebug?: () => void; // Open debug popup (from parent)
 }
 
 export function FusionControlPanel({
@@ -36,9 +37,11 @@ export function FusionControlPanel({
   onMriWindowLevelChange,
   selectedSecondaryId,
   primaryModality = 'CT',
-  availableModalities = []
+  availableModalities = [],
+  onOpenDebug
 }: FusionControlPanelProps) {
   const [isMinimized, setIsMinimized] = useState(true); // Start minimized
+  const [overlayDebug, setOverlayDebug] = useState<boolean>((window as any).FUSION_DEBUG === true);
   
   // Fetch available MR series for fusion
   const { data: availableSeries } = useQuery({
@@ -46,36 +49,35 @@ export function FusionControlPanel({
     enabled: !!studyId
   });
   
-  // Filter for MR series only
+  // Filter for candidate secondary series (exclude CT/RTSTRUCT)
   type SeriesItem = { id: number; modality: string; seriesDescription?: string; imageCount?: number };
   const seriesList = (availableSeries as SeriesItem[]) || [];
-  const mrSeries: SeriesItem[] = seriesList.filter((s) => s.modality === 'MR');
+  const candidateSeries: SeriesItem[] = seriesList.filter((s) => s.id !== primarySeriesId && s.modality && s.modality !== 'CT' && s.modality !== 'RTSTRUCT');
   
   // Get primary series info
   const primarySeries = seriesList.find((s) => s.id === primarySeriesId);
   const actualPrimaryModality = primarySeries?.modality || primaryModality || 'CT';
   
   // Determine secondary modality label
-  const secondaryModality = mrSeries.length > 0 ? 'MR' : 'Secondary';
+  const secondaryModality = candidateSeries.length > 0 ? candidateSeries[0].modality : 'Secondary';
   
   // Auto-select first MR series with valid slice locations (only on initial mount)
   // Use a ref to track if we've already auto-selected
   const hasAutoSelected = useRef(false);
   
   useEffect(() => {
-    if (mrSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
-      // Prefer series with description containing "AX T1 FS+C" as it has better slice locations
-      const preferredSeries = mrSeries.find((s: any) => 
-        s.seriesDescription && s.seriesDescription.includes('AX T1 FS+C')
-      );
-      
-      const seriestoSelect = preferredSeries || mrSeries[0];
+    if (candidateSeries.length > 0 && selectedSecondaryId === null && !hasAutoSelected.current) {
+      // Prefer MR when available, else PT; otherwise first candidate
+      const preferredSeries = candidateSeries.find((s: any) => s.modality === 'MR')
+        || candidateSeries.find((s: any) => s.modality === 'PT')
+        || candidateSeries[0];
+      const seriestoSelect = preferredSeries;
       log.debug(`Auto-selecting MR series: ${seriestoSelect.id} - ${seriestoSelect.seriesDescription || 'No description'}`, 'fusion');
       
       hasAutoSelected.current = true;
       onSecondarySeriesSelect(seriestoSelect.id);
     }
-  }, [mrSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
+  }, [candidateSeries]); // Remove selectedSecondaryId from dependencies to prevent re-selection
   
   const handleSecondarySelect = (value: string) => {
     const seriesId = value === 'none' ? null : parseInt(value);
@@ -99,7 +101,7 @@ export function FusionControlPanel({
       <div className="fixed bottom-4 right-8 z-50 flex flex-col items-end gap-3">
         {/* Floating MRI selection buttons */}
         <div className="flex gap-2">
-          {mrSeries.map((series: any, index: number) => (
+          {candidateSeries.map((series: any, index: number) => (
             <button
               key={series.id}
               onClick={() => handleSecondarySelect(series.id.toString())}
@@ -120,7 +122,7 @@ export function FusionControlPanel({
                     : 'bg-purple-600/50 text-purple-200'
                   }
                 `}>
-                  {index + 1}
+                  {series.modality || 'S'}{index + 1}
                 </span>
               </div>
               {selectedSecondaryId === series.id && (
@@ -218,18 +220,67 @@ export function FusionControlPanel({
         
         {/* Content */}
         <div className="space-y-4">
+          {/* Debug Tools */}
+          <div className="flex items-center justify-between bg-black/30 border border-purple-500/30 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Settings2 className="h-4 w-4 text-purple-300" />
+              <span className="text-xs text-purple-200">Fusion Debug</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className={`text-xs px-2 py-1 rounded-md border ${overlayDebug ? 'border-purple-400 text-purple-200 bg-purple-500/20' : 'border-purple-500/30 text-purple-300 hover:bg-purple-900/30'}`}
+                onClick={() => {
+                  const next = !overlayDebug;
+                  setOverlayDebug(next);
+                  try { (window as any).FUSION_DEBUG = next; (window as any).__FUSION_DEBUG__ = next; } catch {}
+                }}
+              >
+                HUD {overlayDebug ? 'ON' : 'OFF'}
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/30 text-purple-300 hover:bg-purple-900/30"
+                title="Swap Row/Column mapping (debug)"
+                onClick={() => { try { (window as any).__FUSION_SWAP_RC__ = !(window as any).__FUSION_SWAP_RC__; } catch {} }}
+              >
+                Swap RC
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/30 text-purple-300 hover:bg-purple-900/30"
+                title="Toggle half-pixel top-left anchoring"
+                onClick={() => { try { (window as any).__FUSION_HALF_PIXEL__ = !(window as any).__FUSION_HALF_PIXEL__; } catch {} }}
+              >
+                Half‑px
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/40 text-purple-200 hover:bg-purple-900/30"
+                onClick={() => {
+                  if (onOpenDebug) onOpenDebug();
+                  else try { (window as any).__OPEN_FUSION_DEBUG__ && (window as any).__OPEN_FUSION_DEBUG__(); } catch {}
+                }}
+              >
+                Copy JSON
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/40 text-purple-200 hover:bg-purple-900/30"
+                onClick={() => { try { (window as any).__OPEN_REG_DETAILS__ && (window as any).__OPEN_REG_DETAILS__(); } catch {} }}
+              >
+                REG Details
+              </button>
+            </div>
+          </div>
+
           {/* MR Series Selection Grid */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-gray-300 font-medium">Select Fusion Series</Label>
               <Badge className="bg-purple-600/20 backdrop-blur border-purple-400/30 text-purple-200 text-xs">
-                {mrSeries.length} available
+                {candidateSeries.length} available
               </Badge>
             </div>
             
             {/* Simplified grid layout */}
             <div className="grid grid-cols-4 gap-2">
-              {mrSeries.map((series: any, index: number) => (
+              {candidateSeries.map((series: any, index: number) => (
                 <button
                   key={series.id}
                   onClick={() => handleSecondarySelect(series.id.toString())}
@@ -242,9 +293,7 @@ export function FusionControlPanel({
                   `}
                 >
                   <Brain className={`w-6 h-6 mx-auto mb-1 ${selectedSecondaryId === series.id ? 'text-purple-200' : 'text-purple-400'}`} />
-                  <p className="text-[10px] text-purple-200 font-semibold">
-                    MR {index + 1}
-                  </p>
+                  <p className="text-[10px] text-purple-200 font-semibold">{series.modality || 'S'} {index + 1}</p>
                   {selectedSecondaryId === series.id && (
                     <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2">
                       <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
@@ -271,6 +320,31 @@ export function FusionControlPanel({
                     <div className="w-2 h-2 bg-gray-400 rounded-full" />
                   </div>
                 )}
+              </button>
+            </div>
+          </div>
+
+          {/* Matrix test helpers */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-gray-300">Transform Tests</span>
+            <div className="flex gap-2">
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/40 text-purple-200 hover:bg-purple-900/30"
+                onClick={() => { try { (window as any).__FUSION_USE_INVERT__ && (window as any).__FUSION_USE_INVERT__(); } catch {} }}
+              >
+                Invert
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/40 text-purple-200 hover:bg-purple-900/30"
+                onClick={() => { try { (window as any).__FUSION_USE_TRANSPOSE__ && (window as any).__FUSION_USE_TRANSPOSE__(); } catch {} }}
+              >
+                Transpose
+              </button>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-purple-500/40 text-purple-200 hover:bg-purple-900/30"
+                onClick={() => { try { (window as any).__FUSION_RESET_MATRIX__ && (window as any).__FUSION_RESET_MATRIX__(); } catch {} }}
+              >
+                Reset
               </button>
             </div>
           </div>

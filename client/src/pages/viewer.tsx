@@ -52,6 +52,12 @@ export default function Viewer() {
         if (studyId) {
           study = studies.find((s: any) => s.id === parseInt(studyId));
           log.debug(`Found study by ID: ${JSON.stringify(study)}`, 'viewer');
+          if (study) {
+            // Always load ALL studies for this patient so that PET/CT in another study appears
+            const patientStudies = studies.filter((s: any) => s.patientId === study.patientId);
+            log.debug(`Bundling all studies for patient ${study.patientId}: ${patientStudies.length}`, 'viewer');
+            setStudyData({ studies: patientStudies, patient: { id: study.patientId, patientID: study.patientID, patientName: study.patientName } });
+          }
         } else if (patientId) {
           // Find ALL studies for this patient
           

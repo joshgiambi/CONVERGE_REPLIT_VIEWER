@@ -470,17 +470,22 @@ export async function renderFusionOverlay(
   registrationMatrix?: number[],
   ctTransform?: {scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null,
   ctSeriesOrigin?: number[] | null,
-  ctSeriesIOP?: number[] | string | null
+  ctSeriesIOP?: number[] | string | null,
+  isPET?: boolean,
+  isCT?: boolean
 ) {
   // NO TRANSFORMS HERE - we assume the CT transform is already applied by the caller
   console.log('🎯 Rendering fusion overlay in CT coordinate space');
 
-  // STRICT Z-range check: Only render fusion within actual MRI coverage
+  // Z-range handling: do NOT clamp. If CT is outside the secondary coverage, skip rendering overlay.
+  let ctZForInterp = ctSliceZ;
   if (transformedMRI.length > 0) {
     const zValues = transformedMRI.map(t => t.zInCT);
     const minZ = Math.min(...zValues);
     const maxZ = Math.max(...zValues);
-    if (ctSliceZ < minZ - 2 || ctSliceZ > maxZ + 2) {
+    if (!Number.isFinite(ctZForInterp)) return; // invalid position
+    if (ctZForInterp < minZ || ctZForInterp > maxZ) {
+      // Outside coverage -> no overlay
       return;
     }
   }
@@ -503,7 +508,7 @@ export async function renderFusionOverlay(
     const nlen = Math.hypot(nx, ny, nz) || 1;
     ctNormalForInterp = [nx/nlen, ny/nlen, nz/nlen];
   }
-  const mriData = interpolateMRI(ctSliceZ, transformedMRI, secondaryImageCache, {
+  const mriData = interpolateMRI(ctZForInterp, transformedMRI, secondaryImageCache, {
     ctNormal: ctNormalForInterp,
     // Use provided series origin if available to match caller's ctSliceZ reference
     ctOrigin: (ctSeriesOrigin && ctSeriesOrigin.length >= 3) ? ctSeriesOrigin : (posArr.length >= 3 ? posArr : null)
@@ -517,37 +522,91 @@ export async function renderFusionOverlay(
   const tctx = temp.getContext('2d');
   if (!tctx) return;
 
-  // Draw MRI as grayscale with enhanced contrast
+  // Draw secondary (MR/PT/CT) as colored overlay with enhanced contrast
   const imgData = tctx.createImageData(mriData.width, mriData.height);
   const { data } = imgData;
   
-  // Find min/max values for proper scaling
+  // Guard
   if (!mriData.data || mriData.data.length === 0) {
     console.warn('MRI data is empty or invalid');
     return;
   }
-  
-  let min = mriData.data[0], max = mriData.data[0];
-  for (let i = 0; i < mriData.data.length; i++) {
-    min = Math.min(min, mriData.data[i]);
-    max = Math.max(max, mriData.data[i]);
+
+  // Compute or reuse per-slice min/max for MRI normalization (not used for CT/PET LUTs)
+  let min = (mriData as any).min as number | undefined;
+  let max = (mriData as any).max as number | undefined;
+  if (min === undefined || max === undefined) {
+    let tmin = mriData.data[0], tmax = mriData.data[0];
+    for (let i = 0; i < mriData.data.length; i++) {
+      const v = mriData.data[i];
+      if (v < tmin) tmin = v;
+      if (v > tmax) tmax = v;
+    }
+    min = tmin; max = tmax;
+    // Cache back into secondary cache if we know the UID
+    try {
+      const uid = (mriData as any).uid;
+      if (uid && secondaryImageCache.has(uid)) {
+        const prev = secondaryImageCache.get(uid)!;
+        secondaryImageCache.set(uid, { ...prev, min, max });
+      }
+    } catch {}
   }
+  const range = (max! - min!);
   
-  const range = max - min;
-  console.log(`MRI pixel range: ${min.toFixed(1)} to ${max.toFixed(1)} (range: ${range.toFixed(1)})`);
-  
-  for (let i = 0; i < mriData.data.length; i++) {
-    // Scale pixel values from min-max to 0-255 for better contrast
-    const normalized = range > 0 ? (mriData.data[i] - min) / range : 0;
-    const v = Math.max(0, Math.min(255, Math.round(normalized * 255)));
-    const idx4 = i * 4;
-    data[idx4] = data[idx4+1] = data[idx4+2] = v;
-    
-    // Make only very dark background pixels transparent (more conservative threshold)
-    if (v < 5) { // Much lower threshold for true black background only
-      data[idx4+3] = 0; // Fully transparent
-    } else {
-      data[idx4+3] = 255; // Fully opaque for all anatomy
+  const applyFdgLUT = (n: number) => {
+    // Piecewise linear FDG-like LUT from dark orange to yellow-white
+    const stops = [
+      { t: 0.05, c: [0, 0, 0] },
+      { t: 0.20, c: [90, 25, 0] },
+      { t: 0.50, c: [220, 110, 0] },
+      { t: 0.80, c: [255, 200, 0] },
+      { t: 1.00, c: [255, 255, 255] },
+    ];
+    if (n <= stops[0].t) return { r: 0, g: 0, b: 0, a: 0 };
+    for (let s = 0; s < stops.length - 1; s++) {
+      const a = stops[s], b = stops[s + 1];
+      if (n <= b.t) {
+        const w = (n - a.t) / (b.t - a.t);
+        const r = Math.round(a.c[0] + w * (b.c[0] - a.c[0]));
+        const g = Math.round(a.c[1] + w * (b.c[1] - a.c[1]));
+        const bb = Math.round(a.c[2] + w * (b.c[2] - a.c[2]));
+        return { r, g, b: bb, a: 255 };
+      }
+    }
+    return { r: 255, g: 255, b: 255, a: 255 };
+  };
+
+  // Secondary CT: apply default window/level on Hounsfield values; MRI: simple min-max normalization
+  if (isCT) {
+    const WW = 350; // default
+    const WC = 40;  // default
+    const minHU = WC - WW / 2;
+    const maxHU = WC + WW / 2;
+    const widthHU = maxHU - minHU || 1;
+    for (let i = 0; i < mriData.data.length; i++) {
+      const vHU = mriData.data[i];
+      const n = Math.max(0, Math.min(1, (vHU - minHU) / widthHU));
+      const v = Math.round(n * 255);
+      const idx4 = i * 4;
+      data[idx4] = data[idx4 + 1] = data[idx4 + 2] = v;
+      data[idx4 + 3] = 255; // alpha controlled globally by fusionOpacity
+    }
+  } else {
+    for (let i = 0; i < mriData.data.length; i++) {
+      const normalized = range > 0 ? (mriData.data[i] - (min as number)) / range : 0;
+      const idx4 = i * 4;
+      if (isPET) {
+        const { r, g, b, a } = applyFdgLUT(normalized);
+        data[idx4] = r;
+        data[idx4 + 1] = g;
+        data[idx4 + 2] = b;
+        data[idx4 + 3] = a;
+      } else {
+        const v = Math.max(0, Math.min(255, Math.round(normalized * 255)));
+        data[idx4] = data[idx4 + 1] = data[idx4 + 2] = v;
+        data[idx4 + 3] = 255; // remove per-pixel alpha thresholding to avoid islands
+      }
     }
   }
   tctx.putImageData(imgData, 0, 0);
@@ -647,54 +706,136 @@ export async function renderFusionOverlay(
 
   // Apply full 2D affine derived from 3D registration (includes rotation) when orientations are available
   if (registrationMatrix && registrationMatrix.length === 16 && actualSecondaryImage && ctTransform) {
-    // CT orientation/origin
-    const ctOrigin = toNumberArray((primaryImage as any).imagePosition || (primaryImage as any).imageMetadata?.imagePosition);
-    const ctIOP = toNumberArrayFlexible((primaryImage.imageOrientation ?? primaryImage.imageMetadata?.imageOrientation) as any);
-    const hasCTDirs = ctIOP.length >= 6;
-    // MRI orientation/origin
-    let mriOriginArr: number[] = toNumberArrayFlexible((actualSecondaryImage as any).imagePosition);
-    if ((!mriOriginArr || mriOriginArr.length < 3) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
-      const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
-      const v = meta?.imagePosition;
-      if (v) mriOriginArr = toNumberArrayFlexible(v);
+    // CT orientation/origin with robust fallbacks to series-level values
+    let ctOrigin = toNumberArray((primaryImage as any).imagePosition || (primaryImage as any).imageMetadata?.imagePosition);
+    if ((!ctOrigin || ctOrigin.length < 3) && Array.isArray(ctSeriesOrigin) && ctSeriesOrigin.length >= 3) {
+      ctOrigin = ctSeriesOrigin.map(Number) as number[];
     }
-    const mriOrigin = (mriOriginArr && mriOriginArr.length >= 3) ? mriOriginArr : [0, 0, ctSliceZ];
+    let ctIOP = toNumberArrayFlexible((primaryImage.imageOrientation ?? primaryImage.imageMetadata?.imageOrientation) as any);
+    if ((!ctIOP || ctIOP.length < 6) && (ctSeriesIOP as any)) {
+      ctIOP = toNumberArrayFlexible(ctSeriesIOP as any);
+    }
+    const hasCTDirs = ctIOP.length >= 6;
+    // MRI orientation/origin: use interpolation across bracketing slices so XY placement matches the intensity plane
+    const getIPP = (img: any): number[] | null => {
+      let arr = toNumberArrayFlexible(img?.imagePosition);
+      if ((!arr || arr.length < 3) && secondaryImageCache?.has(img?.sopInstanceUID)) {
+        const meta = secondaryImageCache.get(img.sopInstanceUID)?.metadata;
+        const v = meta?.imagePosition;
+        if (v) arr = toNumberArrayFlexible(v);
+      }
+      return (arr && arr.length >= 3) ? arr : null;
+    };
+    // Bracketing frames and linear weight
+    let prev = transformedMRI[0];
+    let next = transformedMRI[0];
+    for (let i = 0; i < transformedMRI.length - 1; i++) {
+      if (transformedMRI[i].zInCT <= ctZForInterp && ctZForInterp <= transformedMRI[i + 1].zInCT) {
+        prev = transformedMRI[i];
+        next = transformedMRI[i + 1];
+        break;
+      }
+      if (ctZForInterp < transformedMRI[0].zInCT) { prev = next = transformedMRI[0]; break; }
+      if (ctZForInterp > transformedMRI[transformedMRI.length - 1].zInCT) { prev = next = transformedMRI[transformedMRI.length - 1]; break; }
+    }
+    const lowerZ = prev.zInCT;
+    const upperZ = next.zInCT;
+    const wPlane = (upperZ !== lowerZ) ? (ctZForInterp - lowerZ) / (upperZ - lowerZ) : 0;
+    const ippPrev = getIPP(prev.image) || [0, 0, lowerZ];
+    const ippNext = getIPP(next.image) || [0, 0, upperZ];
+    const mriOrigin = [
+      ippPrev[0] * (1 - wPlane) + ippNext[0] * wPlane,
+      ippPrev[1] * (1 - wPlane) + ippNext[1] * wPlane,
+      ippPrev[2] * (1 - wPlane) + ippNext[2] * wPlane,
+    ];
     let mriIOP = toNumberArrayFlexible((actualSecondaryImage.imageOrientation ?? actualSecondaryImage.imageMetadata?.imageOrientation) as any);
     if ((!mriIOP || mriIOP.length < 6) && secondaryImageCache?.has(actualSecondaryImage.sopInstanceUID)) {
       const meta = secondaryImageCache.get(actualSecondaryImage.sopInstanceUID)?.metadata;
       const v = meta?.imageOrientation;
       if (v) mriIOP = toNumberArrayFlexible(v as any);
     }
-    const hasMRIDirs = mriIOP.length >= 6;
+    let hasMRIDirs = mriIOP.length >= 6;
 
-    if (hasCTDirs && hasMRIDirs) {
+    // Fallback: derive MRI row/col from CT row/col using registration rotation if MRI IOP is missing
+    let mriRowFromReg: number[] | null = null;
+    let mriColFromReg: number[] | null = null;
+    if (!hasMRIDirs && hasCTDirs) {
+      try {
+        const R = [
+          [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2]],
+          [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6]],
+          [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10]],
+        ];
+        // Inverse of a proper rotation is its transpose
+        const Rt = [
+          [R[0][0], R[1][0], R[2][0]],
+          [R[0][1], R[1][1], R[2][1]],
+          [R[0][2], R[1][2], R[2][2]],
+        ];
+        const ctRowDir = [ctIOP[0], ctIOP[1], ctIOP[2]];
+        const ctColDir = [ctIOP[3], ctIOP[4], ctIOP[5]];
+        const mul = (A: number[][], v: number[]) => [
+          A[0][0]*v[0] + A[0][1]*v[1] + A[0][2]*v[2],
+          A[1][0]*v[0] + A[1][1]*v[1] + A[1][2]*v[2],
+          A[2][0]*v[0] + A[2][1]*v[1] + A[2][2]*v[2],
+        ];
+        const norm = (v: number[]) => {
+          const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l];
+        };
+        mriRowFromReg = norm(mul(Rt, ctRowDir));
+        mriColFromReg = norm(mul(Rt, ctColDir));
+      } catch {}
+    }
+
+    if (hasCTDirs && (hasMRIDirs || (mriRowFromReg && mriColFromReg))) {
+      // Ensure CT origin exists for projection math
+      if (!ctOrigin || ctOrigin.length < 3) {
+        // As a last resort, fall back to [0,0,0] to avoid NaNs; placement may be off but deterministic
+        ctOrigin = [0, 0, 0];
+      }
       // Direction cosines
       const ctRow = [ctIOP[0], ctIOP[1], ctIOP[2]];
       const ctCol = [ctIOP[3], ctIOP[4], ctIOP[5]];
-      const [ctRowSp, ctColSp] = ctSpacingArr; // [row, col]
-      const mriRow = [mriIOP[0], mriIOP[1], mriIOP[2]];
-      const mriCol = [mriIOP[3], mriIOP[4], mriIOP[5]];
-      const [mriRowSp, mriColSp] = mriSpacingArr; // [row, col]
+      const [ctRowSp, ctColSp] = ctSpacingArr; // [row spacing, col spacing]
+      const mriRow = hasMRIDirs ? [mriIOP[0], mriIOP[1], mriIOP[2]] : (mriRowFromReg as number[]);
+      const mriCol = hasMRIDirs ? [mriIOP[3], mriIOP[4], mriIOP[5]] : (mriColFromReg as number[]);
+      const [mriRowSp, mriColSp] = mriSpacingArr; // [row spacing, col spacing]
 
       const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
 
       // Map MRI pixel (u,v) to CT canvas using full chain
+      const swapRC = !!(window as any).__FUSION_SWAP_RC__;
       const mapPoint = (u: number, v: number): [number, number] => {
-        const Xw = mriOrigin[0] + v * mriRow[0] * mriRowSp + u * mriCol[0] * mriColSp;
-        const Yw = mriOrigin[1] + v * mriRow[1] * mriRowSp + u * mriCol[1] * mriColSp;
-        const Zw = mriOrigin[2] + v * mriRow[2] * mriRowSp + u * mriCol[2] * mriColSp;
+        // DICOM mapping: P(i=row=v, j=col=u) = IPP + j*ColDir*ColSpacing + i*RowDir*RowSpacing
+        const j = u, i = v;
+        const col = swapRC ? mriRow : mriCol;
+        const row = swapRC ? mriCol : mriRow;
+        const colSp = swapRC ? mriRowSp : mriColSp;
+        const rowSp = swapRC ? mriColSp : mriRowSp;
+        const Xw = mriOrigin[0] + j * col[0] * colSp + i * row[0] * rowSp;
+        const Yw = mriOrigin[1] + j * col[1] * colSp + i * row[1] * rowSp;
+        const Zw = mriOrigin[2] + j * col[2] * colSp + i * row[2] * rowSp;
         const [cx, cy, cz] = multiplyMatrixVector(registrationMatrix, [Xw, Yw, Zw, 1]).slice(0, 3);
         const worldOffset = [cx - ctOrigin[0], cy - ctOrigin[1], cz - ctOrigin[2]];
-        const px = dot(worldOffset, ctCol) / (ctColSp || 1);
-        const py = dot(worldOffset, ctRow) / (ctRowSp || 1);
+        // Pixel X along CT column dir; Pixel Y along CT row dir (optionally swapped)
+        const Xdir = swapRC ? ctRow : ctCol;
+        const Ydir = swapRC ? ctCol : ctRow;
+        const Xsp = swapRC ? ctRowSp : ctColSp;
+        const Ysp = swapRC ? ctColSp : ctRowSp;
+        const px = dot(worldOffset, Xdir) / (Xsp || 1);
+        const py = dot(worldOffset, Ydir) / (Ysp || 1);
         return [ctTransform.offsetX + px * ctTransform.scale, ctTransform.offsetY + py * ctTransform.scale];
       };
 
-      const [x0, y0] = mapPoint(0, 0);
+      // Map pixel center (0,0); anchor needs top-left corner → subtract half-step along each basis
+      const [x0c, y0c] = mapPoint(0, 0);
       const [xU, yU] = mapPoint(1, 0); // +1 col pixel
       const [xV, yV] = mapPoint(0, 1); // +1 row pixel
-      const Ux = xU - x0, Uy = yU - y0; // column basis in canvas
-      const Vx = xV - x0, Vy = yV - y0; // row basis in canvas
+      const Ux = xU - x0c, Uy = yU - y0c; // column basis in canvas
+      const Vx = xV - x0c, Vy = yV - y0c; // row basis in canvas
+      const halfPixel = !!(window as any).__FUSION_HALF_PIXEL__;
+      const x0 = halfPixel ? (x0c - 0.5 * Ux - 0.5 * Vx) : x0c;
+      const y0 = halfPixel ? (y0c - 0.5 * Uy - 0.5 * Vy) : y0c;
 
       // Draw with affine transform
       ctx.save();
@@ -705,8 +846,30 @@ export async function renderFusionOverlay(
       ctx.drawImage(temp, 0, 0);
       ctx.restore();
 
-      console.log(`✅ AFFINE REGISTRATION:`);
-      console.log(`  Canvas basis U=(${Ux.toFixed(3)}, ${Uy.toFixed(3)}), V=(${Vx.toFixed(3)}, ${Vy.toFixed(3)}) at (${x0.toFixed(1)}, ${y0.toFixed(1)})`);
+      // Optional axis overlay when debugging
+      try {
+        if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
+          const len = 50; // pixels in secondary image space
+          const ux = Ux * len, uy = Uy * len;
+          const vx = Vx * len, vy = Vy * len;
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 0.9;
+          ctx.lineWidth = 2;
+          // U axis (columns) - red
+          ctx.strokeStyle = '#ff5555';
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + ux, y0 + uy); ctx.stroke();
+          // V axis (rows) - lime
+          ctx.strokeStyle = '#55ff55';
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + vx, y0 + vy); ctx.stroke();
+          ctx.restore();
+        }
+      } catch {}
+
+      try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
+        console.log(`✅ AFFINE REGISTRATION:`);
+        console.log(`  Canvas basis U=(${Ux.toFixed(3)}, ${Uy.toFixed(3)}), V=(${Vx.toFixed(3)}, ${Vy.toFixed(3)}) at (${x0.toFixed(1)}, ${y0.toFixed(1)})`);
+      }} catch {}
       return; // Avoid double-draw; we've rendered using affine mapping
     }
   }
@@ -745,8 +908,9 @@ export async function renderFusionOverlay(
     if (iop.length >= 6) {
       const r = [iop[0], iop[1], iop[2]]; // row direction
       const c = [iop[3], iop[4], iop[5]]; // column direction
-      // Project world offset onto CT row/column axes and convert to pixels
+      // Project world offset onto CT column/row axes and convert to pixels
       const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+      // Pixel X (columns) varies along CT column direction; Pixel Y (rows) varies along CT row direction
       const offsetAlongColMM = dot(worldOffset, c);
       const offsetAlongRowMM = dot(worldOffset, r);
       pixelOffsetX = offsetAlongColMM / (colSpacing || 1);
@@ -761,14 +925,16 @@ export async function renderFusionOverlay(
     drawX = ctTransform.offsetX + (pixelOffsetX * ctTransform.scale);
     drawY = ctTransform.offsetY + (pixelOffsetY * ctTransform.scale);
     
-    console.log(`✅ SIMPLIFIED REGISTRATION:`);
-    console.log(`  CT origin (slice): [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
-    console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
-    console.log(`  MRI→CT origin: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
-    console.log(`  World offset (mm): [${worldOffset[0].toFixed(1)}, ${worldOffset[1].toFixed(1)}, ${worldOffset[2].toFixed(1)}]`);
-    console.log(`  Pixel offset (proj): [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
-    console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
-    console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
+    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) {
+      console.log(`✅ SIMPLIFIED REGISTRATION:`);
+      console.log(`  CT origin (slice): [${ctOrigin[0].toFixed(1)}, ${ctOrigin[1].toFixed(1)}, ${ctOrigin[2].toFixed(1)}]`);
+      console.log(`  MRI origin: [${mriOrigin[0].toFixed(1)}, ${mriOrigin[1].toFixed(1)}, ${mriOrigin[2].toFixed(1)}]`);
+      console.log(`  MRI→CT origin: [${mriCT_x.toFixed(1)}, ${mriCT_y.toFixed(1)}, ${mriCT_z.toFixed(1)}]`);
+      console.log(`  World offset (mm): [${worldOffset[0].toFixed(1)}, ${worldOffset[1].toFixed(1)}, ${worldOffset[2].toFixed(1)}]`);
+      console.log(`  Pixel offset (proj): [${pixelOffsetX.toFixed(1)}, ${pixelOffsetY.toFixed(1)}]px`);
+      console.log(`  Canvas position: [${drawX.toFixed(1)}, ${drawY.toFixed(1)}]`);
+      console.log(`  MRI size: [${drawW.toFixed(1)}, ${drawH.toFixed(1)}]`);
+    }} catch {}
   } else if (!ctTransform) {
     console.warn('⚠️ No CT transform available for fusion alignment');
     // Fallback: center the MRI
@@ -785,16 +951,16 @@ export async function renderFusionOverlay(
   // Draw the MRI using the already calculated position and size
   if (drawX !== undefined && drawY !== undefined && drawW !== undefined && drawH !== undefined) {
     ctx.drawImage(temp, drawX, drawY, drawW, drawH);
-    console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`);
+    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ MRI overlay drawn: size=${drawW.toFixed(1)}x${drawH.toFixed(1)}, pos=(${drawX.toFixed(1)},${drawY.toFixed(1)}), opacity=${fusionOpacity}`); } catch {}
   } else {
     // Fallback to centered positioning if calculations failed
     const centerX = (canvasWidth - w) / 2;
     const centerY = (canvasHeight - h) / 2;
     ctx.drawImage(temp, centerX, centerY, w, h);
-    console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`);
+    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ MRI overlay drawn (fallback): centered at (${centerX.toFixed(1)},${centerY.toFixed(1)})`); } catch {}
   }
   
-  console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+  try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`✓ Fusion complete: opacity=${fusionOpacity}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`); } catch {}
   // NO RESTORE - caller manages the transform state
 
   // Optional on-canvas debug overlay when window.__FUSION_DEBUG__ is truthy
@@ -805,14 +971,21 @@ export async function renderFusionOverlay(
       ctx.globalAlpha = 1;
       ctx.setTransform(1, 0, 0, 1, 0, 0); // screen space for text
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(8, 8, 360, 64);
+      ctx.fillRect(8, 8, 420, 84);
       ctx.fillStyle = '#0ff';
       ctx.font = `${fontSize}px monospace`;
       const zVals = transformedMRI.map(t => t.zInCT);
       const minZ = Math.min(...zVals);
       const maxZ = Math.max(...zVals);
-      ctx.fillText(`Fusion Z: CT=${ctSliceZ.toFixed(2)}mm | MRI=[${minZ.toFixed(1)}, ${maxZ.toFixed(1)}]`, 14, 28);
-      ctx.fillText(`Size=${drawW?.toFixed(0)}x${drawH?.toFixed(0)} px  Opacity=${Math.round(fusionOpacity*100)}%`, 14, 28+fontSize+2);
+      const mode = (function(){
+        // crude detection by last logs: if draw via setTransform happened, basis vectors non-zero
+        // we can't read them here easily; infer by registration presence and CT dirs
+        return (registrationMatrix && registrationMatrix.length === 16 && (Array.isArray(ctSeriesIOP) || (primaryImage as any).imageOrientation)) ? 'AFFINE' : 'SIMPLE';
+      })();
+      const flags = `${(window as any).__FUSION_SWAP_RC__ ? 'SwapRC ' : ''}${(window as any).__FUSION_HALF_PIXEL__ ? 'HalfPx ' : ''}`.trim();
+      ctx.fillText(`Fusion Z: CT=${ctSliceZ.toFixed(2)}${clamped ? ' (clamped)' : ''} | Secondary=[${minZ.toFixed(1)}, ${maxZ.toFixed(1)}]`, 14, 28);
+      ctx.fillText(`Size=${drawW?.toFixed(0)}x${drawH?.toFixed(0)}  Opacity=${Math.round(fusionOpacity*100)}%  Mode=${mode}${flags? '  '+flags : ''}`, 14, 28+fontSize+2);
+      ctx.fillText(`CT sp=[${ctSpacingArr.map(v=>v.toFixed(3)).join(', ')}]  Sec sp=[${mriSpacingArr?.map(v=>v.toFixed(3)).join(', ')}]`, 14, 28+2*(fontSize+2));
       ctx.restore();
     }
   } catch { /* noop */ }

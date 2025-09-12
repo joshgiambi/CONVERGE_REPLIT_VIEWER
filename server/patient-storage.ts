@@ -22,6 +22,51 @@ export class PatientStorage {
   }
 
   /**
+   * Create or update a friendly alias folder for a patient name that points to the canonical
+   * DICOM Patient ID folder. This avoids breaking existing file paths while enabling lookups
+   * by patient name (e.g., HN_PETFUSE → sZFwgkMvBgdKDWqF8A92wuD3q).
+   */
+  ensureNameAlias(patientId: string, patientName?: string): void {
+    try {
+      if (!patientName) return;
+      const canonical = this.getPatientPath(patientId);
+      if (!fs.existsSync(canonical)) return; // nothing to alias yet
+
+      const aliasName = this.sanitizeId(patientName);
+      if (!aliasName || aliasName === this.sanitizeId(patientId)) return; // same as id
+
+      const aliasPath = path.join(this.baseStoragePath, aliasName);
+
+      // If alias exists and points to a wrong location, remove it
+      if (fs.existsSync(aliasPath)) {
+        try {
+          const stat = fs.lstatSync(aliasPath);
+          if (stat.isSymbolicLink()) {
+            const target = fs.readlinkSync(aliasPath);
+            if (path.resolve(path.dirname(aliasPath), target) !== path.resolve(canonical)) {
+              fs.unlinkSync(aliasPath);
+            } else {
+              return; // correct alias already exists
+            }
+          } else {
+            // If it's a real directory/file with same name, skip to avoid data loss
+            return;
+          }
+        } catch {}
+      }
+
+      // Create alias symlink pointing to canonical folder
+      try {
+        const relativeTarget = path.relative(path.dirname(aliasPath), canonical) || canonical;
+        fs.symlinkSync(relativeTarget, aliasPath, 'dir');
+        console.log(`Created patient alias: ${aliasName} -> ${canonical}`);
+      } catch (err) {
+        console.warn(`Failed to create alias for patient ${patientId} (${aliasName}):`, err);
+      }
+    } catch {}
+  }
+
+  /**
    * Get the storage path for a patient
    */
   getPatientPath(patientId: string): string {

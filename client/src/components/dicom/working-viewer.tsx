@@ -183,6 +183,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
+  // Fusion debug support
+  const [showFusionDebug, setShowFusionDebug] = useState(false);
+  const [fusionDebugText, setFusionDebugText] = useState('');
+  const [showRegDetails, setShowRegDetails] = useState(false);
+  const [regDetailsText, setRegDetailsText] = useState('');
+  const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
+  const fusionIssueRef = useRef<string | null>(null);
   
   // Cache for MRI slice mappings to prevent recalculation during scrolling
   const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
@@ -198,6 +205,194 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   
+  const compileFusionDebug = useCallback(() => {
+    try {
+      const primaryFirst: any = images?.[0];
+      const secondaryFirst: any = secondaryImages?.[0];
+      const pFoR = (primaryFirst?.metadata?.frameOfReferenceUID || primaryFirst?.frameOfReferenceUID || primaryFirst?.imageMetadata?.frameOfReferenceUID || '');
+      const sFoR = (secondaryFirst?.metadata?.frameOfReferenceUID || secondaryFirst?.frameOfReferenceUID || secondaryFirst?.imageMetadata?.frameOfReferenceUID || '');
+      const ctSpacing = primaryFirst?.pixelSpacing ?? primaryFirst?.imageMetadata?.pixelSpacing ?? 'unknown';
+      const mrSpacing = secondaryFirst?.pixelSpacing ?? secondaryFirst?.imageMetadata?.pixelSpacing ?? 'unknown';
+      const trLen = transformedMRIPositions.current?.length || 0;
+      let zMin = null as number | null, zMax = null as number | null;
+      if (trLen > 0) {
+        const zs = transformedMRIPositions.current.map((t: any) => t.zInCT);
+        zMin = Math.min(...zs); zMax = Math.max(...zs);
+      }
+      // Compute current CT slice Z (projected) like the renderer does
+      let ctSliceZProjected: number | null = null;
+      try {
+        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+        const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
+        const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
+        const curPos = toNum(images[currentIndex]?.imagePosition || images[currentIndex]?.imageMetadata?.imagePosition);
+        if (baseIOP.length >= 6 && basePos.length >= 3 && curPos.length >= 3) {
+          const r = [baseIOP[0], baseIOP[1], baseIOP[2]];
+          const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
+          const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
+          const nl = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nl, n[1]/nl, n[2]/nl];
+          const dx = curPos[0] - basePos[0];
+          const dy = curPos[1] - basePos[1];
+          const dz = curPos[2] - basePos[2];
+          ctSliceZProjected = dx*nn[0] + dy*nn[1] + dz*nn[2];
+        }
+      } catch {}
+      // Derive an up-to-date reason to avoid stale labels
+      let derivedReason: string = fusionIssueRef.current || 'manual';
+      try {
+        const trLen = transformedMRIPositions.current?.length || 0;
+        if (!secondarySeriesId || !secondaryImages.length) derivedReason = 'no-secondary-images';
+        else if (!registrationMatrix || registrationMatrix.length !== 16) derivedReason = 'no-registration-matrix';
+        else if (!trLen) derivedReason = 'no-transformed-positions';
+        else derivedReason = 'ok';
+      } catch {}
+
+      const debug = {
+        reason: derivedReason,
+        primarySeriesId: seriesId,
+        secondarySeriesId,
+        primaryFoR: pFoR,
+        secondaryFoR: sFoR,
+        ctSpacing,
+        mrSpacing,
+        ctSliceZProjected,
+        registrationMatrixLength: registrationMatrix?.length || 0,
+        registrationMatrix: registrationMatrix,
+        resolve: lastResolveInfo,
+        transformedCount: trLen,
+        transformedZRange: trLen ? [zMin, zMax] : null,
+        ctTransform: ctTransform.current,
+      };
+      return JSON.stringify(debug, null, 2);
+    } catch (e) {
+      return `Failed to compile debug: ${String(e)}`;
+    }
+  }, [images, secondaryImages, seriesId, secondarySeriesId, registrationMatrix, lastResolveInfo]);
+
+  const openFusionDebug = useCallback((reason: string) => {
+    fusionIssueRef.current = reason;
+    const txt = compileFusionDebug();
+    setFusionDebugText(txt);
+    setShowFusionDebug(true);
+  }, [compileFusionDebug]);
+
+  const openRegDetails = useCallback(async () => {
+    try {
+      const lines: string[] = [];
+      lines.push('=== Current Applied Registration (viewer) ===');
+      if (registrationMatrix && registrationMatrix.length === 16) {
+        const R = [
+          [registrationMatrix[0], registrationMatrix[1], registrationMatrix[2]],
+          [registrationMatrix[4], registrationMatrix[5], registrationMatrix[6]],
+          [registrationMatrix[8], registrationMatrix[9], registrationMatrix[10]],
+        ];
+        const T = [registrationMatrix[3], registrationMatrix[7], registrationMatrix[11]];
+        const sy = Math.sqrt(R[0][0]*R[0][0] + R[1][0]*R[1][0]);
+        let rx=0, ry=0, rz=0; if (sy>1e-6){ rx=Math.atan2(R[2][1],R[2][2]); ry=Math.atan2(-R[2][0],sy); rz=Math.atan2(R[1][0],R[0][0]); }
+        const deg=(r:number)=> (r*180/Math.PI);
+        lines.push(`T (mm): [${T.map(v=>v.toFixed(4)).join(', ')}]`);
+        lines.push(`R (deg ZYX): [${deg(rx).toFixed(4)}, ${deg(ry).toFixed(4)}, ${deg(rz).toFixed(4)}]`);
+      } else {
+        lines.push('No registration matrix applied');
+      }
+
+      if (seriesId && secondarySeriesId) {
+        lines.push('');
+        lines.push('=== Candidates from DICOM REG (server) ===');
+        const url = `/api/registration/inspect-all?primarySeriesId=${seriesId}&secondarySeriesId=${secondarySeriesId}`;
+        const r = await fetch(url, { cache: 'no-store' as RequestCache });
+        if (r.ok) {
+          const data = await r.json();
+          const cands: any[] = data?.candidates || [];
+          if (cands.length === 0) {
+            lines.push('No candidates found');
+          } else {
+            cands.forEach((c, idx) => {
+              const file = (c.file||'').split('/').pop();
+              const asT = c.asIs?.translationMm || [];
+              const asR = c.asIs?.rotationDegZYX || {};
+              const ivT = c.inverted?.translationMm || [];
+              const ivR = c.inverted?.rotationDegZYX || {};
+              lines.push(`-- Candidate ${idx+1}: ${file}`);
+              lines.push(`   FoR src=${c.sourceFoR||'?'}, tgt=${c.targetFoR||'?'}`);
+              lines.push(`   asIs  T (mm): [${asT.map((v:number)=>v.toFixed(4)).join(', ')}]  R(deg ZYX): [${(asR.x??0).toFixed(4)}, ${(asR.y??0).toFixed(4)}, ${(asR.z??0).toFixed(4)}]`);
+              lines.push(`   inv   T (mm): [${ivT.map((v:number)=>v.toFixed(4)).join(', ')}]  R(deg ZYX): [${(ivR.x??0).toFixed(4)}, ${(ivR.y??0).toFixed(4)}, ${(ivR.z??0).toFixed(4)}]`);
+            });
+          }
+        } else {
+          lines.push(`Failed to fetch candidates: ${r.status}`);
+        }
+      }
+
+      setRegDetailsText(lines.join('\n'));
+      setShowRegDetails(true);
+    } catch (e: any) {
+      setRegDetailsText(`Failed to compile REG details: ${String(e?.message||e)}`);
+      setShowRegDetails(true);
+    }
+  }, [registrationMatrix, seriesId, secondarySeriesId]);
+
+  // Expose a temporary global to trigger the debug popup from anywhere (e.g., control panel)
+  useEffect(() => {
+    try {
+      (window as any).__OPEN_FUSION_DEBUG__ = () => openFusionDebug('manual');
+      (window as any).__OPEN_REG_DETAILS__ = () => openRegDetails();
+    } catch {}
+    return () => {
+      try { delete (window as any).__OPEN_FUSION_DEBUG__; } catch {}
+      try { delete (window as any).__OPEN_REG_DETAILS__; } catch {}
+    };
+  }, [openFusionDebug, openRegDetails]);
+
+  // Expose quick matrix toggles for debugging (invert/transpose/reset)
+  useEffect(() => {
+    try {
+      (window as any).__FUSION_USE_INVERT__ = () => {
+        if (!registrationMatrix) return;
+        const inv = invertMatrix4x4(registrationMatrix);
+        if (inv) {
+          setRegistrationMatrix(inv);
+          registrationMatrixRef.current = inv;
+          // Force re-precompute positions on next render
+          transformedMRIPositions.current = [];
+          mriSliceMappingCache.current.clear();
+          scheduleRender();
+        }
+      };
+      (window as any).__FUSION_USE_TRANSPOSE__ = () => {
+        if (!registrationMatrix) return;
+        const tr = transposeMatrix4x4(registrationMatrix);
+        setRegistrationMatrix(tr);
+        registrationMatrixRef.current = tr;
+        transformedMRIPositions.current = [];
+        mriSliceMappingCache.current.clear();
+        scheduleRender();
+      };
+      (window as any).__FUSION_RESET_MATRIX__ = async () => {
+        // Re-fetch the original matrix via resolve API
+        try {
+          if (!seriesId || !secondarySeriesId) return;
+          const url = `/api/registration/resolve?primarySeriesId=${seriesId}&secondarySeriesId=${secondarySeriesId}`;
+          const r = await fetch(url, { cache: 'no-store' as RequestCache });
+          if (!r.ok) return;
+          const data = await r.json();
+          const m = Array.isArray(data?.matrixRowMajor4x4) && data.matrixRowMajor4x4.length === 16 ? (data.matrixRowMajor4x4 as number[]) : null;
+          setRegistrationMatrix(m);
+          registrationMatrixRef.current = m;
+          transformedMRIPositions.current = [];
+          mriSliceMappingCache.current.clear();
+          scheduleRender();
+        } catch {}
+      };
+    } catch {}
+    return () => {
+      try {
+        delete (window as any).__FUSION_USE_INVERT__;
+        delete (window as any).__FUSION_USE_TRANSPOSE__;
+        delete (window as any).__FUSION_RESET_MATRIX__;
+      } catch {}
+    };
+  }, [registrationMatrix, seriesId, secondarySeriesId]);
   // Crosshair position for MPR views (in pixel coordinates)
   const [crosshairPos, setCrosshairPos] = useState({ x: 256, y: 256 });
   const [crosshairMode, setCrosshairMode] = useState(false);
@@ -2469,7 +2664,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       });
 
-      console.log(`🎯 Found closest slice: index ${closestIndex}, distance ${closestDistance.toFixed(1)}mm`);
+    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`🎯 Found closest slice: index ${closestIndex}, distance ${closestDistance.toFixed(1)}mm`); } catch {}
       
       // Navigate to the closest slice
       setCurrentIndex(closestIndex);
@@ -2523,15 +2718,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (!r.ok) {
           setRegistrationMatrix(null);
           registrationMatrixRef.current = null;
+          setLastResolveInfo({ status: r.status, ok: false });
           return;
         }
         const data = await r.json();
         const m = Array.isArray(data?.matrixRowMajor4x4) && data.matrixRowMajor4x4.length === 16 ? (data.matrixRowMajor4x4 as number[]) : null;
         setRegistrationMatrix(m);
         registrationMatrixRef.current = m;
+        setLastResolveInfo({ status: 200, ok: true, data });
       } catch {
         setRegistrationMatrix(null);
         registrationMatrixRef.current = null;
+        setLastResolveInfo({ status: 0, ok: false });
       }
     };
     loadResolvedRegistration();
@@ -4064,7 +4262,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       // Render RT structure overlays if available
-      if (localRTStructures) {
+      if (rtStructures) {
         try {
           // Pass currentImage with its metadata attached
           const imageWithMetadata = {
@@ -4282,15 +4480,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
   
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    // Skip expensive fusion during rapid scrolling for better performance
-    if (isScrollingRef.current && fusionOpacity > 0) {
-      // Skip fusion rendering during active scrolling to maintain smooth performance
-      console.log("⚡ Skipping fusion during rapid scrolling");
-      return;
-    }
+    // Always render fusion; previous scroll-skip caused overlays to never appear
     
-    console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
-    console.log('🎯 FUSION RENDER DEBUG: Full state:', {
+    const FDEBUG = (() => { try { return !!((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG); } catch { return false; } })();
+    if (FDEBUG) console.log('🎯 FUSION RENDER DEBUG: renderFusionOverlayNew called');
+    if (FDEBUG) console.log('🎯 FUSION RENDER DEBUG: Full state:', {
       secondaryImagesLength: secondaryImages.length,
       secondarySeriesId,
       secondarySeriesType: typeof secondarySeriesId,
@@ -4302,24 +4496,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     });
     
     if (!secondaryImages.length || !secondarySeriesId) {
-      console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
+      if (FDEBUG) console.log("❌ Fusion not rendered - secondaryImages:", secondaryImages.length, "secondarySeriesId:", secondarySeriesId, "type:", typeof secondarySeriesId);
+      if (secondarySeriesId) openFusionDebug('no-secondary-images');
       return;
     }
     
     // If opacity is 0, skip rendering entirely
     if (fusionOpacity === 0) {
-      console.log("❌ Fusion opacity is 0, skipping overlay render");
+      if (FDEBUG) console.log("❌ Fusion opacity is 0, skipping overlay render");
       return;
     }
     
     if (!registrationMatrix || registrationMatrix.length !== 16) {
       console.error("CRITICAL: No registration matrix available - fusion cannot be displayed");
       setFusionAvailable(false);
+      openFusionDebug('no-registration-matrix');
       return;
     }
     
     if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
-      console.log("No transformed MRI positions available");
+      if (FDEBUG) console.log("No transformed MRI positions available");
+      openFusionDebug('no-transformed-positions');
       return;
     }
     
@@ -4392,7 +4589,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     } catch {}
 
-    console.log('🚀 About to call renderFusionOverlay with:', {
+    if (FDEBUG) console.log('🚀 About to call renderFusionOverlay with:', {
       ctSliceZ: ctSliceZProjected,
       fusionOpacity,
       canvasSize: `${canvas.width}x${canvas.height}`,
@@ -4456,9 +4653,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )
         : null),
       // Pass CT series IOP as a stable fallback
-      (images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || null)
+      (images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || null),
+      secondaryModality === 'PT',
+      secondaryModality === 'CT'
     );
-    
+    // Mark fusion healthy now that we rendered successfully
+    try { fusionIssueRef.current = null; setFusionAvailable(true); } catch {}
+
     console.log(`✅ Fusion overlay rendered: CT=${ctSliceZ}mm, opacity=${fusionOpacity}, MRI slices=${transformedMRIPositions.current.length}`);
   };
 
@@ -4507,7 +4708,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     canvas: HTMLCanvasElement,
     currentImage: any,
   ) => {
-    if (!localRTStructures || !currentImage) return;
+    const structuresRef = localRTStructures || externalRTStructures;
+    if (!structuresRef || !currentImage) return;
 
     // FIXED: Get current slice position from actual DICOM metadata with fallbacks
     let currentSlicePosition: number = currentIndex + 1; // Default fallback
@@ -4566,13 +4768,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       FINAL currentSlicePosition: ${currentSlicePosition}mm`);
     if (DEBUG) console.log(
       `📋 Available structures:`,
-      localRTStructures?.structures?.map((s: any) => s.structureName) || [],
+      structuresRef?.structures?.map((s: any) => s.structureName) || [],
     );
 
     // Get all RT structure Z positions to check coordinate space
     const allRTZPositions: number[] = [];
-    if (localRTStructures?.structures) {
-      localRTStructures.structures.forEach((structure: any) => {
+    if (structuresRef?.structures) {
+      structuresRef.structures.forEach((structure: any) => {
         structure.contours.forEach((contour: any) => {
           allRTZPositions.push(contour.slicePosition);
         });
@@ -4602,8 +4804,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Keep stroke at full opacity - only fill should be affected by opacity setting
     ctx.globalAlpha = 1;
 
-    if (localRTStructures?.structures) {
-      localRTStructures.structures.forEach((structure: any) => {
+    if (structuresRef?.structures) {
+      structuresRef.structures.forEach((structure: any) => {
       // Check if this structure is visible or if it's selected for editing/selection
       const isVisible = structureVisibility.get(structure.roiNumber);
       const isSelectedForEdit = selectedForEdit === structure.roiNumber;
@@ -5504,6 +5706,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 <span className={secondaryModality === 'PT' ? 'text-yellow-300' : 'text-purple-300'}>
                   ({Math.round(fusionOpacity * 100)}%)
                 </span>
+                <Button size="sm" variant="ghost" className="h-5 px-2 ml-2 text-[10px] hover:bg-gray-700/40"
+                  onClick={(e) => { e.stopPropagation(); setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
+                  title="Show fusion debug info">
+                  Debug
+                </Button>
               </Badge>
             )}
           </div>
@@ -5526,6 +5733,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 </span>
               </div>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2 text-xs hover:bg-gray-700/40"
+              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
+              title="Open Fusion Debug"
+            >
+              Fusion Debug
+            </Button>
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -5901,8 +6117,49 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   Delete Selected
                 </AlertDialogAction>
               </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Fusion Debug Aid */}
+        <AlertDialog open={showFusionDebug} onOpenChange={(open) => setShowFusionDebug(open)}>
+          <AlertDialogContent className="max-w-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Fusion Debug Info</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-gray-300">Copy and paste this back for analysis.</p>
+              <textarea
+                readOnly
+                value={fusionDebugText}
+                className="w-full h-64 p-2 text-xs bg-black/60 border border-gray-600 rounded-md text-gray-200 font-mono"
+              />
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Close</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { try { navigator.clipboard.writeText(fusionDebugText); } catch {} }}>Copy</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* REG Details popup */}
+        <AlertDialog open={showRegDetails} onOpenChange={(open) => setShowRegDetails(open)}>
+          <AlertDialogContent className="max-w-3xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Registration Details (for Eclipse compare)</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-2">
+              <textarea
+                readOnly
+                value={regDetailsText}
+                className="w-full h-80 p-2 text-xs bg-black/60 border border-gray-600 rounded-md text-gray-200 font-mono"
+              />
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Close</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { try { navigator.clipboard.writeText(regDetailsText); } catch {} }}>Copy</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
           {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
 
@@ -5920,6 +6177,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               mriWindowLevel={mriWindowLevel}
               onMriWindowLevelChange={setMriWindowLevel}
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
+              onOpenDebug={() => openFusionDebug('manual')}
             />
           )}
           

@@ -3,6 +3,8 @@ export interface DICOMSeries {
   seriesInstanceUID: string;
   seriesDescription: string;
   modality: string;
+  // Optional linkage populated by callers when combining study+series
+  studyId?: number;
   seriesNumber?: number;
   imageCount: number;
   sliceThickness?: string;

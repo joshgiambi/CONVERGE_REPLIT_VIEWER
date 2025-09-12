@@ -990,7 +990,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   rescaleIntercept: imageMetadata.rescaleIntercept,
                   rescaleSlope: imageMetadata.rescaleSlope,
                   fileName: imageMetadata.filename,
-                  filePath: imageMetadata.filePath || imageMetadata.filename // Use filePath if available
+                  filePath: imageMetadata.filePath || imageMetadata.filename, // Use filePath if available
+                  metadata: { frameOfReferenceUID: imageMetadata.frameOfReferenceUID }
                 });
               }
             }
@@ -2250,10 +2251,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const ipp = toArray(ds.string?.('x00200032'));
             const iop = toArray(ds.string?.('x00200037'));
             const ps = toArray(ds.string?.('x00280030'));
+            const forUid = ds.string?.('x00200052');
             const newMeta: any = (typeof img.metadata === 'string' ? (() => { try { return JSON.parse(img.metadata); } catch { return {}; } })() : (img.metadata || {}));
             if (ipp && ipp.length >= 3) newMeta.imagePositionPatient = ipp;
             if (iop && iop.length >= 6) newMeta.imageOrientationPatient = iop;
             if (ps && ps.length >= 2) newMeta.pixelSpacing = ps;
+            if (forUid) newMeta.frameOfReferenceUID = forUid;
             await storage.updateImageGeometry(img.id, {
               imagePosition: (ipp && ipp.length >= 3) ? `${ipp[0]}\\${ipp[1]}\\${ipp[2]}` : img.imagePosition || null,
               imageOrientation: (iop && iop.length >= 6) ? `${iop[0]}\\${iop[1]}\\${iop[2]}\\${iop[3]}\\${iop[4]}\\${iop[5]}` : img.imageOrientation || null,
@@ -2585,6 +2588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Resolve registration matrix for a chosen primary<-secondary pairing
+  // Searches patient-wide for a REG that best references the requested series.
   // GET /api/registration/resolve?primarySeriesId=..&secondarySeriesId=..
   app.get("/api/registration/resolve", async (req, res) => {
     try {
@@ -2598,22 +2602,236 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const secondarySeries = await storage.getSeriesById(secondarySeriesId);
       if (!primarySeries || !secondarySeries) return res.status(404).json({ error: 'Series not found' });
 
-      // Locate a REG file within the primary study (or its patient’s studies if desired)
-      const { findRegFileForStudy } = await import('./registration/reg-resolver.ts');
+      // Locate REG files patient-wide and pick the one that best references primary/secondary
+      const { findRegFileForStudy, findAllRegFilesForPatient } = await import('./registration/reg-resolver.ts');
       const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
-      const found = await findRegFileForStudy(primarySeries.studyId);
-      if (!found) return res.status(404).json({ error: 'No REG file located for study' });
 
-      const parsed = parseDicomRegistrationFromFile(found.filePath);
-      if (!parsed || !parsed.matrixRowMajor4x4) return res.status(404).json({ error: 'No valid matrix in REG' });
-
-      // Build metadata for direction decision
+      // Resolve patientId for primary study to search across all their studies
+      const primaryStudy = await storage.getStudy(primarySeries.studyId);
+      let candidates: Array<{ file: any; parsed: any }>=[];
+      if (primaryStudy?.patientId) {
+        const all = await findAllRegFilesForPatient(primaryStudy.patientId);
+        for (const f of all) {
+          const p = parseDicomRegistrationFromFile(f.filePath);
+          if (p && p.matrixRowMajor4x4) candidates.push({ file: f, parsed: p });
+        }
+      }
+      // Fallback to within the primary study only
+      if (candidates.length === 0) {
+        const f = await findRegFileForStudy(primarySeries.studyId);
+        if (f) {
+          const p = parseDicomRegistrationFromFile(f.filePath);
+          if (p && p.matrixRowMajor4x4) candidates.push({ file: f, parsed: p });
+        }
+      }
+      const primaryUID = primarySeries.seriesInstanceUID;
+      const secondaryUID = secondarySeries.seriesInstanceUID;
+      // Build FoRs for identity fallback if no REG exists
       const primaryImages = await storage.getImagesBySeriesId(primarySeriesId);
       const secondaryImages = await storage.getImagesBySeriesId(secondarySeriesId);
-      const pFoR = (primaryImages[0] as any)?.frameOfReferenceUID || (primaryImages[0] as any)?.metadata?.frameOfReferenceUID || '';
-      const sFoR = (secondaryImages[0] as any)?.frameOfReferenceUID || (secondaryImages[0] as any)?.metadata?.frameOfReferenceUID || '';
+      let pFoR = (primaryImages[0] as any)?.frameOfReferenceUID || (primaryImages[0] as any)?.metadata?.frameOfReferenceUID || '';
+      let sFoR = (secondaryImages[0] as any)?.frameOfReferenceUID || (secondaryImages[0] as any)?.metadata?.frameOfReferenceUID || '';
+      // If FoR missing in DB, parse directly from the first DICOM file to be robust
+      const readFoR = (filePath: string | null | undefined): string => {
+        try {
+          if (!filePath) return '';
+          const fp = filePath.startsWith('storage/') ? filePath : filePath;
+          if (!fs.existsSync(fp)) return '';
+          const buffer = fs.readFileSync(fp);
+          const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+          return ds.string?.('x00200052')?.trim() || '';
+        } catch { return ''; }
+      };
+      if (!pFoR && primaryImages[0]?.filePath) pFoR = readFoR((primaryImages[0] as any).filePath);
+      if (!sFoR && secondaryImages[0]?.filePath) sFoR = readFoR((secondaryImages[0] as any).filePath);
+      if (candidates.length === 0) {
+        if (pFoR && sFoR && pFoR === sFoR) {
+          return res.json({
+            primary: { id: primarySeriesId, seriesInstanceUID: primarySeries.seriesInstanceUID },
+            secondary: { id: secondarySeriesId, seriesInstanceUID: secondarySeries.seriesInstanceUID },
+            sourceFoR: sFoR,
+            targetFoR: pFoR,
+            referencedSeriesInstanceUids: [],
+            matrixRowMajor4x4: [
+              1,0,0,0,
+              0,1,0,0,
+              0,0,1,0,
+              0,0,0,1
+            ],
+            orientationRows: { X: [1,0,0], Y: [0,1,0], Z: [0,0,1] },
+            translation: [0,0,0],
+            notes: ['Identity transform (same Frame of Reference)']
+          });
+        }
+        return res.status(404).json({ error: 'No REG file located for patient or study' });
+      }
 
-      const m = parsed.matrixRowMajor4x4 as number[];
+      // Try to COMPOSE via Frame-of-Reference graph if possible
+      try {
+        if (pFoR && sFoR) {
+          const edges: Array<{ from: string; to: string; M: number[] }> = [];
+          const invertLocal = (mat: number[]) => {
+            const R = [
+              [mat[0], mat[1], mat[2]],
+              [mat[4], mat[5], mat[6]],
+              [mat[8], mat[9], mat[10]]
+            ];
+            const Rt = [
+              [R[0][0], R[1][0], R[2][0]],
+              [R[0][1], R[1][1], R[2][1]],
+              [R[0][2], R[1][2], R[2][2]]
+            ];
+            const t = [mat[3], mat[7], mat[11]];
+            const tin = [
+              -(Rt[0][0]*t[0] + Rt[0][1]*t[1] + Rt[0][2]*t[2]),
+              -(Rt[1][0]*t[0] + Rt[1][1]*t[1] + Rt[1][2]*t[2]),
+              -(Rt[2][0]*t[0] + Rt[2][1]*t[1] + Rt[2][2]*t[2])
+            ];
+            return [
+              Rt[0][0], Rt[0][1], Rt[0][2], tin[0],
+              Rt[1][0], Rt[1][1], Rt[1][2], tin[1],
+              Rt[2][0], Rt[2][1], Rt[2][2], tin[2],
+              0, 0, 0, 1
+            ];
+          };
+          const mulLocal = (A: number[], B: number[]) => {
+            const r = new Array(16).fill(0);
+            for (let i=0;i<4;i++) for (let j=0;j<4;j++) for (let k=0;k<4;k++) r[i*4+j]+=A[i*4+k]*B[k*4+j];
+            return r;
+          };
+          // Helper to read FrameOfReferenceUID from a seriesInstanceUID by peeking at an image file
+          const readFoRBySeriesUID = async (seriesUID: string): Promise<string> => {
+            try {
+              const ser = await storage.getSeriesByUID(seriesUID);
+              if (!ser) return '';
+              const imgs = await storage.getImagesBySeriesId(ser.id);
+              const filePath = (imgs?.[0] as any)?.filePath;
+              if (!filePath || !fs.existsSync(filePath)) return '';
+              const buffer = fs.readFileSync(filePath);
+              const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+              return ds.string?.('x00200052')?.trim() || '';
+            } catch { return ''; }
+          };
+
+          for (const c of candidates) {
+            const parsed = c.parsed;
+            const cands = Array.isArray(parsed?.candidates) && parsed.candidates.length
+              ? parsed.candidates
+              : [{ matrix: parsed?.matrixRowMajor4x4, sourceFoR: parsed?.sourceFrameOfReferenceUid, targetFoR: parsed?.targetFrameOfReferenceUid, referenced: parsed?.referencedSeriesInstanceUids }];
+            for (const cand of cands) {
+              let from = (cand as any)?.sourceFoR || parsed?.sourceFrameOfReferenceUid || '';
+              let to = (cand as any)?.targetFoR || parsed?.targetFrameOfReferenceUid || '';
+              const M = (cand as any)?.matrix as number[] | undefined;
+              if (!Array.isArray(M) || M.length !== 16) continue;
+
+              // Fallback: if FoRs are missing or identical, try to deduce from referenced series FoRs
+              if (!from || !to || from === to) {
+                try {
+                  const refs: string[] = (cand as any)?.referenced || parsed?.referencedSeriesInstanceUids || [];
+                  const uniqFoRs = new Set<string>();
+                  for (const uid of refs) {
+                    const f = await readFoRBySeriesUID(uid);
+                    if (f) uniqFoRs.add(f);
+                  }
+                  if (uniqFoRs.size >= 2) {
+                    const list = Array.from(uniqFoRs.values());
+                    // Prefer mapping secondary FoR -> primary FoR if both present
+                    if (sFoR && pFoR && uniqFoRs.has(sFoR) && uniqFoRs.has(pFoR)) {
+                      from = sFoR; to = pFoR;
+                    } else {
+                      // Arbitrary but deterministic pick of two distinct FoRs
+                      from = list[0]; to = list[1];
+                    }
+                  }
+                } catch {}
+              }
+
+              if (from && to) {
+                edges.push({ from, to, M });
+                edges.push({ from: to, to: from, M: invertLocal(M) });
+              }
+            }
+          }
+          if (edges.length) {
+            // BFS from sFoR to pFoR
+            const q: string[] = [sFoR];
+            const prev = new Map<string, { prev: string | null; M: number[] | null }>();
+            prev.set(sFoR, { prev: null, M: null });
+            while (q.length) {
+              const cur = q.shift()!;
+              if (cur === pFoR) break;
+              for (const e of edges.filter(e => e.from === cur)) {
+                if (!prev.has(e.to)) { prev.set(e.to, { prev: cur, M: e.M }); q.push(e.to); }
+              }
+            }
+            if (prev.has(pFoR)) {
+              const chain: number[][] = [];
+              let cur: string | null = pFoR;
+              while (cur && prev.get(cur)?.prev !== null) {
+                const step = prev.get(cur)!;
+                if (step.M) chain.unshift(step.M);
+                cur = prev.get(cur)!.prev;
+              }
+              if (chain.length) {
+                let Mtot = chain[0];
+                for (let i=1;i<chain.length;i++) Mtot = mulLocal(chain[i], Mtot);
+                return res.json({
+                  primary: { id: primarySeriesId, seriesInstanceUID: primarySeries.seriesInstanceUID },
+                  secondary: { id: secondarySeriesId, seriesInstanceUID: secondarySeries.seriesInstanceUID },
+                  sourceFoR: sFoR || null,
+                  targetFoR: pFoR || null,
+                  referencedSeriesInstanceUids: [],
+                  matrixRowMajor4x4: Mtot,
+                  orientationRows: { X: [Mtot[0], Mtot[1], Mtot[2]], Y: [Mtot[4], Mtot[5], Mtot[6]], Z: [Mtot[8], Mtot[9], Mtot[10]] },
+                  translation: [Mtot[3], Mtot[7], Mtot[11]],
+                  notes: ['Composed across multiple REG files using Frame of Reference graph']
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('REG composition failed; falling back to single candidate', e);
+      }
+
+      // Score candidates: +2 if references primary, +2 if references secondary, +1 if FoR matches, highest wins
+
+      let best = candidates[0];
+      let bestScore = -Infinity;
+      for (const c of candidates) {
+        const refs: string[] = c.parsed.referencedSeriesInstanceUids || [];
+        const tFoR = c.parsed.targetFrameOfReferenceUid || '';
+        const srcFoR = c.parsed.sourceFrameOfReferenceUid || '';
+        let score = 0;
+        if (refs.includes(primaryUID)) score += 2;
+        if (refs.includes(secondaryUID)) score += 2;
+        if (pFoR && (pFoR === tFoR || pFoR === srcFoR)) score += 1;
+        if (sFoR && (sFoR === tFoR || sFoR === srcFoR)) score += 1;
+        if (score > bestScore) { bestScore = score; best = c; }
+      }
+
+      const parsed = best.parsed;
+      // If parser exposed multiple candidates, pick the one whose FoR best matches primary/secondary
+      let chosenMatrix: number[] | null = null;
+      if (Array.isArray(parsed?.candidates) && parsed.candidates.length) {
+        // Score by FoR match first, then by referenced series membership
+        const scoreCand = (cand: any) => {
+          let s = 0;
+          if (cand?.targetFoR && pFoR && cand.targetFoR === pFoR) s += 5;
+          if (cand?.sourceFoR && sFoR && cand.sourceFoR === sFoR) s += 5;
+          if (cand?.referenced?.includes(primaryUID)) s += 2;
+          if (cand?.referenced?.includes(secondaryUID)) s += 2;
+          if (Array.isArray(cand?.matrix) && cand.matrix.length === 16 && !cand.matrix.every((v: number, i: number) => (i % 5 === 0 ? v === 1 : v === 0))) s += 1;
+          return s;
+        };
+        const sorted = parsed.candidates.slice().sort((a: any, b: any) => scoreCand(b) - scoreCand(a));
+        chosenMatrix = (sorted[0]?.matrix && sorted[0].matrix.length === 16) ? sorted[0].matrix : null;
+      }
+
+      const m = chosenMatrix || (parsed.matrixRowMajor4x4 as number[]);
+      if (!m || m.length !== 16) return res.status(404).json({ error: 'No valid matrix in REG' });
+
+      // Build metadata for direction decision
       const asRows = (mat: number[]) => ({
         X: [mat[0], mat[1], mat[2]],
         Y: [mat[4], mat[5], mat[6]],
@@ -2654,6 +2872,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (pFoR === sFoRreg) chosen = invert(m);
       }
 
+      // Final fallback: if no REG really references the pair but FoR are equal, use identity
+      if (!chosen && pFoR && sFoR && pFoR === sFoR) {
+        chosen = [
+          1,0,0,0,
+          0,1,0,0,
+          0,0,1,0,
+          0,0,0,1
+        ];
+      }
+
+      if (!chosen) return res.status(404).json({ error: 'No suitable registration matrix found' });
+
       return res.json({
         primary: { id: primarySeriesId, seriesInstanceUID: primarySeries.seriesInstanceUID },
         secondary: { id: secondarySeriesId, seriesInstanceUID: secondarySeries.seriesInstanceUID },
@@ -2668,6 +2898,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('resolve registration failed', err);
       res.status(500).json({ error: 'resolve failed', details: err?.message });
+    }
+  });
+
+  // Inspect all candidate registrations for the patient's REG files with detailed matrices
+  // GET /api/registration/inspect-all?primarySeriesId=..&secondarySeriesId=..
+  app.get("/api/registration/inspect-all", async (req, res) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      const secondarySeriesId = Number(req.query.secondarySeriesId);
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId and secondarySeriesId required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) return res.status(404).json({ error: 'Series not found' });
+
+      const { findAllRegFilesForPatient } = await import('./registration/reg-resolver.ts');
+      const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+
+      const primaryStudy = await storage.getStudy(primarySeries.studyId);
+      const out: any[] = [];
+
+      // Helper math
+      const toEulerZYX = (R: number[][]) => {
+        const sy = Math.sqrt(R[0][0]*R[0][0] + R[1][0]*R[1][0]);
+        let x=0, y=0, z=0;
+        if (sy > 1e-6) { x = Math.atan2(R[2][1], R[2][2]); y = Math.atan2(-R[2][0], sy); z = Math.atan2(R[1][0], R[0][0]); }
+        const d = (r:number)=>r*180/Math.PI; return { x:d(x), y:d(y), z:d(z) };
+      };
+      const invertRigid = (m: number[]) => {
+        const R = [[m[0],m[1],m[2]],[m[4],m[5],m[6]],[m[8],m[9],m[10]]];
+        const t = [m[3],m[7],m[11]];
+        const Rt = [[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
+        const tin = [-(Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2]),-(Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2]),-(Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2])];
+        return [Rt[0][0],Rt[0][1],Rt[0][2],tin[0], Rt[1][0],Rt[1][1],Rt[1][2],tin[1], Rt[2][0],Rt[2][1],Rt[2][2],tin[2], 0,0,0,1];
+      };
+
+      let pFoR = '';
+      let sFoR = '';
+      try {
+        const pImgs = await storage.getImagesBySeriesId(primarySeriesId);
+        const sImgs = await storage.getImagesBySeriesId(secondarySeriesId);
+        const readFoR = (filePath?: string|null) => {
+          try { if (!filePath) return ''; const buffer = fs.readFileSync(filePath); const ds=(dicomParser as any).parseDicom(new Uint8Array(buffer)); return ds.string?.('x00200052')?.trim() || ''; } catch { return ''; }
+        };
+        if (pImgs[0]?.filePath) pFoR = readFoR((pImgs[0] as any).filePath);
+        if (sImgs[0]?.filePath) sFoR = readFoR((sImgs[0] as any).filePath);
+      } catch {}
+
+      const regs = primaryStudy?.patientId ? await findAllRegFilesForPatient(primaryStudy.patientId) : [];
+      for (const rfile of regs) {
+        const parsed = parseDicomRegistrationFromFile(rfile.filePath);
+        if (!parsed) continue;
+        const cands = Array.isArray(parsed.candidates) && parsed.candidates.length ? parsed.candidates : (parsed.matrixRowMajor4x4 ? [{ matrix: parsed.matrixRowMajor4x4, sourceFoR: parsed.sourceFrameOfReferenceUid, targetFoR: parsed.targetFrameOfReferenceUid, referenced: parsed.referencedSeriesInstanceUids }] : []);
+        for (const c of cands) {
+          const m = c.matrix as number[];
+          if (!m || m.length !== 16) continue;
+          const R = [[m[0],m[1],m[2]],[m[4],m[5],m[6]],[m[8],m[9],m[10]]];
+          const T = [m[3], m[7], m[11]];
+          const e = toEulerZYX(R);
+          // Report both as-is and inverted so we can match Eclipse quickly
+          const inv = invertRigid(m);
+          const Ri = [[inv[0],inv[1],inv[2]],[inv[4],inv[5],inv[6]],[inv[8],inv[9],inv[10]]];
+          const Ti = [inv[3], inv[7], inv[11]];
+          const ei = toEulerZYX(Ri);
+          out.push({
+            file: rfile.filePath,
+            referenced: c.referenced || [],
+            sourceFoR: c.sourceFoR || parsed.sourceFrameOfReferenceUid || null,
+            targetFoR: c.targetFoR || parsed.targetFrameOfReferenceUid || null,
+            matrixRowMajor4x4: m,
+            asIs: { translationMm: T, rotationDegZYX: e },
+            inverted: { translationMm: Ti, rotationDegZYX: ei },
+            foRMatch: { primaryFoR: pFoR || null, secondaryFoR: sFoR || null }
+          });
+        }
+      }
+
+      res.json({ ok: true, primarySeries: { id: primarySeriesId, uid: primarySeries.seriesInstanceUID }, secondarySeries: { id: secondarySeriesId, uid: secondarySeries.seriesInstanceUID }, candidates: out });
+    } catch (err: any) {
+      console.error('inspect-all failed', err);
+      res.status(500).json({ error: 'inspect-all failed', details: err?.message });
     }
   });
 
@@ -2725,9 +3038,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { findRegFileForStudy, findAllRegFilesForPatient } = await import('./registration/reg-resolver.ts');
       const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
       const foundList = patientId ? await findAllRegFilesForPatient(patientId) : (await (async()=>{ const f = await findRegFileForStudy(studyId as number); return f? [{studyId: studyId as number, seriesId: f.seriesId, filePath: f.filePath}] as any: []; })());
+
+      // Helper to gather all series across patient (or study fallback)
+      const gatherAllSeries = async (): Promise<any[]> => {
+        if (patientId) {
+          const studies = await storage.getStudiesByPatient(patientId);
+          const acc: any[] = [];
+          for (const st of studies) acc.push(...await storage.getSeriesByStudyId(st.id));
+          return acc;
+        }
+        if (Number.isFinite(studyId as any)) {
+          try {
+            const study = await storage.getStudy(studyId as number);
+            if (study && Number.isFinite(study.patientId)) {
+              const studies = await storage.getStudiesByPatient(study.patientId);
+              const acc: any[] = [];
+              for (const st of studies) acc.push(...await storage.getSeriesByStudyId(st.id));
+              return acc;
+            }
+          } catch {}
+          return await storage.getSeriesByStudyId(studyId as number);
+        }
+        return [];
+      };
+
+      // Utility: build list of CTAC series IDs across a universe of series using FoR matching with PET
+      const computeCtacIds = async (seriesList: any[], getFo: (sid:number)=>Promise<string>): Promise<number[]> => {
+        const ptSeries = seriesList.filter(s => (s.modality || '').toUpperCase() === 'PT');
+        const ctac = new Set<number>();
+        for (const pt of ptSeries) {
+          const foPT = await getFo(pt.id);
+          for (const s of seriesList) {
+            if ((s.modality || '').toUpperCase() !== 'CT') continue;
+            const fo = await getFo(s.id);
+            if (fo && fo === foPT) ctac.add(s.id);
+          }
+        }
+        return Array.from(ctac);
+      };
+
+      // Fallback: build associations by Frame of Reference clusters when no REG is available
       if (!foundList.length) {
-        console.warn('ASSOC: no REG files found for query', { studyId, patientId });
-        return res.json({ associations: [] });
+        console.warn('ASSOC: no REG files found for query; falling back to FoR clustering', { studyId, patientId });
+        const allSeries = await gatherAllSeries();
+        const forMap = new Map<number, string>(); // seriesId -> FoR
+        const imagesCache = new Map<number, any[]>();
+        const getFoR = async (sid: number): Promise<string> => {
+          if (forMap.has(sid)) return forMap.get(sid)!;
+          let fo = '';
+          try {
+            const imgs = imagesCache.has(sid) ? imagesCache.get(sid)! : await storage.getImagesBySeriesId(sid);
+            imagesCache.set(sid, imgs);
+            const img0: any = imgs[0];
+            if (img0) {
+              fo = (img0.frameOfReferenceUID || (img0.metadata?.frameOfReferenceUID)) || '';
+              if (!fo && img0.filePath) {
+                const buffer = fs.readFileSync(img0.filePath);
+                const byteArray = new Uint8Array(buffer);
+                const ds = (dicomParser as any).parseDicom(byteArray, {});
+                fo = ds.string?.('x00200052')?.trim() || '';
+              }
+            }
+          } catch {}
+          forMap.set(sid, fo || '');
+          return fo || '';
+        };
+
+        // Group series by FoR
+        const clusters = new Map<string, any[]>();
+        for (const s of allSeries) {
+          const fo = await getFoR(s.id);
+          if (!fo) continue;
+          if (!clusters.has(fo)) clusters.set(fo, []);
+          clusters.get(fo)!.push(s);
+        }
+
+        const associations: any[] = [];
+        for (const [fo, list] of clusters.entries()) {
+          if (!list || list.length < 2) continue; // need at least two to associate
+          // Prefer CT as primary; otherwise first in list
+          const ctPrimary = list.find(s => (s.modality || '').toUpperCase() === 'CT') || list[0];
+          const sourcesSeriesIds = list.filter(s => s.id !== ctPrimary.id).map(s => s.id);
+          const sources = list.filter(s => s.id !== ctPrimary.id).map(s => s.seriesInstanceUID);
+          const assoc = {
+            regFile: null,
+            studyId: ctPrimary.studyId,
+            target: ctPrimary.seriesInstanceUID,
+            targetSeriesId: ctPrimary.id,
+            sources,
+            sourcesSeriesIds,
+            sourceFoR: fo,
+            targetFoR: fo
+          };
+          associations.push(assoc);
+        }
+
+        // Compute CTAC ids for client-side demotion of CTAC
+        const ctacSeriesIds = await computeCtacIds(allSeries, getFo);
+        return res.json({ associations, ctacSeriesIds });
       }
 
       const associations: any[] = [];
@@ -2760,6 +3168,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
             allSeries = await storage.getSeriesByStudyId(found.studyId);
           }
         }
+        // Helper FoR resolver per series
+        const foMap = new Map<number, string>();
+        const getFo = async (sid: number) => {
+          if (foMap.has(sid)) return foMap.get(sid)!;
+          let fo = '';
+          try {
+            const imgs = await storage.getImagesBySeriesId(sid);
+            const img0: any = imgs[0];
+            fo = (img0?.frameOfReferenceUID || img0?.metadata?.frameOfReferenceUID) || '';
+            if (!fo && img0?.filePath) {
+              const buffer = fs.readFileSync(img0.filePath);
+              const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+              fo = ds.string?.('x00200052')?.trim() || '';
+            }
+          } catch {}
+          foMap.set(sid, fo || '');
+          return fo || '';
+        };
+
         // Determine target by Target FoR exact match
         const tFoR = parsed.targetFrameOfReferenceUid || '';
         let targetSeriesUID: string | null = null;
@@ -2812,6 +3239,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return modality !== 'REG' && modality !== 'RTSTRUCT';
           });
         }
+
+        // Augment sources: If a PET series is associated, also include the CT from the same study (PET/CT session grouping)
+        try {
+          const extraCTIds: number[] = [];
+          for (const sid of sourcesSeriesIds) {
+            const srcSeries = allSeries.find(s => s.id === sid);
+            if (!srcSeries) continue;
+            if ((srcSeries.modality || '').toUpperCase() === 'PT') {
+              const siblingCTs = allSeries.filter(s => (s.studyId === srcSeries.studyId) && ((s.modality || '').toUpperCase() === 'CT'));
+              for (const ct of siblingCTs) {
+                if (ct.id !== targetSeriesId) extraCTIds.push(ct.id);
+              }
+            }
+          }
+          if (extraCTIds.length) {
+            const merged = Array.from(new Set([ ...sourcesSeriesIds, ...extraCTIds ]));
+            sourcesSeriesIds = merged;
+            const extraUIDs = extraCTIds.map(id => allSeries.find(s => s.id === id)?.seriesInstanceUID).filter(Boolean) as string[];
+            sources = Array.from(new Set([ ...sources, ...extraUIDs ]));
+          }
+        } catch {}
+
+        // Normalize primary: prefer Planning CT over PET/CT CTAC
+        try {
+          const unionIds: number[] = [];
+          if (Number.isFinite(targetSeriesId as any)) unionIds.push(targetSeriesId as number);
+          unionIds.push(...sourcesSeriesIds);
+          const unionSeries = unionIds.map(id => allSeries.find(s => s.id === id)).filter(Boolean) as any[];
+          const ctSeries = unionSeries.filter(s => (s.modality || '').toUpperCase() === 'CT');
+          if (ctSeries.length) {
+            const ptSeriesAll = allSeries.filter(s => (s.modality || '').toUpperCase() === 'PT');
+            const ptStudyIds = new Set<number>(ptSeriesAll.map(s => s.studyId));
+            const ctacIds = new Set<number>();
+            for (const pt of ptSeriesAll) {
+              const foPT = await getFo(pt.id);
+              for (const ct of allSeries) {
+                if ((ct.modality || '').toUpperCase() !== 'CT') continue;
+                const foCT = await getFo(ct.id);
+                if (foCT && foCT === foPT) ctacIds.add(ct.id);
+              }
+            }
+
+            const ctNotInPTStudy = ctSeries.filter(ct => !ptStudyIds.has(ct.studyId));
+            const ctNotCTAC = ctSeries.filter(ct => !ctacIds.has(ct.id));
+            const ctPreferred = ctNotInPTStudy.length ? ctNotInPTStudy : (ctNotCTAC.length ? ctNotCTAC : ctSeries);
+            // Rank by imageCount descending
+            const byImages = (arr: any[]) => arr.slice().sort((a,b) => (b.imageCount||0) - (a.imageCount||0));
+            const ranked = byImages(ctPreferred);
+            const bestCT = ranked[0];
+            if (bestCT && bestCT.id !== targetSeriesId) {
+              // Promote best CT to primary
+              if (Number.isFinite(targetSeriesId as any)) sourcesSeriesIds = Array.from(new Set([ targetSeriesId as number, ...sourcesSeriesIds ]));
+              targetSeriesId = bestCT.id;
+              targetSeriesUID = bestCT.seriesInstanceUID;
+              // Remove promoted CT from sources
+              sourcesSeriesIds = sourcesSeriesIds.filter(id => id !== targetSeriesId);
+              sources = sources.filter(uid => uid !== targetSeriesUID);
+            }
+          }
+        } catch {}
         const assoc = {
           regFile: found.filePath,
           studyId: found.studyId,
@@ -2822,11 +3309,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sourceFoR: parsed.sourceFrameOfReferenceUid || null,
           targetFoR: parsed.targetFrameOfReferenceUid || null
         };
+
+        // Final guard: never allow CTAC as target when another CT exists. Promote planning CT.
+        try {
+          const ptSeriesAll = allSeries.filter(s => (s.modality || '').toUpperCase() === 'PT');
+          const ctacIds = new Set<number>();
+          for (const pt of ptSeriesAll) {
+            const foPT = await getFo(pt.id);
+            for (const ct of allSeries) {
+              if ((ct.modality || '').toUpperCase() !== 'CT') continue;
+              const foCT = await getFo(ct.id);
+              if (foCT && foCT === foPT) ctacIds.add(ct.id);
+            }
+          }
+          if (Number.isFinite(assoc.targetSeriesId as any) && ctacIds.has(assoc.targetSeriesId as number)) {
+            const allCTs = allSeries.filter(s => (s.modality || '').toUpperCase() === 'CT');
+            const planningCTs = allCTs.filter(ct => !ctacIds.has(ct.id));
+            const pick = (planningCTs.length ? planningCTs : allCTs).sort((a,b)=>(b.imageCount||0)-(a.imageCount||0))[0];
+            if (pick && pick.id !== assoc.targetSeriesId) {
+              if (Number.isFinite(assoc.targetSeriesId as any)) assoc.sourcesSeriesIds = Array.from(new Set([ assoc.targetSeriesId as number, ...(assoc.sourcesSeriesIds||[]) ]));
+              assoc.targetSeriesId = pick.id; assoc.target = pick.seriesInstanceUID;
+              assoc.sourcesSeriesIds = (assoc.sourcesSeriesIds||[]).filter((id:number)=>id!==pick.id);
+              assoc.sources = (assoc.sources||[]).filter((uid:string)=>uid!==pick.seriesInstanceUID);
+            }
+          }
+        } catch {}
         console.log('ASSOC:', assoc);
         associations.push(assoc);
       }
 
-      return res.json({ associations });
+      // Build CTAC list across the patient/study series universe
+      const allSeriesUniverse: any[] = [];
+      try {
+        const idSet = new Set<number>();
+        for (const a of associations) {
+          if (Number.isFinite(a.targetSeriesId as any)) idSet.add(a.targetSeriesId as number);
+          for (const sid of (a.sourcesSeriesIds||[])) idSet.add(sid);
+        }
+        for (const sid of Array.from(idSet)) {
+          const s = await storage.getSeriesById(sid);
+          if (s) allSeriesUniverse.push(s);
+        }
+      } catch {}
+      const getFoGlobal = async (sid: number): Promise<string> => {
+        try {
+          const imgs = await storage.getImagesBySeriesId(sid);
+          const img0: any = imgs[0];
+          let fo = (img0?.frameOfReferenceUID || img0?.metadata?.frameOfReferenceUID) || '';
+          if (!fo && img0?.filePath) {
+            const buffer = fs.readFileSync(img0.filePath);
+            const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+            fo = ds.string?.('x00200052')?.trim() || '';
+          }
+          return fo || '';
+        } catch { return ''; }
+      };
+      const ctacSeriesIds = await (async () => {
+        try { return await computeCtacIds(allSeriesUniverse, getFoGlobal); } catch { return []; }
+      })();
+
+      return res.json({ associations, ctacSeriesIds });
     } catch (err: any) {
       console.error('associations failed', err);
       res.status(500).json({ error: 'associations failed', details: err?.message });
