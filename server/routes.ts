@@ -6,6 +6,7 @@ import { storage } from "./storage";
 import { Server } from "http";
 import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
+import polygonClipping from 'polygon-clipping';
 import { db } from "./db";
 import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -2981,7 +2982,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chosenMatrix = (sorted[0]?.matrix && sorted[0].matrix.length === 16) ? sorted[0].matrix : null;
       }
 
-      const m = chosenMatrix || (parsed.matrixRowMajor4x4 as number[]);
+      const m = chosenMatrix || ((parsed as any).matrixRawRowMajor4x4 as number[] || parsed.matrixRowMajor4x4 as number[]);
       if (!m || m.length !== 16) return res.status(404).json({ error: 'No valid matrix in REG' });
 
       // Build metadata for direction decision
@@ -3016,13 +3017,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ];
       };
 
-      // Decide direction based on REG FoR and chosen primary
+      // Decide direction based on REG FoR and chosen primary: moving (secondary) -> fixed (primary)
       let chosen: number[] = m;
       const tFoR = parsed.targetFrameOfReferenceUid || '';
       const sFoRreg = parsed.sourceFrameOfReferenceUid || '';
-      if (pFoR && tFoR && pFoR !== tFoR && sFoR) {
-        // If primary FoR matches REG source, invert to report Primary<-Secondary
-        if (pFoR === sFoRreg) chosen = invert(m);
+      if (sFoR && pFoR) {
+        if (sFoR === sFoRreg && pFoR === tFoR) {
+          chosen = m; // already moving->fixed
+        } else if (sFoR === tFoR && pFoR === sFoRreg) {
+          chosen = invert(m); // invert to moving->fixed
+        }
       }
 
       // Final fallback: if no REG really references the pair but FoR are equal, use identity
@@ -3044,6 +3048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetFoR: parsed.targetFrameOfReferenceUid || null,
         referencedSeriesInstanceUids: parsed.referencedSeriesInstanceUids || [],
         matrixRowMajor4x4: chosen,
+        matrixRawRowMajor4x4: m,
         orientationRows: asRows(chosen),
         translation: T(chosen),
         notes: parsed.notes || []
@@ -3134,6 +3139,743 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('inspect-all failed', err);
       res.status(500).json({ error: 'inspect-all failed', details: err?.message });
+    }
+  });
+
+  // Server-side resampling of a single secondary frame onto the primary CT grid
+  // GET /api/fusion/resampled-frame?primarySeriesId=..&secondarySeriesId=..&primarySOP=..&variant=M|MT|MINV|MINVT
+  // Returns a grayscale PNG buffer (same rows/cols as the requested CT image) already aligned to the CT FoR
+  app.get("/api/fusion/resampled-frame", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      const secondarySeriesId = Number(req.query.secondarySeriesId);
+      const primarySOP = String(req.query.primarySOP || '');
+      const variant = String(req.query.variant || 'MINV').toUpperCase();
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId) || !primarySOP) {
+        return res.status(400).json({ error: 'primarySeriesId, secondarySeriesId and primarySOP are required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) return res.status(404).json({ error: 'Series not found' });
+
+      // Find the primary image by SOP
+      const primaryImage = await storage.getImageByUID(primarySOP);
+      if (!primaryImage || !primaryImage.filePath) return res.status(404).json({ error: 'Primary image not found' });
+
+      // Helper: parse minimal DICOM meta without pixel data
+      const parseMeta = (filePath: string) => {
+        const buffer = fs.readFileSync(filePath);
+        const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer));
+        const arr = (tag: string): number[] => {
+          try { const s = ds.string?.(tag); return s ? s.split('\\').map(Number) : []; } catch { return []; }
+        };
+        const num = (tag: string): number | null => { try { const s = ds.string?.(tag); const v = s? parseFloat(s) : NaN; return Number.isFinite(v)? v : null; } catch { return null; } };
+        const u16 = (tag: string): number | null => { try { const v = ds.uint16?.(tag); return Number.isFinite(v)? v : null; } catch { return null; } };
+        return {
+          iop: arr('x00200037'),
+          ipp: arr('x00200032'),
+          psp: arr('x00280030'),
+          rows: u16('x00280010') || 0,
+          cols: u16('x00280011') || 0,
+          windowCenter: num('x00281050'),
+          windowWidth: num('x00281051'),
+          photometric: (ds.string?.('x00280004') || 'MONOCHROME2') as string,
+          bitsAllocated: (ds.uint16?.('x00280100') || 16) as number,
+          forUID: (ds.string?.('x00200052') || '').trim()
+        };
+      };
+
+      // Extract full pixel data for one image
+      const extractPixelData = (filePath: string): { data: Uint8Array | Uint16Array; rows: number; cols: number; windowCenter: number | null; windowWidth: number | null; photometric: string; bits: number } | null => {
+        try {
+          const dicomData = fs.readFileSync(filePath);
+          const ds = dicomParser.parseDicom(dicomData);
+          const el = (ds as any).elements?.['x7fe00010'];
+          if (!el) return null;
+          const rows = (ds as any).uint16?.('x00280010') as number;
+          const cols = (ds as any).uint16?.('x00280011') as number;
+          const bits = (ds as any).uint16?.('x00280100') as number;
+          const photometric = (ds as any).string?.('x00280004') || 'MONOCHROME2';
+          const wc = (() => { const s = (ds as any).string?.('x00281050'); const v = s ? parseFloat(s) : NaN; return Number.isFinite(v) ? v : null; })();
+          const ww = (() => { const s = (ds as any).string?.('x00281051'); const v = s ? parseFloat(s) : NaN; return Number.isFinite(v) ? v : null; })();
+          const byteArray = new Uint8Array((ds as any).byteArray.buffer, el.dataOffset, el.length);
+          let data: Uint8Array | Uint16Array;
+          if (bits === 16) data = new Uint16Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength / 2);
+          else data = byteArray;
+          return { data, rows, cols, windowCenter: wc, windowWidth: ww, photometric, bits };
+        } catch {
+          return null;
+        }
+      };
+
+      // Build registration matrix variants (same convention as RADFUSE client path)
+      const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+      const { findAllRegFilesForPatient, findRegFileForStudy } = await import('./registration/reg-resolver.ts');
+      const primaryStudy = await storage.getStudy(primarySeries.studyId);
+      const pSeriesUID = primarySeries.seriesInstanceUID;
+      const sSeriesUID = secondarySeries.seriesInstanceUID;
+      const pImg0 = (await storage.getImagesBySeriesId(primarySeriesId))[0] as any;
+      const sImg0 = (await storage.getImagesBySeriesId(secondarySeriesId))[0] as any;
+      const pMeta0 = pImg0?.filePath ? parseMeta(pImg0.filePath) : null;
+      const sMeta0 = sImg0?.filePath ? parseMeta(sImg0.filePath) : null;
+      const pFoR = pMeta0?.forUID || '';
+      const sFoR = sMeta0?.forUID || '';
+
+      type RegCand = { mat: number[]; sourceFoR?: string; targetFoR?: string; referenced?: string[]; filePath: string; score: number; flags: string[] };
+      const allCands: RegCand[] = [];
+      const pushFromFile = (filePath: string) => {
+        const parsed = parseDicomRegistrationFromFile(filePath);
+        if (!parsed) return;
+        const items = Array.isArray(parsed.candidates) && parsed.candidates.length
+          ? parsed.candidates
+          : (parsed.matrixRowMajor4x4 ? [{ matrix: parsed.matrixRowMajor4x4, sourceFoR: parsed.sourceFrameOfReferenceUid, targetFoR: parsed.targetFrameOfReferenceUid, referenced: parsed.referencedSeriesInstanceUids }] : []);
+        for (const it of items) {
+          const m = (it as any).matrix as number[];
+          if (!m || m.length !== 16) continue;
+          const ref = ((it as any).referenced || []) as string[];
+          const sF = (it as any).sourceFoR || (it as any).sourceFoRUID || undefined;
+          const tF = (it as any).targetFoR || (it as any).targetFoRUID || undefined;
+          let score = 0; const flags: string[] = [];
+          if (ref.includes(pSeriesUID)) { score += 5; flags.push('refP'); }
+          if (ref.includes(sSeriesUID)) { score += 5; flags.push('refS'); }
+          if (sF && sF === sFoR) { score += 3; flags.push('sFo=sec'); }
+          if (tF && tF === pFoR) { score += 3; flags.push('tFo=pri'); }
+          // Prefer strict match where both series are explicitly referenced
+          if (ref.includes(pSeriesUID) && ref.includes(sSeriesUID)) { score += 50; flags.push('strict'); }
+          allCands.push({ mat: m, sourceFoR: sF, targetFoR: tF, referenced: ref, filePath, score, flags });
+        }
+      };
+
+      if (primaryStudy?.patientId) {
+        const regs = await findAllRegFilesForPatient(primaryStudy.patientId);
+        for (const r of regs) pushFromFile(r.filePath);
+      }
+      if (!allCands.length) {
+        const rf = await findRegFileForStudy(primarySeries.studyId);
+        if (rf) pushFromFile(rf.filePath);
+      }
+      if (!allCands.length) return res.status(404).json({ error: 'No registration found for patient/study' });
+      allCands.sort((a, b) => a.score - b.score);
+      const bestReg = allCands[allCands.length - 1];
+      const baseM = bestReg.mat.slice();
+      const transpose4 = (m: number[]) => [
+        m[0], m[4], m[8],  m[12] ?? 0,
+        m[1], m[5], m[9],  m[13] ?? 0,
+        m[2], m[6], m[10], m[14] ?? 0,
+        m[3], m[7], m[11], m[15] ?? 1,
+      ];
+      const invertRigid = (m: number[]) => {
+        const r00 = m[0], r01 = m[1], r02 = m[2], tx = m[3];
+        const r10 = m[4], r11 = m[5], r12 = m[6], ty = m[7];
+        const r20 = m[8], r21 = m[9], r22 = m[10], tz = m[11];
+        const rt00 = r00, rt01 = r10, rt02 = r20;
+        const rt10 = r01, rt11 = r11, rt12 = r21;
+        const rt20 = r02, rt21 = r12, rt22 = r22;
+        const itx = -(rt00*tx + rt01*ty + rt02*tz);
+        const ity = -(rt10*tx + rt11*ty + rt12*tz);
+        const itz = -(rt20*tx + rt21*ty + rt22*tz);
+        return [
+          rt00, rt10, rt20, itx,
+          rt01, rt11, rt21, ity,
+          rt02, rt12, rt22, itz,
+          0, 0, 0, 1
+        ];
+      };
+      const chooseVariant = (name: string): number[] => {
+        const nm = name.toUpperCase();
+        if (nm === 'M') return baseM;
+        if (nm === 'MT') return transpose4(baseM);
+        if (nm === 'MINV') return invertRigid(baseM);
+        if (nm === 'MINVT') return invertRigid(transpose4(baseM));
+        return invertRigid(baseM);
+      };
+      const C2M = chooseVariant(variant); // maps CT world -> moving (secondary) world
+      const M2C = invertRigid(C2M);       // moving -> CT world (for slice selection)
+
+      // Primary CT frame metadata
+      const pmeta = parseMeta(primaryImage.filePath);
+      if (!pmeta.iop.length || !pmeta.ipp.length) return res.status(400).json({ error: 'Primary image missing orientation/position' });
+      const row = [pmeta.iop[0], pmeta.iop[1], pmeta.iop[2]];
+      const col = [pmeta.iop[3], pmeta.iop[4], pmeta.iop[5]];
+      const nrm = [row[1]*col[2]-row[2]*col[1], row[2]*col[0]-row[0]*col[2], row[0]*col[1]-row[1]*col[0]];
+      const nlen = Math.hypot(nrm[0], nrm[1], nrm[2]) || 1;
+      const nct = [nrm[0]/nlen, nrm[1]/nlen, nrm[2]/nlen];
+      // PixelSpacing is [RowSpacing, ColumnSpacing]
+      const rowSp = (pmeta.psp?.[0] ?? 1) as number;
+      const colSp = (pmeta.psp?.[1] ?? 1) as number;
+
+      // Use first CT image in series as origin for plane distances
+      const primaryImgs = await storage.getImagesBySeriesId(primarySeriesId);
+      const originMeta = parseMeta((primaryImgs[0] as any).filePath);
+      const ctOrigin = originMeta.ipp.length >= 3 ? originMeta.ipp : pmeta.ipp;
+      const planeParamCT = (P: number[]) => (P[0]-ctOrigin[0])*nct[0] + (P[1]-ctOrigin[1])*nct[1] + (P[2]-ctOrigin[2])*nct[2];
+      const zCT = planeParamCT(pmeta.ipp);
+
+      // Gather secondary slice metadata (no pixel yet)
+      const secImgs = await storage.getImagesBySeriesId(secondarySeriesId);
+      if (!secImgs?.length) return res.status(404).json({ error: 'No images in secondary series' });
+      type MRMeta = { filePath: string; ipp: number[]; iop: number[]; psp: number[]; rows: number; cols: number };
+      const secMeta: MRMeta[] = [];
+      for (const im of secImgs) {
+        const m = parseMeta((im as any).filePath);
+        if (m.ipp.length >= 3 && m.iop.length >= 6 && m.rows && m.cols) {
+          secMeta.push({ filePath: (im as any).filePath, ipp: m.ipp, iop: m.iop, psp: m.psp || [1,1], rows: m.rows, cols: m.cols });
+        }
+      }
+      if (!secMeta.length) return res.status(400).json({ error: 'Secondary series missing spatial metadata' });
+
+      // Choose nearest secondary slice for this CT plane
+      const transformPoint = (m: number[], p: number[]) => [
+        m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
+        m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
+        m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11]
+      ];
+      let best = secMeta[0];
+      let bestAbs = Infinity;
+      for (const m of secMeta) {
+        const Pct = transformPoint(M2C, m.ipp as any);
+        const z = planeParamCT(Pct as any);
+        const d = Math.abs(z - zCT);
+        if (d < bestAbs) { bestAbs = d; best = m; }
+      }
+
+      // Load pixel data for the chosen secondary frame
+      const secPD = extractPixelData(best.filePath);
+      if (!secPD) return res.status(500).json({ error: 'Failed to extract pixel data from secondary image' });
+
+      // Prepare sampling helpers
+      const mrRow = [best.iop[0], best.iop[1], best.iop[2]];
+      const mrCol = [best.iop[3], best.iop[4], best.iop[5]];
+      const dot3 = (a: number[], b: number[]) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+      const sub3 = (a: number[], b: number[]) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+      const wc = secPD.windowCenter;
+      const ww = secPD.windowWidth;
+      const minVal = (wc !== null && ww !== null) ? (wc - ww/2) : 0;
+      const maxVal = (wc !== null && ww !== null) ? (wc + ww/2) : ((secPD.bits === 16) ? 4096 : 255);
+      const range = Math.max(1, maxVal - minVal);
+
+      // Output buffer same size as CT image
+      const outW = pmeta.cols || 512;
+      const outH = pmeta.rows || 512;
+      const out = new Uint8Array(outW * outH);
+
+      // Map each CT pixel to moving and sample bilinear
+      const idx = (yy: number, xx: number) => yy * secPD.cols + xx;
+      for (let v = 0; v < outH; v++) {
+        for (let u = 0; u < outW; u++) {
+          // CT pixel (u,v) to CT world
+          const rf = [
+            pmeta.ipp[0] + u * colSp * col[0] + v * rowSp * row[0],
+            pmeta.ipp[1] + u * colSp * col[1] + v * rowSp * row[1],
+            pmeta.ipp[2] + u * colSp * col[2] + v * rowSp * row[2]
+          ];
+          // Map to moving space
+          const rm = transformPoint(C2M, rf as any) as any as number[];
+          const d = sub3(rm, best.ipp);
+          const uu = dot3(d, mrCol) / ((best.psp?.[1] ?? 1) as number);
+          const vv = dot3(d, mrRow) / ((best.psp?.[0] ?? 1) as number);
+          const x0 = Math.floor(uu), y0 = Math.floor(vv);
+          const x1 = x0 + 1, y1 = y0 + 1;
+          let gray = 0;
+          if (x0 >= 0 && y0 >= 0 && x1 < secPD.cols && y1 < secPD.rows) {
+            const fx = uu - x0; const fy = vv - y0;
+            const p00 = secPD.data[idx(y0, x0)] as any as number;
+            const p10 = secPD.data[idx(y0, x1)] as any as number;
+            const p01 = secPD.data[idx(y1, x0)] as any as number;
+            const p11 = secPD.data[idx(y1, x1)] as any as number;
+            const top = p00 + fx * (p10 - p00);
+            const bot = p01 + fx * (p11 - p01);
+            const val = top + fy * (bot - top);
+            const clamped = Math.max(0, Math.min(255, Math.round(((val - minVal) / range) * 255)));
+            gray = clamped;
+          }
+          out[v * outW + u] = gray;
+        }
+      }
+
+      // Encode as PNG
+      const sharpMod = await import('sharp');
+      const png = await sharpMod.default(out, { raw: { width: outW, height: outH, channels: 1 } }).png({ compressionLevel: 9 }).toBuffer();
+      res.setHeader('Content-Type', 'image/png');
+      // Attach compact debug header so the client can verify selection
+      try {
+        const dbg = JSON.stringify({
+          variant,
+          pSeriesUID,
+          sSeriesUID,
+          pFoR,
+          sFoR,
+          reg: { file: bestReg?.filePath || '', score: bestReg?.score || 0, flags: bestReg?.flags || [], refs: (bestReg?.referenced || []).slice(0,4) }
+        });
+        res.setHeader('X-Reg-Selected', dbg);
+      } catch {}
+      return res.send(png);
+    } catch (err: any) {
+      console.error('resampled-frame failed', err);
+      return res.status(500).json({ error: 'resampled-frame failed', details: err?.message });
+    }
+  });
+
+  // Validate fusion by per-slice Dice score of BODY contours between primary and secondary series
+  // GET /api/fusion/validate-body-dice?primarySeriesId=..|primarySeriesUID=..&secondarySeriesId=..|secondarySeriesUID=..&variant=M|MT|MINV|MINVT
+  app.get("/api/fusion/validate-body-dice", async (req: Request, res: Response) => {
+    try {
+      // Resolve series by ID or UID
+      const resolveSeries = async (idKey: string, uidKey: string) => {
+        let ser = undefined as any;
+        if (req.query[idKey]) {
+          const id = Number(req.query[idKey]);
+          if (Number.isFinite(id)) ser = await storage.getSeriesById(id);
+        }
+        if (!ser && req.query[uidKey]) {
+          ser = await storage.getSeriesByUID(String(req.query[uidKey]));
+        }
+        return ser;
+      };
+      const primarySeries = await resolveSeries('primarySeriesId', 'primarySeriesUID');
+      const secondarySeries = await resolveSeries('secondarySeriesId', 'secondarySeriesUID');
+      if (!primarySeries || !secondarySeries) {
+        return res.status(400).json({ error: 'primarySeriesId/UID and secondarySeriesId/UID are required and must resolve to existing series' });
+      }
+
+      // Load registration matrix for the pair (as resolved by existing logic)
+      const resolveUrl = new URL('http://localhost');
+      resolveUrl.searchParams.set('primarySeriesId', String(primarySeries.id));
+      resolveUrl.searchParams.set('secondarySeriesId', String(secondarySeries.id));
+      // Call local function instead of HTTP: reuse the core logic above
+      const findRegForPair = async (): Promise<number[] | null> => {
+        // Duplicate minimal logic: prefer the already exposed resolver route code
+        // To avoid code duplication, quickly fetch via storage/parse again
+        const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+        const { findAllRegFilesForPatient, findRegFileForStudy } = await import('./registration/reg-resolver.ts');
+        const primaryStudy = await storage.getStudy(primarySeries.studyId);
+        const candidates: Array<{ matrix: number[]; parsed: any }> = [];
+        if (primaryStudy?.patientId) {
+          const all = await findAllRegFilesForPatient(primaryStudy.patientId);
+          for (const f of all) {
+            const p = parseDicomRegistrationFromFile(f.filePath);
+            if (p && p.matrixRowMajor4x4) candidates.push({ matrix: p.matrixRowMajor4x4, parsed: p });
+          }
+        }
+        if (candidates.length === 0) {
+          const f = await findRegFileForStudy(primarySeries.studyId);
+          if (f) {
+            const p = parseDicomRegistrationFromFile(f.filePath);
+            if (p && p.matrixRowMajor4x4) candidates.push({ matrix: p.matrixRowMajor4x4, parsed: p });
+          }
+        }
+        if (candidates.length === 0) return null;
+        // Pick first for simplicity; direction will be handled by variant testing
+        return candidates[0].matrix;
+      };
+      const baseMatrix = await findRegForPair();
+      if (!baseMatrix || baseMatrix.length !== 16) {
+        return res.status(404).json({ error: 'No registration matrix found for the pair' });
+      }
+
+      const variant = String(req.query.variant || 'M').toUpperCase();
+      const matTranspose = (m: number[]) => [
+        m[0], m[4], m[8],  m[12],
+        m[1], m[5], m[9],  m[13],
+        m[2], m[6], m[10], m[14],
+        m[3], m[7], m[11], m[15],
+      ];
+      const invertRigid = (m: number[]) => {
+        const R = [[m[0],m[1],m[2]],[m[4],m[5],m[6]],[m[8],m[9],m[10]]];
+        const t = [m[3],m[7],m[11]];
+        const Rt = [[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
+        const tin = [-(Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2]),-(Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2]),-(Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2])];
+        return [Rt[0][0],Rt[0][1],Rt[0][2],tin[0], Rt[1][0],Rt[1][1],Rt[1][2],tin[1], Rt[2][0],Rt[2][1],Rt[2][2],tin[2], 0,0,0,1];
+      };
+      let M: number[] = baseMatrix.slice();
+      if (variant === 'MT') M = matTranspose(M);
+      else if (variant === 'MINV') M = invertRigid(M);
+      else if (variant === 'MINVT') M = invertRigid(matTranspose(M));
+
+      // Helper: dot product
+      const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+      // Helper: transform 3D point by 4x4
+      const xform = (m: number[], p: number[]) => [
+        m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
+        m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
+        m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11]
+      ];
+
+      // Load RTSTRUCT referencing primary and secondary series
+      const loadRTSetForSeries = async (seriesObj: any): Promise<any | null> => {
+        // Find all series for patient
+        const study = await storage.getStudy(seriesObj.studyId);
+        if (!study || !study.patientId) return null;
+        const studies = await storage.getStudiesByPatient(study.patientId);
+        for (const st of studies) {
+          const sers = await storage.getSeriesByStudyId(st.id);
+          for (const s of sers) {
+            if (s.modality === 'RTSTRUCT') {
+              const imgs = await storage.getImagesBySeriesId(s.id);
+              const filePath = (imgs?.[0] as any)?.filePath;
+              if (!filePath || !fs.existsSync(filePath)) continue;
+              const rt = RTStructureParser.parseRTStructureSet(filePath);
+              if (rt?.referencedSeriesUID && rt.referencedSeriesUID === seriesObj.seriesInstanceUID) {
+                return rt;
+              }
+            }
+          }
+        }
+        return null;
+      };
+
+      const primaryRT = await loadRTSetForSeries(primarySeries);
+      const secondaryRT = await loadRTSetForSeries(secondarySeries);
+      if (!primaryRT || !secondaryRT) {
+        return res.status(404).json({ error: 'RTSTRUCT not found for one or both series' });
+      }
+
+      // Extract BODY structures (case-insensitive)
+      const findBody = (rt: any) => (rt.structures || []).find((s: any) => String(s.structureName || '').toUpperCase() === 'BODY');
+      const primaryBody = findBody(primaryRT);
+      const secondaryBody = findBody(secondaryRT);
+      if (!primaryBody || !secondaryBody) {
+        return res.status(404).json({ error: 'BODY structure not found in one or both RTSTRUCTs' });
+      }
+
+      // Primary geometry (basis and spacings) from first image
+      const primaryImages = await storage.getImagesBySeriesId(primarySeries.id);
+      if (!primaryImages?.length) return res.status(404).json({ error: 'No images in primary series' });
+      const first = primaryImages[0] as any;
+      const toArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
+      const iop = toArr(first.imageOrientation || first.metadata?.imageOrientation);
+      const ipp = toArr(first.imagePosition || first.metadata?.imagePosition);
+      const psp = toArr(first.pixelSpacing || first.metadata?.pixelSpacing);
+      if (iop.length < 6 || ipp.length < 3) return res.status(400).json({ error: 'Primary series missing orientation/position' });
+      const row = [iop[0], iop[1], iop[2]];
+      const col = [iop[3], iop[4], iop[5]];
+      const nrm = [row[1]*col[2]-row[2]*col[1], row[2]*col[0]-row[0]*col[2], row[0]*col[1]-row[1]*col[0]];
+      const nlen = Math.hypot(nrm[0], nrm[1], nrm[2]) || 1;
+      const nct = [nrm[0]/nlen, nrm[1]/nlen, nrm[2]/nlen];
+      const rowSp = (psp?.[1] ?? psp?.[0] ?? 1) as number; // DICOM: PixelSpacing = RowSpacing\ColSpacing; mapping to i/j may vary
+      const colSp = (psp?.[0] ?? psp?.[1] ?? 1) as number;
+      const planeParam = (P: number[]) => dot(nct, [P[0]-ipp[0], P[1]-ipp[1], P[2]-ipp[2]]);
+      const uvOf = (P: number[]) => {
+        const d = [P[0]-ipp[0], P[1]-ipp[1], P[2]-ipp[2]];
+        const u = dot(d, col) / (colSp || 1);
+        const v = dot(d, row) / (rowSp || 1);
+        return [u, v];
+      };
+
+      // Build maps of primary contours by slice plane value (use provided slicePosition but allow tolerance)
+      const tol = (() => {
+        const sth = Number(first.metadata?.sliceThickness) || Number(first.sliceThickness) || 1;
+        const sbs = Number(first.metadata?.spacingBetweenSlices) || Number(first.spacingBetweenSlices) || sth;
+        return Math.max(0.5, Math.min(3, (sbs || sth || 1) * 0.6));
+      })();
+
+      type Ring = Array<[number, number]>;
+      const primaryByZ = new Map<number, Ring[]>();
+      const pushRing = (map: Map<number, Ring[]>, z: number, ring: Ring) => {
+        // Snap by tolerance to cluster keys
+        let key: number | null = null;
+        for (const k of map.keys()) if (Math.abs(k - z) <= tol) { key = k; break; }
+        const use = key !== null ? key : z;
+        const arr = map.get(use) || [];
+        arr.push(ring);
+        map.set(use, arr);
+      };
+      for (const c of (primaryBody.contours || [])) {
+        const pts = (c.points || []) as number[];
+        if (pts.length < 6) continue;
+        const ring: Ring = [];
+        for (let i = 0; i < pts.length; i += 3) {
+          const P = [pts[i], pts[i+1], pts[i+2]];
+          const [u, v] = uvOf(P);
+          ring.push([u, v]);
+        }
+        // Slice parameter from first point
+        const zval = planeParam([pts[0], pts[1], pts[2]]);
+        pushRing(primaryByZ, zval, ring);
+      }
+
+      // Transform secondary contours into primary space and bucket by z
+      const transformedByZ = new Map<number, Ring[]>();
+      for (const c of (secondaryBody.contours || [])) {
+        const pts = (c.points || []) as number[];
+        if (pts.length < 6) continue;
+        const ringPrimary: Ring = [];
+        let zfirst = 0;
+        for (let i = 0; i < pts.length; i += 3) {
+          const Qs = [pts[i], pts[i+1], pts[i+2]];
+          const Pp = xform(M, Qs);
+          if (i === 0) zfirst = planeParam(Pp);
+          const [u, v] = uvOf(Pp as number[]);
+          ringPrimary.push([u, v]);
+        }
+        pushRing(transformedByZ, zfirst, ringPrimary);
+      }
+
+      // Area helpers
+      const polygonArea = (poly: Ring): number => {
+        let a = 0;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+        }
+        return Math.abs(a) * 0.5;
+      };
+      const multiArea = (multi: Ring[]): number => multi.reduce((s, r) => s + polygonArea(r), 0);
+      const toPCMulti = (rings: Ring[]): any => rings.map(r => [r]); // polygon-clipping MultiPolygon: Array<Polygon>, Polygon = Array<Ring>
+      const pcArea = (mp: any): number => {
+        if (!mp) return 0;
+        let a = 0;
+        for (const poly of mp as any[]) {
+          for (const ring of poly as any[]) {
+            // ring: Array<[x,y]>
+            a += polygonArea(ring as Ring);
+          }
+        }
+        return a;
+      };
+
+      // Compute per-slice Dice where both have contours
+      const results: Array<{ z: number; dice: number; areaPrimary: number; areaSecondary: number; areaIntersection: number; primaryRings: number; secondaryRings: number }> = [];
+      for (const [zPrim, primRings] of primaryByZ.entries()) {
+        // Find matching secondary z within tolerance
+        let zMatch: number | null = null;
+        for (const z of transformedByZ.keys()) { if (Math.abs(z - zPrim) <= tol) { zMatch = z; break; } }
+        if (zMatch === null) continue;
+        const secRings = transformedByZ.get(zMatch)!;
+        const primaryMP = toPCMulti(primRings);
+        const secondaryMP = toPCMulti(secRings);
+        const inter = polygonClipping.intersection(primaryMP as any, secondaryMP as any);
+        const aP = multiArea(primRings);
+        const aS = multiArea(secRings);
+        const aI = pcArea(inter);
+        const dice = (aP + aS) > 0 ? (2 * aI) / (aP + aS) : 0;
+        results.push({ z: zPrim, dice, areaPrimary: aP, areaSecondary: aS, areaIntersection: aI, primaryRings: primRings.length, secondaryRings: secRings.length });
+      }
+
+      // Sort by z and provide stats
+      results.sort((a, b) => a.z - b.z);
+      const count = results.length;
+      const avg = count ? results.reduce((s, r) => s + r.dice, 0) / count : 0;
+      const min = count ? Math.min(...results.map(r => r.dice)) : 0;
+      const max = count ? Math.max(...results.map(r => r.dice)) : 0;
+      const pass98 = results.filter(r => r.dice >= 0.98).length;
+
+      return res.json({
+        ok: true,
+        primarySeries: { id: primarySeries.id, uid: primarySeries.seriesInstanceUID },
+        secondarySeries: { id: secondarySeries.id, uid: secondarySeries.seriesInstanceUID },
+        variant,
+        sliceCount: count,
+        passCount98: pass98,
+        averageDice: Number(avg.toFixed(4)),
+        minDice: Number(min.toFixed(4)),
+        maxDice: Number(max.toFixed(4)),
+        perSlice: results.map(r => ({ z: Number(r.z.toFixed(3)), dice: Number(r.dice.toFixed(4)), aP: Math.round(r.areaPrimary), aS: Math.round(r.areaSecondary), aI: Math.round(r.areaIntersection), nPR: r.primaryRings, nSR: r.secondaryRings }))
+      });
+    } catch (err: any) {
+      console.error('validate-body-dice failed', err);
+      return res.status(500).json({ error: 'validate-body-dice failed', details: err?.message });
+    }
+  });
+
+  // Dev-only: scan all REG candidate matrices across the patient for this pair and score BODY per-slice DSC
+  // GET /api/dev/registration/scan-candidates?primarySeriesId=..&secondarySeriesId=..
+  app.get("/api/dev/registration/scan-candidates", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      const secondarySeriesId = Number(req.query.secondarySeriesId);
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId and secondarySeriesId required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) return res.status(404).json({ error: 'Series not found' });
+
+      // Load RTSTRUCT sets for both series (search patient-wide)
+      const loadRTSetForSeries = async (seriesObj: any): Promise<any | null> => {
+        const study = await storage.getStudy(seriesObj.studyId);
+        if (!study || !study.patientId) return null;
+        const studies = await storage.getStudiesByPatient(study.patientId);
+        const desiredUID = seriesObj.seriesInstanceUID;
+        const parsedSets: any[] = [];
+        for (const st of studies) {
+          const sers = await storage.getSeriesByStudyId(st.id);
+          for (const s of sers) {
+            if ((s.modality || '').toUpperCase() !== 'RTSTRUCT') continue;
+            try {
+              const imgs = await storage.getImagesBySeriesId(s.id);
+              const pathFile = (imgs[0] as any)?.filePath; if (!pathFile) continue;
+              const { RTStructureParser } = await import('./rt-structure-parser');
+              const set = RTStructureParser.parseRTStructureSet(pathFile);
+              if (!set) continue;
+              parsedSets.push(set);
+              if (set.referencedSeriesUID && set.referencedSeriesUID === desiredUID) {
+                return set;
+              }
+            } catch {}
+          }
+        }
+        // Fallback: return any parsed set if direct reference not found
+        if (parsedSets.length) return parsedSets[0];
+        return null;
+      };
+
+      const primaryRT = await loadRTSetForSeries(primarySeries);
+      const secondaryRT = await loadRTSetForSeries(secondarySeries);
+      if (!primaryRT || !secondaryRT) return res.status(404).json({ error: 'RTSTRUCT BODY not found for both series' });
+
+      const pickBody = (rt: any) => (rt.structures || []).find((s: any) => String(s.structureName || '').toUpperCase() === 'BODY');
+      const primBody = pickBody(primaryRT);
+      const secBody = pickBody(secondaryRT);
+      if (!primBody || !secBody) return res.status(404).json({ error: 'BODY structure missing' });
+
+      // Primary plane geometry from CT series: build uv mapping helpers
+      const getFoAndDirs = async (sid: number) => {
+        const imgs = await storage.getImagesBySeriesId(sid);
+        const img0: any = imgs[0] || {};
+        const iop: number[] = (Array.isArray(img0.imageOrientation) ? img0.imageOrientation : String(img0.imageOrientation||'').split('\\').map(Number));
+        const ipp: number[] = (Array.isArray(img0.imagePosition) ? img0.imagePosition : String(img0.imagePosition||'').split('\\').map(Number));
+        const ps: number[] = (Array.isArray(img0.pixelSpacing) ? img0.pixelSpacing : String(img0.pixelSpacing||'').split('\\').map(Number));
+        const row = [iop[0], iop[1], iop[2]]; const col = [iop[3], iop[4], iop[5]];
+        const nx = row[1]*col[2] - row[2]*col[1]; const ny = row[2]*col[0] - row[0]*col[2]; const nz = row[0]*col[1] - row[1]*col[0];
+        const nlen = Math.hypot(nx, ny, nz) || 1; const n = [nx/nlen, ny/nlen, nz/nlen];
+        return { row, col, n, ipp, ps };
+      };
+      const primGeom = await getFoAndDirs(primarySeriesId);
+
+      type Ring = Array<[number, number]>;
+      const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+      const uvOf = (P: number[]): [number, number] => {
+        const d = [P[0] - primGeom.ipp[0], P[1] - primGeom.ipp[1], P[2] - primGeom.ipp[2]];
+        const u = dot(d, primGeom.col) / (primGeom.ps[1] || primGeom.ps[0] || 1);
+        const v = dot(d, primGeom.row) / (primGeom.ps[0] || primGeom.ps[1] || 1);
+        return [u, v];
+      };
+      const planeParam = (P: number[]) => dot(primGeom.n, [P[0], P[1], P[2]]);
+      const polygonArea = (poly: Ring): number => {
+        let a = 0; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]); return Math.abs(a) * 0.5;
+      };
+
+      // Build primary BODY rings by z
+      const bucketRings = (struct: any) => {
+        const map = new Map<number, Ring[]>();
+        const tol = 0.75; // mm tolerance when grouping
+        const pushRing = (z: number, ring: Ring) => {
+          let key: number | null = null; for (const k of map.keys()) if (Math.abs(k - z) <= tol) { key = k; break; }
+          const use = key !== null ? key : z; const arr = map.get(use) || []; arr.push(ring); map.set(use, arr);
+        };
+        for (const c of (struct.contours || [])) {
+          const pts = (c.points || []) as number[]; if (pts.length < 6) continue; const ring: Ring = [];
+          for (let i = 0; i < pts.length; i += 3) ring.push(uvOf([pts[i], pts[i+1], pts[i+2]]));
+          const z = planeParam([pts[0], pts[1], pts[2]]); pushRing(z, ring);
+        }
+        return map;
+      };
+      const primaryByZ = bucketRings(primBody);
+
+      // Load REG candidates
+      const { findAllRegFilesForPatient } = await import('./registration/reg-resolver.ts');
+      const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+      const primaryStudy = await storage.getStudy(primarySeries.studyId);
+      if (!primaryStudy?.patientId) return res.status(404).json({ error: 'Patient not found for primary' });
+      const regFiles = await findAllRegFilesForPatient(primaryStudy.patientId);
+      const matrices: Array<{ file: string; matrix: number[]; label: string }> = [];
+      for (const f of regFiles) {
+        const parsed = parseDicomRegistrationFromFile(f.filePath);
+        if (!parsed) continue;
+        const list = Array.isArray(parsed.candidates) && parsed.candidates.length ? parsed.candidates : (parsed.matrixRowMajor4x4 ? [{ matrix: parsed.matrixRowMajor4x4 }] : []);
+        for (let i = 0; i < list.length; i++) {
+          const m = list[i].matrix as number[]; if (!m || m.length !== 16) continue;
+          matrices.push({ file: f.filePath, matrix: m, label: `${f.filePath}#${i}` });
+        }
+      }
+      if (matrices.length === 0) return res.status(404).json({ error: 'No REG candidates found' });
+
+      const matTranspose = (m: number[]) => [m[0],m[4],m[8],m[12], m[1],m[5],m[9],m[13], m[2],m[6],m[10],m[14], m[3],m[7],m[11],m[15]];
+      const invertRigid = (m: number[]) => {
+        const R = [[m[0],m[1],m[2]],[m[4],m[5],m[6]],[m[8],m[9],m[10]]];
+        const t = [m[3],m[7],m[11]]; const Rt = [[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
+        const tin = [-(Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2]),-(Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2]),-(Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2])];
+        return [Rt[0][0],Rt[0][1],Rt[0][2],tin[0], Rt[1][0],Rt[1][1],Rt[1][2],tin[1], Rt[2][0],Rt[2][1],Rt[2][2],tin[2], 0,0,0,1];
+      };
+      const buildVariant = (m: number[], v: string) => v==='MT'?matTranspose(m):v==='MINV'?invertRigid(m):v==='MINVT'?invertRigid(matTranspose(m)):m;
+      const xform = (m: number[], p: number[]) => [m[0]*p[0]+m[1]*p[1]+m[2]*p[2]+m[3], m[4]*p[0]+m[5]*p[1]+m[6]*p[2]+m[7], m[8]*p[0]+m[9]*p[1]+m[10]*p[2]+m[11]];
+
+      const toRingsByZWithMatrix = (struct: any, M: number[]) => {
+        const map = new Map<number, Ring[]>();
+        const tol = 0.75;
+        const pushRing = (z: number, ring: Ring) => { let key: number | null = null; for (const k of map.keys()) if (Math.abs(k - z) <= tol) { key = k; break; } const use = key !== null ? key : z; const arr = map.get(use) || []; arr.push(ring); map.set(use, arr); };
+        for (const c of (struct.contours || [])) {
+          const pts = (c.points || []) as number[]; if (pts.length < 6) continue; const ring: Ring = [];
+          let zFirst = 0;
+          for (let i = 0; i < pts.length; i += 3) {
+            const P = xform(M, [pts[i], pts[i+1], pts[i+2]]);
+            if (i === 0) zFirst = planeParam(P as number[]);
+            ring.push(uvOf(P as number[]));
+          }
+          pushRing(zFirst, ring);
+        }
+        return map;
+      };
+
+      const toPCMulti = (rings: Ring[]): any => rings.map(r => [r]);
+      const pcArea = (mp: any): number => { if (!mp) return 0; let a=0; for (const poly of mp as any[]) for (const ring of poly as any[]) a += polygonArea(ring as Ring); return a; };
+
+      const results: any[] = [];
+      const variants = ['M','MT','MINV','MINVT','M_RAS','MINV_RAS'];
+      const S4 = [
+        -1,0,0,0,
+         0,-1,0,0,
+         0,0,1,0,
+         0,0,0,1
+      ];
+      const mul4 = (A:number[], B:number[]) => {
+        const C = new Array(16).fill(0);
+        for (let r=0;r<4;r++) for (let c=0;c<4;c++) for (let k=0;k<4;k++) C[r*4+c] += A[r*4+k]*B[k*4+c];
+        return C;
+      };
+      for (const cand of matrices) {
+        for (const v of variants) {
+          let M = buildVariant(cand.matrix, v.includes('INV')? 'MINV' : 'M');
+          if (v.endsWith('_RAS')) {
+            // Convert RAS-coded matrix to DICOM LPS by S * M * S
+            M = mul4(S4, mul4(M, S4));
+          } else if (v === 'MT' || v === 'MINVT') {
+            // Uncommon; keep as-is (transpose variants handled earlier if needed)
+            M = buildVariant(cand.matrix, v);
+          }
+          const secByZ = toRingsByZWithMatrix(secBody, M);
+          const metrics: number[] = [];
+          for (const [zPrim, primRings] of primaryByZ.entries()) {
+            let zMatch: number | null = null; for (const z of secByZ.keys()) { if (Math.abs(z - zPrim) <= 0.75) { zMatch = z; break; } }
+            if (zMatch === null) continue; const secRings = secByZ.get(zMatch)!;
+            const inter = polygonClipping.intersection(toPCMulti(primRings) as any, toPCMulti(secRings) as any);
+            const aP = primRings.reduce((s,r)=>s+polygonArea(r),0); const aS = secRings.reduce((s,r)=>s+polygonArea(r),0); const aI = pcArea(inter);
+            const dice = (aP + aS) > 0 ? (2 * aI) / (aP + aS) : 0; metrics.push(dice);
+          }
+          metrics.sort((a,b)=>a-b);
+          const count = metrics.length; const avg = count ? metrics.reduce((s,x)=>s+x,0)/count : 0; const min = count?metrics[0]:0; const max = count?metrics[count-1]:0; const pass98 = metrics.filter(x=>x>=0.98).length;
+          results.push({ file: cand.file, label: cand.label, variant: v, sliceCount: count, pass98, avg: Number(avg.toFixed(4)), min: Number(min.toFixed(4)), max: Number(max.toFixed(4)) });
+        }
+      }
+      results.sort((a,b)=> (b.pass98 - a.pass98) || (b.avg - a.avg));
+      const best = results[0];
+      let bestMatrix: number[] | null = null;
+      if (best) {
+        // Reconstruct matrix for the best entry
+        const src = matrices.find(m => best.label.startsWith(m.file));
+        if (src) {
+          let M = buildVariant(src.matrix, (best.variant.includes('INV')? 'MINV' : 'M'));
+          if (best.variant.endsWith('_RAS')) M = mul4(S4, mul4(M, S4));
+          if (best.variant === 'MT' || best.variant === 'MINVT') M = buildVariant(src.matrix, best.variant);
+          bestMatrix = M;
+        }
+      }
+      return res.json({ ok: true, results, best, bestMatrix });
+    } catch (err: any) {
+      console.error('scan-candidates failed', err);
+      res.status(500).json({ error: 'scan-candidates failed', details: err?.message });
     }
   });
 
