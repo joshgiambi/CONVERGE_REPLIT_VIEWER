@@ -427,7 +427,7 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
       const result = spawnSync(helper, args, { encoding: 'utf-8' });
       if (result.status !== 0) {
         fuseboxHelperMetrics.failures += 1;
-        logFuseboxHelper('warn', 'Fusebox helper conversion failed', {
+        logFuseboxHelper('warn', 'Fusebox helper conversion failed, falling back to matrix', {
           helper,
           args,
           status: result.status,
@@ -436,10 +436,9 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
           primarySeriesId,
           secondarySeriesId,
         });
-        throw createFuseboxError('FUSEBOX_HELPER_FAILED', 'Fusebox helper failed to convert REG to H5', {
-          helper,
-          status: result.status,
-        });
+        info.transformFile = undefined;
+        info.transformSource = 'matrix-validated';
+        return info;
       }
       fuseboxHelperMetrics.conversions += 1;
     } else {
@@ -5401,6 +5400,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch {}
         console.log('ASSOC:', assoc);
         associations.push(assoc);
+
+        // Add reverse associations so MRI/PET can act as primary when co-registered
+        const promotableSources = resolvedSourceSeries.filter(detail => {
+          const modality = (detail?.modality || '').toUpperCase();
+          return modality && modality !== 'CT' && Number.isFinite(detail?.id as number);
+        });
+
+        for (const sourceDetail of promotableSources) {
+          const promoteId = sourceDetail.id as number;
+          if (!Number.isFinite(promoteId)) continue;
+
+          const otherSourceIds = new Set<number>();
+          if (Number.isFinite(targetSeriesId as any)) otherSourceIds.add(targetSeriesId as number);
+          for (const id of sourcesSeriesIds) {
+            if (Number.isFinite(id) && id !== promoteId) otherSourceIds.add(id);
+          }
+
+          const otherSourceDetails = Array.from(otherSourceIds)
+            .map(id => toSeriesDetail(seriesById.get(id)))
+            .filter((detail): detail is NonNullable<typeof detail> => !!detail && detail.id !== promoteId);
+
+          const promotedCandidates = transformCandidates
+            .map((cand) => {
+              if (!Array.isArray(cand.matrix) || cand.matrix.length !== 16) return null;
+              const inverted = invertMatrix4x4RowMajor(cand.matrix.slice());
+              if (!inverted) return null;
+              return {
+                id: `${cand.id || path.basename(found.filePath)}::inv`,
+                regFile: cand.regFile || found.filePath,
+                sourceFoR: cand.targetFoR || parsed.targetFrameOfReferenceUid || null,
+                targetFoR: cand.sourceFoR || parsed.sourceFrameOfReferenceUid || null,
+                matrix: inverted,
+                referencedSeriesInstanceUids: Array.isArray(cand.referencedSeriesInstanceUids) && cand.referencedSeriesInstanceUids.length
+                  ? cand.referencedSeriesInstanceUids
+                  : refs,
+              };
+            })
+            .filter((cand): cand is Record<string, any> => !!cand);
+
+          if (!promotedCandidates.length) continue;
+
+          const promotedSources = new Set<string>();
+          if (targetSeriesUID) promotedSources.add(targetSeriesUID);
+          for (const detail of otherSourceDetails) {
+            if (detail?.uid) promotedSources.add(detail.uid);
+          }
+
+          const promotedAssoc = {
+            regFile: found.filePath,
+            studyId: found.studyId,
+            target: sourceDetail.uid,
+            targetSeriesId: promoteId,
+            sources: Array.from(promotedSources),
+            sourcesSeriesIds: Array.from(otherSourceIds).filter(id => id !== promoteId),
+            sourceSeriesIds: Array.from(otherSourceIds).filter(id => id !== promoteId),
+            sourceFoR: parsed.targetFrameOfReferenceUid || null,
+            targetFoR: parsed.sourceFrameOfReferenceUid || null,
+            relationship: 'registered',
+            siblingSeriesIds: Array.from(siblingFoRIds),
+            transformCandidates: promotedCandidates,
+            targetSeriesDetail: sourceDetail,
+            sourceSeriesDetails: [targetSeriesDetail, ...otherSourceDetails],
+          };
+
+          associations.push(promotedAssoc);
+        }
       }
 
       // Build CTAC list across the patient/study series universe

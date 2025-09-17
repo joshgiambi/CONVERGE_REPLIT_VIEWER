@@ -39,6 +39,7 @@ A quick guide for future agents working on the Fusebox refactor.
 - [x] Run viewer smoke test: CT primary + PET secondary; ensure overlay aligns using the registration cache harness. *(HN PET/CT patient verified on `fusion-test` slice 103 – overlay matches ProKnow.)*
 - [ ] Record Dice validation command that uses new route (optional but recommended).
 - [ ] Validate multi-registration scenarios (multiple REG files per secondary) and confirm cache/telemetry captures each transform source.
+- [ ] Confirm viewer hits `/api/fusebox/derived-series`/`derived-slice` for active fusion pair (no `/resampled-slice` spam) and overlays snap in without contour flicker.
 
 Notes:
 - Use `FUSEBOX_PYTHON=/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/sam_env/bin/python` when starting the server so Python deps (numpy/SimpleITK/pydicom) are available to Fusebox.
@@ -48,6 +49,7 @@ Notes:
 - Resampler now sorts DICOM filenames by physical slice normal before loading; log output prints modality/FoR and z-range so physical alignment regressions are visible immediately.
 - New backend helper `/api/fusebox/derived-series` writes cached derived stacks (`storage/patients/<id>/derived/...`) and returns manifest metadata for preloading.
 - Added `/api/fusebox/derived-slice` to stream derived stack slices without invoking the Python helper, enabling the viewer to reuse cached DICOM data.
+- Registration associations now emit reverse entries so MR/PET series appear as valid primaries in the fusion UI; CT↔MR matrices are inverted automatically.
 - Documented next-step expectations for registration ingestion below; update once implemented.
 
 ## Registration Pipeline – Remaining Work

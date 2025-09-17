@@ -24,8 +24,8 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { fetchFuseboxSlice, fuseboxSliceToImageData, clearFuseboxCache } from "@/lib/fusion-utils";
-import type { FuseboxSlice } from "@/lib/fusion-utils";
+import { fetchFuseboxSlice, fuseboxSliceToImageData, clearFuseboxCache, ensureDerivedSeriesManifest } from "@/lib/fusion-utils";
+import type { FuseboxSlice, DerivedSeriesManifest } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -274,6 +274,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return manifest;
   }, [manifestKeyFor, seriesId]);
 
+  useEffect(() => {
+    if (!seriesId || !secondarySeriesId) return;
+    let cancelled = false;
+    getDerivedManifest(secondarySeriesId, selectedRegistrationId ?? null).catch(() => {
+      if (import.meta.env.DEV && !cancelled) {
+        console.warn('Fusebox: derived manifest warmup failed for active pairing', {
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+          registrationId: selectedRegistrationId,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [seriesId, secondarySeriesId, selectedRegistrationId, getDerivedManifest]);
+
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
       console.log('registrationOptions: no secondary selected');
@@ -452,10 +469,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const FUSION_PREFETCH_SECONDARY_DELAY_MS = 18;
 
   const prefetchFusionSlices = useCallback(
-    (centerIndex: number) => {
+    async (centerIndex: number) => {
       if (!secondarySeriesId || !images.length) return;
 
       const registrationId = selectedRegistrationId ?? null;
+      
+      // Get derived manifest for the new system
+      let manifest: any = null;
+      try {
+        manifest = await getDerivedManifest(secondarySeriesId, registrationId);
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.warn('🐟 FUSION: Failed to get derived manifest for prefetch, falling back to old system', error);
+        }
+      }
 
       for (let offset = -FUSION_PREFETCH_RADIUS; offset <= FUSION_PREFETCH_RADIUS; offset += 1) {
         if (offset === 0) continue;
@@ -473,7 +500,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           secondarySeriesId,
           sopInstanceUID: sop,
           registrationId: registrationId ?? undefined,
-        })
+        }, { derivedManifest: manifest ?? undefined, fallbackToHelper: true })
           .then((slice) => {
             const prepared = convertSliceToCanvas(slice, secondaryModality);
             if (prepared) {
@@ -493,6 +520,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [
       buildFuseboxCacheKey,
       convertSliceToCanvas,
+      getDerivedManifest,
       images,
       secondaryModality,
       secondarySeriesId,
