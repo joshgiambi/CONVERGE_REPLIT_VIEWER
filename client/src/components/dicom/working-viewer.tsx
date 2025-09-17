@@ -4105,12 +4105,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId) {
-        console.log('🐟 FUSION: secondarySeriesId detected in main render:', secondarySeriesId);
-        console.log('🐟 FUSION: About to call renderFusionOverlayNew', { 
-          ctx: !!ctx, 
-          currentImage: !!currentImage,
-          currentImageSOP: currentImage?.sopInstanceUID 
-        });
+        // Fusion overlay rendering
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
@@ -4354,15 +4349,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, []);
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    console.log('🐟 FUSION: renderFusionOverlayNew START', {
-      secondarySeriesId, 
-      fusionOpacity,
-      registrationOptions: registrationOptions.length,
-      selectedRegistrationId
-    });
-    
     if (!secondarySeriesId || fusionOpacity === 0) {
-      console.log('🐟 FUSION: Early exit - no secondary or zero opacity');
       setFuseboxTransformSource(null);
       return;
     }
@@ -4376,20 +4363,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     const transform = ctTransform.current;
     if (!transform) {
-      console.log('🐟 FUSION: Early exit - no ctTransform');
       return;
     }
-
-    console.log('🐟 FUSION: Transform check passed, checking registration matrix', {
-      hasRegistrationMatrix,
-      registrationMatrixLength: registrationMatrix?.length,
-      selectedRegistrationId
-    });
 
     if (hasRegistrationMatrix) {
       missingMatrixLogRef.current = false;
     } else if (!missingMatrixLogRef.current) {
-      console.log('🐟 FUSION: Proceeding without client-side matrix');
       pushFusionLog('Proceeding without client-side matrix; expecting helper output', {
         primary: seriesId,
         secondary: secondarySeriesId,
@@ -4401,14 +4380,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const cacheKey = `${primaryImage.sopInstanceUID}:${secondarySeriesId}:${selectedRegistrationId ?? 'default'}`;
     let cached = fuseboxCacheRef.current.get(cacheKey);
     
-    console.log('🐟 FUSION: Cache check', { 
-      cacheKey,
-      hasCached: !!cached,
-      cacheSize: fuseboxCacheRef.current.size
-    });
-    
     if (!cached) {
-      console.log('🐟 FUSION: No cache, fetching fusebox slice...');
       try {
         const slice = await fetchFuseboxSlice({
           primarySeriesId: seriesId,

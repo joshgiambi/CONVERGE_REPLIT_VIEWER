@@ -801,7 +801,6 @@ export function SeriesSelector({
                                     ? regAssociations[seriesItem.id]
                                     : []
                                 );
-                                console.log('🔗 CT reg associations', { primaryId: seriesItem.id, regAssociations, explicitSecIds: Array.from(explicitSecIds) });
                                 if (explicitSecIds.size === 0) return null;
                                 const ctAssoc = series.filter(s => s.modality === 'CT' && explicitSecIds.has(s.id));
                                 if (ctAssoc.length === 0) return null;
