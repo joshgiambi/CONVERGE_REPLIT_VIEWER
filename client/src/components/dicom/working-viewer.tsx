@@ -416,6 +416,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         registrationOptions,
         logs: fusionLogs.slice(-50),
       };
+      
+      // Assign to window for debugging
+      (window as any).__fusion = debug;
+      
       return JSON.stringify(debug, null, 2);
     } catch (e) {
       return `Failed to compile debug: ${String(e)}`;
@@ -4101,12 +4105,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId) {
+        console.log('🐟 FUSION: secondarySeriesId detected in main render:', secondarySeriesId);
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
           console.error("Error rendering fusion overlay:", fusionError);
           // Continue without fusion rather than failing entire image display
         }
+      } else {
+        console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
       // Render RT structure overlays if available
