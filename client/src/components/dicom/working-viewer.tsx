@@ -4106,10 +4106,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId) {
         console.log('🐟 FUSION: secondarySeriesId detected in main render:', secondarySeriesId);
+        console.log('🐟 FUSION: About to call renderFusionOverlayNew', { 
+          ctx: !!ctx, 
+          currentImage: !!currentImage,
+          currentImageSOP: currentImage?.sopInstanceUID 
+        });
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
-          console.error("Error rendering fusion overlay:", fusionError);
+          console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
           // Continue without fusion rather than failing entire image display
         }
       } else {
