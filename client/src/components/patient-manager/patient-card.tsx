@@ -3,12 +3,13 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star, ArrowRight, Link as LinkIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
 import { DicomThumbnail } from './dicom-thumbnail';
 import { useToast } from '@/hooks/use-toast';
+import type { AssociationResponse, RegistrationAssociation } from '@/types/fusion';
 
 interface PatientCardProps {
   patient: any;
@@ -27,7 +28,8 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   const [isExpanded, setIsExpanded] = useState(false);
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
-  const [registrationInfo, setRegistrationInfo] = useState<any>(null);
+  const [associationData, setAssociationData] = useState<AssociationResponse | null>(null);
+  const [loadingAssociations, setLoadingAssociations] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -82,25 +84,26 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         }
       };
       
-      // Load registration info
-      const loadRegistrationInfo = async () => {
-        if (studies.length > 0) {
+      // Load association data
+      const loadAssociationData = async () => {
+        if (patient?.id) {
+          setLoadingAssociations(true);
           try {
-            const response = await fetch(`/api/registrations/${studies[0].id}`);
+            const response = await fetch(`/api/registration/associations?patientId=${patient.id}`);
             if (response.ok) {
               const data = await response.json();
-              if (data && data.transformationMatrix) {
-                setRegistrationInfo(data);
-              }
+              setAssociationData(data);
             }
           } catch (err) {
-            console.error('Error loading registration:', err);
+            console.error('Error loading associations:', err);
+          } finally {
+            setLoadingAssociations(false);
           }
         }
       };
       
       loadRTStructures();
-      loadRegistrationInfo();
+      loadAssociationData();
     }
   }, [isExpanded]);
 
@@ -274,29 +277,29 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                   </Badge>
                 )}
                 
-                {registrationInfo && (
+                {associationData?.associations.length && (
                   <Badge 
                     variant="secondary" 
                     className="bg-orange-900/20 text-orange-400 border-orange-600/50"
                   >
                     <GitBranch className="h-3 w-3 mr-1" />
-                    Registration
+                    {associationData.associations.length} Association{associationData.associations.length !== 1 ? 's' : ''}
                   </Badge>
                 )}
                 
-                {mriSeries.length > 0 && ctSeries.length > 0 && (
+                {associationData?.associations.some(a => a.relationship === 'shared-frame') && (
                   <Badge 
                     variant="secondary" 
-                    className="bg-purple-900/20 text-purple-400 border-purple-600/50"
+                    className="bg-blue-900/20 text-blue-400 border-blue-600/50"
                   >
-                    <Layers className="h-3 w-3 mr-1" />
-                    Fused Images
+                    <LinkIcon className="h-3 w-3 mr-1" />
+                    Co-registered
                   </Badge>
                 )}
               </div>
             </div>
 
-            {/* Series Summary - Horizontal Layout */}
+            {/* Simple Series Summary - Main View */}
             <div className="flex items-center gap-6">
               {study.series.filter(s => ['CT', 'MR', 'PT'].includes(s.modality)).map((imageSeries) => (
                 <div key={imageSeries.id} className="flex items-center gap-3">
@@ -318,6 +321,212 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         {/* Expanded Content */}
         {isExpanded && (
           <div className="mt-4 space-y-4 border-t border-gray-700 pt-4">
+            {/* Compact Scan Details Table */}
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-indigo-400 flex items-center gap-2">
+                <FileStack className="h-4 w-4" />
+                Detailed Scan List
+              </h4>
+              <div className="bg-gray-800/30 rounded-lg p-3">
+                <div className="space-y-1">
+                  <div className="flex items-center text-xs text-gray-400 font-mono border-b border-gray-700/50 pb-1">
+                    <span className="w-10">ID</span>
+                    <span className="w-8">#</span>
+                    <span className="w-10">Type</span>
+                    <span className="flex-1 min-w-0">Description</span>
+                    <span className="w-12 text-right">Imgs</span>
+                    <span className="w-16 text-right">Vendor</span>
+                  </div>
+                  {studiesWithSeries.flatMap(study => study.series)
+                    .filter(s => ['CT', 'MR', 'PT', 'RTSTRUCT', 'REG'].includes(s.modality))
+                    .sort((a, b) => (a.seriesNumber || 999) - (b.seriesNumber || 999))
+                    .map((s) => {
+                      const association = associationData?.associations.find(assoc => 
+                        assoc.siblingSeriesIds.includes(s.id)
+                      );
+                      const isPrimary = association?.targetSeriesId === s.id;
+                      const isCtac = associationData?.ctacSeriesIds.includes(s.id);
+                      const isCoReg = association && association.relationship === 'shared-frame';
+                      const isReg = association && association.relationship === 'registered';
+
+                      return (
+                        <div 
+                          key={s.id} 
+                          className={`flex items-center text-xs font-mono py-0.5 px-1 rounded-sm ${
+                            isPrimary ? 'bg-green-900/20' : 
+                            isCoReg ? 'bg-blue-900/20' : 
+                            isReg ? 'bg-orange-900/20' : 
+                            'hover:bg-gray-700/20'
+                          }`}
+                        >
+                          <span className="w-10 text-gray-300 font-bold">{s.id}</span>
+                          <span className="w-8 text-gray-400">{s.seriesNumber || '?'}</span>
+                          <div className="w-10">
+                            <Badge className={`${getModalityColor(s.modality)} text-xs px-1 py-0`}>
+                              {s.modality}
+                            </Badge>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              <span className="text-gray-200 truncate text-xs">
+                                {s.seriesDescription || `Series ${s.seriesNumber || '?'}`}
+                              </span>
+                              {isPrimary && <span className="text-green-400 text-xs">●</span>}
+                              {isCtac && <span className="text-yellow-400 text-xs">⚡</span>}
+                              {isCoReg && !isPrimary && <LinkIcon className="h-2.5 w-2.5 text-blue-400" />}
+                              {isReg && !isPrimary && <GitBranch className="h-2.5 w-2.5 text-orange-400" />}
+                            </div>
+                          </div>
+                          <span className="w-12 text-gray-400 text-right text-xs">{s.imageCount}</span>
+                          <span className="w-16 text-gray-500 text-right text-xs truncate">
+                            {(s as any).metadata?.manufacturer?.substring(0, 6) || '--'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            {/* Eclipse-Style Fusion Mapping */}
+            {associationData?.associations.length && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-orange-400 flex items-center gap-2">
+                  <GitBranch className="h-4 w-4" />
+                  Eclipse-Style Fusion Mapping
+                </h4>
+                <div className="space-y-3">
+                  {(() => {
+                    // Group series by associations across all studies
+                    const allSeries = studiesWithSeries.flatMap(study => study.series);
+                    const processedSeriesIds = new Set<number>();
+                    const mappings: Array<{
+                      type: 'association' | 'standalone';
+                      association?: RegistrationAssociation;
+                      series: any[];
+                      rtStructures?: any[];
+                    }> = [];
+
+                    // Process associations
+                    associationData.associations.forEach(assoc => {
+                      const associatedSeries = [
+                        ...(assoc.targetSeriesId ? [allSeries.find(s => s.id === assoc.targetSeriesId)] : []),
+                        ...assoc.sourcesSeriesIds.map(id => allSeries.find(s => s.id === id))
+                      ].filter(Boolean);
+
+                      if (associatedSeries.length > 0) {
+                        // Find RT structures associated with these series
+                        const associatedRTStructures = allSeries.filter(s => 
+                          s.modality === 'RTSTRUCT' && 
+                          associatedSeries.some(imgS => imgS.studyId === s.studyId)
+                        );
+
+                        mappings.push({
+                          type: 'association',
+                          association: assoc,
+                          series: associatedSeries,
+                          rtStructures: associatedRTStructures
+                        });
+                        associatedSeries.forEach(s => processedSeriesIds.add(s.id));
+                      }
+                    });
+
+                    return mappings.map((mapping, idx) => (
+                      <div key={idx} className="bg-gray-800/20 rounded-lg p-3">
+                        {mapping.type === 'association' && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {/* Co-registered series in dashed box */}
+                              {mapping.association?.relationship === 'shared-frame' && mapping.series.length > 1 ? (
+                                <div className="border-2 border-dashed border-blue-400/50 bg-blue-900/5 rounded-lg p-2 flex items-center gap-2">
+                                  <LinkIcon className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                                  <div className="flex items-center gap-3">
+                                    {mapping.series.map((s) => (
+                                      <div key={s.id} className="flex items-center gap-2">
+                                        <Badge className={`${getModalityColor(s.modality)} text-xs px-1.5 py-0.5`}>
+                                          {s.modality}
+                                        </Badge>
+                                        <span className="text-xs text-gray-200">
+                                          {s.seriesDescription?.substring(0, 15) || `S${s.seriesNumber}`} ({s.id})
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <span className="text-xs text-blue-300 ml-2">Co-registered</span>
+                                </div>
+                              ) : (
+                                // Registration relationship with target in solid box
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  {/* Source series */}
+                                  <div className="flex items-center gap-2">
+                                    {mapping.series.filter(s => s.id !== mapping.association?.targetSeriesId).map(s => (
+                                      <div key={s.id} className="flex items-center gap-2">
+                                        <Badge className={`${getModalityColor(s.modality)} text-xs px-1.5 py-0.5`}>
+                                          {s.modality}
+                                        </Badge>
+                                        <span className="text-xs text-gray-300">
+                                          {s.seriesDescription?.substring(0, 12) || `S${s.seriesNumber}`} ({s.id})
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  
+                                  {/* Connection arrow with REG info */}
+                                  {mapping.association?.regFile && (
+                                    <div className="flex items-center gap-1">
+                                      <div className="w-8 h-px bg-orange-400"></div>
+                                      <ArrowRight className="h-3 w-3 text-orange-400" />
+                                      <span className="text-xs text-orange-300 bg-orange-900/20 px-1 rounded">
+                                        REG: {mapping.association.regFile.split('/').pop()}
+                                      </span>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Target series in solid box */}
+                                  {mapping.association?.targetSeriesId && (() => {
+                                    const target = mapping.series.find(s => s.id === mapping.association?.targetSeriesId);
+                                    return target ? (
+                                      <div className="border-2 border-solid border-green-400/60 bg-green-900/10 rounded-lg p-2 flex items-center gap-2">
+                                        <Badge className={`${getModalityColor(target.modality)} text-xs px-1.5 py-0.5`}>
+                                          {target.modality}
+                                        </Badge>
+                                        <span className="text-xs text-gray-200">
+                                          {target.seriesDescription?.substring(0, 12) || `S${target.seriesNumber}`} ({target.id})
+                                        </span>
+                                        <span className="text-xs text-green-300">Primary</span>
+                                      </div>
+                                    ) : null;
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* RT Structures attachment */}
+                            {mapping.rtStructures && mapping.rtStructures.length > 0 && (
+                              <div className="ml-4 flex items-center gap-2">
+                                <div className="w-4 h-px bg-green-400"></div>
+                                <div className="flex items-center gap-2">
+                                  <Brain className="h-3 w-3 text-green-400" />
+                                  <span className="text-xs text-green-300">
+                                    {mapping.rtStructures.length} RT Structure{mapping.rtStructures.length !== 1 ? 's' : ''}
+                                  </span>
+                                  {mapping.rtStructures.map(rt => (
+                                    <span key={rt.id} className="text-xs text-gray-400">
+                                      {rt.seriesDescription?.substring(0, 10) || 'Structures'} ({rt.id})
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+
             {/* Image Thumbnails */}
             {imageSeries.length > 0 && (
               <div className="space-y-2">
@@ -382,69 +591,65 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               </div>
             ))}
 
-            {/* Registration Info - Enhanced with visual connections */}
-            {registrationInfo && (
-              <div className="space-y-2">
+            {/* Detailed Association Information - Only in Expanded View */}
+            {associationData?.associations.length && (
+              <div className="space-y-3">
                 <h4 className="text-sm font-medium text-orange-400 flex items-center gap-2">
                   <GitBranch className="h-4 w-4" />
-                  Registration & Fusion Links
+                  Detailed Fusion Associations
                 </h4>
-                <div className="bg-gray-800/50 p-4 rounded-lg space-y-4">
-                  {/* Show CT Series */}
-                  {ctSeries.map(ct => (
-                    <div key={ct.id} className="space-y-3">
-                      {/* Primary CT Series */}
-                      <div className="flex items-center gap-3">
-                        <div className="flex-shrink-0">
-                          <Badge className="bg-blue-900/20 text-blue-400 border-blue-600/50">
-                            CT
-                          </Badge>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-gray-300 font-medium">
-                            {ct.seriesDescription || `CT Series ${ct.seriesNumber}`}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {ct.imageCount} images • Reference series
-                          </p>
-                        </div>
-                      </div>
-                      
-                      {/* Registration Connection Visualization */}
-                      <div className="relative pl-8">
-                        <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-400 via-orange-400 to-purple-400"></div>
-                        <div className="absolute left-3 top-4 w-2.5 h-2.5 bg-orange-400 rounded-full ring-2 ring-gray-800"></div>
-                        <div className="pl-4 py-2">
-                          <p className="text-xs text-orange-400 font-medium">4x4 Registration Matrix</p>
-                          <p className="text-xs text-gray-500">{registrationInfo.matrixType || 'RIGID'} transformation</p>
-                        </div>
-                      </div>
-                      
-                      {/* Connected MRI Series */}
-                      <div className="space-y-2 pl-8">
-                        {mriSeries.map((mri) => (
-                          <div key={mri.id} className="flex items-center gap-3 relative">
-                            <div className="absolute -left-4 top-3 w-2 h-2 bg-purple-400 rounded-full"></div>
-                            <div className="flex-shrink-0">
-                              <Badge className="bg-purple-900/20 text-purple-400 border-purple-600/50">
-                                MR
-                              </Badge>
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-sm text-gray-300">
-                                {mri.seriesDescription || `MR Series ${mri.seriesNumber}`}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {mri.imageCount} images • Co-registered for fusion
-                              </p>
-                            </div>
+                <div className="space-y-3">
+                  {associationData.associations.map((assoc, idx) => {
+                    const targetSeries = series.find(s => s.id === assoc.targetSeriesId);
+                    const sourceSeries = assoc.sourcesSeriesIds.map(id => series.find(s => s.id === id)).filter(Boolean);
+                    const isRegistered = assoc.relationship === 'registered';
+                    
+                    return (
+                      <div key={idx} className="bg-gray-800/30 rounded-lg p-3 text-xs">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0 mt-0.5">
+                            <Badge variant="outline" className={
+                              isRegistered 
+                                ? "text-orange-300 border-orange-500/50" 
+                                : "text-blue-300 border-blue-500/50"
+                            }>
+                              {isRegistered ? 'REG' : 'Co-reg'}
+                            </Badge>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  
+                          <div className="flex-1 space-y-1">
+                            {/* Association details */}
+                            <div className="text-gray-300">
+                              <strong>ID {assoc.studyId}</strong> • 
+                              {assoc.regFile && <span className="ml-1 text-orange-300">REG: {assoc.regFile.split('/').pop()}</span>}
+                              {assoc.sourceFoR !== assoc.targetFoR && <span className="ml-1 text-purple-300">Cross-FoR</span>}
+                            </div>
+                            
+                            {/* Series connections */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {sourceSeries.map(s => (
+                                <span key={s.id} className="text-gray-400">
+                                  {s.modality}({s.id})
+                                </span>
+                              ))}
+                              <ArrowRight className="h-3 w-3 text-gray-500" />
+                              {targetSeries && (
+                                <span className="text-green-300 font-medium">
+                                  {targetSeries.modality}({targetSeries.id}) PRIMARY
+                                </span>
+                              )}
+                            </div>
 
+                            {/* Transform candidates */}
+                            {isRegistered && assoc.transformCandidates?.length > 0 && (
+                              <div className="text-gray-500">
+                                {assoc.transformCandidates.length} transform candidate{assoc.transformCandidates.length !== 1 ? 's' : ''}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

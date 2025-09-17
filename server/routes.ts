@@ -14,6 +14,7 @@ import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 import { logger } from './logger';
+import { spawn, spawnSync } from 'child_process';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -75,6 +76,415 @@ function lineSegmentsIntersect(p1: number[], p2: number[], p3: number[], p4: num
   const d4 = (p2[0] - p1[0]) * (p4[1] - p1[1]) - (p2[1] - p1[1]) * (p4[0] - p1[0]);
   
   return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+type MinimalImageMeta = {
+  frameOfReference?: string | null;
+  imageOrientation?: number[];
+  imagePosition?: number[];
+  pixelSpacing?: number[];
+  rows?: number;
+  cols?: number;
+};
+
+function parseMinimalDicomMeta(filePath: string): MinimalImageMeta | null {
+  try {
+    const bytes = fs.readFileSync(filePath);
+    const data = (dicomParser as any).parseDicom(new Uint8Array(bytes));
+    const arr = (tag: string): number[] => {
+      try {
+        const value = data.string?.(tag);
+        return value ? value.split('\\').map(Number).filter(v => Number.isFinite(v)) : [];
+      } catch {
+        return [];
+      }
+    };
+    const str = (tag: string): string | null => {
+      try {
+        const value = data.string?.(tag);
+        return value ? String(value).trim() : null;
+      } catch {
+        return null;
+      }
+    };
+    const u16 = (tag: string): number | undefined => {
+      try {
+        const value = data.uint16?.(tag);
+        return Number.isFinite(value) ? Number(value) : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    return {
+      frameOfReference: str('x00200052'),
+      imageOrientation: arr('x00200037'),
+      imagePosition: arr('x00200032'),
+      pixelSpacing: arr('x00280030'),
+      rows: u16('x00280010'),
+      cols: u16('x00280011'),
+    };
+  } catch (err) {
+    logger.warn({ err }, 'Failed to parse minimal DICOM meta');
+    return null;
+  }
+}
+
+function invertMatrix4x4RowMajor(matrix: number[]): number[] | null {
+  if (!Array.isArray(matrix) || matrix.length !== 16) return null;
+  const m = matrix;
+  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+  const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+  const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+
+  const b00 = a00 * a11 - a01 * a10;
+  const b01 = a00 * a12 - a02 * a10;
+  const b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11;
+  const b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30;
+  const b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31;
+  const b10 = a21 * a33 - a23 * a31;
+  const b11 = a22 * a33 - a23 * a32;
+
+  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+  const invDet = 1.0 / det;
+  const inv = new Array<number>(16);
+  inv[0] = (a11 * b11 - a12 * b10 + a13 * b09) * invDet;
+  inv[1] = (-a01 * b11 + a02 * b10 - a03 * b09) * invDet;
+  inv[2] = (a31 * b05 - a32 * b04 + a33 * b03) * invDet;
+  inv[3] = (-a21 * b05 + a22 * b04 - a23 * b03) * invDet;
+  inv[4] = (-a10 * b11 + a12 * b08 - a13 * b07) * invDet;
+  inv[5] = (a00 * b11 - a02 * b08 + a03 * b07) * invDet;
+  inv[6] = (-a30 * b05 + a32 * b02 - a33 * b01) * invDet;
+  inv[7] = (a20 * b05 - a22 * b02 + a23 * b01) * invDet;
+  inv[8] = (a10 * b10 - a11 * b08 + a13 * b06) * invDet;
+  inv[9] = (-a00 * b10 + a01 * b08 - a03 * b06) * invDet;
+  inv[10] = (a30 * b04 - a31 * b02 + a33 * b00) * invDet;
+  inv[11] = (-a20 * b04 + a21 * b02 - a23 * b00) * invDet;
+  inv[12] = (-a10 * b09 + a11 * b07 - a12 * b06) * invDet;
+  inv[13] = (a00 * b09 - a01 * b07 + a02 * b06) * invDet;
+  inv[14] = (-a30 * b03 + a31 * b01 - a32 * b00) * invDet;
+  inv[15] = (a20 * b03 - a21 * b01 + a22 * b00) * invDet;
+  return inv;
+}
+
+function sortImagesByInstance(imagesList: any[]): any[] {
+  return imagesList
+    .slice()
+    .sort((a, b) => {
+      const ai = Number((a.instanceNumber ?? a.metadata?.instanceNumber ?? 0) as number);
+      const bi = Number((b.instanceNumber ?? b.metadata?.instanceNumber ?? 0) as number);
+      if (Number.isFinite(ai) && Number.isFinite(bi) && ai !== bi) return ai - bi;
+      return String(a.fileName || a.sopInstanceUID || '').localeCompare(String(b.fileName || b.sopInstanceUID || ''));
+    });
+}
+
+type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache';
+type FuseboxTransformInfo = {
+  matrix?: number[];
+  filePath?: string;
+  transformFile?: string;
+  transformSource?: FuseboxTransformSource;
+  registrationId?: string;
+};
+
+const fuseboxHelperMetrics = {
+  attempts: 0,
+  cacheHits: 0,
+  conversions: 0,
+  failures: 0,
+  disabled: 0,
+};
+
+let fuseboxHelperDisabledLogged = false;
+let resolvedFuseboxPython: string | null = null;
+const fuseboxPythonFailureLogged = new Set<string>();
+let fuseboxPythonFallbackLogged = false;
+
+const createFuseboxError = (code: string, message: string, context: Record<string, unknown>) => {
+  const error = new Error(message);
+  (error as any).code = code;
+  (error as any).context = context;
+  return error;
+};
+
+const logFuseboxHelper = (
+  level: 'debug' | 'info' | 'warn',
+  message: string,
+  data: Record<string, unknown>,
+) => {
+  const payload = `${message} ${JSON.stringify({ event: 'fusebox.helper', ...data })}`;
+  if (level === 'debug') {
+    logger.debug(payload);
+  } else if (level === 'info') {
+    logger.info(payload);
+  } else {
+    logger.warn(payload);
+  }
+};
+
+const resolveFuseboxPython = (): string => {
+  if (resolvedFuseboxPython) return resolvedFuseboxPython;
+
+  const candidateList = [
+    process.env.FUSEBOX_PYTHON,
+    process.env.SIMPLEITK_PYTHON,
+    process.env.PYTHON,
+    path.join(process.cwd(), 'sam_env', 'bin', 'python'),
+    'python3',
+    'python',
+  ]
+    .filter((candidate): candidate is string => !!candidate)
+    .filter((candidate, index, arr) => arr.indexOf(candidate) === index);
+
+  for (const candidate of candidateList) {
+    try {
+      const check = spawnSync(candidate, ['-c', 'import numpy; import SimpleITK'], { encoding: 'utf-8' });
+      if (check.status === 0) {
+        resolvedFuseboxPython = candidate;
+        logFuseboxHelper('info', 'Resolved Fusebox python interpreter', { candidate });
+        return candidate;
+      }
+      if (!fuseboxPythonFailureLogged.has(candidate)) {
+        fuseboxPythonFailureLogged.add(candidate);
+        logFuseboxHelper('warn', 'Fusebox python candidate missing numpy/SimpleITK', {
+          candidate,
+          status: check.status,
+          stderr: check.stderr,
+        });
+      }
+    } catch (err: any) {
+      if (!fuseboxPythonFailureLogged.has(candidate)) {
+        fuseboxPythonFailureLogged.add(candidate);
+        logFuseboxHelper('warn', 'Fusebox python candidate unavailable', {
+          candidate,
+          err: err?.message || err,
+        });
+      }
+    }
+  }
+
+  const fallback = candidateList[0] || 'python3';
+  resolvedFuseboxPython = fallback;
+  if (!fuseboxPythonFallbackLogged) {
+    fuseboxPythonFallbackLogged = true;
+    logFuseboxHelper('warn', 'Falling back to default Fusebox python without dependency validation', {
+      fallback,
+      candidates: candidateList,
+    });
+  }
+  return fallback;
+};
+
+async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesId: number, registrationId?: string): Promise<FuseboxTransformInfo | null> {
+  const primarySeries = await storage.getSeriesById(primarySeriesId);
+  const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+  if (!primarySeries || !secondarySeries) return null;
+
+  const [primaryImages, secondaryImages] = await Promise.all([
+    storage.getImagesBySeriesId(primarySeriesId),
+    storage.getImagesBySeriesId(secondarySeriesId),
+  ]);
+  if (!primaryImages?.length || !secondaryImages?.length) return null;
+
+  const primaryMeta = primaryImages[0]?.filePath ? parseMinimalDicomMeta(primaryImages[0].filePath) : null;
+  const secondaryMeta = secondaryImages[0]?.filePath ? parseMinimalDicomMeta(secondaryImages[0].filePath) : null;
+  const primaryFoR = primaryMeta?.frameOfReference || null;
+  const secondaryFoR = secondaryMeta?.frameOfReference || null;
+
+  const maybeAttachHelperOutput = async (info: FuseboxTransformInfo | null, regPath?: string, candidateId?: string) => {
+    if (!info || info.transformFile || !regPath) return info;
+    const helper = process.env.DICOM_REG_CONVERTER;
+    if (!helper) {
+      fuseboxHelperMetrics.disabled += 1;
+      if (!fuseboxHelperDisabledLogged) {
+        logFuseboxHelper('warn', 'Fusebox helper disabled (DICOM_REG_CONVERTER not set)', {
+          primarySeriesId,
+          secondarySeriesId,
+        });
+        fuseboxHelperDisabledLogged = true;
+      }
+      throw createFuseboxError('FUSEBOX_HELPER_MISSING', 'Fusebox helper is not configured (DICOM_REG_CONVERTER unset)', {
+        primarySeriesId,
+        secondarySeriesId,
+      });
+    }
+    if (!primaryFoR || !secondaryFoR) {
+      throw createFuseboxError('FUSEBOX_MISSING_FOR', 'Frame of Reference UID missing for helper conversion', {
+        primarySeriesId,
+        secondarySeriesId,
+        primaryFoR,
+        secondaryFoR,
+      });
+    }
+
+    fuseboxHelperMetrics.attempts += 1;
+
+    const cacheDir = path.join(process.cwd(), 'tmp', 'fusebox-transforms');
+    await fs.promises.mkdir(cacheDir, { recursive: true });
+    const safeName = path.basename(regPath).replace(/[^a-zA-Z0-9_.-]+/g, '_');
+    const outPath = path.join(cacheDir, `${primarySeriesId}_${secondarySeriesId}_${safeName}.h5`);
+
+    let needsConversion = true;
+    try {
+      await fs.promises.access(outPath, fs.constants.R_OK);
+      needsConversion = false;
+    } catch {}
+
+    if (needsConversion) {
+      const args = ['--input', regPath, '--output', outPath, '--fixed', primaryFoR, '--moving', secondaryFoR];
+      const result = spawnSync(helper, args, { encoding: 'utf-8' });
+      if (result.status !== 0) {
+        fuseboxHelperMetrics.failures += 1;
+        logFuseboxHelper('warn', 'Fusebox helper conversion failed', {
+          helper,
+          args,
+          status: result.status,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          primarySeriesId,
+          secondarySeriesId,
+        });
+        throw createFuseboxError('FUSEBOX_HELPER_FAILED', 'Fusebox helper failed to convert REG to H5', {
+          helper,
+          status: result.status,
+        });
+      }
+      fuseboxHelperMetrics.conversions += 1;
+    } else {
+      fuseboxHelperMetrics.cacheHits += 1;
+    }
+
+    info.transformFile = outPath;
+    info.transformSource = needsConversion ? 'helper-generated' : 'helper-cache';
+    if (candidateId) info.registrationId = candidateId;
+    logFuseboxHelper('info', 'Fusebox helper transform ready', {
+      primarySeriesId,
+      secondarySeriesId,
+      cacheHit: !needsConversion,
+      transformFile: outPath,
+    });
+    return info;
+  };
+
+  const primaryStudy = primarySeries.studyId ? await storage.getStudy(primarySeries.studyId) : null;
+  const patientId = primaryStudy?.patientId ?? null;
+  const { findAllRegFilesForPatient, findRegFileForStudy } = await import('./registration/reg-resolver.ts');
+  const regCandidates = patientId ? await findAllRegFilesForPatient(patientId) : [];
+  if (!regCandidates.length && primarySeries.studyId) {
+    const fallback = await findRegFileForStudy(primarySeries.studyId);
+    if (fallback) regCandidates.push(fallback as any);
+  }
+
+  const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+  let fallbackMatrix: FuseboxTransformInfo | null = null;
+  let helperError: Error | null = null;
+  for (const reg of regCandidates) {
+    const parsed = parseDicomRegistrationFromFile(reg.filePath);
+    if (!parsed) continue;
+    const candidates = parsed.candidates?.length
+      ? parsed.candidates
+      : (parsed.matrixRowMajor4x4 ? [{
+          matrix: parsed.matrixRowMajor4x4,
+          sourceFoR: parsed.sourceFrameOfReferenceUid,
+          targetFoR: parsed.targetFrameOfReferenceUid,
+        }] : []);
+    for (let idx = 0; idx < candidates.length; idx++) {
+      const cand = candidates[idx];
+      if (!cand.matrix || cand.matrix.length !== 16) continue;
+      const sourceFoR = cand.sourceFoR || parsed.sourceFrameOfReferenceUid;
+      const targetFoR = cand.targetFoR || parsed.targetFrameOfReferenceUid;
+      const candidateId = `${path.basename(reg.filePath)}::${idx}`;
+
+      if (registrationId && candidateId !== registrationId) {
+        continue;
+      }
+
+      if (primaryFoR && secondaryFoR && sourceFoR && targetFoR) {
+        if (sourceFoR === secondaryFoR && targetFoR === primaryFoR) {
+          try {
+            return await maybeAttachHelperOutput({ matrix: cand.matrix.slice(), filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
+          } catch (err: any) {
+            helperError = err;
+          }
+        }
+        if (sourceFoR === primaryFoR && targetFoR === secondaryFoR) {
+          const inverted = invertMatrix4x4RowMajor(cand.matrix.slice());
+          if (inverted) {
+            try {
+              return await maybeAttachHelperOutput({ matrix: inverted, filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
+            } catch (err: any) {
+              helperError = err;
+            }
+          }
+        }
+      }
+
+      if (!fallbackMatrix && (!registrationId || registrationId === candidateId)) {
+        try {
+          fallbackMatrix = await maybeAttachHelperOutput({ matrix: cand.matrix.slice(), filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
+        } catch (err: any) {
+          helperError = err;
+        }
+      }
+    }
+  }
+
+  if (fallbackMatrix && fallbackMatrix.transformFile) {
+    return fallbackMatrix;
+  }
+
+  if (helperError) throw helperError;
+
+  throw createFuseboxError('FUSEBOX_NO_TRANSFORM', 'No registration transform produced a helper output', {
+    primarySeriesId,
+    secondarySeriesId,
+  });
+}
+
+async function collectSeriesFiles(seriesId: number): Promise<string[]> {
+  const images = await storage.getImagesBySeriesId(seriesId);
+  if (!images?.length) return [];
+  const ordered = sortImagesByInstance(images);
+  return ordered
+    .map((img: any) => img.filePath ? path.resolve(img.filePath) : null)
+    .filter((p): p is string => !!p && fs.existsSync(p));
+}
+
+async function runFuseboxResample(config: Record<string, any>): Promise<any> {
+  const python = resolveFuseboxPython();
+  logger.debug(`🐍 Using Python: ${python} (FUSEBOX_PYTHON=${process.env.FUSEBOX_PYTHON || 'unset'}) for Fusebox resample`);
+  const scriptPath = path.resolve('scripts', 'fusebox_resample.py');
+  const tmpBase = path.join(process.cwd(), 'tmp');
+  await fs.promises.mkdir(tmpBase, { recursive: true });
+  const tmpDir = await fs.promises.mkdtemp(path.join(tmpBase, 'fusebox-'));
+  const configPath = path.join(tmpDir, 'config.json');
+  await fs.promises.writeFile(configPath, JSON.stringify(config), 'utf-8');
+
+  return new Promise((resolve) => {
+    const child = spawn(python, [scriptPath, '--config', configPath], { cwd: process.cwd() });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('close', async (code) => {
+      try { await fs.promises.rm(tmpDir, { recursive: true, force: true }); } catch {}
+      if (code !== 0) {
+        resolve({ error: stderr.trim() || stdout.trim() || `fusebox exited with code ${code}` });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch (err) {
+        resolve({ error: `Failed to parse fusebox output: ${(err as Error).message}` });
+      }
+    });
+  });
 }
 
 // Configure multer to use session-specific upload directories
@@ -313,6 +723,8 @@ function extractDICOMMetadata(filePath: string) {
       seriesNumber: getNumber('x00200011'),
       instanceNumber: getNumber('x00200013'),
       imageType: getString('x00080008'),
+      manufacturer: getString('x00080070'),
+      manufacturerModelName: getString('x00081090'),
       pixelSpacing: getArray('x00280030'),
       imagePositionPatient: getArray('x00200032'),
       imageOrientationPatient: getArray('x00200037'),
@@ -1416,7 +1828,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   sliceThickness: seriesMetadata.sliceThickness || null,
                   metadata: { 
                     bodyPartExamined: seriesMetadata.bodyPartExamined || '',
-                    protocolName: seriesMetadata.protocolName || '' 
+                    protocolName: seriesMetadata.protocolName || '',
+                    manufacturer: seriesMetadata.manufacturer || '',
+                    manufacturerModelName: seriesMetadata.manufacturerModelName || ''
                   }
                 });
                 console.log(`Successfully created series with ID: ${dbSeries.id}`);
@@ -3142,278 +3556,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Server-side resampling of a single secondary frame onto the primary CT grid
-  // GET /api/fusion/resampled-frame?primarySeriesId=..&secondarySeriesId=..&primarySOP=..&variant=M|MT|MINV|MINVT
-  // Returns a grayscale PNG buffer (same rows/cols as the requested CT image) already aligned to the CT FoR
+  // Fusebox resampling endpoint (SimpleITK via Python helper)
+  app.get("/api/fusebox/resampled-slice", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      const secondarySeriesId = Number(req.query.secondarySeriesId);
+      const primarySOP = String(req.query.primarySOP || '');
+      const requestedRegistrationId = typeof req.query.registrationId === 'string' ? req.query.registrationId : undefined;
+      const interpolation = typeof req.query.interpolation === 'string' ? req.query.interpolation : 'linear';
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId) || !primarySOP) {
+        return res.status(400).json({ error: 'primarySeriesId, secondarySeriesId, and primarySOP are required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) {
+        return res.status(404).json({ error: 'Series not found' });
+      }
+
+      const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
+      if (!primaryImages.length) {
+        return res.status(404).json({ error: 'Primary series has no images' });
+      }
+
+      const sliceIndex = primaryImages.findIndex((img: any) => img.sopInstanceUID === primarySOP);
+      if (sliceIndex === -1) {
+        return res.status(404).json({ error: 'Primary SOP not found in series' });
+      }
+
+      const primaryFiles = await collectSeriesFiles(primarySeriesId);
+      const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
+      if (!primaryFiles.length || !secondaryFiles.length) {
+        return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
+      }
+
+      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
+        return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
+      }
+
+      const config = {
+        primary: primaryFiles,
+        secondary: secondaryFiles,
+        transform: transformInfo.matrix,
+        transformFile: transformInfo.transformFile,
+        sliceIndex,
+        interpolation,
+      };
+
+      const result = await runFuseboxResample(config);
+      if (!result || result.error) {
+        logger.error(`Fusebox resample failed: ${result?.error || 'Unknown error'}`);
+        return res.status(500).json({ error: 'Fusebox resample failed', details: result?.error || 'Unknown error' });
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        ...result,
+        sliceIndex,
+        secondaryModality: secondarySeries.modality || null,
+        registrationFile: transformInfo.filePath || null,
+        transformSource: transformInfo.transformSource || (transformInfo.transformFile ? 'helper-generated' : undefined),
+        registrationId: transformInfo.registrationId || requestedRegistrationId || null,
+      });
+    } catch (err: any) {
+      if (err?.code && String(err.code).startsWith('FUSEBOX_')) {
+        logger.error(`Fusebox helper unavailable: ${err?.message || String(err)}`);
+        return res.status(503).json({ error: 'Fusebox helper unavailable', details: err?.message || String(err) });
+      }
+      logger.error(`Fusebox endpoint failed: ${err?.message || String(err)}`);
+      return res.status(500).json({ error: 'Fusebox endpoint failed', details: err?.message || String(err) });
+    }
+  });
+
+  // Legacy compatibility: return PNG frame using Fusebox resampling so existing UI keeps working
   app.get("/api/fusion/resampled-frame", async (req: Request, res: Response) => {
     try {
       const primarySeriesId = Number(req.query.primarySeriesId);
       const secondarySeriesId = Number(req.query.secondarySeriesId);
       const primarySOP = String(req.query.primarySOP || '');
-      const variant = String(req.query.variant || 'MINV').toUpperCase();
+      const requestedRegistrationId = typeof req.query.registrationId === 'string' ? req.query.registrationId : undefined;
       if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId) || !primarySOP) {
         return res.status(400).json({ error: 'primarySeriesId, secondarySeriesId and primarySOP are required' });
       }
 
-      const primarySeries = await storage.getSeriesById(primarySeriesId);
-      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
-      if (!primarySeries || !secondarySeries) return res.status(404).json({ error: 'Series not found' });
-
-      // Find the primary image by SOP
-      const primaryImage = await storage.getImageByUID(primarySOP);
-      if (!primaryImage || !primaryImage.filePath) return res.status(404).json({ error: 'Primary image not found' });
-
-      // Helper: parse minimal DICOM meta without pixel data
-      const parseMeta = (filePath: string) => {
-        const buffer = fs.readFileSync(filePath);
-        const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer));
-        const arr = (tag: string): number[] => {
-          try { const s = ds.string?.(tag); return s ? s.split('\\').map(Number) : []; } catch { return []; }
-        };
-        const num = (tag: string): number | null => { try { const s = ds.string?.(tag); const v = s? parseFloat(s) : NaN; return Number.isFinite(v)? v : null; } catch { return null; } };
-        const u16 = (tag: string): number | null => { try { const v = ds.uint16?.(tag); return Number.isFinite(v)? v : null; } catch { return null; } };
-        return {
-          iop: arr('x00200037'),
-          ipp: arr('x00200032'),
-          psp: arr('x00280030'),
-          rows: u16('x00280010') || 0,
-          cols: u16('x00280011') || 0,
-          windowCenter: num('x00281050'),
-          windowWidth: num('x00281051'),
-          photometric: (ds.string?.('x00280004') || 'MONOCHROME2') as string,
-          bitsAllocated: (ds.uint16?.('x00280100') || 16) as number,
-          forUID: (ds.string?.('x00200052') || '').trim()
-        };
-      };
-
-      // Extract full pixel data for one image
-      const extractPixelData = (filePath: string): { data: Uint8Array | Uint16Array; rows: number; cols: number; windowCenter: number | null; windowWidth: number | null; photometric: string; bits: number } | null => {
-        try {
-          const dicomData = fs.readFileSync(filePath);
-          const ds = dicomParser.parseDicom(dicomData);
-          const el = (ds as any).elements?.['x7fe00010'];
-          if (!el) return null;
-          const rows = (ds as any).uint16?.('x00280010') as number;
-          const cols = (ds as any).uint16?.('x00280011') as number;
-          const bits = (ds as any).uint16?.('x00280100') as number;
-          const photometric = (ds as any).string?.('x00280004') || 'MONOCHROME2';
-          const wc = (() => { const s = (ds as any).string?.('x00281050'); const v = s ? parseFloat(s) : NaN; return Number.isFinite(v) ? v : null; })();
-          const ww = (() => { const s = (ds as any).string?.('x00281051'); const v = s ? parseFloat(s) : NaN; return Number.isFinite(v) ? v : null; })();
-          const byteArray = new Uint8Array((ds as any).byteArray.buffer, el.dataOffset, el.length);
-          let data: Uint8Array | Uint16Array;
-          if (bits === 16) data = new Uint16Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength / 2);
-          else data = byteArray;
-          return { data, rows, cols, windowCenter: wc, windowWidth: ww, photometric, bits };
-        } catch {
-          return null;
-        }
-      };
-
-      // Build registration matrix variants (same convention as RADFUSE client path)
-      const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
-      const { findAllRegFilesForPatient, findRegFileForStudy } = await import('./registration/reg-resolver.ts');
-      const primaryStudy = await storage.getStudy(primarySeries.studyId);
-      const pSeriesUID = primarySeries.seriesInstanceUID;
-      const sSeriesUID = secondarySeries.seriesInstanceUID;
-      const pImg0 = (await storage.getImagesBySeriesId(primarySeriesId))[0] as any;
-      const sImg0 = (await storage.getImagesBySeriesId(secondarySeriesId))[0] as any;
-      const pMeta0 = pImg0?.filePath ? parseMeta(pImg0.filePath) : null;
-      const sMeta0 = sImg0?.filePath ? parseMeta(sImg0.filePath) : null;
-      const pFoR = pMeta0?.forUID || '';
-      const sFoR = sMeta0?.forUID || '';
-
-      type RegCand = { mat: number[]; sourceFoR?: string; targetFoR?: string; referenced?: string[]; filePath: string; score: number; flags: string[] };
-      const allCands: RegCand[] = [];
-      const pushFromFile = (filePath: string) => {
-        const parsed = parseDicomRegistrationFromFile(filePath);
-        if (!parsed) return;
-        const items = Array.isArray(parsed.candidates) && parsed.candidates.length
-          ? parsed.candidates
-          : (parsed.matrixRowMajor4x4 ? [{ matrix: parsed.matrixRowMajor4x4, sourceFoR: parsed.sourceFrameOfReferenceUid, targetFoR: parsed.targetFrameOfReferenceUid, referenced: parsed.referencedSeriesInstanceUids }] : []);
-        for (const it of items) {
-          const m = (it as any).matrix as number[];
-          if (!m || m.length !== 16) continue;
-          const ref = ((it as any).referenced || []) as string[];
-          const sF = (it as any).sourceFoR || (it as any).sourceFoRUID || undefined;
-          const tF = (it as any).targetFoR || (it as any).targetFoRUID || undefined;
-          let score = 0; const flags: string[] = [];
-          if (ref.includes(pSeriesUID)) { score += 5; flags.push('refP'); }
-          if (ref.includes(sSeriesUID)) { score += 5; flags.push('refS'); }
-          if (sF && sF === sFoR) { score += 3; flags.push('sFo=sec'); }
-          if (tF && tF === pFoR) { score += 3; flags.push('tFo=pri'); }
-          // Prefer strict match where both series are explicitly referenced
-          if (ref.includes(pSeriesUID) && ref.includes(sSeriesUID)) { score += 50; flags.push('strict'); }
-          allCands.push({ mat: m, sourceFoR: sF, targetFoR: tF, referenced: ref, filePath, score, flags });
-        }
-      };
-
-      if (primaryStudy?.patientId) {
-        const regs = await findAllRegFilesForPatient(primaryStudy.patientId);
-        for (const r of regs) pushFromFile(r.filePath);
-      }
-      if (!allCands.length) {
-        const rf = await findRegFileForStudy(primarySeries.studyId);
-        if (rf) pushFromFile(rf.filePath);
-      }
-      if (!allCands.length) return res.status(404).json({ error: 'No registration found for patient/study' });
-      allCands.sort((a, b) => a.score - b.score);
-      const bestReg = allCands[allCands.length - 1];
-      const baseM = bestReg.mat.slice();
-      const transpose4 = (m: number[]) => [
-        m[0], m[4], m[8],  m[12] ?? 0,
-        m[1], m[5], m[9],  m[13] ?? 0,
-        m[2], m[6], m[10], m[14] ?? 0,
-        m[3], m[7], m[11], m[15] ?? 1,
-      ];
-      const invertRigid = (m: number[]) => {
-        const r00 = m[0], r01 = m[1], r02 = m[2], tx = m[3];
-        const r10 = m[4], r11 = m[5], r12 = m[6], ty = m[7];
-        const r20 = m[8], r21 = m[9], r22 = m[10], tz = m[11];
-        const rt00 = r00, rt01 = r10, rt02 = r20;
-        const rt10 = r01, rt11 = r11, rt12 = r21;
-        const rt20 = r02, rt21 = r12, rt22 = r22;
-        const itx = -(rt00*tx + rt01*ty + rt02*tz);
-        const ity = -(rt10*tx + rt11*ty + rt12*tz);
-        const itz = -(rt20*tx + rt21*ty + rt22*tz);
-        return [
-          rt00, rt10, rt20, itx,
-          rt01, rt11, rt21, ity,
-          rt02, rt12, rt22, itz,
-          0, 0, 0, 1
-        ];
-      };
-      const chooseVariant = (name: string): number[] => {
-        const nm = name.toUpperCase();
-        if (nm === 'M') return baseM;
-        if (nm === 'MT') return transpose4(baseM);
-        if (nm === 'MINV') return invertRigid(baseM);
-        if (nm === 'MINVT') return invertRigid(transpose4(baseM));
-        return invertRigid(baseM);
-      };
-      const C2M = chooseVariant(variant); // maps CT world -> moving (secondary) world
-      const M2C = invertRigid(C2M);       // moving -> CT world (for slice selection)
-
-      // Primary CT frame metadata
-      const pmeta = parseMeta(primaryImage.filePath);
-      if (!pmeta.iop.length || !pmeta.ipp.length) return res.status(400).json({ error: 'Primary image missing orientation/position' });
-      const row = [pmeta.iop[0], pmeta.iop[1], pmeta.iop[2]];
-      const col = [pmeta.iop[3], pmeta.iop[4], pmeta.iop[5]];
-      const nrm = [row[1]*col[2]-row[2]*col[1], row[2]*col[0]-row[0]*col[2], row[0]*col[1]-row[1]*col[0]];
-      const nlen = Math.hypot(nrm[0], nrm[1], nrm[2]) || 1;
-      const nct = [nrm[0]/nlen, nrm[1]/nlen, nrm[2]/nlen];
-      // PixelSpacing is [RowSpacing, ColumnSpacing]
-      const rowSp = (pmeta.psp?.[0] ?? 1) as number;
-      const colSp = (pmeta.psp?.[1] ?? 1) as number;
-
-      // Use first CT image in series as origin for plane distances
-      const primaryImgs = await storage.getImagesBySeriesId(primarySeriesId);
-      const originMeta = parseMeta((primaryImgs[0] as any).filePath);
-      const ctOrigin = originMeta.ipp.length >= 3 ? originMeta.ipp : pmeta.ipp;
-      const planeParamCT = (P: number[]) => (P[0]-ctOrigin[0])*nct[0] + (P[1]-ctOrigin[1])*nct[1] + (P[2]-ctOrigin[2])*nct[2];
-      const zCT = planeParamCT(pmeta.ipp);
-
-      // Gather secondary slice metadata (no pixel yet)
-      const secImgs = await storage.getImagesBySeriesId(secondarySeriesId);
-      if (!secImgs?.length) return res.status(404).json({ error: 'No images in secondary series' });
-      type MRMeta = { filePath: string; ipp: number[]; iop: number[]; psp: number[]; rows: number; cols: number };
-      const secMeta: MRMeta[] = [];
-      for (const im of secImgs) {
-        const m = parseMeta((im as any).filePath);
-        if (m.ipp.length >= 3 && m.iop.length >= 6 && m.rows && m.cols) {
-          secMeta.push({ filePath: (im as any).filePath, ipp: m.ipp, iop: m.iop, psp: m.psp || [1,1], rows: m.rows, cols: m.cols });
-        }
-      }
-      if (!secMeta.length) return res.status(400).json({ error: 'Secondary series missing spatial metadata' });
-
-      // Choose nearest secondary slice for this CT plane
-      const transformPoint = (m: number[], p: number[]) => [
-        m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
-        m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
-        m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11]
-      ];
-      let best = secMeta[0];
-      let bestAbs = Infinity;
-      for (const m of secMeta) {
-        const Pct = transformPoint(M2C, m.ipp as any);
-        const z = planeParamCT(Pct as any);
-        const d = Math.abs(z - zCT);
-        if (d < bestAbs) { bestAbs = d; best = m; }
+      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
+        return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
       }
 
-      // Load pixel data for the chosen secondary frame
-      const secPD = extractPixelData(best.filePath);
-      if (!secPD) return res.status(500).json({ error: 'Failed to extract pixel data from secondary image' });
+      const [primaryFiles, secondaryFiles, primaryImages] = await Promise.all([
+        collectSeriesFiles(primarySeriesId),
+        collectSeriesFiles(secondarySeriesId),
+        storage.getImagesBySeriesId(primarySeriesId),
+      ]);
 
-      // Prepare sampling helpers
-      const mrRow = [best.iop[0], best.iop[1], best.iop[2]];
-      const mrCol = [best.iop[3], best.iop[4], best.iop[5]];
-      const dot3 = (a: number[], b: number[]) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
-      const sub3 = (a: number[], b: number[]) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
-      const wc = secPD.windowCenter;
-      const ww = secPD.windowWidth;
-      const minVal = (wc !== null && ww !== null) ? (wc - ww/2) : 0;
-      const maxVal = (wc !== null && ww !== null) ? (wc + ww/2) : ((secPD.bits === 16) ? 4096 : 255);
-      const range = Math.max(1, maxVal - minVal);
+      const sliceIndex = (() => {
+        const imgs = sortImagesByInstance(primaryImages || []);
+        const idx = imgs.findIndex((img: any) => img.sopInstanceUID === primarySOP);
+        return idx >= 0 ? idx : 0;
+      })();
 
-      // Output buffer same size as CT image
-      const outW = pmeta.cols || 512;
-      const outH = pmeta.rows || 512;
-      const out = new Uint8Array(outW * outH);
-
-      // Map each CT pixel to moving and sample bilinear
-      const idx = (yy: number, xx: number) => yy * secPD.cols + xx;
-      for (let v = 0; v < outH; v++) {
-        for (let u = 0; u < outW; u++) {
-          // CT pixel (u,v) to CT world
-          const rf = [
-            pmeta.ipp[0] + u * colSp * col[0] + v * rowSp * row[0],
-            pmeta.ipp[1] + u * colSp * col[1] + v * rowSp * row[1],
-            pmeta.ipp[2] + u * colSp * col[2] + v * rowSp * row[2]
-          ];
-          // Map to moving space
-          const rm = transformPoint(C2M, rf as any) as any as number[];
-          const d = sub3(rm, best.ipp);
-          const uu = dot3(d, mrCol) / ((best.psp?.[1] ?? 1) as number);
-          const vv = dot3(d, mrRow) / ((best.psp?.[0] ?? 1) as number);
-          const x0 = Math.floor(uu), y0 = Math.floor(vv);
-          const x1 = x0 + 1, y1 = y0 + 1;
-          let gray = 0;
-          if (x0 >= 0 && y0 >= 0 && x1 < secPD.cols && y1 < secPD.rows) {
-            const fx = uu - x0; const fy = vv - y0;
-            const p00 = secPD.data[idx(y0, x0)] as any as number;
-            const p10 = secPD.data[idx(y0, x1)] as any as number;
-            const p01 = secPD.data[idx(y1, x0)] as any as number;
-            const p11 = secPD.data[idx(y1, x1)] as any as number;
-            const top = p00 + fx * (p10 - p00);
-            const bot = p01 + fx * (p11 - p01);
-            const val = top + fy * (bot - top);
-            const clamped = Math.max(0, Math.min(255, Math.round(((val - minVal) / range) * 255)));
-            gray = clamped;
-          }
-          out[v * outW + u] = gray;
-        }
-      }
-
-      // Encode as PNG
-      const sharpMod = await import('sharp');
-      const png = await sharpMod.default(out, { raw: { width: outW, height: outH, channels: 1 } }).png({ compressionLevel: 9 }).toBuffer();
-      res.setHeader('Content-Type', 'image/png');
-      // Attach compact debug header so the client can verify selection
-      try {
-        const dbg = JSON.stringify({
-          variant,
-          pSeriesUID,
-          sSeriesUID,
-          pFoR,
-          sFoR,
-          reg: { file: bestReg?.filePath || '', score: bestReg?.score || 0, flags: bestReg?.flags || [], refs: (bestReg?.referenced || []).slice(0,4) }
+      const result: any = await (async () => {
+        const response = await runFuseboxResample({
+          primary: primaryFiles,
+          secondary: secondaryFiles,
+          transform: transformInfo.matrix,
+          transformFile: transformInfo.transformFile,
+          sliceIndex,
+          interpolation: 'linear',
         });
-        res.setHeader('X-Reg-Selected', dbg);
-      } catch {}
-      return res.send(png);
+        if (!response || response.error) throw new Error(response?.error || 'Fusebox resample failed');
+        return response;
+      })();
+
+      const width = Number(result.width) || 0;
+      const height = Number(result.height) || 0;
+      if (!width || !height || typeof result.data !== 'string') {
+        return res.status(500).json({ error: 'Invalid Fusebox response for PNG bridge' });
+      }
+
+      const raw = Buffer.from(result.data, 'base64');
+      const float = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+      const bytes = new Uint8Array(width * height);
+      const min = typeof result.min === 'number' ? result.min : 0;
+      const max = typeof result.max === 'number' ? result.max : 1;
+      const range = Math.max(1e-6, max - min);
+      for (let i = 0; i < bytes.length; i++) {
+        const v = (float[i] - min) / range;
+        bytes[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
+      }
+
+      const sharpMod = await import('sharp');
+      const png = await sharpMod.default(bytes, { raw: { width, height, channels: 1 } }).png({ compressionLevel: 9 }).toBuffer();
+      res.setHeader('Content-Type', 'image/png');
+      res.send(png);
     } catch (err: any) {
-      console.error('resampled-frame failed', err);
-      return res.status(500).json({ error: 'resampled-frame failed', details: err?.message });
+      if (err?.code && String(err.code).startsWith('FUSEBOX_')) {
+        logger.error({ err }, 'Legacy resampled-frame proxy helper unavailable');
+        res.status(503).json({ error: 'Fusebox helper unavailable', details: err?.message });
+        return;
+      }
+      logger.error({ err }, 'Legacy resampled-frame proxy failed');
+      res.status(500).json({ error: 'resampled-frame failed', details: err?.message });
     }
   });
 
@@ -4015,16 +4301,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const ctPrimary = list.find(s => (s.modality || '').toUpperCase() === 'CT') || list[0];
           const sourcesSeriesIds = list.filter(s => s.id !== ctPrimary.id).map(s => s.id);
           const sources = list.filter(s => s.id !== ctPrimary.id).map(s => s.seriesInstanceUID);
-          const assoc = {
-            regFile: null,
-            studyId: ctPrimary.studyId,
-            target: ctPrimary.seriesInstanceUID,
-            targetSeriesId: ctPrimary.id,
-            sources,
-            sourcesSeriesIds,
-            sourceFoR: fo,
-            targetFoR: fo
-          };
+        const assoc = {
+          regFile: null,
+          studyId: ctPrimary.studyId,
+          target: ctPrimary.seriesInstanceUID,
+          targetSeriesId: ctPrimary.id,
+          sources,
+          sourcesSeriesIds,
+          sourceFoR: fo,
+          targetFoR: fo,
+          relationship: 'shared-frame',
+          siblingSeriesIds: list.map(series => series.id),
+          transformCandidates: [] as Array<unknown>,
+        };
           associations.push(assoc);
         }
 
@@ -4194,6 +4483,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         } catch {}
+        const siblingFoRIds = new Set<number>();
+        if (Number.isFinite(targetSeriesId as any)) {
+          try {
+            const targetFo = await getFo(targetSeriesId as number);
+            if (targetFo) {
+              for (const s of allSeries) {
+                if (s.id === targetSeriesId) continue;
+                const fo = await getFo(s.id);
+                if (fo && fo === targetFo) siblingFoRIds.add(s.id);
+              }
+            }
+          } catch {}
+        }
+
+        const transformCandidates = (parsed.candidates?.length
+          ? parsed.candidates
+          : (parsed.matrixRowMajor4x4 ? [{
+              matrix: parsed.matrixRowMajor4x4,
+              sourceFoR: parsed.sourceFrameOfReferenceUid,
+              targetFoR: parsed.targetFrameOfReferenceUid,
+              referenced: refs,
+            }] : []))
+          .map((cand, idx) => ({
+            id: `${path.basename(found.filePath)}::${idx}`,
+            regFile: found.filePath,
+            sourceFoR: cand.sourceFoR || parsed.sourceFrameOfReferenceUid || null,
+            targetFoR: cand.targetFoR || parsed.targetFrameOfReferenceUid || null,
+            matrix: Array.isArray(cand.matrix) ? cand.matrix.slice() : [],
+            referencedSeriesInstanceUids: Array.isArray(cand.referenced) && cand.referenced.length ? cand.referenced : refs,
+          }));
+
         const assoc = {
           regFile: found.filePath,
           studyId: found.studyId,
@@ -4202,7 +4522,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sources,
           sourcesSeriesIds,
           sourceFoR: parsed.sourceFrameOfReferenceUid || null,
-          targetFoR: parsed.targetFrameOfReferenceUid || null
+          targetFoR: parsed.targetFrameOfReferenceUid || null,
+          relationship: 'registered',
+          siblingSeriesIds: Array.from(siblingFoRIds),
+          transformCandidates,
         };
 
         // Final guard: never allow CTAC as target when another CT exists. Promote planning CT.

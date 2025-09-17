@@ -541,7 +541,7 @@ export function ContourEditToolbar({
     if (!showSettings) return null;
 
     return (
-      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 bg-black/90 backdrop-blur-sm border border-gray-600/50 rounded-lg py-2 px-4 shadow-2xl z-50" style={{ minWidth: '600px', maxWidth: '800px' }}>
+      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 bg-white/10 backdrop-blur-md border border-white/30 rounded-lg py-1.5 px-2.5 shadow-2xl z-50 w-max max-w-[90vw]">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs font-medium text-gray-400 capitalize">{showSettings} Settings</h4>
           <Button
@@ -734,109 +734,88 @@ export function ContourEditToolbar({
             </Button>
           </div>
         ) : showSettings === 'brush' ? (
-          <div className="flex items-center gap-4">
-            {/* Brush Size Control - Compact */}
-            <div className="flex items-center gap-3 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30">
-              <Brush className="w-4 h-4 text-blue-400" />
-              <Label className="text-xs text-gray-300 whitespace-nowrap">Size:</Label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-blue-400 min-w-[3.5rem] text-right">
-                  {(() => {
-                    const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
-                    const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
-                    const brushSizeMM = brushThickness[0] * avgPixelSpacing;
-                    const brushSizeCM = brushSizeMM / 10;
-                    return `${brushSizeCM.toFixed(2)} cm`;
-                  })()}
-                </span>
-                <div className="w-32">
-                  <Slider
-                    value={brushThickness}
-                    onValueChange={(value) => {
-                      setBrushThickness(value);
-                      if (onToolChange && activeTool === 'brush') {
-                        onToolChange({
-                          tool: 'brush',
-                          brushSize: value[0],
-                          isActive: true,
-                          predictionEnabled: isPredictionEnabled
-                        });
-                      }
-                    }}
-                    max={102}
-                    min={1}
-                    step={1}
-                    className="[&_[role=slider]]:bg-blue-500 [&_[role=slider]]:border-blue-400"
-                  />
-                </div>
-                <span className="text-xs text-gray-500">({brushThickness[0]}px)</span>
-              </div>
-            </div>
-            
-            {/* Mode Toggles - Compact Row */}
-            <div className="flex items-center gap-2">
-              {/* Smart Brush - Gradient-Sensitive */}
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-green-500/30 transition-colors">
-                <Zap className="w-3.5 h-3.5 text-green-400" />
-                <div className="flex flex-col">
-                  <Label className="text-xs text-gray-300 cursor-pointer">Smart Brush</Label>
-                  <span className="text-[10px] text-gray-500">Edge-aware</span>
-                </div>
-                <Switch
-                  checked={smartBrush}
-                  onCheckedChange={(enabled) => {
-                    setSmartBrush(enabled);
+          <div className="flex items-center gap-2">
+            {/* Brush Size Control - Ultra Compact */}
+            <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/20">
+              <Brush className="w-3.5 h-3.5 text-blue-300" />
+              <Label className="text-[11px] text-gray-200 whitespace-nowrap">Size</Label>
+              <span className="text-[11px] font-semibold text-blue-300 min-w-[3.2rem] text-right">
+                {(() => {
+                  const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
+                  const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
+                  const brushSizeMM = brushThickness[0] * avgPixelSpacing;
+                  const brushSizeCM = brushSizeMM / 10;
+                  return `${brushSizeCM.toFixed(2)} cm`;
+                })()}
+              </span>
+              <div className="w-28">
+                <Slider
+                  value={brushThickness}
+                  onValueChange={(value) => {
+                    setBrushThickness(value);
                     if (onToolChange && activeTool === 'brush') {
                       onToolChange({
                         tool: 'brush',
-                        brushSize: brushThickness[0],
+                        brushSize: value[0],
                         isActive: true,
-                        smartBrushEnabled: enabled,
                         predictionEnabled: isPredictionEnabled
                       });
                     }
                   }}
-                  className="data-[state=checked]:bg-green-500 scale-75"
+                  max={102}
+                  min={1}
+                  step={1}
+                  className="h-1 [&_[role=slider]]:h-3 [&_[role=slider]]:w-3 [&_[role=slider]]:bg-blue-500 [&_[role=slider]]:border-blue-400"
                 />
               </div>
-              
-              {/* AI Prediction */}
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/20 rounded-lg border border-gray-700/30 hover:border-purple-500/30 transition-colors">
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <div className="flex flex-col">
-                  <Label className="text-xs text-gray-300 cursor-pointer">AI Predict</Label>
-                  <span className="text-[10px] text-gray-500">Next slice</span>
-                </div>
-                {isPredictionEnabled && (
-                  <Badge className="text-[10px] px-1 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30 animate-pulse">
-                    ON
-                  </Badge>
-                )}
-                <Switch
-                  checked={isPredictionEnabled}
-                  onCheckedChange={(enabled) => {
-                    setIsPredictionEnabled(enabled);
-                    if (onToolChange && activeTool === 'brush') {
-                      onToolChange({
-                        tool: 'brush',
-                        brushSize: brushThickness[0],
-                        isActive: true,
-                        smartBrushEnabled: smartBrush,
-                        predictionEnabled: enabled
-                      });
-                    }
-                  }}
-                  className="data-[state=checked]:bg-purple-500 scale-75"
-                />
-              </div>
+              <span className="text-[11px] text-gray-400">({brushThickness[0]}px)</span>
             </div>
-            
-            {/* Shortcuts Info - Compact */}
-            <div className="flex items-center gap-3 px-3 py-2 bg-gray-800/10 rounded-lg border border-gray-700/20 text-xs">
-              <Keyboard className="w-3.5 h-3.5 text-gray-400" />
-              <span className="text-gray-500">Shift: Erase</span>
-              <span className="text-gray-700">|</span>
-              <span className="text-gray-500">Right-drag: Size</span>
+
+            {/* Mode Toggles - Icon Buttons */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const enabled = !smartBrush;
+                  setSmartBrush(enabled);
+                  if (onToolChange && activeTool === 'brush') {
+                    onToolChange({
+                      tool: 'brush',
+                      brushSize: brushThickness[0],
+                      isActive: true,
+                      smartBrushEnabled: enabled,
+                      predictionEnabled: isPredictionEnabled
+                    });
+                  }
+                }}
+                title="Smart Brush (edge-aware)"
+                className={`h-7 px-2 rounded-md border ${smartBrush ? 'border-green-400/60 bg-green-900/30 text-green-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const enabled = !isPredictionEnabled;
+                  setIsPredictionEnabled(enabled);
+                  if (onToolChange && activeTool === 'brush') {
+                    onToolChange({
+                      tool: 'brush',
+                      brushSize: brushThickness[0],
+                      isActive: true,
+                      smartBrushEnabled: smartBrush,
+                      predictionEnabled: enabled
+                    });
+                  }
+                }}
+                title="AI Predict next slice"
+                className={`h-7 px-2 rounded-md border ${isPredictionEnabled ? 'border-purple-400/60 bg-purple-900/30 text-purple-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+              </Button>
             </div>
           </div>
         ) : showSettings === 'planar-contour' ? (

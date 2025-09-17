@@ -840,9 +840,7 @@ export function SeriesSelector({
                               })()}
                               {/* RT Structure Series nested under CT - only show those that reference this CT */}
                               {rtSeries && rtSeries.length > 0 && rtSeries.filter((rtS: any) => {
-                                // Debug log for RT series filtering
                                 const isMatch = rtS.referencedSeriesId === seriesItem.id || (!rtS.referencedSeriesId && rtSeries.length === 1);
-                                // Debug suppressed by default to avoid console noise
                               return isMatch;
                             }).length > 0 && (
                                 <div className="space-y-1 border-l-2 border-green-500/30 pl-3">

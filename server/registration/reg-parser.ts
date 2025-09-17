@@ -3,7 +3,8 @@ import dicomParser from 'dicom-parser';
 import { isIdentity4x4, isRigidRowMajor4x4, toRowMajorFlat } from './validators.ts';
 
 export interface ParsedRegistration {
-  matrixRowMajor4x4: number[] | null;
+  matrixRowMajor4x4: number[] | null; // RAW row‑major as found (no projection)
+  matrixRawRowMajor4x4?: number[] | null; // alias for clarity
   sourceFrameOfReferenceUid?: string;
   targetFrameOfReferenceUid?: string;
   referencedSeriesInstanceUids?: string[];
@@ -173,7 +174,7 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
   // Fallbacks outside nested sequences
   try {
     const dsTop = tryParseDS16((dataSet as any).string?.('x300600c6'));
-    if (dsTop) candidates.push(dsTop);
+    if (dsTop) candidates.push({ matrix: dsTop });
   } catch {}
 
   // De-duplicate and validate
@@ -184,40 +185,26 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     if (!unique.includes(key)) { unique.push(key); uniqueCands.push(c); }
   }
 
-  // Prefer the last valid rigid matrix that is non-identity
+  // Prefer the last matrix that is non-identity; DO NOT project – return raw as-is
   let selected: number[] | null = null;
+  let selectedRaw: number[] | null = null;
   for (let i = uniqueCands.length - 1; i >= 0; i--) {
     const m = uniqueCands[i].matrix;
     const flat = Array.isArray(m[0]) ? (toRowMajorFlat(m as any) as any) : m;
     if (!flat || flat.length !== 16) continue;
     if (isIdentity4x4(flat)) { notes.push(`candidate ${i} is identity`); continue; }
-    // Validate and project to rigid if needed
-    const Rraw = [
-      [flat[0], flat[1], flat[2]],
-      [flat[4], flat[5], flat[6]],
-      [flat[8], flat[9], flat[10]],
-    ];
-    const { R, adjusted } = projectToNearestRotation(Rraw);
-    const T = [flat[3], flat[7], flat[11]];
-    const corrected = [
-      R[0][0], R[0][1], R[0][2], T[0],
-      R[1][0], R[1][1], R[1][2], T[1],
-      R[2][0], R[2][1], R[2][2], T[2],
-      0, 0, 0, 1
-    ];
-    if (!isRigidRowMajor4x4(corrected)) {
-      notes.push(`candidate ${i} failed rigid projection`);
-      continue;
+    // Keep raw as-is. If it is not rigid, still return raw but note it.
+    if (!isRigidRowMajor4x4(flat)) {
+      notes.push(`candidate ${i} appears non-rigid; returning raw unmodified`);
     }
-    if (adjusted) notes.push(`candidate ${i} rotation projected to nearest rigid`);
-    // Replace the candidate matrix with corrected rigid
-    uniqueCands[i].matrix = corrected;
-    selected = corrected;
+    selectedRaw = flat.slice();
+    selected = flat.slice();
     break;
   }
 
   return {
     matrixRowMajor4x4: selected,
+    matrixRawRowMajor4x4: selectedRaw ?? selected ?? null,
     sourceFrameOfReferenceUid: sourceFoR,
     targetFrameOfReferenceUid: targetFoR,
     referencedSeriesInstanceUids: referencedSeries.length ? Array.from(new Set(referencedSeries)) : undefined,

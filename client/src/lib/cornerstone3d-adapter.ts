@@ -149,19 +149,26 @@ function loadAndCacheImage(imageId: string): any {
       }
       
       // Create an image object compatible with Cornerstone3D
+      // Pull common DICOM display/geometry fields from metadata if present
+      const slope = (metadata?.rescaleSlope ?? metadata?.slope ?? 1) as number;
+      const intercept = (metadata?.rescaleIntercept ?? metadata?.intercept ?? 0) as number;
+      const px = Array.isArray(metadata?.pixelSpacing) ? metadata.pixelSpacing : undefined;
+      const ipp = metadata?.imagePosition || metadata?.imagePositionPatient;
+      const iop = metadata?.imageOrientation || metadata?.imageOrientationPatient;
+
       const image = {
         imageId,
         rows: height,
         columns: width,
         height,
         width,
-        intercept: 0,
-        slope: 1,
+        intercept,
+        slope,
         windowCenter: metadata?.windowCenter || 40,
         windowWidth: metadata?.windowWidth || 300,
-        pixelSpacing: metadata?.pixelSpacing || [1, 1],
-        imagePositionPatient: metadata?.imagePosition || [0, 0, 0],
-        imageOrientationPatient: metadata?.imageOrientation || [1, 0, 0, 0, 1, 0],
+        pixelSpacing: px || [1, 1],
+        imagePositionPatient: ipp || [0, 0, 0],
+        imageOrientationPatient: iop || [1, 0, 0, 0, 1, 0],
         sizeInBytes: data.byteLength,
         getPixelData: () => data,
         // Calculate min/max without spread operator for large arrays
@@ -173,8 +180,8 @@ function loadAndCacheImage(imageId: string): any {
         decodeTimeInMS: 0,
         floatPixelData: data,
         color: false,
-        columnPixelSpacing: metadata?.pixelSpacing?.[1] || 1,
-        rowPixelSpacing: metadata?.pixelSpacing?.[0] || 1,
+        columnPixelSpacing: (px?.[1] ?? px?.[0] ?? 1),
+        rowPixelSpacing: (px?.[0] ?? px?.[1] ?? 1),
       };
 
       console.log('[Custom Loader] Created image object with size:', image.width, 'x', image.height);

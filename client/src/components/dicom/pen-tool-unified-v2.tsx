@@ -25,12 +25,8 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   onContourUpdate,
   color
 }) => {
-  // Debug - log when component renders
-  console.log('🔷 PenToolUnifiedV2 RENDERED:', {
-    isActive,
-    hasCanvas: !!canvasRef?.current,
-    selectedStructure,
-    imageMetadata: imageMetadata ? 'present' : 'missing'
+  const [internalState, setInternalState] = useState<InternalPenState>({
+
   });
   
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);

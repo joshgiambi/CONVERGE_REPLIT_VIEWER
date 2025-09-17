@@ -16,6 +16,7 @@ import { contoursToVIP } from '@/boolean/integrate';
 import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract } from '@/boolean/vipBoolean';
 import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
+import type { RegistrationAssociation } from '@/types/fusion';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
 
@@ -40,6 +41,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
   const [regAssociations, setRegAssociations] = useState<Record<number, number[]>>({});
+  const [registrationRelationshipMap, setRegistrationRelationshipMap] = useState<Map<number, RegistrationAssociation[]>>(new Map());
   // Single-view mode only; MPR uses floating windows inside WorkingViewer
   const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
   
@@ -184,6 +186,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         // Build mapping preferring ID fields if provided, otherwise map UIDs → IDs
         const uidToSeries = new Map<string, any>((seriesData as any[]).map(s => [s.seriesInstanceUID, s] as const));
         const mapping: Record<number, number[]> = {};
+        const associationMap = new Map<number, RegistrationAssociation[]>();
         for (const a of associations) {
           // Prefer id-based target
           let primaryId: number | null = Number.isFinite(a?.targetSeriesId) ? a.targetSeriesId : null;
@@ -200,14 +203,30 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               if (sec && sec.id !== primaryId) secondaryIds.push(sec.id);
             }
           }
+          if (!secondaryIds.length && Array.isArray(a?.siblingSeriesIds)) {
+            secondaryIds = a.siblingSeriesIds
+              .filter((id: any) => Number.isFinite(id) && id !== primaryId)
+              .map((id: any) => Number(id));
+          }
+
           if (secondaryIds.length) {
             const prev = mapping[primaryId] || [];
             const combined = Array.from(new Set([...prev, ...secondaryIds]));
             mapping[primaryId] = combined;
           }
+
+          const entry: RegistrationAssociation = {
+            ...a,
+            targetSeriesId: primaryId,
+            sourcesSeriesIds: secondaryIds,
+          };
+          const existing = associationMap.get(primaryId) || [];
+          existing.push(entry);
+          associationMap.set(primaryId, existing);
         }
 
         setRegAssociations(mapping);
+        setRegistrationRelationshipMap(associationMap);
         setRegCtacIds(Array.from(ctacUnion));
 
         // Auto-select best primary candidate if nothing selected yet
@@ -860,7 +879,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                 <WorkingViewer 
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
-                  studyId={studyData.studies[0]?.id}
+                  studyId={selectedSeries.studyId ?? studyData.studies[0]?.id}
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}
@@ -895,6 +914,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                     setCurrentlyLoadingSecondary(currentlyLoading);
                   }}
                   isMPRVisible={mprVisible}
+                  // Mirror associations from Series panel: restrict Fusion choices
+                  allowedSecondaryIds={regAssociations[selectedSeries.id] || []}
+                  availableSeries={series}
+                  registrationAssociations={registrationRelationshipMap}
                 />
               
               {/* Structure Tags on Right Side - Responsive */}
@@ -1406,19 +1429,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Fusion Control Panel */}
-      {showFusionPanel && secondarySeriesId && selectedSeries && studyData?.studies?.[0] && (
-        <FusionControlPanel
-          primarySeriesId={selectedSeries.id}
-          studyId={studyData.studies[0].id}
-          onSecondarySeriesSelect={setSecondarySeriesId}
-          opacity={fusionOpacity}
-          onOpacityChange={setFusionOpacity}
-          isVisible={true}
-          selectedSecondaryId={secondarySeriesId}
-          secondaryModality={series.find(s => s.id === secondarySeriesId)?.modality || 'MR'}
-        />
-      )}
+      {/* Fusion Control Panel is rendered inside WorkingViewer to avoid duplication */}
 
       {/* Margin Toolbar */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (

@@ -4,7 +4,9 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "dev": "npm run dev:setup && NODE_ENV=development tsx watch server/index.ts",
+    "dev:itk": "npm run dev:setup && DICOM_REG_CONVERTER=/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/dicom_reg_to_h5 FUSEBOX_PYTHON=/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/sam_env/bin/python PORT=3000 NODE_ENV=development tsx watch server/index.ts",
+    "dev:setup": "node -e \"console.log('🔧 Checking Fusebox setup...'); const fs = require('fs'); const path = require('path'); const helperPath = path.join(__dirname, 'build/dicom-reg-converter/dicom_reg_to_h5'); const pythonPath = path.join(__dirname, 'sam_env/bin/python'); if (!fs.existsSync(helperPath)) { console.error('❌ DICOM helper not found at:', helperPath); console.error('Run: cmake --build build/dicom-reg-converter'); process.exit(1); } if (!fs.existsSync(pythonPath)) { console.error('❌ Python venv not found at:', pythonPath); console.error('Run: python -m venv sam_env && source sam_env/bin/activate && pip install -e .'); process.exit(1); } console.log('✅ Fusebox setup verified'); console.log('🐟 DICOM helper:', helperPath); console.log('🐍 Python interpreter:', pythonPath);\"",
     "validate:shapetester": "tsx scripts/validate-shapetester.ts",
     "validate:target1": "tsx scripts/validate-target1-interp.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",

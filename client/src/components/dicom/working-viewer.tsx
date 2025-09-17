@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,8 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { computeTransformedMRIPositions, renderFusionOverlay, invertMatrix4x4, transposeMatrix4x4, findNearestMRIIndexByPlane, clearFusionCalculationCache } from "@/lib/fusion-utils";
+import { fetchFuseboxSlice, fuseboxSliceToImageData, clearFuseboxCache } from "@/lib/fusion-utils";
+import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -39,7 +40,7 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { backgroundLoader } from "@/lib/background-loader";
+import type { RegistrationAssociation, RegistrationTransformCandidate } from '@/types/fusion';
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // Set to true only when specifically debugging rendering issues
@@ -50,6 +51,35 @@ type PreviewContour = {
   points: number[]; 
   slicePosition: number; 
   meta?: { margin?: number; type?: string };
+};
+
+type RegistrationOption = {
+  id: string | null;
+  label: string;
+  relationship: RegistrationAssociation['relationship'];
+  regFile: string | null;
+  matrix: number[] | null;
+  association: RegistrationAssociation;
+  candidate?: RegistrationTransformCandidate | null;
+};
+
+const IDENTITY_MATRIX_4X4 = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+] as const;
+
+const cloneIdentityMatrix = () => Array.from(IDENTITY_MATRIX_4X4);
+
+const matricesEqual = (a: number[] | null, b: number[] | null) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (Math.abs(a[i] - b[i]) > 1e-6) return false;
+  }
+  return true;
 };
 
 // Using doPolygonsIntersectSimple from simple-polygon-operations for consistency
@@ -102,6 +132,15 @@ interface WorkingViewerProps {
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
   onSecondaryLoadingStateChange?: (seriesId: number, state: { isLoading: boolean; progress: number }) => void;
+  availableSeries?: Array<{
+    id: number;
+    modality?: string;
+    seriesDescription?: string;
+    imageCount?: number;
+    studyId?: number;
+  }>;
+  allowedSecondaryIds?: number[];
+  registrationAssociations?: Map<number, RegistrationAssociation[]>;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -136,6 +175,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     imageCache,
     orientation = 'axial',
     onSecondaryLoadingStateChange, // @ts-ignore - Added for loading state feedback
+    availableSeries,
+    registrationAssociations,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,7 +197,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [predictedContours, setPredictedContours] = useState<Map<string, any>>(new Map());
   const [previewContours, setPreviewContours] = useState<PreviewContour[]>([]);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
-  const [fusionAvailable, setFusionAvailable] = useState(true);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [dicomPixelData, setDicomPixelData] = useState<any>(null);
   
@@ -179,117 +219,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Use external MPR visibility state or fallback to internal state
   const mprVisible = props.isMPRVisible ?? false;
   
-  // Secondary series state for fusion
-  const [secondaryImages, setSecondaryImages] = useState<any[]>([]);
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
   const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
-  // Secondary series loading states
-  const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
-  const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
-  
-  // Background loaded secondary series cache (keep multiple series in memory)
-  const backgroundSecondaryCache = useRef<Map<number, {
-    images: any[];
-    imageCache: Map<string, any>;
-    transformedPositions: any[];
-    modality: string;
-  }>>(new Map());
-  
-  // Track which series have been background loaded
-  const backgroundLoadedSeries = useRef<Set<number>>(new Set());
-  
-  // Background loading of secondary series
-  const startBackgroundLoading = useCallback(async () => {
-    if (!studyId || !registrationMatrix) return;
-    
-    try {
-      // Fetch all series for this study
-      const seriesResponse = await fetch(`/api/studies/${studyId}/series`);
-      if (!seriesResponse.ok) return;
-      
-      const allSeries = await seriesResponse.json();
-      
-      // Filter for secondary series (exclude primary and non-imaging modalities)
-      const secondarySeries = allSeries.filter((s: any) => 
-        s.id !== seriesId && 
-        s.modality && 
-        (s.modality === 'MR' || s.modality === 'PT' || s.modality === 'PET' || s.modality === 'CT') &&
-        s.modality !== 'RTSTRUCT' && 
-        s.modality !== 'REG'
-      );
-      
-      // Found secondary series for background loading
-      
-      // Start background loading for each secondary series
-      for (const series of secondarySeries) {
-        if (backgroundLoadedSeries.current.has(series.id)) {
-          continue;
-        }
-        
-        backgroundLoadSecondary(series.id, series.modality);
-      }
-      
-    } catch (error) {
-      console.error('Error starting background loading:', error);
-    }
-  }, [studyId, seriesId, registrationMatrix]);
-  
-  // Background load a specific secondary series
-  const backgroundLoadSecondary = useCallback(async (secondaryId: number, modality: string) => {
-    try {
-      // Fetch series info and images
-      const imagesResponse = await fetch(`/api/series/${secondaryId}/images`);
-      if (!imagesResponse.ok) return;
-      
-      const imageList = await imagesResponse.json();
-      
-      // Use background loader service for progressive loading
-      const cache = await backgroundLoader.loadSecondarySeriesBackground(
-        secondaryId,
-        imageList,
-        (state) => {
-          // Update loading state for UI feedback
-          const newStates = new Map(secondaryLoadingStates);
-          newStates.set(secondaryId, { progress: state.progress, isLoading: state.isLoading });
-          setSecondaryLoadingStates(newStates);
-          // Reduced logging for background loading
-        },
-        'medium' // Lower priority than active fusion loading
-      );
-      // Store in background cache when complete
-      if (cache && cache.size > 0) {
-        // Process images to add metadata for fusion geometry
-        const processedImages = imageList.map((img: any) => ({
-          ...img,
-          metadata: {
-            imagePosition: img.imagePosition || img.imageMetadata?.imagePosition || null,
-            imageOrientation: img.imageOrientation || img.imageMetadata?.imageOrientation || null,
-            pixelSpacing: img.pixelSpacing || img.imageMetadata?.pixelSpacing || null,
-          }
-        }));
-        
-        backgroundSecondaryCache.current.set(secondaryId, {
-          images: processedImages,
-          imageCache: cache,
-          transformedPositions: [], // Will be computed when needed
-          modality
-        });
-        backgroundLoadedSeries.current.add(secondaryId);
-        
-        // Also update the loading state to show completion
-        const completeStates = new Map(secondaryLoadingStates);
-        completeStates.set(secondaryId, { progress: 100, isLoading: false });
-        setSecondaryLoadingStates(completeStates);
-      }
-      
-    } catch (error) {
-      console.error(`Error background loading series ${secondaryId}:`, error);
-    }
-  }, [secondaryLoadingStates]);
+  const [fuseboxTransformSource, setFuseboxTransformSource] = useState<FuseboxSlice['transformSource'] | null>(null);
+  const [selectedRegistrationId, setSelectedRegistrationId] = useState<string | null>(null);
+  const [registrationAssociationsForPrimary, setRegistrationAssociationsForPrimary] = useState<RegistrationAssociation[]>([]);
   // Fusion debug support
   const [showFusionDebug, setShowFusionDebug] = useState(false);
   const [fusionDebugText, setFusionDebugText] = useState('');
@@ -298,15 +236,92 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [regDetailsText, setRegDetailsText] = useState('');
   const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
   const fusionIssueRef = useRef<string | null>(null);
-  
-  // Cache for MRI slice mappings to prevent recalculation during scrolling
-  const mriSliceMappingCache = useRef<Map<number, { mriIndex: number; distance: number } | null>>(new Map());
-  // Pre-computed MRI Z-range in CT space for performance
-  const mriZRangeInCTSpace = useRef<{ min: number; max: number } | null>(null);
-  // Pre-computed transformed MRI positions for fast lookup
-  const transformedMRIPositions = useRef<Array<{ xInCT: number; yInCT: number; zInCT: number; image: any }>>([]); 
+  const fuseboxCacheRef = useRef<Map<string, {
+    canvas: HTMLCanvasElement;
+    slice: FuseboxSlice;
+    timestamp: number;
+    hasSignal: boolean;
+  }>>(new Map());
   // CT transform for fusion coordinate system alignment
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
+  const scheduleRenderRef = useRef<(() => void) | null>(null);
+
+  const registrationOptions = useMemo<RegistrationOption[]>(() => {
+    if (secondarySeriesId == null) return [];
+    const secondaryId = Number(secondarySeriesId);
+    if (!Number.isFinite(secondaryId)) return [];
+    const options: RegistrationOption[] = [];
+    for (const assoc of registrationAssociationsForPrimary) {
+      const siblingIds = Array.isArray(assoc.siblingSeriesIds)
+        ? assoc.siblingSeriesIds.map((id: any) => Number(id)).filter(Number.isFinite)
+        : [];
+      const sourceIds = Array.isArray(assoc.sourcesSeriesIds)
+        ? assoc.sourcesSeriesIds.map((id: any) => Number(id)).filter(Number.isFinite)
+        : [];
+
+      const isShared = assoc.relationship === 'shared-frame' && siblingIds.includes(secondaryId);
+      const isRegistered = assoc.relationship === 'registered' && sourceIds.includes(secondaryId);
+      if (!isShared && !isRegistered) {
+        continue;
+      }
+
+      if (assoc.relationship === 'shared-frame') {
+        options.push({
+          id: null,
+          label: 'Shared frame of reference',
+          relationship: assoc.relationship,
+          regFile: assoc.regFile,
+          matrix: cloneIdentityMatrix(),
+          association: assoc,
+          candidate: null,
+        });
+        continue;
+      }
+
+      const candidates = Array.isArray(assoc.transformCandidates) ? assoc.transformCandidates : [];
+      if (!candidates.length) {
+        const fileLabel = assoc.regFile ? assoc.regFile.split(/[\\/]/).pop() : 'Registration';
+        options.push({
+          id: null,
+          label: fileLabel || 'Registration',
+          relationship: assoc.relationship,
+          regFile: assoc.regFile,
+          matrix: null,
+          association: assoc,
+          candidate: null,
+        });
+        continue;
+      }
+
+      candidates.forEach((cand, idx) => {
+        if (!Array.isArray(cand.matrix) || cand.matrix.length !== 16) return;
+        const regFile = cand.regFile || assoc.regFile;
+        const baseName = regFile ? regFile.split(/[\\/]/).pop() : 'Registration';
+        const suffix = typeof cand.id === 'string' && cand.id.includes('::') ? Number(cand.id.split('::')[1]) : idx;
+        const label = Number.isFinite(suffix)
+          ? `${baseName || 'Registration'} (candidate ${Number(suffix) + 1})`
+          : (baseName || 'Registration');
+
+        options.push({
+          id: cand.id ?? `${regFile || 'reg'}::${idx}`,
+          label,
+          relationship: assoc.relationship,
+          regFile: regFile ?? null,
+          matrix: cand.matrix.slice(),
+          association: assoc,
+          candidate: cand,
+        });
+      });
+    }
+    return options;
+  }, [registrationAssociationsForPrimary, secondarySeriesId]);
+
+  useEffect(() => {
+    return () => {
+      fuseboxCacheRef.current.clear();
+      clearFuseboxCache();
+    };
+  }, []);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -316,67 +331,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const compileFusionDebug = useCallback(() => {
     try {
       const primaryFirst: any = images?.[0];
-      const secondaryFirst: any = secondaryImages?.[0];
       const pFoR = (primaryFirst?.metadata?.frameOfReferenceUID || primaryFirst?.frameOfReferenceUID || primaryFirst?.imageMetadata?.frameOfReferenceUID || '');
-      const sFoR = (secondaryFirst?.metadata?.frameOfReferenceUID || secondaryFirst?.frameOfReferenceUID || secondaryFirst?.imageMetadata?.frameOfReferenceUID || '');
-      const ctSpacing = primaryFirst?.pixelSpacing ?? primaryFirst?.imageMetadata?.pixelSpacing ?? 'unknown';
-      const mrSpacing = secondaryFirst?.pixelSpacing ?? secondaryFirst?.imageMetadata?.pixelSpacing ?? 'unknown';
-      const trLen = transformedMRIPositions.current?.length || 0;
-      let zMin = null as number | null, zMax = null as number | null;
-      if (trLen > 0) {
-        const zs = transformedMRIPositions.current.map((t: any) => t.zInCT);
-        zMin = Math.min(...zs); zMax = Math.max(...zs);
-      }
-      // Compute current CT slice Z (projected) like the renderer does
-      let ctSliceZProjected: number | null = null;
-      try {
-        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-        const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-        const curPos = toNum(images[currentIndex]?.imagePosition || images[currentIndex]?.imageMetadata?.imagePosition);
-        if (baseIOP.length >= 6 && basePos.length >= 3 && curPos.length >= 3) {
-          const r = [baseIOP[0], baseIOP[1], baseIOP[2]];
-          const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
-          const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
-          const nl = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nl, n[1]/nl, n[2]/nl];
-          const dx = curPos[0] - basePos[0];
-          const dy = curPos[1] - basePos[1];
-          const dz = curPos[2] - basePos[2];
-          ctSliceZProjected = dx*nn[0] + dy*nn[1] + dz*nn[2];
-        }
-      } catch {}
-      // Derive an up-to-date reason to avoid stale labels
+      const cacheSnapshot = Array.from(fuseboxCacheRef.current.entries()).map(([key, entry]) => ({
+        key,
+        sliceIndex: entry.slice.sliceIndex,
+        modality: entry.slice.secondaryModality,
+        dimensions: `${entry.slice.width}x${entry.slice.height}`,
+        ageMs: Date.now() - entry.timestamp,
+        hasSignal: entry.hasSignal,
+        transformSource: entry.slice.transformSource,
+      }));
+
       let derivedReason: string = fusionIssueRef.current || 'manual';
-      try {
-        const trLen = transformedMRIPositions.current?.length || 0;
-        if (!secondarySeriesId || !secondaryImages.length) derivedReason = 'no-secondary-images';
-        else if (!registrationMatrix || registrationMatrix.length !== 16) derivedReason = 'no-registration-matrix';
-        else if (!trLen) derivedReason = 'no-transformed-positions';
-        else derivedReason = 'ok';
-      } catch {}
+      if (!fusionIssueRef.current) {
+        if (!secondarySeriesId) {
+          derivedReason = 'no-secondary-series';
+        } else if (!registrationMatrix || registrationMatrix.length !== 16) {
+          derivedReason = 'no-registration-matrix';
+        } else if (cacheSnapshot.length === 0) {
+          derivedReason = 'waiting-for-cache';
+        } else {
+          derivedReason = 'ok';
+        }
+      }
 
       const debug = {
         reason: derivedReason,
         primarySeriesId: seriesId,
         secondarySeriesId,
         primaryFoR: pFoR,
-        secondaryFoR: sFoR,
-        ctSpacing,
-        mrSpacing,
-        ctSliceZProjected,
         registrationMatrixLength: registrationMatrix?.length || 0,
-        registrationMatrix: registrationMatrix,
+        registrationMatrix,
         resolve: lastResolveInfo,
-        transformedCount: trLen,
-        transformedZRange: trLen ? [zMin, zMax] : null,
+        cacheSize: cacheSnapshot.length,
+        cache: cacheSnapshot,
+        transformSource: fuseboxTransformSource,
         ctTransform: ctTransform.current,
+        registrationId: selectedRegistrationId,
+        registrationOptions,
         logs: fusionLogs.slice(-50),
       };
       return JSON.stringify(debug, null, 2);
     } catch (e) {
       return `Failed to compile debug: ${String(e)}`;
     }
-  }, [images, secondaryImages, seriesId, secondarySeriesId, registrationMatrix, lastResolveInfo, fusionLogs]);
+  }, [images, seriesId, secondarySeriesId, registrationMatrix, lastResolveInfo, fusionLogs, fuseboxTransformSource, selectedRegistrationId, registrationOptions]);
 
   const pushFusionLog = useCallback((msg: string, data?: any) => {
     const line = `[${new Date().toISOString()}] ${msg}${data !== undefined ? ' ' + (()=>{ try { return JSON.stringify(data); } catch { return String(data); } })() : ''}`;
@@ -384,6 +383,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
     });
+  }, []);
+
+  const handleRegistrationSelect = useCallback((registrationId: string | null) => {
+    setSelectedRegistrationId(registrationId);
+    fuseboxCacheRef.current.clear();
+    clearFuseboxCache();
+    setFuseboxTransformSource(null);
+    scheduleRenderRef.current?.();
   }, []);
 
   const openFusionDebug = useCallback((reason: string) => {
@@ -449,69 +456,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [registrationMatrix, seriesId, secondarySeriesId]);
 
-  // Expose a temporary global to trigger the debug popup from anywhere (e.g., control panel)
-  useEffect(() => {
-    try {
-      (window as any).__OPEN_FUSION_DEBUG__ = () => openFusionDebug('manual');
-      (window as any).__OPEN_REG_DETAILS__ = () => openRegDetails();
-      (window as any).__FUSION_PUSH_LOG__ = (m: any, d?: any) => pushFusionLog(String(m), d);
-    } catch {}
-    return () => {
-      try { delete (window as any).__OPEN_FUSION_DEBUG__; } catch {}
-      try { delete (window as any).__OPEN_REG_DETAILS__; } catch {}
-      try { delete (window as any).__FUSION_PUSH_LOG__; } catch {}
-    };
-  }, [openFusionDebug, openRegDetails, pushFusionLog]);
-
-  // Expose quick matrix toggles for debugging (invert/transpose/reset)
-  useEffect(() => {
-    try {
-      (window as any).__FUSION_USE_INVERT__ = () => {
-        if (!registrationMatrix) return;
-        const inv = invertMatrix4x4(registrationMatrix);
-        if (inv) {
-          setRegistrationMatrix(inv);
-          registrationMatrixRef.current = inv;
-          // Force re-precompute positions on next render
-          transformedMRIPositions.current = [];
-          mriSliceMappingCache.current.clear();
-          scheduleRender();
-        }
-      };
-      (window as any).__FUSION_USE_TRANSPOSE__ = () => {
-        if (!registrationMatrix) return;
-        const tr = transposeMatrix4x4(registrationMatrix);
-        setRegistrationMatrix(tr);
-        registrationMatrixRef.current = tr;
-        transformedMRIPositions.current = [];
-        mriSliceMappingCache.current.clear();
-        scheduleRender();
-      };
-      (window as any).__FUSION_RESET_MATRIX__ = async () => {
-        // Re-fetch the original matrix via resolve API
-        try {
-          if (!seriesId || !secondarySeriesId) return;
-          const url = `/api/registration/resolve?primarySeriesId=${seriesId}&secondarySeriesId=${secondarySeriesId}`;
-          const r = await fetch(url, { cache: 'no-store' as RequestCache });
-          if (!r.ok) return;
-          const data = await r.json();
-          const m = Array.isArray(data?.matrixRowMajor4x4) && data.matrixRowMajor4x4.length === 16 ? (data.matrixRowMajor4x4 as number[]) : null;
-          setRegistrationMatrix(m);
-          registrationMatrixRef.current = m;
-          transformedMRIPositions.current = [];
-          mriSliceMappingCache.current.clear();
-          scheduleRender();
-        } catch {}
-      };
-    } catch {}
-    return () => {
-      try {
-        delete (window as any).__FUSION_USE_INVERT__;
-        delete (window as any).__FUSION_USE_TRANSPOSE__;
-        delete (window as any).__FUSION_RESET_MATRIX__;
-      } catch {}
-    };
-  }, [registrationMatrix, seriesId, secondarySeriesId]);
   // Crosshair position for MPR views (in pixel coordinates)
   // Initialize to center of first image, fallback to 256 for 512x512 default
   const [crosshairPos, setCrosshairPos] = useState(() => {
@@ -610,6 +554,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [fusionOpacity, secondarySeriesId]);
 
+  useEffect(() => {
+    scheduleRenderRef.current = scheduleRender;
+    return () => {
+      if (scheduleRenderRef.current === scheduleRender) {
+        scheduleRenderRef.current = null;
+      }
+    };
+  }, [scheduleRender]);
+
   // When fusion opacity changes, redraw base CT from offscreen + cached overlay only (no full CT re-render)
   useEffect(() => {
     try {
@@ -621,12 +574,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const cacheKey = `${currentImage.sopInstanceUID}_${secondarySeriesId}`;
-      const cached = fusionRenderCache.current.get(cacheKey);
+      const cacheKey = `${currentImage.sopInstanceUID}:${secondarySeriesId}`;
+      const cached = fuseboxCacheRef.current.get(cacheKey);
       const t = ctTransform.current;
       const src = offscreenCanvasRef.current;
 
       if (cached && t && src) {
+        if (!cached.hasSignal) {
+          fusionIssueRef.current = 'empty-fusebox-slice';
+          return;
+        }
         ctx.save();
         // Redraw CT from offscreen canvas with existing transform
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -636,11 +593,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         // Draw cached fusion overlay with new opacity
         ctx.globalAlpha = fusionOpacity;
-        if (cached.bitmap) {
-          ctx.drawImage(cached.bitmap, 0, 0);
-        } else if (cached.canvas) {
-          ctx.drawImage(cached.canvas, 0, 0);
-        }
+        ctx.drawImage(cached.canvas, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
         ctx.restore();
 
         // Redraw RT structures on top
@@ -700,12 +653,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   // Secondary image prefetch optimization
   const secondaryPrefetchCompleteRef = useRef(false);
-  const lastFusionRenderRef = useRef<{ ctZ: number; mriIndex: number } | null>(null);
 
   // Missing caches/levels used later in the file
   const imageCacheRef = useRef<Map<string, any>>(new Map());
   const mprCacheRef = useRef<Map<string, any>>(new Map());
-  const secondaryImageCacheRef = useRef<Map<string, any>>(new Map());
   const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
     props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
   );
@@ -2906,9 +2857,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           closestIndex = index;
         }
       });
-
-    try { if ((window as any).__FUSION_DEBUG__ || (window as any).FUSION_DEBUG) console.log(`🎯 Found closest slice: index ${closestIndex}, distance ${closestDistance.toFixed(1)}mm`); } catch {}
-      
       // Navigate to the closest slice
       setCurrentIndex(closestIndex);
     },
@@ -2947,651 +2895,165 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
-  // Resolve registration for current primary (seriesId) and selected secondary
   useEffect(() => {
-    const loadResolvedRegistration = async () => {
-      if (!seriesId || !secondarySeriesId) {
-        setRegistrationMatrix(null);
-        registrationMatrixRef.current = null;
-        return;
-      }
-      try {
-        const url = `/api/registration/resolve?primarySeriesId=${seriesId}&secondarySeriesId=${secondarySeriesId}`;
-        const r = await fetch(url, { cache: 'no-store' as RequestCache });
-        if (!r.ok) {
-          setRegistrationMatrix(null);
-          registrationMatrixRef.current = null;
-          setLastResolveInfo({ status: r.status, ok: false });
-          return;
-        }
-        const data = await r.json();
-        const m = Array.isArray(data?.matrixRowMajor4x4) && data.matrixRowMajor4x4.length === 16 ? (data.matrixRowMajor4x4 as number[]) : null;
-        setRegistrationMatrix(m);
-        registrationMatrixRef.current = m;
-        setLastResolveInfo({ status: 200, ok: true, data });
-      } catch {
-        setRegistrationMatrix(null);
-        registrationMatrixRef.current = null;
-        setLastResolveInfo({ status: 0, ok: false });
-      }
-    };
-    loadResolvedRegistration();
-  }, [seriesId, secondarySeriesId]);
-  
-  // Re-render fusion overlay when registration matrix is loaded
-  useEffect(() => {
-    // Disabled during rebuild (no registration matrix)
-    if (!registrationMatrix || registrationMatrix.length !== 16) {
-      scheduleRender();
+    if (!registrationAssociations) {
+      setRegistrationAssociationsForPrimary([]);
       return;
     }
-    console.log('🔥 FUSION DEBUG: Registration matrix useEffect triggered');
-    console.log('🔥 FUSION DEBUG: Registration matrix:', registrationMatrix);
-    console.log('🔥 FUSION DEBUG: State check:', {
-      hasMatrix: !!registrationMatrix,
-      matrixLength: registrationMatrix?.length,
-      secondarySeriesId,
-      secondarySeriesType: typeof secondarySeriesId,
-      imagesLength: images.length,
-      secondaryImagesLength: secondaryImages.length,
-      fusionOpacity
-    });
-    
-    if (registrationMatrix && registrationMatrix.length === 16 && secondarySeriesId && Number(secondarySeriesId) && images.length > 0) {
-      console.log('Registration matrix loaded, re-rendering fusion overlay');
-      
-      // Pre-compute MRI transformations if we have secondary images loaded
-      if (secondaryImages.length > 0) {
-        // Helper: compute CT z-range in mm using CT orientation
-        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-        const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-        let ctZMin = -Infinity, ctZMax = Infinity;
-        if (iop.length >= 6 && origin.length >= 3) {
-          const r = [iop[0], iop[1], iop[2]];
-          const c = [iop[3], iop[4], iop[5]];
-          const n = [
-            r[1] * c[2] - r[2] * c[1],
-            r[2] * c[0] - r[0] * c[2],
-            r[0] * c[1] - r[1] * c[0]
-          ];
-          const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
-          const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-          const zVals: number[] = [];
-          for (const img of images) {
-            const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-            if (p.length >= 3) {
-              const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
-              zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
-            }
-          }
-          if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
-        }
+    const list = registrationAssociations.get(seriesId) || [];
+    setRegistrationAssociationsForPrimary(list);
+  }, [registrationAssociations, seriesId]);
 
-        const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
-
-        // Compute with provided matrix
-        // Always reference CT series origin/orientation from the first CT slice
-        // to keep CT Z-axis consistent across precomputation and per-slice matching
-        const ctSeriesIOP = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
-        const ctSeriesIPP = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
-        let transformed = computeTransformedMRIPositions(
-          secondaryImages,
-          registrationMatrix,
-          ctSeriesIOP,
-          ctSeriesIPP,
-          secondaryImageCacheRef.current
-        );
-
-        // Validate Z-overlap; if present, align any constant Z bias using median offset
-        if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
-          const zMin = Math.min(...transformed.map(t => t.zInCT));
-          const zMax = Math.max(...transformed.map(t => t.zInCT));
-          console.log(`🔎 Z-range check (on reg load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
-          if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
-            console.error('❌ Registration matrix yields no Z-overlap. Aborting fusion until a valid REG is provided.');
-            transformed = [];
-          } else {
-            // Compute median Z offset between MRI planes and nearest CT planes and correct it
-            const ctZs: number[] = [];
-            const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-            const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-            const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-            if (iop2.length >= 6 && origin2.length >= 3) {
-              const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
-              const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
-              const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
-              for (const img of images) {
-                const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
-                if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
-              }
-              ctZs.sort((a,b)=>a-b);
-            }
-            if (ctZs.length > 1) {
-              const nearest = (val: number) => {
-                let lo=0, hi=ctZs.length-1, best=ctZs[0];
-                while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
-                return best;
-              };
-              const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
-              if (diffs.length) {
-                const s = diffs.slice().sort((a,b)=>a-b); const median = s[Math.floor(s.length/2)];
-                if (Math.abs(median) > 0.25) {
-                  console.log(`⚙️ Applying median Z-offset correction (reg-load path): ${median.toFixed(2)}mm`);
-                  transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
-                }
-              }
-            }
-          }
-        }
-
-        transformedMRIPositions.current = transformed;
-        
-        // Calculate and store Z-range
-        if (transformed.length > 0) {
-          const zValues = transformed.map(item => item.zInCT);
-          mriZRangeInCTSpace.current = {
-            min: Math.min(...zValues),
-            max: Math.max(...zValues)
-          };
-        }
-        
-        // Clear cache to force recomputation with new data
-        mriSliceMappingCache.current.clear();
-      }
-      
-      scheduleRender();
+  useEffect(() => {
+    if (secondarySeriesId == null) {
+      setSelectedRegistrationId(null);
+      return;
     }
-  }, [registrationMatrix, secondarySeriesId, images.length]);
+    if (!registrationOptions.length) {
+      setSelectedRegistrationId(null);
+      return;
+    }
+    const hasSelected = registrationOptions.some(opt => (opt.id ?? null) === (selectedRegistrationId ?? null));
+    if (!hasSelected) {
+      setSelectedRegistrationId(registrationOptions[0].id ?? null);
+    }
+  }, [secondarySeriesId, registrationOptions, selectedRegistrationId]);
+
+  // Apply registration matrix derived from association graph instead of resolve endpoint
+  useEffect(() => {
+    if (!seriesId || secondarySeriesId == null) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 204,
+        ok: false,
+        data: {
+          reason: !seriesId ? 'missing-primary-series' : 'missing-secondary-series',
+          primarySeriesId: seriesId ?? null,
+          secondarySeriesId: secondarySeriesId ?? null,
+        },
+      });
+      return;
+    }
+
+    if (!registrationOptions.length) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 404,
+        ok: false,
+        data: {
+          reason: 'no-registration-options',
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+        },
+      });
+      return;
+    }
+
+    const selectedOption = registrationOptions.find(opt => (opt.id ?? null) === (selectedRegistrationId ?? null))
+      ?? registrationOptions[0];
+
+    if (!selectedOption) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 404,
+        ok: false,
+        data: {
+          reason: 'registration-option-not-found',
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+          registrationId: selectedRegistrationId ?? null,
+        },
+      });
+      return;
+    }
+
+    const derivedMatrix = Array.isArray(selectedOption.matrix) && selectedOption.matrix.length === 16
+      ? selectedOption.matrix.slice()
+      : (selectedOption.relationship === 'shared-frame' ? cloneIdentityMatrix() : null);
+
+    if (derivedMatrix) {
+      if (!matricesEqual(registrationMatrixRef.current, derivedMatrix)) {
+        registrationMatrixRef.current = derivedMatrix;
+        setRegistrationMatrix(derivedMatrix);
+      } else if (registrationMatrixRef.current === null) {
+        registrationMatrixRef.current = derivedMatrix;
+        setRegistrationMatrix(derivedMatrix);
+      }
+      setLastResolveInfo({
+        status: 200,
+        ok: true,
+        data: {
+          source: 'associations',
+          registrationId: selectedOption.id ?? null,
+          relationship: selectedOption.relationship,
+          regFile: selectedOption.regFile ?? null,
+          targetSeriesId: selectedOption.association?.targetSeriesId ?? null,
+          sourceSeriesIds: selectedOption.association?.sourcesSeriesIds ?? [],
+        },
+      });
+    } else {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 422,
+        ok: false,
+        data: {
+          source: 'associations',
+          registrationId: selectedOption.id ?? null,
+          relationship: selectedOption.relationship,
+          reason: 'missing-matrix',
+        },
+      });
+    }
+  }, [seriesId, secondarySeriesId, registrationOptions, selectedRegistrationId]);
   
-  // Trigger pre-computation when both registration matrix and secondary images are available
+  // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
-    if (!registrationMatrix || registrationMatrix.length !== 16) return;
-    console.log('Both registration matrix and secondary images available, pre-computing transformations...');
-    // Helper: compute CT z-range in mm using CT orientation
-    const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-    const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-    const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-    let ctZMin = -Infinity, ctZMax = Infinity;
-    if (iop.length >= 6 && origin.length >= 3) {
-      const r = [iop[0], iop[1], iop[2]];
-      const c = [iop[3], iop[4], iop[5]];
-      const n = [
-        r[1] * c[2] - r[2] * c[1],
-        r[2] * c[0] - r[0] * c[2],
-        r[0] * c[1] - r[1] * c[0]
-      ];
-      const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
-      const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-      const zVals: number[] = [];
-      for (const img of images) {
-        const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-        if (p.length >= 3) {
-          const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
-          zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
-        }
-      }
-      if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
-    }
+    fuseboxCacheRef.current.clear();
+    clearFuseboxCache();
+    setFuseboxTransformSource(null);
+    scheduleRender();
+  }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
 
-    const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
-
-    // Use CT series' first slice for a stable CT origin/orientation
-    const ctSeriesIOP2 = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation;
-    const ctSeriesIPP2 = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
-    let transformed = computeTransformedMRIPositions(
-      secondaryImages,
-      registrationMatrix,
-      ctSeriesIOP2,
-      ctSeriesIPP2,
-      secondaryImageCacheRef.current
-    );
-
-    if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
-      const zMin = Math.min(...transformed.map(t => t.zInCT));
-      const zMax = Math.max(...transformed.map(t => t.zInCT));
-      console.log(`🔎 Z-range check (precompute): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
-      if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
-        console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
-        const inv = invertMatrix4x4(registrationMatrix);
-        if (inv) {
-          const transformedInv = computeTransformedMRIPositions(
-            secondaryImages,
-            inv,
-            ctSeriesIOP2,
-            ctSeriesIPP2,
-            secondaryImageCacheRef.current
-          );
-          if (transformedInv.length > 0) {
-            const ziMin = Math.min(...transformedInv.map(t => t.zInCT));
-            const ziMax = Math.max(...transformedInv.map(t => t.zInCT));
-            console.log(`🔎 Z-range (inverted): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${ziMin.toFixed(1)}, ${ziMax.toFixed(1)}]`);
-            if (overlap(ctZMin, ctZMax, ziMin, ziMax, 5)) {
-              console.log('✅ Inverted matrix provides valid Z overlap. Using inverted registration.');
-              transformed = transformedInv;
-              setRegistrationMatrix(inv);
-              registrationMatrixRef.current = inv;
-            } else {
-              console.warn('Inverted matrix also fails Z overlap. Keeping original matrix.');
-            }
-          }
-        }
-      } else {
-        console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
-        // Apply median Z offset correction to remove constant bias
-        const ctZs: number[] = [];
-        const toNum2 = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        const iop2 = toNum2(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-        const origin2 = toNum2(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-        if (iop2.length >= 6 && origin2.length >= 3) {
-          const r2 = [iop2[0], iop2[1], iop2[2]]; const c2 = [iop2[3], iop2[4], iop2[5]];
-          const n2 = [r2[1]*c2[2]-r2[2]*c2[1], r2[2]*c2[0]-r2[0]*c2[2], r2[0]*c2[1]-r2[1]*c2[0]];
-          const n2l = Math.hypot(n2[0], n2[1], n2[2]) || 1; const nn2 = [n2[0]/n2l, n2[1]/n2l, n2[2]/n2l];
-          for (const img of images) {
-            const p = toNum2(img.imagePosition || img.imageMetadata?.imagePosition);
-            if (p.length >= 3) { const dx=p[0]-origin2[0], dy=p[1]-origin2[1], dz=p[2]-origin2[2]; ctZs.push(dx*nn2[0]+dy*nn2[1]+dz*nn2[2]); }
-          }
-          ctZs.sort((a,b)=>a-b);
-        }
-        if (ctZs.length > 1) {
-          const nearest = (val: number) => {
-            let lo=0, hi=ctZs.length-1, best=ctZs[0];
-            while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
-            return best;
-          };
-          const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
-          if (diffs.length) {
-            const s = diffs.slice().sort((a,b)=>a-b);
-            const median = s[Math.floor(s.length/2)];
-            if (Math.abs(median) > 0.25) {
-              console.log(`⚙️ Applying median Z-offset correction (precompute path): ${median.toFixed(2)}mm`);
-              transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
-            }
-          }
-        }
-      }
-    }
-    transformedMRIPositions.current = transformed;
-    
-    // Calculate and store Z-range
-    if (transformed.length > 0) {
-      const zValues = transformed.map(item => item.zInCT);
-      mriZRangeInCTSpace.current = {
-        min: Math.min(...zValues),
-        max: Math.max(...zValues)
-      };
-      console.log(`MRI Z-range after transformation: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
-    }
-    
-    // Clear cache to force recomputation with new data
-    mriSliceMappingCache.current.clear();
-  }, [registrationMatrix, secondaryImages]);
-  
-  // Re-render current image when secondary images are loaded
   useEffect(() => {
-    if (secondaryImages.length > 0 && images.length > 0) {
-      displayCurrentImage();
+    if (!secondarySeriesId) {
+      setSecondaryModality('MR');
+      setFuseboxTransformSource(null);
+      fuseboxCacheRef.current.clear();
+      clearFuseboxCache();
+      return;
     }
-  }, [secondaryImages]);
 
-  // Load secondary series images for fusion - Using Background Loading Service
-  useEffect(() => {
-    
-    const loadSecondaryImages = async () => {
-      // Check if secondarySeriesId is valid (not null)
-      if (!secondarySeriesId) {
-        // Clear all fusion state when disabling
-        
-        // Cancel any existing background loading
-        // Note: secondarySeriesId is null here, so cancel any active loading
-        for (const seriesId of backgroundLoadedSeries.current) {
-          backgroundLoader.cancelSeriesLoading(seriesId);
-        }
-        
-        setSecondaryImages([]);
-        secondaryImageCacheRef.current = new Map();
-        mriSliceMappingCache.current.clear();
-        fusionRenderCache.current.clear(); // Clear fusion cache when disabling
-        clearFusionCalculationCache(); // Clear calculation cache
-        transformedMRIPositions.current = [];
-        setSecondaryModality('MR'); // Reset to default
-        setFusionAvailable(false); // Reset fusion availability flag
-        setFusionDebugText(''); // Clear debug text
-        setFusionLogs([]); // Clear fusion logs
-        setCurrentlyLoadingSecondary(null); // Clear loading state
-        return;
-      }
-
-      // TEMPORARILY DISABLE background loading to fix flashing issues
-      // TODO: Re-enable after stabilizing basic fusion
-      // const backgroundLoaded = backgroundSecondaryCache.current.get(secondarySeriesId);
-      // if (backgroundLoaded) { ... }
-
-      // Normal loading for series not background loaded
-      setCurrentlyLoadingSecondary(secondarySeriesId);
-      const newState = new Map(secondaryLoadingStates);
-      newState.set(secondarySeriesId, { progress: 0, isLoading: true });
-      setSecondaryLoadingStates(newState);
-      onSecondaryLoadingStateChange?.(secondarySeriesId, newState as any);
-
-      // Clear fusion caches when switching secondary series
-      fusionRenderCache.current.clear(); // Clear fusion render cache for new series
-      clearFusionCalculationCache(); // Clear calculation cache for new series
-      transformedMRIPositions.current = []; // Clear transformed positions for new series
-      
-      pushFusionLog('load-secondary-begin', { seriesId: secondarySeriesId });
+    let cancelled = false;
+    const loadMetadata = async () => {
       try {
-        // First fetch series info to get modality
-        const updateState = (progress: number) => {
-          const newState = new Map(secondaryLoadingStates);
-          newState.set(secondarySeriesId, { progress, isLoading: true });
-          setSecondaryLoadingStates(newState);
-          onSecondaryLoadingStateChange?.(secondarySeriesId, newState as any);
-        };
-        
-        updateState(10);
-        
-        const seriesResponse = await fetch(`/api/series/${secondarySeriesId}`);
-        if (seriesResponse.ok) {
-          const seriesData = await seriesResponse.json();
-          setSecondaryModality(seriesData.modality || 'MR');
-          pushFusionLog('secondary-modality', { modality: seriesData.modality });
+        const response = await fetch(`/api/series/${secondarySeriesId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && data?.modality) {
+          setSecondaryModality(data.modality);
         }
-        
-        updateState(20);
-        
-        const response = await fetch(`/api/series/${secondarySeriesId}/images`);
-        if (!response.ok) {
-          throw new Error(`Failed to load secondary images: ${response.statusText}`);
-        }
-
-        const imageList = await response.json();
-        
-        updateState(30);
-        
-        // Robust ordering using ImagePositionPatient projected along MRI series normal
-        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        // Derive a base origin and normal from the first image that has orientation + position
-        let baseOrigin: number[] | null = null;
-        let normal: number[] | null = null;
-        for (const img of imageList) {
-          const iop = toNum(img.imageOrientation || img.imageMetadata?.imageOrientation);
-          const ipp = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-          if (iop.length >= 6 && ipp.length >= 3) {
-            const r = [iop[0], iop[1], iop[2]];
-            const c = [iop[3], iop[4], iop[5]];
-            const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
-            const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
-            normal = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-            baseOrigin = ipp;
-            break;
-          }
-        }
-
-        // Filter to images that have a valid ImagePositionPatient; skip others
-        const withPositions = imageList
-          .map((img: any) => {
-            const ipp = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-            return { img, ipp };
-          })
-          .filter(({ ipp }: any) => ipp.length >= 3 && ipp.every((v: number) => isFinite(v)));
-
-        let sortedImages: any[];
-        if (withPositions.length > 0 && normal && baseOrigin) {
-          // Project each image position onto the series normal and sort by that scalar
-          sortedImages = withPositions
-            .map(({ img, ipp }: any) => {
-              const dx = ipp[0] - baseOrigin![0];
-              const dy = ipp[1] - baseOrigin![1];
-              const dz = ipp[2] - baseOrigin![2];
-              const proj = dx*normal![0] + dy*normal![1] + dz*normal![2];
-              return { img, proj };
-            })
-            .sort((a: any, b: any) => a.proj - b.proj)
-            .map((o: any) => o.img);
-        } else {
-          console.warn("Falling back to instanceNumber ordering for MRI (positions/orientation not available yet)");
-          sortedImages = [...imageList].sort((a: any, b: any) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
-        }
-
-        setSecondaryImages(sortedImages);
-        mriSliceMappingCache.current.clear(); // Clear MRI mapping cache when new images loaded
-        // Force re-calculation of transformed positions for new secondary series
-        transformedMRIPositions.current = [];
-        pushFusionLog('secondary-images-loaded', { count: sortedImages.length, seriesId: secondarySeriesId });
-        
-        // Debug log the sorted order
-        try {
-          const debugImages = [...sortedImages.slice(0, 2), ...sortedImages.slice(-2)];
-          pushFusionLog('secondary-order-sample', debugImages.map((img: any) => ({ inst: img.instanceNumber, z: img.sliceLocation })));
-        } catch {}
-        
-        // Preload secondary images with concurrency limits
-        const newCache = new Map();
-        const CONCURRENT_LIMIT = 4;
-        
-        // Process secondary images in chunks with progress updates
-        for (let i = 0; i < sortedImages.length; i += CONCURRENT_LIMIT) {
-          const chunk = sortedImages.slice(i, i + CONCURRENT_LIMIT);
-          
-          // Update progress as we load chunks (30% base + 60% for loading)
-          const baseProgress = 30;
-          const loadingProgress = 60;
-          const chunkProgress = Math.floor(baseProgress + (loadingProgress * (i / sortedImages.length)));
-          updateState(Math.min(chunkProgress, 90));
-          
-          await Promise.all(chunk.map(async (image: any, chunkIndex: number) => {
-            const index = i + chunkIndex;
-            try {
-              // Create a dedicated fetch for secondary images
-              const response = await fetch(`/api/images/${image.sopInstanceUID}`);
-              if (!response.ok) {
-                console.error(`Failed to fetch secondary image ${index}:`, response.status);
-                return;
-              }
-              
-              const arrayBuffer = await response.arrayBuffer();
-              const imageData = await parseDicomImage(arrayBuffer);
-              
-              if (imageData) {
-                // Attach essential spatial metadata from DB for fusion geometry
-                const meta = {
-                  imagePosition: image.imagePosition || image.imageMetadata?.imagePosition || null,
-                  imageOrientation: image.imageOrientation || image.imageMetadata?.imageOrientation || null,
-                  pixelSpacing: image.pixelSpacing || image.imageMetadata?.pixelSpacing || null,
-                };
-                newCache.set(image.sopInstanceUID, { ...imageData, metadata: meta });
-                if (index < 3) {
-                  console.log(`Cached secondary image ${index}: ${image.sopInstanceUID}`);
-                }
-              } else {
-                console.error(`Failed to parse secondary image ${index}`);
-              }
-            } catch (error) {
-              console.warn(`Failed to preload secondary image ${index}:`, error);
-            }
-          }));
-        }
-        
-        secondaryImageCacheRef.current = newCache;
-        console.log(`Preloaded ${newCache.size} secondary images`);
-        console.log("First few cache keys:", Array.from(newCache.keys()).slice(0, 3));
-        
-        // Store cache reference to avoid closure issues
-        // Publish cache to refs for render path and fusion utils
-        secondaryImageCacheRef.current = newCache;
-        (window as any).secondaryImageCacheRef = newCache;
-        
-        // Trigger re-render of current image to show fusion
-        // Note: The current image will be re-rendered automatically when secondary images state changes
-        console.log('Secondary images loaded, fusion should now be available');
-        
-        // Pre-compute MRI positions in CT space if registration matrix is available
-        if (registrationMatrix && registrationMatrix.length === 16) {
-          // Clear cache to force fresh computation with debug logs
-          transformedMRIPositions.current = [];
-          mriZRangeInCTSpace.current = null;
-          mriSliceMappingCache.current.clear();
-          console.log("=== FORCING FRESH MRI TRANSFORMATION COMPUTATION ===");
-
-          // Compute CT z-range
-          const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-          const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-          const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-          let ctZMin = -Infinity, ctZMax = Infinity;
-          if (iop.length >= 6 && origin.length >= 3) {
-            const r = [iop[0], iop[1], iop[2]];
-            const c = [iop[3], iop[4], iop[5]];
-            const n = [
-              r[1] * c[2] - r[2] * c[1],
-              r[2] * c[0] - r[0] * c[2],
-              r[0] * c[1] - r[1] * c[0]
-            ];
-            const nlen = Math.hypot(n[0], n[1], n[2]) || 1;
-            const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-            const zVals: number[] = [];
-            for (const img of images) {
-              const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-              if (p.length >= 3) {
-                const dx = p[0] - origin[0], dy = p[1] - origin[1], dz = p[2] - origin[2];
-                zVals.push(dx*nn[0] + dy*nn[1] + dz*nn[2]);
-              }
-            }
-            if (zVals.length) { ctZMin = Math.min(...zVals); ctZMax = Math.max(...zVals); }
-          }
-          const overlap = (aMin: number, aMax: number, bMin: number, bMax: number, tol = 5) => !(aMax < bMin - tol || bMax < aMin - tol);
-
-          // Compute transformed MRI positions and store in ref
-          // Always use CT series reference (first slice) here as well
-          let transformed = computeTransformedMRIPositions(
-            sortedImages,
-            registrationMatrix,
-            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
-            secondaryImageCacheRef.current
-          );
-
-          if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
-            const zMin = Math.min(...transformed.map(t => t.zInCT));
-            const zMax = Math.max(...transformed.map(t => t.zInCT));
-            console.log(`🔎 Z-range check (on secondary load): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${zMin.toFixed(1)}, ${zMax.toFixed(1)}]`);
-            if (!overlap(ctZMin, ctZMax, zMin, zMax, 5)) {
-              console.warn(`No MRI→CT Z overlap detected (MRI ${zMin.toFixed(1)}–${zMax.toFixed(1)} vs CT ${ctZMin.toFixed(1)}–${ctZMax.toFixed(1)}). Trying inverted matrix.`);
-              const tryMatrix = (m: number[]) => computeTransformedMRIPositions(
-                sortedImages,
-                m,
-                images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-                images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
-                secondaryImageCacheRef.current
-              );
-              const checkOverlapAndAdopt = (cand: {mat: number[]; tag: string}) => {
-                const tr = tryMatrix(cand.mat);
-                if (tr.length > 0) {
-                  const a = Math.min(...tr.map(t => t.zInCT));
-                  const b = Math.max(...tr.map(t => t.zInCT));
-                  console.log(`🔎 Z-range (${cand.tag}): CT=[${ctZMin.toFixed(1)}, ${ctZMax.toFixed(1)}], MRI→CT=[${a.toFixed(1)}, ${b.toFixed(1)}]`);
-                  if (overlap(ctZMin, ctZMax, a, b, 5)) {
-                    console.log(`✅ ${cand.tag} matrix provides valid Z overlap. Using it.`);
-                    transformed = tr;
-                    setRegistrationMatrix(cand.mat);
-                    registrationMatrixRef.current = cand.mat;
-                    return true;
-                  }
-                }
-                return false;
-              };
-
-              const inv = invertMatrix4x4(registrationMatrix);
-              if (inv && checkOverlapAndAdopt({ mat: inv, tag: 'inverted' })) {
-                // adopted
-              } else {
-                const trn = transposeMatrix4x4(registrationMatrix);
-                if (checkOverlapAndAdopt({ mat: trn, tag: 'transposed' })) {
-                  // adopted
-                } else if (inv) {
-                  const invTrn = transposeMatrix4x4(inv);
-                  checkOverlapAndAdopt({ mat: invTrn, tag: 'inverted+transposed' });
-                }
-              }
-            } else {
-              console.log('✅ MRI→CT Z overlap OK — keeping provided matrix');
-            }
-          }
-
-          // Z-offset alignment like above path
-          if (isFinite(ctZMin) && isFinite(ctZMax) && transformed.length > 0) {
-            const ctZs: number[] = [];
-            const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-            const iop = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-            const origin = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-            if (iop.length >= 6 && origin.length >= 3) {
-              const r = [iop[0], iop[1], iop[2]]; const c = [iop[3], iop[4], iop[5]];
-              const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
-              const nlen = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nlen, n[1]/nlen, n[2]/nlen];
-              for (const img of images) {
-                const p = toNum(img.imagePosition || img.imageMetadata?.imagePosition);
-                if (p.length >= 3) { const dx = p[0]-origin[0], dy=p[1]-origin[1], dz=p[2]-origin[2]; ctZs.push(dx*nn[0]+dy*nn[1]+dz*nn[2]); }
-              }
-              ctZs.sort((a,b)=>a-b);
-            }
-            if (ctZs.length > 1) {
-              const nearest = (val: number) => {
-                let lo=0, hi=ctZs.length-1, best=ctZs[0];
-                while (lo<=hi){const mid=(lo+hi>>1); const v=ctZs[mid]; if (Math.abs(v-val)<Math.abs(best-val)) best=v; if (v<val) lo=mid+1; else hi=mid-1;}
-                return best;
-              };
-              const diffs = transformed.map(t => t.zInCT - nearest(t.zInCT)).filter(d => isFinite(d));
-              if (diffs.length) {
-                const sorted = diffs.slice().sort((a,b)=>a-b);
-                const median = sorted[Math.floor(sorted.length/2)];
-                if (Math.abs(median) > 0.5) {
-                  console.log(`⚙️ Applying Z-offset correction: ${median.toFixed(2)}mm`);
-                  transformed = transformed.map(t => ({...t, zInCT: t.zInCT - median}));
-                }
-              }
-            }
-          }
-
-          transformedMRIPositions.current = transformed;
-          console.log(`✓ Computed ${transformed.length} transformed MRI positions`);
-          
-          // Compute Z-range bounds for optimization
-          if (transformed.length > 0) {
-            const zValues = transformed.map(t => t.zInCT);
-            mriZRangeInCTSpace.current = {
-              min: Math.min(...zValues),
-              max: Math.max(...zValues)
-            };
-            console.log(`✓ MRI Z-range in CT space: ${mriZRangeInCTSpace.current.min.toFixed(1)}mm to ${mriZRangeInCTSpace.current.max.toFixed(1)}mm`);
-          }
-        }
-        
-        // Trigger re-render to show fusion overlay with delay to ensure state is updated
-        if (newCache.size > 0) {
-          setTimeout(() => {
-            scheduleRender();
-          }, 100);
-        }
-        
-        // Mark secondary series loading as complete
-        const completeState = new Map(secondaryLoadingStates);
-        completeState.set(secondarySeriesId, { progress: 100, isLoading: false });
-        setSecondaryLoadingStates(completeState);
-        setCurrentlyLoadingSecondary(null);
-        if (secondarySeriesId) onSecondaryLoadingStateChange?.(null, completeState as any);
-        
-      } catch (err) {
-        console.error("Error loading secondary images:", err);
-        // Mark as error state
-        const errorState = new Map(secondaryLoadingStates);
-        errorState.set(secondarySeriesId, { progress: 0, isLoading: false });
-        setSecondaryLoadingStates(errorState);
-        setCurrentlyLoadingSecondary(null);
-        if (secondarySeriesId) onSecondaryLoadingStateChange?.(null, errorState as any);
-      }
+      } catch {}
     };
 
-    loadSecondaryImages();
+    fuseboxCacheRef.current.clear();
+    clearFuseboxCache();
+    loadMetadata();
+
+    return () => {
+      cancelled = true;
+    };
   }, [secondarySeriesId]);
 
   // Auto-trigger background loading when primary images and registration are ready
@@ -4592,7 +4054,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
-      if (secondarySeriesId && secondaryImages.length > 0) {
+      if (secondarySeriesId) {
         try {
           await renderFusionOverlayNew(ctx, currentImage);
         } catch (fusionError: any) {
@@ -4819,277 +4281,114 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     ctx.putImageData(imageData, 0, 0);
   };
   
-  // Stable fusion cache that persists across renders
-  const fusionRenderCache = useRef<Map<string, {
-    bitmap?: ImageBitmap;
-    canvas?: HTMLCanvasElement;
-    timestamp: number;
-  }>>(new Map());
-  
-  const lastFusionState = useRef<{
-    ctSliceZ: number;
-    fusionOpacity: number;
-    secondarySeriesId: number | null;
-    registrationMatrix: number[] | null;
-  }>({ ctSliceZ: 0, fusionOpacity: 0, secondarySeriesId: null, registrationMatrix: null });
-  
-  // Keep fusion rendering simple and stable
-
-  // Clean up old cache entries periodically
   useEffect(() => {
-    const cleanupCache = () => {
+    if (typeof window === 'undefined') return;
+
+    const interval = window.setInterval(() => {
       const now = Date.now();
-      const maxAge = 5000; // 5 seconds
-      for (const [key, value] of fusionRenderCache.current.entries()) {
-        if (now - value.timestamp > maxAge) {
-          fusionRenderCache.current.delete(key);
+      for (const [key, entry] of fuseboxCacheRef.current.entries()) {
+        if (now - entry.timestamp > 15000) {
+          fuseboxCacheRef.current.delete(key);
         }
       }
-    };
-    
-    const interval = setInterval(cleanupCache, 2000); // Clean every 2 seconds
-    return () => {
-      clearInterval(interval);
-    };
+    }, 5000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    // Early exit conditions
-    if (!secondaryImages.length || !secondarySeriesId || fusionOpacity === 0 || !registrationMatrix) {
+    if (!secondarySeriesId || fusionOpacity === 0) {
+      setFuseboxTransformSource(null);
       return;
     }
-    
-    // Check if still loading
-    const loadingState = secondaryLoadingStates.get(secondarySeriesId);
-    if (loadingState?.isLoading || currentlyLoadingSecondary === secondarySeriesId) {
+
+    if (!registrationMatrix || registrationMatrix.length !== 16) {
+      fusionIssueRef.current = 'no-registration-matrix';
+      setFuseboxTransformSource(null);
       return;
     }
-    
-    // Validate required data
-    if (!primaryImage?.sopInstanceUID || !secondaryImageCacheRef.current?.size) {
+
+    if (!primaryImage?.sopInstanceUID) {
+      setFuseboxTransformSource(null);
       return;
     }
-    
-    try {
-      // Ensure transformed positions are computed
-      if (!transformedMRIPositions.current || transformedMRIPositions.current.length === 0) {
-        if (registrationMatrix && secondaryImages.length > 0) {
-          const transformed = computeTransformedMRIPositions(
-            secondaryImages,
-            registrationMatrix,
-            images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation,
-            images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition,
-            secondaryImageCacheRef.current
-          );
-          transformedMRIPositions.current = transformed;
-        } else {
+
+    const transform = ctTransform.current;
+    if (!transform) {
+      return;
+    }
+
+    const cacheKey = `${primaryImage.sopInstanceUID}:${secondarySeriesId}:${selectedRegistrationId ?? 'default'}`;
+    let cached = fuseboxCacheRef.current.get(cacheKey);
+    if (!cached) {
+      try {
+        const slice = await fetchFuseboxSlice({
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+          sopInstanceUID: primaryImage.sopInstanceUID,
+          registrationId: selectedRegistrationId ?? undefined,
+        });
+
+        if (slice.registrationId && slice.registrationId !== selectedRegistrationId) {
+          setSelectedRegistrationId(slice.registrationId);
+        }
+
+        if (slice.secondaryModality && slice.secondaryModality !== secondaryModality) {
+          setSecondaryModality(slice.secondaryModality);
+        }
+
+        const { imageData, hasSignal } = fuseboxSliceToImageData(slice, slice.secondaryModality ?? secondaryModality);
+        const overlayCanvas = document.createElement('canvas');
+        overlayCanvas.width = slice.width;
+        overlayCanvas.height = slice.height;
+        const overlayCtx = overlayCanvas.getContext('2d');
+        if (!overlayCtx) {
           return;
         }
-      }
-    
-    // No debouncing - render fusion immediately for stability
-    
-    // Compute CT slice Z - use cached value if possible
-    let ctSliceZ: number = (currentIndex + 1) * 3; // Default fallback
-    
-    // Check if we can use cached state to avoid expensive calculations
-    const currentState = { ctSliceZ: 0, fusionOpacity, secondarySeriesId, registrationMatrix };
-    const stateChanged = lastFusionState.current.ctSliceZ !== ctSliceZ || 
-                        lastFusionState.current.fusionOpacity !== fusionOpacity ||
-                        lastFusionState.current.secondarySeriesId !== secondarySeriesId ||
-                        lastFusionState.current.registrationMatrix !== registrationMatrix;
-    
-    // Only recalculate if state changed significantly
-    if (stateChanged) {
-      try {
-        const toNumArr = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        const iopStr = images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || primaryImage.imageOrientation || primaryImage.imageMetadata?.imageOrientation;
-        const iop = toNumArr(iopStr);
-        const seriesOriginStr = images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition;
-        const seriesOrigin = toNumArr(seriesOriginStr);
-        const thisPosStr = primaryImage.imagePosition || primaryImage.imageMetadata?.imagePosition;
-        const thisPos = toNumArr(thisPosStr);
-
-        if (iop.length >= 6 && seriesOrigin.length >= 3 && thisPos.length >= 3) {
-          const rx = iop[0], ry = iop[1], rz = iop[2];
-          const cx = iop[3], cy = iop[4], cz = iop[5];
-          const nx = ry * cz - rz * cy;
-          const ny = rz * cx - rx * cz;
-          const nz = rx * cy - ry * cx;
-          const nlen = Math.hypot(nx, ny, nz) || 1;
-          const n = [nx / nlen, ny / nlen, nz / nlen];
-          const dx = thisPos[0] - seriesOrigin[0];
-          const dy = thisPos[1] - seriesOrigin[1];
-          const dz = thisPos[2] - seriesOrigin[2];
-          ctSliceZ = dx * n[0] + dy * n[1] + dz * n[2];
-        } else {
-          // Fallback to legacy heuristics
-          if (primaryImage.parsedSliceLocation !== undefined && primaryImage.parsedSliceLocation !== null) {
-            ctSliceZ = primaryImage.parsedSliceLocation;
-          } else if (primaryImage.parsedZPosition !== undefined && primaryImage.parsedZPosition !== null) {
-            ctSliceZ = primaryImage.parsedZPosition;
-          } else if (primaryImage.sliceLocation) {
-            const parsed = parseFloat(primaryImage.sliceLocation);
-            if (!isNaN(parsed)) ctSliceZ = parsed;
-          } else if (primaryImage.imagePosition) {
-            const imagePos = typeof primaryImage.imagePosition === 'string'
-              ? primaryImage.imagePosition.split("\\")
-              : primaryImage.imagePosition;
-            if (imagePos && imagePos.length >= 3) {
-              const parsed = parseFloat(imagePos[2]);
-              if (!isNaN(parsed)) ctSliceZ = parsed;
-            }
-          }
+        overlayCtx.putImageData(imageData, 0, 0);
+        cached = { canvas: overlayCanvas, slice, timestamp: Date.now(), hasSignal };
+        fuseboxCacheRef.current.set(cacheKey, cached);
+        if (!hasSignal) {
+          pushFusionLog('Fusebox slice had no visible signal', {
+            sop: primaryImage.sopInstanceUID,
+            min: slice.min,
+            max: slice.max,
+          });
         }
-      } catch (e) {
-        // Keep fallback value on error
-      }
-    }
-    
-    const actualCache = secondaryImageCacheRef.current;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-      // Create simple cache key without opacity to reduce cache misses
-      const cacheKey = `${primaryImage.sopInstanceUID}_${secondarySeriesId}`;
-      const cached = fusionRenderCache.current.get(cacheKey);
-      const now = Date.now();
-      
-      // Use cached result if available and recent (but re-apply current opacity)
-      if (cached && (now - cached.timestamp) < 100) {
-        ctx.save();
-        ctx.globalAlpha = fusionOpacity; // Always use current opacity
-        if (cached.bitmap) {
-          ctx.drawImage(cached.bitmap, 0, 0);
-        } else if (cached.canvas) {
-          ctx.drawImage(cached.canvas, 0, 0);
-        }
-        ctx.restore();
+      } catch (error) {
+        console.error('Fusebox overlay fetch failed:', error);
+        fusionIssueRef.current = 'fusebox-fetch-error';
+        setFuseboxTransformSource(null);
         return;
       }
-    
-    // Project current CT slice Z into same CT-relative coordinate as transformed MRI
-    let ctSliceZProjected = ctSliceZ;
-    try {
-      const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-      const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-      const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-      const curPos = toNum(primaryImage?.imagePosition || primaryImage?.imageMetadata?.imagePosition);
-      if (baseIOP.length >= 6 && basePos.length >= 3 && curPos.length >= 3) {
-        const r = [baseIOP[0], baseIOP[1], baseIOP[2]];
-        const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
-        const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]];
-        const nl = Math.hypot(n[0], n[1], n[2]) || 1; const nn = [n[0]/nl, n[1]/nl, n[2]/nl];
-        const dx = curPos[0] - basePos[0];
-        const dy = curPos[1] - basePos[1];
-        const dz = curPos[2] - basePos[2];
-        ctSliceZProjected = dx*nn[0] + dy*nn[1] + dz*nn[2];
-      }
-    } catch {}
-    
-    // Ensure nearest MRI slice and neighbors are available in cache; if not, lazy-load them (non-blocking)
-    try {
-      if (transformedMRIPositions.current && transformedMRIPositions.current.length > 0) {
-        const toNum = (v: any): number[] => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split('\\').map(Number) : []);
-        const baseIOP = toNum(images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation);
-        const basePos = toNum(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition);
-        let ctNorm: number[] | null = null;
-        if (baseIOP.length >= 6) {
-          const r = [baseIOP[0], baseIOP[1], baseIOP[2]]; const c = [baseIOP[3], baseIOP[4], baseIOP[5]];
-          const n = [r[1]*c[2]-r[2]*c[1], r[2]*c[0]-r[0]*c[2], r[0]*c[1]-r[1]*c[0]]; const nl = Math.hypot(n[0],n[1],n[2])||1; ctNorm = [n[0]/nl,n[1]/nl,n[2]/nl];
-        }
-        const nearestIdx = findNearestMRIIndexByPlane(ctSliceZProjected, ctNorm, (basePos.length>=3?basePos:null), transformedMRIPositions.current as any);
-        const queueUid = (uid?: string) => {
-          if (!uid) return;
-          if (secondaryImageCacheRef.current.has(uid)) return;
-          (async () => {
-            try {
-              const resp = await fetch(`/api/images/${uid}`);
-              if (resp.ok) {
-                const buf = await resp.arrayBuffer();
-                const imgData = await parseDicomImage(buf);
-                if (imgData) secondaryImageCacheRef.current.set(uid, imgData);
-              }
-            } catch (e) { 
-              // Silently handle errors for performance
-            }
-          })();
-        };
-        if (nearestIdx !== null && nearestIdx >= 0) {
-          for (let k = -2; k <= 2; k++) {
-            const idx = nearestIdx + k;
-            if (idx < 0 || idx >= transformedMRIPositions.current.length) continue;
-            queueUid(transformedMRIPositions.current[idx]?.image?.sopInstanceUID);
-          }
-        }
-      }
-    } catch {}
-
-    // Create a temporary canvas for fusion rendering
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
-
-    // Call the new fusion utility function with registration matrix and shared CT coordinate system
-    // DO NOT apply transform here - fusion-utils handles its own transforms
-    await renderFusionOverlay(
-      tempCtx,
-      primaryImage,
-      transformedMRIPositions.current,
-      actualCache,
-      ctSliceZProjected,
-      fusionOpacity,
-      panX,
-      panY,
-      canvas.width,
-      canvas.height,
-      registrationMatrix,
-      ctTransform.current,
-      // Pass the CT series origin to maintain the same reference as ctSliceZProjected
-      (images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition
-        ? (Array.isArray(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition)
-            ? (images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition).map((n: any)=>Number(n))
-            : String(images[0]?.imagePosition || images[0]?.imageMetadata?.imagePosition).split('\\').map(Number)
-          )
-        : null),
-      // Pass CT series IOP as a stable fallback
-      (images[0]?.imageOrientation || images[0]?.imageMetadata?.imageOrientation || null),
-      secondaryModality
-    );
-
-      // Cache the result for future use (without opacity since we apply it dynamically)
-      let bitmap: ImageBitmap | null = null;
-      try {
-        if (typeof createImageBitmap === 'function') {
-          bitmap = await createImageBitmap(tempCanvas);
-        }
-      } catch {}
-      fusionRenderCache.current.set(cacheKey, {
-        bitmap: bitmap || undefined,
-        canvas: bitmap ? undefined : tempCanvas,
-        timestamp: now
-      });
-
-      // Draw the cached result to the main canvas with proper blending
-      ctx.save();
-      ctx.globalAlpha = fusionOpacity;
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(tempCanvas, 0, 0);
-      ctx.restore();
-
-      // Mark fusion healthy (reduce state updates)
-      fusionIssueRef.current = null;
-
-      // Update last fusion state
-      lastFusionState.current = { ctSliceZ, fusionOpacity, secondarySeriesId, registrationMatrix };
-      
-    } catch (error) {
-      console.error('Fusion render error:', error);
     }
+
+    if (!cached) {
+      setFuseboxTransformSource(null);
+      return;
+    }
+
+    if (!cached.hasSignal) {
+      fusionIssueRef.current = 'empty-fusebox-slice';
+      setFuseboxTransformSource(cached.slice.transformSource ?? null);
+      return;
+    }
+
+    const source = cached.slice.transformSource ?? null;
+    setFuseboxTransformSource(source);
+    fusionIssueRef.current = null;
+
+    ctx.save();
+    ctx.globalAlpha = fusionOpacity;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(
+      cached.canvas,
+      transform.offsetX,
+      transform.offsetY,
+      transform.imageWidth * transform.scale,
+      transform.imageHeight * transform.scale,
+    );
+    ctx.restore();
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied
@@ -6124,7 +5423,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 )}
               </>
             )}
-            {secondarySeriesId && secondaryImages.length > 0 && (
+            {secondarySeriesId && (
               <Badge className={`flex items-center gap-1 border backdrop-blur-sm ${
                 secondaryModality === 'PT' 
                   ? 'bg-yellow-900/40 text-yellow-200 border-yellow-600/30' 
@@ -6622,6 +5921,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
               onOpenDebug={() => openFusionDebug('manual')}
               secondaryModality={secondaryModality}
+              transformSource={fuseboxTransformSource}
+              allowedSecondaryIds={props.allowedSecondaryIds}
+              availableSeries={availableSeries}
+              registrationOptions={registrationOptions}
+              selectedRegistrationId={selectedRegistrationId}
+              onRegistrationSelect={handleRegistrationSelect}
             />
           )}
           
