@@ -9,9 +9,9 @@ Tracking the current status of the multi-registration fusion refactor.
 - [x] **FIXED**: Remove duplicate `registrationAssociations` prop in `viewer-interface.tsx` - fusion control panels now appear for CT series when clicking anchor icons.
 
 ## Helper integration
-- [x] Once the wiring above is in place, hit `/api/fusebox/resampled-slice` and confirm `transformSource` is `helper-generated`/`helper-cache`.
-- [ ] **STEP 1**: Verify the registration dropdown renders with correct options when fusion panel appears (visual test)
-- [ ] **STEP 2**: Verify toggling dropdown selection sends the matching `registrationId` (watch `/api/fusebox/resampled-slice?registrationId=...`).
+- [x] Once the wiring above is in place, hit `/api/fusebox/resampled-slice` and confirm `transformSource` is `helper-generated`/`helper-cache`. ✅ **CONFIRMED: "helper-cache"**
+- [x] **STEP 1**: Verify the registration dropdown renders with correct options when fusion panel appears (visual test) - ✅ **WORKING FOR CT**
+- [x] **STEP 2**: Verify toggling dropdown selection sends the matching `registrationId` (watch `/api/fusebox/resampled-slice?registrationId=...`) - ✅ **WORKING** API calls with registrationId confirmed
 - [ ] **STEP 3**: Ensure changing registration clears the cache, updates the overlay, and writes the selection into the debug panel.
 
 ## Validation
@@ -20,8 +20,8 @@ Tracking the current status of the multi-registration fusion refactor.
 - [ ] Confirm the “no signal” warning only appears when the actual resampled slice is flat (e.g., shared FoR) rather than because the wrong transform was used.
 
 ## Current Issues Found
-- [ ] **ISSUE A**: PET series don't show fusion panels (only CT series work with anchor icons)
-- [ ] **ISSUE B**: No actual fusion overlay rendering even when panels appear (missing dropdown → API → rendering connection)
+- [ ] **ISSUE A**: PET series don't show fusion panels (only CT series work with anchor icons) - *DEFERRED until CT overlay working*
+- [ ] **ISSUE B**: No actual fusion overlay rendering - **CRITICAL: `window.__fusion` undefined, no 🐟 logs, renderFusionOverlayNew never called** - *WorkingViewer fusion system not initializing*
 
 ## Next steps for follow-up
 - Swap the front-end registration resolution logic to consume the new association map and drop `/api/registration/resolve`.
