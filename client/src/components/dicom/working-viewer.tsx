@@ -40,10 +40,10 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import type { RegistrationAssociation, RegistrationTransformCandidate } from '@/types/fusion';
+import type { RegistrationAssociation, RegistrationTransformCandidate, RegistrationSeriesDetail } from '@/types/fusion';
 
 // Debug flags - more granular control over logging
-const DEBUG = false; // Set to true only when specifically debugging rendering issues
+const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
 const RT_STRUCTURE_DEBUG = false; // Set to true when specifically debugging RT structures
 
 // Typed preview contour interface for consistency
@@ -61,6 +61,8 @@ type RegistrationOption = {
   matrix: number[] | null;
   association: RegistrationAssociation;
   candidate?: RegistrationTransformCandidate | null;
+  sourceDetail: RegistrationSeriesDetail | null;
+  targetDetail: RegistrationSeriesDetail | null;
 };
 
 const IDENTITY_MATRIX_4X4 = [
@@ -247,10 +249,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const scheduleRenderRef = useRef<(() => void) | null>(null);
 
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
-    if (secondarySeriesId == null) return [];
+    if (secondarySeriesId == null) {
+      console.log('registrationOptions: no secondary selected');
+      return [];
+    }
     const secondaryId = Number(secondarySeriesId);
-    if (!Number.isFinite(secondaryId)) return [];
+    if (!Number.isFinite(secondaryId)) {
+      console.log('registrationOptions: secondary not finite', secondarySeriesId);
+      return [];
+    }
+
+    const describeSeries = (detail: RegistrationSeriesDetail | null | undefined) => {
+      if (!detail) return null;
+      const modality = detail.modality ? detail.modality.toUpperCase() : null;
+      const description = detail.description?.trim();
+      const fallbackId = detail.id != null ? `Series ${detail.id}` : null;
+      if (modality && description) return `${modality} · ${description}`;
+      if (modality) return `${modality} · ${description || fallbackId || detail.uid || 'Series'}`;
+      if (description) return description;
+      if (fallbackId) return fallbackId;
+      if (detail.uid) return detail.uid;
+      return null;
+    };
+
     const options: RegistrationOption[] = [];
+    const seenOptionKeys = new Set<string>();
+
     for (const assoc of registrationAssociationsForPrimary) {
       const siblingIds = Array.isArray(assoc.siblingSeriesIds)
         ? assoc.siblingSeriesIds.map((id: any) => Number(id)).filter(Number.isFinite)
@@ -261,34 +285,49 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const isShared = assoc.relationship === 'shared-frame' && siblingIds.includes(secondaryId);
       const isRegistered = assoc.relationship === 'registered' && sourceIds.includes(secondaryId);
-      if (!isShared && !isRegistered) {
-        continue;
-      }
+      if (!isShared && !isRegistered) continue;
+
+      const sourceDetail = Array.isArray(assoc.sourceSeriesDetails)
+        ? assoc.sourceSeriesDetails.find(detail => detail?.id === secondaryId) || null
+        : null;
+      const targetDetail = assoc.targetSeriesDetail ?? null;
+      const sourceLabel = describeSeries(sourceDetail) ?? `Series ${secondaryId}`;
+      const targetLabel = describeSeries(targetDetail) ?? 'Primary CT';
 
       if (assoc.relationship === 'shared-frame') {
+        const key = `${assoc.regFile || 'shared'}:${secondaryId}:shared`;
+        if (seenOptionKeys.has(key)) continue;
+        seenOptionKeys.add(key);
         options.push({
           id: null,
-          label: 'Shared frame of reference',
+          label: `Shared FoR · ${sourceLabel}`,
           relationship: assoc.relationship,
           regFile: assoc.regFile,
           matrix: cloneIdentityMatrix(),
           association: assoc,
           candidate: null,
+          sourceDetail,
+          targetDetail,
         });
         continue;
       }
 
       const candidates = Array.isArray(assoc.transformCandidates) ? assoc.transformCandidates : [];
       if (!candidates.length) {
-        const fileLabel = assoc.regFile ? assoc.regFile.split(/[\\/]/).pop() : 'Registration';
+        const key = `${assoc.regFile || 'reg'}:${secondaryId}:default`;
+        if (seenOptionKeys.has(key)) continue;
+        seenOptionKeys.add(key);
+        const baseName = assoc.regFile ? assoc.regFile.split(/[\\/]/).pop() : null;
         options.push({
           id: null,
-          label: fileLabel || 'Registration',
+          label: baseName ? `${sourceLabel} → ${targetLabel} (${baseName})` : `${sourceLabel} → ${targetLabel}`,
           relationship: assoc.relationship,
           regFile: assoc.regFile,
           matrix: null,
           association: assoc,
           candidate: null,
+          sourceDetail,
+          targetDetail,
         });
         continue;
       }
@@ -296,23 +335,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       candidates.forEach((cand, idx) => {
         if (!Array.isArray(cand.matrix) || cand.matrix.length !== 16) return;
         const regFile = cand.regFile || assoc.regFile;
-        const baseName = regFile ? regFile.split(/[\\/]/).pop() : 'Registration';
-        const suffix = typeof cand.id === 'string' && cand.id.includes('::') ? Number(cand.id.split('::')[1]) : idx;
-        const label = Number.isFinite(suffix)
-          ? `${baseName || 'Registration'} (candidate ${Number(suffix) + 1})`
-          : (baseName || 'Registration');
-
+        const suffixIndex = typeof cand.id === 'string' && cand.id.includes('::')
+          ? Number(cand.id.split('::')[1])
+          : idx;
+        const candidateNumber = Number.isFinite(suffixIndex) ? (Number(suffixIndex) + 1) : (idx + 1);
+        const candidateLabel = candidates.length > 1 ? ` (candidate ${candidateNumber})` : '';
+        const label = `${sourceLabel} → ${targetLabel}${candidateLabel}`;
+        const key = `${regFile || 'reg'}:${secondaryId}:${cand.id ?? candidateNumber}`;
+        if (seenOptionKeys.has(key)) return;
+        seenOptionKeys.add(key);
         options.push({
-          id: cand.id ?? `${regFile || 'reg'}::${idx}`,
+          id: cand.id ?? `${regFile || 'reg'}::${candidateNumber}`,
           label,
           relationship: assoc.relationship,
           regFile: regFile ?? null,
           matrix: cand.matrix.slice(),
           association: assoc,
           candidate: cand,
+          sourceDetail,
+          targetDetail,
         });
       });
     }
+    console.log('registration options', { secondaryId, options, registrationAssociationsForPrimary });
     return options;
   }, [registrationAssociationsForPrimary, secondarySeriesId]);
 
@@ -2901,6 +2946,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
     const list = registrationAssociations.get(seriesId) || [];
+    console.log('registration associations for primary', { seriesId, list });
     setRegistrationAssociationsForPrimary(list);
   }, [registrationAssociations, seriesId]);
 
@@ -4478,26 +4524,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
-    // CRITICAL DEBUG: Log all slice position sources for comparison
-    if (DEBUG) console.log(`🔍 SLICE POSITION DEBUG:
-      parsedSliceLocation: ${currentImage.parsedSliceLocation}
-      parsedZPosition: ${currentImage.parsedZPosition} 
-      imageMetadata.sliceLocation: ${currentImage.imageMetadata?.sliceLocation || currentImage.sliceLocation}
-      imageMetadata.imagePosition Z: ${currentImage.imageMetadata?.imagePosition 
-        ? (typeof currentImage.imageMetadata.imagePosition === 'string' 
-          ? currentImage.imageMetadata.imagePosition.split("\\")[2] 
-          : currentImage.imageMetadata.imagePosition[2])
-        : (currentImage.imagePosition 
-          ? (typeof currentImage.imagePosition === 'string' 
-            ? currentImage.imagePosition.split("\\")[2] 
-            : currentImage.imagePosition[2])
-          : "N/A")}
-      currentIndex: ${currentIndex}
-      FINAL currentSlicePosition: ${currentSlicePosition}mm`);
-    if (DEBUG) console.log(
-      `📋 Available structures:`,
-      structuresRef?.structures?.map((s: any) => s.structureName) || [],
-    );
+    // CRITICAL DEBUG: Disabled for performance - was causing excessive console spam
+    // Slice position calculation debug logs removed
+    // if (DEBUG) console.log(
+    //   `📋 Available structures:`,
+    //   structuresRef?.structures?.map((s: any) => s.structureName) || [],
+    // );
 
     // Get all RT structure Z positions to check coordinate space
     const allRTZPositions: number[] = [];
@@ -5908,7 +5940,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {/* Removed overlaid text - now in titlebar */}
           
           {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.hasSecondarySeriesForFusion && registrationMatrix && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
+          {studyId && props.hasSecondarySeriesForFusion && registrationOptions.length > 0 && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
             <FusionControlPanel
               primarySeriesId={seriesId}
               studyId={studyId}

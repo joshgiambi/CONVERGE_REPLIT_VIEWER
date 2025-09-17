@@ -47,6 +47,14 @@ def affine_from_row_major(flat: List[float]) -> sitk.AffineTransform:
     return xform
 
 
+def ensure_moving_to_fixed(xform: sitk.Transform) -> sitk.Transform:
+    """Fusebox consumes moving→fixed transforms; invert when needed."""
+    try:
+        return xform.GetInverse()
+    except RuntimeError as exc:  # pragma: no cover
+        raise ValueError("Transform is not invertible") from exc
+
+
 def resample(primary: sitk.Image, secondary: sitk.Image, xform: sitk.Transform, interpolation: str) -> sitk.Image:
     resample_filter = sitk.ResampleImageFilter()
     resample_filter.SetReferenceImage(primary)
@@ -107,9 +115,10 @@ def run_from_config(cfg: dict) -> dict:
     secondary = read_series(secondary_files)
 
     if transform_file:
-        xform = sitk.ReadTransform(transform_file)
+        xform = ensure_moving_to_fixed(sitk.ReadTransform(transform_file))
     elif transform:
-        xform = affine_from_row_major([float(v) for v in transform])
+        raw = affine_from_row_major([float(v) for v in transform])
+        xform = ensure_moving_to_fixed(raw)
     else:
         raise ValueError("Either transform or transformFile must be provided")
 

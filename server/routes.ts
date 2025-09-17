@@ -4214,11 +4214,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/registration/associations", async (req, res) => {
     try {
       const studyId = req.query.studyId ? Number(req.query.studyId) : undefined;
-      const patientId = req.query.patientId ? Number(req.query.patientId) : undefined;
-      if (!Number.isFinite(studyId as any) && !Number.isFinite(patientId as any)) return res.status(400).json({ error: 'studyId or patientId required' });
+      const patientIdRaw = req.query.patientId as string | undefined;
+      const patientId = patientIdRaw && patientIdRaw.trim() ? patientIdRaw.trim() : undefined;
+      if (!Number.isFinite(studyId as any) && !patientId) return res.status(400).json({ error: 'studyId or patientId required' });
       const { findRegFileForStudy, findAllRegFilesForPatient } = await import('./registration/reg-resolver.ts');
       const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
-      const foundList = patientId ? await findAllRegFilesForPatient(patientId) : (await (async()=>{ const f = await findRegFileForStudy(studyId as number); return f? [{studyId: studyId as number, seriesId: f.seriesId, filePath: f.filePath}] as any: []; })());
+      const foundList = patientId
+        ? await findAllRegFilesForPatient(patientId)
+        : (await (async () => {
+            const f = await findRegFileForStudy(studyId as number);
+            return f ? [{ studyId: studyId as number, seriesId: f.seriesId, filePath: f.filePath }] as any : [];
+          })());
 
       // Helper to gather all series across patient (or study fallback)
       const gatherAllSeries = async (): Promise<any[]> => {
@@ -4241,6 +4247,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return await storage.getSeriesByStudyId(studyId as number);
         }
         return [];
+      };
+
+      // Preload all series (needed for UID→ID resolution and metadata enrichment later)
+      const allSeries = await gatherAllSeries();
+      const seriesById = new Map<number, any>();
+      const seriesByUid = new Map<string, any>();
+      for (const s of allSeries) {
+        seriesById.set(s.id, s);
+        if (s.seriesInstanceUID) seriesByUid.set(s.seriesInstanceUID, s);
+      }
+
+      const toSeriesDetail = (series: any | undefined | null) => {
+        if (!series) return null;
+        return {
+          id: series.id ?? null,
+          uid: series.seriesInstanceUID ?? null,
+          description: series.seriesDescription ?? null,
+          modality: series.modality ?? null,
+          studyId: series.studyId ?? null,
+          imageCount: series.imageCount ?? null,
+        };
       };
 
       // Utility: build list of CTAC series IDs across a universe of series using FoR matching with PET
@@ -4301,21 +4328,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const ctPrimary = list.find(s => (s.modality || '').toUpperCase() === 'CT') || list[0];
           const sourcesSeriesIds = list.filter(s => s.id !== ctPrimary.id).map(s => s.id);
           const sources = list.filter(s => s.id !== ctPrimary.id).map(s => s.seriesInstanceUID);
-        const assoc = {
-          regFile: null,
-          studyId: ctPrimary.studyId,
-          target: ctPrimary.seriesInstanceUID,
-          targetSeriesId: ctPrimary.id,
-          sources,
-          sourcesSeriesIds,
-          sourceFoR: fo,
-          targetFoR: fo,
-          relationship: 'shared-frame',
-          siblingSeriesIds: list.map(series => series.id),
-          transformCandidates: [] as Array<unknown>,
-        };
+          if (!sourcesSeriesIds.length) continue;
+          const targetDetail = toSeriesDetail(ctPrimary);
+          const sourceDetails = sourcesSeriesIds
+            .map(id => toSeriesDetail(seriesById.get(id)))
+            .filter((detail): detail is NonNullable<typeof detail> => !!detail);
+          if (!sourceDetails.length || !targetDetail) continue;
+          const assoc = {
+            regFile: null,
+            studyId: ctPrimary.studyId,
+            target: ctPrimary.seriesInstanceUID,
+            targetSeriesId: ctPrimary.id,
+            sources,
+            sourcesSeriesIds,
+            sourceSeriesIds: sourcesSeriesIds, // Add backward compatibility field for shared-frame
+            sourceFoR: fo,
+            targetFoR: fo,
+            relationship: 'shared-frame',
+            siblingSeriesIds: list.map(series => series.id),
+            transformCandidates: [] as Array<unknown>,
+            targetSeriesDetail: targetDetail,
+            sourceSeriesDetails: sourceDetails,
+          };
           associations.push(assoc);
         }
+
+        // Helper FoR resolver per series (moved up for early return case)
+        const foMap = new Map<number, string>();
+        const getFo = async (sid: number) => {
+          if (foMap.has(sid)) return foMap.get(sid)!;
+          let fo = '';
+          try {
+            const imgs = await storage.getImagesBySeriesId(sid);
+            const img0: any = imgs[0];
+            fo = (img0?.frameOfReferenceUID || img0?.metadata?.frameOfReferenceUID) || '';
+            if (!fo && img0?.filePath) {
+              const buffer = fs.readFileSync(img0.filePath);
+              const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+              fo = ds.string?.('x00200052')?.trim() || '';
+            }
+          } catch {}
+          foMap.set(sid, fo || '');
+          return fo || '';
+        };
 
         // Compute CTAC ids for client-side demotion of CTAC
         const ctacSeriesIds = await computeCtacIds(allSeries, getFo);
@@ -4514,6 +4569,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
             referencedSeriesInstanceUids: Array.isArray(cand.referenced) && cand.referenced.length ? cand.referenced : refs,
           }));
 
+        const targetSeriesRecord = targetSeriesId != null ? seriesById.get(targetSeriesId) || seriesByUid.get(targetSeriesUID || '') : null;
+        const targetSeriesDetail = toSeriesDetail(targetSeriesRecord);
+
+        const resolvedSourceSeries = sourcesSeriesIds
+          .map(id => toSeriesDetail(seriesById.get(id)))
+          .filter((detail): detail is NonNullable<typeof detail> => !!detail);
+
+        if (!targetSeriesDetail) {
+          console.warn('ASSOC: skipping registration without resolvable target series', {
+            file: found.filePath,
+            targetSeriesId,
+            targetSeriesUID,
+          });
+          continue;
+        }
+
+        if (!resolvedSourceSeries.length) {
+          console.warn('ASSOC: skipping registration without resolvable sources', {
+            file: found.filePath,
+            refs,
+            resolvedSources: sourcesSeriesIds,
+          });
+          continue;
+        }
+
         const assoc = {
           regFile: found.filePath,
           studyId: found.studyId,
@@ -4521,11 +4601,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           targetSeriesId,
           sources,
           sourcesSeriesIds,
+          sourceSeriesIds: sourcesSeriesIds, // Add backward compatibility field
           sourceFoR: parsed.sourceFrameOfReferenceUid || null,
           targetFoR: parsed.targetFrameOfReferenceUid || null,
           relationship: 'registered',
           siblingSeriesIds: Array.from(siblingFoRIds),
           transformCandidates,
+          targetSeriesDetail,
+          sourceSeriesDetails: resolvedSourceSeries,
         };
 
         // Final guard: never allow CTAC as target when another CT exists. Promote planning CT.

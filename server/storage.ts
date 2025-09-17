@@ -332,7 +332,18 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(studies).orderBy(desc(studies.createdAt));
   }
 
-  async getStudiesByPatient(patientId: number): Promise<Study[]> {
+  async getStudiesByPatient(patientId: string | number): Promise<Study[]> {
+    // If patientId is a string, it's a DICOM patient ID - convert to database ID
+    if (typeof patientId === 'string') {
+      const patient = await this.getPatientByID(patientId);
+      if (!patient) {
+        console.log(`No patient found with DICOM ID: ${patientId}`);
+        return [];
+      }
+      return await db.select().from(studies).where(eq(studies.patientId, patient.id)).orderBy(desc(studies.createdAt));
+    }
+    
+    // If patientId is a number, use it directly as database ID
     return await db.select().from(studies).where(eq(studies.patientId, patientId)).orderBy(desc(studies.createdAt));
   }
 

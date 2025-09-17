@@ -9,6 +9,15 @@ export interface RegistrationTransformCandidate {
   referencedSeriesInstanceUids?: string[];
 }
 
+export interface RegistrationSeriesDetail {
+  id: number | null;
+  uid: string | null;
+  description: string | null;
+  modality: string | null;
+  studyId: number | null;
+  imageCount: number | null;
+}
+
 export interface RegistrationAssociation {
   regFile: string | null;
   studyId: number;
@@ -21,6 +30,8 @@ export interface RegistrationAssociation {
   relationship: 'registered' | 'shared-frame';
   siblingSeriesIds: number[];
   transformCandidates: RegistrationTransformCandidate[];
+  targetSeriesDetail?: RegistrationSeriesDetail | null;
+  sourceSeriesDetails?: RegistrationSeriesDetail[];
 }
 
 export interface AssociationResponse {

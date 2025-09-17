@@ -801,6 +801,7 @@ export function SeriesSelector({
                                     ? regAssociations[seriesItem.id]
                                     : []
                                 );
+                                console.log('🔗 CT reg associations', { primaryId: seriesItem.id, regAssociations, explicitSecIds: Array.from(explicitSecIds) });
                                 if (explicitSecIds.size === 0) return null;
                                 const ctAssoc = series.filter(s => s.modality === 'CT' && explicitSecIds.has(s.id));
                                 if (ctAssoc.length === 0) return null;
@@ -1305,60 +1306,7 @@ export function SeriesSelector({
                         )}
                         
                         {/* Registration Series - Simple pill-shaped display */}
-                        {regSeries.length > 0 && (
-                          <div className="mt-4 space-y-2">
-                            {regSeries.map((seriesItem) => {
-                              // For now, we'll use a simple heuristic to find the two series to fuse
-                              // In a real implementation, we'd parse the REG file to get the referenced series UIDs
-                              // Priority: CT as primary, then MR/PT as secondary
-                              const ctSeries = series.find(s => s.modality === 'CT');
-                              const mrSeries = series.find(s => s.modality === 'MR');
-                              const ptSeries = series.find(s => s.modality === 'PT');
-                              
-                              // Determine primary and secondary series based on available modalities
-                              let primarySeries = ctSeries;
-                              let secondarySeries = mrSeries || ptSeries;
-                              
-                              // If no CT, could be MR-to-MR or other combinations
-                              if (!primarySeries && mrSeries) {
-                                primarySeries = mrSeries;
-                                secondarySeries = series.find(s => s.modality === 'MR' && s.id !== mrSeries.id);
-                              }
-                              
-                              return (
-                                <div
-                                  key={seriesItem.id}
-                                  className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs hover:bg-gray-700/50 transition-colors cursor-pointer"
-                                  onMouseEnter={() => setHoveredRegSeries(seriesItem.id)}
-                                  onMouseLeave={() => setHoveredRegSeries(null)}
-                                  onClick={async () => {
-                                    // Parse the registration file first (disabled during rebuild)
-                                    try {
-                                      // await fetch(`/api/registrations/${studyId}/parse`, { method: 'POST' });
-                                    } catch (error) {
-                                      console.error('Error parsing registration (disabled):', error);
-                                    }
-                                    
-                                    // Open primary with secondary fusion when clicking REG
-                                    if (primarySeries && secondarySeries) {
-                                      onSeriesSelect(primarySeries);
-                                      if (onSecondarySeriesSelect) {
-                                        setTimeout(() => {
-                                          onSecondarySeriesSelect(secondarySeries.id);
-                                        }, 100);
-                                      }
-                                    }
-                                  }}
-                                >
-                                  <Link className="w-3 h-3 text-gray-500" />
-                                  <span className="text-gray-400">
-                                    {seriesItem.modality} • {seriesItem.seriesDescription || 'Registration'}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
+                        {/* Registration series are hidden from the selection list now that associations drive fusion */}
                       </>
                     );
                   })()}

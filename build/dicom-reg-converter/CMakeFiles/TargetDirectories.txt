@@ -1,0 +1,7 @@
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/dicom_reg_to_h5.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/edit_cache.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/rebuild_cache.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/list_install_components.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/install.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/install/local.dir
+/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/CMakeFiles/install/strip.dir

@@ -16,7 +16,7 @@ import { contoursToVIP } from '@/boolean/integrate';
 import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract } from '@/boolean/vipBoolean';
 import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
-import type { RegistrationAssociation } from '@/types/fusion';
+import type { RegistrationAssociation, RegistrationSeriesDetail } from '@/types/fusion';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
 
@@ -157,13 +157,141 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   useEffect(() => {
     const loadAssociations = async () => {
       try {
-        if (!studyData?.patient?.id) return;
+        // Patient ID will be resolved later using more sophisticated logic
         if (!seriesData || !Array.isArray(seriesData) || seriesData.length === 0) return;
+
+        const ensureString = (value: unknown): string | null => {
+          if (typeof value !== 'string') return null;
+          const trimmed = value.trim();
+          return trimmed ? trimmed : null;
+        };
+
+        const normalizeSeriesId = (value: unknown): number | null => {
+          if (value === null || value === undefined) return null;
+          if (typeof value === 'number' && Number.isFinite(value)) return value;
+          if (typeof value === 'bigint') {
+            const asNumber = Number(value);
+            return Number.isFinite(asNumber) ? asNumber : null;
+          }
+          if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) return null;
+            const parsed = Number(trimmed);
+            return Number.isFinite(parsed) ? parsed : null;
+          }
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+
+        const normalizeSeriesIdArray = (values: unknown[]): number[] => {
+          const ids: number[] = [];
+          for (const value of values) {
+            const id = normalizeSeriesId(value);
+            if (id != null) ids.push(id);
+          }
+          return ids;
+        };
+
+        const normalizeSeriesDetail = (detail: any): RegistrationSeriesDetail | null => {
+          if (!detail) return null;
+          const id = normalizeSeriesId(detail.id ?? detail.seriesId ?? detail.series_id);
+          const uid = ensureString(detail.uid ?? detail.seriesInstanceUID ?? detail.seriesInstanceUid);
+          const description = ensureString(detail.description ?? detail.seriesDescription);
+          const modality = ensureString(detail.modality);
+          const studyId = normalizeSeriesId(detail.studyId ?? detail.study_id);
+          const imageCountRaw = detail.imageCount ?? detail.instances ?? detail.image_count;
+          const imageCountNumber = Number(imageCountRaw);
+          const imageCount = Number.isFinite(imageCountNumber) ? imageCountNumber : null;
+          if (id == null && !uid) return null;
+          return {
+            id,
+            uid,
+            description,
+            modality,
+            studyId,
+            imageCount,
+          };
+        };
+
+        const seriesEntries: [string, any][] = [];
+        (seriesData as any[]).forEach(ser => {
+          const uid = ensureString(ser.seriesInstanceUID ?? ser.seriesInstanceUid ?? ser.uid);
+          if (uid) seriesEntries.push([uid, ser]);
+        });
+        const uidToSeries = new Map<string, any>(seriesEntries);
+
+        const fromSeriesRecord = (ser: any): RegistrationSeriesDetail => ({
+          id: normalizeSeriesId(ser.id),
+          uid: ensureString(ser.seriesInstanceUID ?? ser.seriesInstanceUid ?? ser.uid),
+          description: ensureString(ser.seriesDescription ?? ser.description),
+          modality: ensureString(ser.modality),
+          studyId: normalizeSeriesId(ser.studyId ?? ser.study_id),
+          imageCount: Number.isFinite(Number(ser.imageCount)) ? Number(ser.imageCount) : null,
+        });
+
+        const resolveDetailById = (id: number | string | null | undefined): RegistrationSeriesDetail | null => {
+          const normalizedId = normalizeSeriesId(id);
+          if (normalizedId == null) return null;
+          const ser = (seriesData as any[]).find(s => normalizeSeriesId(s.id) === normalizedId);
+          if (!ser) return null;
+          return { ...fromSeriesRecord(ser), id: normalizedId };
+        };
+
+        const resolveDetailByUid = (uid: string | null | undefined): RegistrationSeriesDetail | null => {
+          const normalizedUid = ensureString(uid);
+          if (!normalizedUid) return null;
+          const ser = uidToSeries.get(normalizedUid);
+          if (!ser) return null;
+          return fromSeriesRecord(ser);
+        };
+
+        const resolveDetailFromAssociation = (detail: any): RegistrationSeriesDetail | null => {
+          if (!detail) return null;
+          const explicitId = normalizeSeriesId(detail.id ?? detail.seriesId ?? detail.series_id);
+          if (explicitId != null) {
+            const resolved = resolveDetailById(explicitId);
+            if (resolved) return resolved;
+          }
+          const resolvedByUid = resolveDetailByUid(detail.uid ?? detail.seriesInstanceUID ?? detail.seriesInstanceUid);
+          if (resolvedByUid) return resolvedByUid;
+          const normalized = normalizeSeriesDetail(detail);
+          if (!normalized) return null;
+          if (normalized.id != null && !normalized.uid) {
+            return {
+              ...normalized,
+              uid: resolveDetailById(normalized.id)?.uid ?? normalized.uid,
+            };
+          }
+          return normalized;
+        };
+
+        const resolvePatientIdentifier = (): string | number | null => {
+          const urlPatientId = typeof window !== 'undefined'
+            ? ensureString(new URL(window.location.href).searchParams.get('patientId'))
+            : null;
+          if (urlPatientId) return urlPatientId;
+
+          const patient = studyData?.patient;
+          if (patient) {
+            const dicomId = ensureString((patient as any).patientID ?? (patient as any).patientId);
+            if (dicomId) return dicomId;
+            if (Number.isFinite(patient.id)) return patient.id as number;
+          }
+          const studyWithPatientId = Array.isArray(studyData?.studies)
+            ? studyData.studies.find((st: any) => Number.isFinite(st?.patientId))
+            : null;
+          if (studyWithPatientId && Number.isFinite(studyWithPatientId.patientId)) {
+            return studyWithPatientId.patientId as number;
+          }
+          return null;
+        };
+
+        const patientIdentifier = resolvePatientIdentifier();
 
         // Try patient-wide first, then per-study if empty
         const tryFetch = async (url: string) => {
           try {
-            const r = await fetch(url);
+            const r = await fetch(url, { cache: 'no-store' });
             if (!r.ok) return { associations: [] as any[], ctacSeriesIds: [] as number[] };
             const j = await r.json();
             const assocs = Array.isArray(j?.associations) ? j.associations : [];
@@ -172,59 +300,209 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           } catch { return { associations: [] as any[], ctacSeriesIds: [] as number[] }; }
         };
 
-        let result = await tryFetch(`/api/registration/associations?patientId=${studyData.patient.id}`);
+        let result = patientIdentifier != null
+          ? await tryFetch(`/api/registration/associations?patientId=${encodeURIComponent(String(patientIdentifier))}`)
+          : { associations: [] as any[], ctacSeriesIds: [] as number[] };
         let associations = result.associations;
-        let ctacUnion = new Set<number>(result.ctacSeriesIds || []);
+        const ctacUnion = new Set<number>();
+        (result.ctacSeriesIds || []).forEach((id: unknown) => {
+          const normalized = normalizeSeriesId(id);
+          if (normalized != null) ctacUnion.add(normalized);
+        });
+        if (import.meta.env.DEV) {
+          console.log('📎 Registration fetch context', {
+            patientIdentifier,
+            associationsFromPatient: associations.length,
+            ctacCount: ctacUnion.size,
+          });
+        }
         if (!associations.length && Array.isArray(studyData?.studies)) {
           const results = await Promise.all(
             studyData.studies.map((st: any) => tryFetch(`/api/registration/associations?studyId=${st.id}`))
           );
           associations = results.flatMap(r => r.associations);
-          results.forEach(r => (r.ctacSeriesIds||[]).forEach((id:number)=>ctacUnion.add(id)));
+          results.forEach(r => (r.ctacSeriesIds || []).forEach((id: unknown) => {
+            const normalized = normalizeSeriesId(id);
+            if (normalized != null) ctacUnion.add(normalized);
+          }));
         }
+        const allowedFusionModalities = new Set(['CT', 'PT', 'PET', 'MR', 'NM']);
+        const filterDetailsByModality = (details: (RegistrationSeriesDetail | null)[]) => {
+          const unique = new Map<number, RegistrationSeriesDetail>();
+          const filtered: RegistrationSeriesDetail[] = [];
+          for (const detail of details) {
+            if (!detail) continue;
+            const modality = detail.modality ? detail.modality.toUpperCase() : '';
+            if (!allowedFusionModalities.has(modality)) continue;
+            const detailId = normalizeSeriesId(detail.id);
+            if (detailId != null) {
+              if (unique.has(detailId)) continue;
+              const normalizedDetail = { ...detail, id: detailId };
+              unique.set(detailId, normalizedDetail);
+              filtered.push(normalizedDetail);
+              continue;
+            }
+            filtered.push(detail);
+          }
+          return filtered;
+        };
 
-        // Build mapping preferring ID fields if provided, otherwise map UIDs → IDs
-        const uidToSeries = new Map<string, any>((seriesData as any[]).map(s => [s.seriesInstanceUID, s] as const));
         const mapping: Record<number, number[]> = {};
         const associationMap = new Map<number, RegistrationAssociation[]>();
         for (const a of associations) {
-          // Prefer id-based target
-          let primaryId: number | null = Number.isFinite(a?.targetSeriesId) ? a.targetSeriesId : null;
-          if (!primaryId && a?.target) {
-            const s = uidToSeries.get(a.target);
-            if (s) primaryId = s.id;
+          // Resolve target detail and ensure modality is eligible
+          let primaryDetail: RegistrationSeriesDetail | null = null;
+          if (a?.targetSeriesDetail) {
+            primaryDetail = resolveDetailFromAssociation(a.targetSeriesDetail);
           }
-          if (!primaryId) continue;
+          if (!primaryDetail) {
+            primaryDetail = resolveDetailById(a?.targetSeriesId ?? null);
+          }
+          if (!primaryDetail && a?.target) {
+            primaryDetail = resolveDetailByUid(a.target);
+          }
+          if (!primaryDetail) continue;
+          const targetModality = primaryDetail.modality ? primaryDetail.modality.toUpperCase() : '';
+          if (!allowedFusionModalities.has(targetModality)) continue;
 
-          let secondaryIds: number[] = Array.isArray(a?.sourcesSeriesIds) ? a.sourcesSeriesIds.filter((x: any) => Number.isFinite(x)).map((x: any) => Number(x)) : [];
-          if (secondaryIds.length === 0 && Array.isArray(a?.sources)) {
-            for (const uid of a.sources) {
-              const sec = uidToSeries.get(uid);
-              if (sec && sec.id !== primaryId) secondaryIds.push(sec.id);
+          const primaryId = normalizeSeriesId(primaryDetail.id ?? a?.targetSeriesId ?? a?.targetSeriesDetail?.id);
+          if (primaryId == null) continue;
+          if (!primaryDetail.id || primaryDetail.id !== primaryId) {
+            primaryDetail = { ...primaryDetail, id: primaryId };
+          }
+
+          let secondaryIds: number[] = Array.isArray(a?.sourcesSeriesIds)
+            ? normalizeSeriesIdArray(a.sourcesSeriesIds)
+            : [];
+
+          let resolvedDetails: RegistrationSeriesDetail[] = [];
+          if (Array.isArray(a?.sourceSeriesDetails) && a.sourceSeriesDetails.length) {
+            resolvedDetails = a.sourceSeriesDetails
+              .map((detail: any) => resolveDetailFromAssociation(detail))
+              .filter((detail): detail is RegistrationSeriesDetail => !!detail);
+            if (!secondaryIds.length) {
+              secondaryIds = resolvedDetails
+                .map(detail => normalizeSeriesId(detail.id))
+                .filter((id): id is number => id != null);
             }
           }
-          if (!secondaryIds.length && Array.isArray(a?.siblingSeriesIds)) {
-            secondaryIds = a.siblingSeriesIds
-              .filter((id: any) => Number.isFinite(id) && id !== primaryId)
-              .map((id: any) => Number(id));
+
+          if (!resolvedDetails.length && Array.isArray(a?.sources)) {
+            resolvedDetails = a.sources
+              .map(uid => resolveDetailByUid(uid))
+              .filter((detail): detail is RegistrationSeriesDetail => !!detail);
           }
 
+          if (!secondaryIds.length) {
+            secondaryIds = resolvedDetails
+              .map(detail => normalizeSeriesId(detail.id))
+              .filter((id): id is number => id != null);
+          }
+
+          if (!secondaryIds.length && Array.isArray(a?.siblingSeriesIds)) {
+            secondaryIds = normalizeSeriesIdArray(a.siblingSeriesIds);
+          }
+
+          if (!resolvedDetails.length && secondaryIds.length) {
+            resolvedDetails = secondaryIds
+              .map(id => resolveDetailById(id))
+              .filter((detail): detail is RegistrationSeriesDetail => !!detail);
+          }
+
+          if (import.meta.env.DEV) {
+            console.log('🔍 Association candidate', {
+              primaryId,
+              targetDetail: primaryDetail,
+              secondaryIdsInitial: secondaryIds.slice(),
+              resolvedDetailsInitial: resolvedDetails,
+              rawAssociation: a,
+            });
+          }
+
+          const filteredDetails = filterDetailsByModality(resolvedDetails);
+          const filteredIds = filteredDetails
+            .map(detail => normalizeSeriesId(detail.id))
+            .filter((id): id is number => id != null);
+
+          const candidateIds = filteredIds.length ? filteredIds : secondaryIds;
+          const detailsById = new Map<number, RegistrationSeriesDetail>();
+          filteredDetails.forEach(detail => {
+            const id = normalizeSeriesId(detail.id);
+            if (id != null) detailsById.set(id, { ...detail, id });
+          });
+          resolvedDetails.forEach(detail => {
+            const id = normalizeSeriesId(detail.id);
+            if (id != null && !detailsById.has(id)) {
+              detailsById.set(id, { ...detail, id });
+            }
+          });
+
+          const validSecondaryIds: number[] = [];
+          const validSecondaryDetails: RegistrationSeriesDetail[] = [];
+          const seenSecondary = new Set<number>();
+
+          for (const rawId of candidateIds) {
+            const normalizedId = normalizeSeriesId(rawId);
+            if (normalizedId == null) continue;
+            if (seenSecondary.has(normalizedId)) continue;
+
+            let detail = detailsById.get(normalizedId) ?? resolveDetailById(normalizedId);
+            const seriesRecord = (seriesData as any[]).find(s => normalizeSeriesId(s.id) === normalizedId);
+            const modality = ensureString(detail?.modality ?? seriesRecord?.modality)?.toUpperCase() ?? '';
+            if (!allowedFusionModalities.has(modality)) continue;
+
+            seenSecondary.add(normalizedId);
+            validSecondaryIds.push(normalizedId);
+            const hydratedDetail: RegistrationSeriesDetail = {
+              id: normalizedId,
+              uid: ensureString(detail?.uid ?? seriesRecord?.seriesInstanceUID ?? seriesRecord?.seriesInstanceUid) ?? null,
+              description: ensureString(detail?.description ?? seriesRecord?.seriesDescription) ?? null,
+              modality,
+              studyId: normalizeSeriesId(detail?.studyId ?? seriesRecord?.studyId ?? seriesRecord?.study_id),
+              imageCount: (() => {
+                const raw = detail?.imageCount ?? seriesRecord?.imageCount;
+                const parsed = Number(raw);
+                return Number.isFinite(parsed) ? parsed : null;
+              })(),
+            };
+            validSecondaryDetails.push(hydratedDetail);
+          }
+
+          if (import.meta.env.DEV) {
+            console.log('🔍 Filtered association details', {
+              primaryId,
+              filteredIds,
+              candidateIds,
+              validSecondaryIds,
+              validSecondaryDetails,
+            });
+          }
+
+          if (!validSecondaryIds.length) continue;
+
+          secondaryIds = validSecondaryIds;
+
           if (secondaryIds.length) {
-            const prev = mapping[primaryId] || [];
+            const prev = mapping[primaryId as number] || [];
             const combined = Array.from(new Set([...prev, ...secondaryIds]));
-            mapping[primaryId] = combined;
+            mapping[primaryId as number] = combined;
           }
 
           const entry: RegistrationAssociation = {
             ...a,
-            targetSeriesId: primaryId,
+            targetSeriesId: primaryId as number,
+            targetSeriesDetail: primaryDetail,
             sourcesSeriesIds: secondaryIds,
+            sourceSeriesDetails: validSecondaryDetails,
           };
-          const existing = associationMap.get(primaryId) || [];
+          const existing = associationMap.get(primaryId as number) || [];
           existing.push(entry);
-          associationMap.set(primaryId, existing);
+          associationMap.set(primaryId as number, existing);
         }
 
+        if (import.meta.env.DEV) {
+          console.log('📎 Registration mapping built', mapping, associationMap);
+        }
         setRegAssociations(mapping);
         setRegistrationRelationshipMap(associationMap);
         setRegCtacIds(Array.from(ctacUnion));
@@ -243,7 +521,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             if (modality !== 'CT') return false;
             // Prefer CT not in PT study and not marked CTAC by server
             if (ptStudyIds.has(ser.studyId)) return false;
-            if ((regCtacIds||[]).includes(ser.id)) return false;
+            if (ctacUnion.has(ser.id)) return false;
             return true;
           });
           const chosenId = preferred ?? primaryIds[0];
@@ -916,6 +1194,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   isMPRVisible={mprVisible}
                   // Mirror associations from Series panel: restrict Fusion choices
                   allowedSecondaryIds={regAssociations[selectedSeries.id] || []}
+                  registrationAssociations={registrationRelationshipMap}
                   availableSeries={series}
                   registrationAssociations={registrationRelationshipMap}
                 />

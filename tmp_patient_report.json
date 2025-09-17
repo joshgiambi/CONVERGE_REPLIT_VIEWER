@@ -1,0 +1,805 @@
+[dotenv@17.2.1] injecting env (1) from .env -- tip: 📡 version env with Radar: https://dotenvx.com/radar
+{
+  "patientKey": "nYHUfQQEeTNqKGsj",
+  "patient": {
+    "id": 21,
+    "patient_id": "OZa7UswspYAakrgYemxMdqy1E",
+    "patient_name": "nYHUfQQEeTNqKGsj"
+  },
+  "studies": [
+    {
+      "id": 19,
+      "studyInstanceUID": "1.2.246.352.221.560239776788899496214844231966441500067",
+      "series": [
+        {
+          "id": 50,
+          "seriesInstanceUID": "1.2.246.352.221.534437763102598122915916606648478293420",
+          "modality": "CT",
+          "description": "CT STD HN 2.5mm",
+          "imageCount": 135,
+          "sliceThickness": "2.5",
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": {
+            "row": 0.78125,
+            "col": 0.78125
+          }
+        },
+        {
+          "id": 51,
+          "seriesInstanceUID": "1.2.246.352.221.482497532653462080914109465315058346371",
+          "modality": "PT",
+          "description": "QCFX MAC HN",
+          "imageCount": 83,
+          "sliceThickness": "3.27",
+          "dimensions": {
+            "rows": 256,
+            "columns": 256
+          },
+          "pixelSpacing": {
+            "row": 1.5625,
+            "col": 1.5625
+          }
+        },
+        {
+          "id": 52,
+          "seriesInstanceUID": "1.2.246.352.221.461915798329414722418205574557242931098",
+          "modality": "RTSTRUCT",
+          "description": "Image Registration",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        }
+      ],
+      "registrations": []
+    },
+    {
+      "id": 20,
+      "studyInstanceUID": "1.2.246.352.221.562728508619352284615748755713089003937",
+      "series": [
+        {
+          "id": 53,
+          "seriesInstanceUID": "1.2.246.352.221.570537758543275012911456240642628457867",
+          "modality": "CT",
+          "description": "",
+          "imageCount": 88,
+          "sliceThickness": "1.98849013696227",
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": {
+            "row": 0.9080203577699,
+            "col": 0.9080203577699
+          }
+        },
+        {
+          "id": 54,
+          "seriesInstanceUID": "1.2.246.352.221.49537297405199815191289945572223233980",
+          "modality": "CT",
+          "description": "Head_Neck C+  2.0  Br38  3",
+          "imageCount": 207,
+          "sliceThickness": "2",
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": {
+            "row": 0.9765625,
+            "col": 0.9765625
+          }
+        },
+        {
+          "id": 55,
+          "seriesInstanceUID": "1.2.246.352.221.51399723574694919545666599258325590455",
+          "modality": "REG",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 56,
+          "seriesInstanceUID": "1.2.246.352.221.544500580057704177610453666387339426459",
+          "modality": "REG",
+          "description": "",
+          "imageCount": 2,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 57,
+          "seriesInstanceUID": "1.2.246.352.221.47936617555942191882790461593057333660",
+          "modality": "REG",
+          "description": "",
+          "imageCount": 3,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 58,
+          "seriesInstanceUID": "1.2.246.352.221.49287335691851764302465588548402461333",
+          "modality": "REG",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 59,
+          "seriesInstanceUID": "1.2.246.352.221.46138085696468237982535829228268734108",
+          "modality": "REG",
+          "description": "Image Registration",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 60,
+          "seriesInstanceUID": "1.2.246.352.221.52429386731964250722723657917618693298",
+          "modality": "RTIMAGE",
+          "description": "Eclipse Predicted Portal Dose Images",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 1024,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 61,
+          "seriesInstanceUID": "1.2.246.352.221.57041051239281911635405108116224524684",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 8,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 62,
+          "seriesInstanceUID": "1.2.246.352.221.537208229859381264810529606203967766971",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 63,
+          "seriesInstanceUID": "1.2.246.352.221.575048070800541773910898493346449270669",
+          "modality": "RTIMAGE",
+          "description": "Eclipse Predicted Portal Dose Images",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 1024,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 64,
+          "seriesInstanceUID": "1.2.246.352.221.494213048426383827018243121574355384224",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 65,
+          "seriesInstanceUID": "1.2.246.352.221.495623300508172461111583836228939724221",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 66,
+          "seriesInstanceUID": "1.2.246.352.221.51735909683952600661904178820564493199",
+          "modality": "RTIMAGE",
+          "description": "Eclipse Predicted Portal Dose Images",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 1024,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 67,
+          "seriesInstanceUID": "1.2.246.352.221.473981318258805049512069963857613987203",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 68,
+          "seriesInstanceUID": "1.2.246.352.221.510131772635738017814913482410675466123",
+          "modality": "RTIMAGE",
+          "description": "",
+          "imageCount": 5,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 768,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 69,
+          "seriesInstanceUID": "1.2.246.352.221.53968866125124324069113460307963729834",
+          "modality": "RTIMAGE",
+          "description": "",
+          "imageCount": 2,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 768,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 70,
+          "seriesInstanceUID": "1.2.246.352.221.523178733979613193415281813484254089871",
+          "modality": "RTIMAGE",
+          "description": "",
+          "imageCount": 6,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 768,
+            "columns": 1024
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 71,
+          "seriesInstanceUID": "1.2.246.352.221.495021826637876811413128893162724094643",
+          "modality": "RTIMAGE",
+          "description": "",
+          "imageCount": 3,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 1190,
+            "columns": 1190
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 72,
+          "seriesInstanceUID": "1.2.246.352.221.474845609372444790715249258974209193348",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 73,
+          "seriesInstanceUID": "1.2.246.352.221.51221724992877536554229446628611839124",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 74,
+          "seriesInstanceUID": "1.2.246.352.221.47892706623608550707424596292359179152",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 75,
+          "seriesInstanceUID": "1.2.246.352.221.56544312353602160245609833887575429295",
+          "modality": "RTIMAGE",
+          "description": "Eclipse DRRs",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": 512,
+            "columns": 512
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 76,
+          "seriesInstanceUID": "1.2.246.352.221.5138306589341189415943767192210469821",
+          "modality": "RTPLAN",
+          "description": "ARIA RadOnc Plans",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 77,
+          "seriesInstanceUID": "1.2.246.352.221.51438377823915308351196770232442434692",
+          "modality": "RTPLAN",
+          "description": "ARIA RadOnc Plans",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 78,
+          "seriesInstanceUID": "1.2.246.352.221.51909874263518464689720335719017399170",
+          "modality": "RTSTRUCT",
+          "description": "ARIA RadOnc Structure Sets",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 79,
+          "seriesInstanceUID": "1.2.246.352.221.544600080330635546813792045694607410091",
+          "modality": "RTSTRUCT",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 80,
+          "seriesInstanceUID": "1.2.246.352.221.50666315241431579684037849400712737947",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 81,
+          "seriesInstanceUID": "1.2.246.352.221.560468688166496094011559517875075353999",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 82,
+          "seriesInstanceUID": "1.2.246.352.221.54310684678197197548429975627115716234",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 83,
+          "seriesInstanceUID": "1.2.246.352.221.50648408763524649453235734520522171036",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 84,
+          "seriesInstanceUID": "1.2.246.352.221.486760837549219071012234428728144874883",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 85,
+          "seriesInstanceUID": "1.2.246.352.221.49478087509189557802161314833569619618",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 86,
+          "seriesInstanceUID": "1.2.246.352.221.52716200981812106234016832044633237636",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 87,
+          "seriesInstanceUID": "1.2.246.352.221.51594281314301419949787636257375529900",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        },
+        {
+          "id": 88,
+          "seriesInstanceUID": "1.2.246.352.221.504069610743836352217248493392233250229",
+          "modality": "RTRECORD",
+          "description": "",
+          "imageCount": 1,
+          "sliceThickness": null,
+          "dimensions": {
+            "rows": null,
+            "columns": null
+          },
+          "pixelSpacing": null
+        }
+      ],
+      "registrations": [
+        {
+          "seriesId": 55,
+          "file": "storage/patients/OZa7UswspYAakrgYemxMdqy1E/1.2.246.352.221.562728508619352284615748755713089003937/1.2.246.352.221.51399723574694919545666599258325590455/1.2.246.352.221.47107871783223454141765951539006254246.dcm",
+          "matrix": [
+            0.99992091609901,
+            -0.000003251255796,
+            -0.0125762290508,
+            2.87830911131123,
+            0.0005791587509,
+            0.99895092150012,
+            0.0457899662504,
+            180.3535227379,
+            0.01256288672437,
+            -0.0457936286344,
+            0.99887192244734,
+            -360.81750045383,
+            0,
+            0,
+            0,
+            1
+          ],
+          "notes": [],
+          "decomposition": {
+            "rotationMatrix": [
+              [
+                0.99992091609901,
+                -0.000003251255796,
+                -0.0125762290508
+              ],
+              [
+                0.0005791587509,
+                0.99895092150012,
+                0.0457899662504
+              ],
+              [
+                0.01256288672437,
+                -0.0457936286344,
+                0.99887192244734
+              ]
+            ],
+            "translation": {
+              "x": 2.87830911131123,
+              "y": 180.3535227379,
+              "z": -360.81750045383
+            },
+            "eulerXYZdeg": {
+              "rollX": -2.6249068448048347,
+              "pitchY": -0.7198193230362487,
+              "yawZ": 0.033185972860070606
+            }
+          }
+        },
+        {
+          "seriesId": 56,
+          "file": "storage/patients/OZa7UswspYAakrgYemxMdqy1E/1.2.246.352.221.562728508619352284615748755713089003937/1.2.246.352.221.544500580057704177610453666387339426459/1.2.246.352.221.50536508438063881766295327042461947798.dcm",
+          "matrix": [
+            0.99960693584367,
+            0.00110239444843,
+            -0.0280135420773,
+            13.4243723242439,
+            -0.0001947175168,
+            0.9994754994337,
+            0.03238345436871,
+            181.778991781577,
+            0.0280345482989,
+            -0.0323652708662,
+            0.99908285609525,
+            -362.42191226584,
+            0,
+            0,
+            0,
+            1
+          ],
+          "notes": [],
+          "decomposition": {
+            "rotationMatrix": [
+              [
+                0.99960693584367,
+                0.00110239444843,
+                -0.0280135420773
+              ],
+              [
+                -0.0001947175168,
+                0.9994754994337,
+                0.03238345436871
+              ],
+              [
+                0.0280345482989,
+                -0.0323652708662,
+                0.99908285609525
+              ]
+            ],
+            "translation": {
+              "x": 13.4243723242439,
+              "y": 181.778991781577,
+              "z": -362.42191226584
+            },
+            "eulerXYZdeg": {
+              "rollX": -1.8554468549965513,
+              "pitchY": -1.6064717756003337,
+              "yawZ": -0.01116087871017178
+            }
+          }
+        },
+        {
+          "seriesId": 57,
+          "file": "storage/patients/OZa7UswspYAakrgYemxMdqy1E/1.2.246.352.221.562728508619352284615748755713089003937/1.2.246.352.221.47936617555942191882790461593057333660/1.2.246.352.221.52810088245862539895973696644000486024.dcm",
+          "matrix": [
+            0.99934608201476,
+            -0.000005521161432,
+            0.03615810187584,
+            -15.52742552913,
+            0.0000056194808991,
+            0.99999999998079,
+            -0.000002617526423,
+            199.818606172393,
+            -0.0361581018607,
+            0.000002819004538,
+            0.99934608202659,
+            -355.43986709773,
+            0,
+            0,
+            0,
+            1
+          ],
+          "notes": [],
+          "decomposition": {
+            "rotationMatrix": [
+              [
+                0.99934608201476,
+                -0.000005521161432,
+                0.03615810187584
+              ],
+              [
+                0.0000056194808991,
+                0.99999999998079,
+                -0.000002617526423
+              ],
+              [
+                -0.0361581018607,
+                0.000002819004538,
+                0.99934608202659
+              ]
+            ],
+            "translation": {
+              "x": -15.52742552913,
+              "y": 199.818606172393,
+              "z": -355.43986709773
+            },
+            "eulerXYZdeg": {
+              "rollX": 0.00016162275047664675,
+              "pitchY": 2.0721583253706437,
+              "yawZ": 0.00032218321997149954
+            }
+          }
+        },
+        {
+          "seriesId": 58,
+          "file": "storage/patients/OZa7UswspYAakrgYemxMdqy1E/1.2.246.352.221.562728508619352284615748755713089003937/1.2.246.352.221.49287335691851764302465588548402461333/1.2.246.352.221.559202431043907878916475956155626236086.dcm",
+          "matrix": [
+            0.99990711487766,
+            -0.0001079475251,
+            0.01362901186343,
+            -1.4648628528568,
+            0.00053903685907,
+            0.99949948325738,
+            -0.0316305612895,
+            -197.53472524798,
+            -0.013618775874,
+            0.03163496982073,
+            0.99940670281329,
+            354.100467008307,
+            0,
+            0,
+            0,
+            1
+          ],
+          "notes": [],
+          "decomposition": {
+            "rotationMatrix": [
+              [
+                0.99990711487766,
+                -0.0001079475251,
+                0.01362901186343
+              ],
+              [
+                0.00053903685907,
+                0.99949948325738,
+                -0.0316305612895
+              ],
+              [
+                -0.013618775874,
+                0.03163496982073,
+                0.99940670281329
+              ]
+            ],
+            "translation": {
+              "x": -1.4648628528568,
+              "y": -197.53472524798,
+              "z": 354.100467008307
+            },
+            "eulerXYZdeg": {
+              "rollX": 1.813020912082994,
+              "pitchY": 0.7803225021889393,
+              "yawZ": 0.030887403015073797
+            }
+          }
+        },
+        {
+          "seriesId": 59,
+          "file": "storage/patients/OZa7UswspYAakrgYemxMdqy1E/1.2.246.352.221.562728508619352284615748755713089003937/1.2.246.352.221.46138085696468237982535829228268734108/1.2.246.352.221.516840734399078479312302493491489751699.dcm",
+          "matrix": [
+            0.99596890180941,
+            0.03970124960909,
+            -0.0804348022192,
+            -28.016053434682,
+            -0.0165785569386,
+            0.96274218462914,
+            0.26991227720382,
+            -160.27288023187,
+            0.08815383189854,
+            -0.2674907413631,
+            0.95951946577785,
+            471.182417554872,
+            0,
+            0,
+            0,
+            1
+          ],
+          "notes": [],
+          "decomposition": {
+            "rotationMatrix": [
+              [
+                0.99596890180941,
+                0.03970124960909,
+                -0.0804348022192
+              ],
+              [
+                -0.0165785569386,
+                0.96274218462914,
+                0.26991227720382
+              ],
+              [
+                0.08815383189854,
+                -0.2674907413631,
+                0.95951946577785
+              ]
+            ],
+            "translation": {
+              "x": -28.016053434682,
+              "y": -160.27288023187,
+              "z": 471.182417554872
+            },
+            "eulerXYZdeg": {
+              "rollX": -15.577179999197545,
+              "pitchY": -5.0574072640171,
+              "yawZ": -0.9536378349548238
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
