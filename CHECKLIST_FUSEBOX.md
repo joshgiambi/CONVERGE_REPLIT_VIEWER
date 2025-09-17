@@ -36,7 +36,7 @@ A quick guide for future agents working on the Fusebox refactor.
 ## Testing
 - [x] Add unit/smoke test calling `scripts/fusebox_resample.py` with sample CT/MR bundle. *(Executed `python3 scripts/fusebox_resample.py --config tmp/fusebox_smoke_config.json`; SimpleITK warns about non-uniform sampling when the series list is truncated, but the resample completed and returned a slice payload.)*
 - [x] Helper parity script `scripts/verify_fusebox_transform.py --helper build/dicom-reg-converter/dicom_reg_to_h5` confirms `.h5` output matches the raw matrix and resampled voxels.
-- [ ] Run viewer smoke test: CT primary + MR secondary; ensure overlay aligns.
+- [x] Run viewer smoke test: CT primary + PET secondary; ensure overlay aligns using the registration cache harness. *(HN PET/CT patient verified on `fusion-test` slice 103 – overlay matches ProKnow.)*
 - [ ] Record Dice validation command that uses new route (optional but recommended).
 - [ ] Validate multi-registration scenarios (multiple REG files per secondary) and confirm cache/telemetry captures each transform source.
 
@@ -45,6 +45,8 @@ Notes:
 - SimpleITK warning about non-uniform sampling is expected with truncated lists; does not block the overlay payload.
 - TypeScript: `npm run check` still fails on legacy uploader/contour modules; not Fusebox-specific.
 - The `/api/fusebox/resampled-slice` response now includes `transformSource` (`helper-generated`, `helper-cache`, or `matrix`) so the UI can surface helper fallbacks inline.
+- Resampler now sorts DICOM filenames by physical slice normal before loading; log output prints modality/FoR and z-range so physical alignment regressions are visible immediately.
+- New backend helper `/api/fusebox/derived-series` writes cached derived stacks (`storage/patients/<id>/derived/...`) and returns manifest metadata for preloading.
 - Documented next-step expectations for registration ingestion below; update once implemented.
 
 ## Registration Pipeline – Remaining Work
@@ -52,13 +54,18 @@ Notes:
 1. **REG ingestion & association graph**
    - Ingest every REG file per patient/study, resolve both series IDs (any modality) and persist the relationships so the frontend can enumerate valid fusion pairs.
    - Allow a single REG file to describe multiple series that share a Frame of Reference (e.g., PET/CT, multi-sequence MRI); expose those sibling relationships in the API for UI display.
-2. **Multiple registrations per pair**
+2. **Derived-series cache** *(new)*
+   - Once a transform is validated, resample the full secondary volume onto the primary grid, write a derived DICOM series (new SeriesInstanceUID/SOP UIDs, primary FoR), and store it under `storage/patients/<id>/derived/<primary>_<secondary>/`.
+   - [x] Backend route `/api/fusebox/derived-series` generates and caches derived stacks on demand (writes manifest + DICOM series).
+   - Persist metadata (series id, FoR, source transformId, lastUpdated) so the API can advertise ready-to-stream fused stacks. *(manifest now stored alongside derived files; expose through route response.)*
+   - Keep an LRU or priority list so we eagerly maintain the latest 5–10 derived stacks per patient; older ones regenerate on demand.
+3. **Multiple registrations per pair**
    - Support more than one valid transform between the same primary/secondary (e.g., separate rigid solutions for tumour vs. nodal regions). Surface the available registrations and let the user pick which to load.
-3. **Helper enforcement**
+4. **Helper enforcement**
    - Remove the matrix-only fallback path; if helper execution fails, return a hard error and log the failure so QA can catch missing `.h5` transforms.
-4. **Client-side rendering improvements**
+5. **Client-side rendering improvements**
    - Add CT↔CT visualization (difference shader or windowed overlay) so normalized payloads remain clinically useful.
-5. **Testing checklist additions**
+6. **Testing checklist additions**
    - Automated parity test for same-FoR siblings (no resample expected) and multi-registration selection flow.
 
 ## Server configuration

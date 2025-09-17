@@ -250,6 +250,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
+  const fusionSecondaryPrefetchRef = useRef<Set<string>>(new Set());
+  const fusionDerivedPrefetchRef = useRef<Set<string>>(new Set());
 
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
@@ -424,6 +426,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const FUSION_CACHE_MAX_AGE_MS = 45000;
   const FUSION_PREFETCH_RADIUS = 3;
+  const FUSION_PREFETCH_SECONDARY_LIMIT = 6;
+  const FUSION_PREFETCH_SECONDARY_SLICE_LIMIT = 120;
+  const FUSION_PREFETCH_SECONDARY_DELAY_MS = 18;
 
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
@@ -474,6 +479,144 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       seriesId,
     ],
   );
+
+  useEffect(() => {
+    if (!images.length || !registrationOptions.length) return;
+
+    const sopList = images
+      .map((image) => image?.sopInstanceUID)
+      .filter((uid): uid is string => typeof uid === 'string' && uid.length > 0);
+    if (!sopList.length) return;
+
+    const currentSecondaryId = secondarySeriesId != null ? Number(secondarySeriesId) : null;
+
+    const seen = new Set<string>();
+    const candidates: Array<{
+      secondaryId: number;
+      registrationId: string | null;
+      modality: string;
+    }> = [];
+
+    for (const option of registrationOptions) {
+      const secId = option.sourceDetail?.id;
+      if (secId == null) continue;
+      const numericId = Number(secId);
+      if (!Number.isFinite(numericId)) continue;
+
+      if (currentSecondaryId != null && numericId === currentSecondaryId) {
+        continue;
+      }
+
+      const regId = option.id ?? null;
+      const candidateKey = `${numericId}:${regId ?? ''}`;
+      if (seen.has(candidateKey)) continue;
+      seen.add(candidateKey);
+
+      const modality = option.sourceDetail?.modality
+        || option.association?.sourceSeriesDetails?.find(detail => detail?.id === numericId)?.modality
+        || option.association?.targetSeriesDetail?.modality
+        || 'CT';
+
+      candidates.push({
+        secondaryId: numericId,
+        registrationId: regId,
+        modality: modality.toUpperCase?.() ?? String(modality),
+      });
+    }
+
+    const limited = candidates.slice(0, FUSION_PREFETCH_SECONDARY_LIMIT);
+    if (!limited.length) return;
+
+    const ensureDerivedSeries = (secondaryId: number, registrationId: string | null) => {
+      const key = `${secondaryId}:${registrationId ?? ''}`;
+      if (fusionDerivedPrefetchRef.current.has(key)) return;
+      fusionDerivedPrefetchRef.current.add(key);
+
+      fetch('/api/fusebox/derived-series', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primarySeriesId: seriesId,
+          secondarySeriesId: secondaryId,
+          registrationId,
+        }),
+        keepalive: true,
+      }).catch((error) => {
+        if (import.meta.env.DEV) {
+          console.warn('Fusebox derived-series warmup failed', { secondaryId, registrationId, error });
+        }
+      });
+    };
+
+    const schedule = (secondaryId: number, registrationId: string | null, modality: string) => {
+      const taskKey = `${secondaryId}:${registrationId ?? ''}`;
+      if (fusionSecondaryPrefetchRef.current.has(taskKey)) return;
+      fusionSecondaryPrefetchRef.current.add(taskKey);
+
+      ensureDerivedSeries(secondaryId, registrationId);
+
+      (async () => {
+        try {
+          let processed = 0;
+          for (const sop of sopList) {
+            if (processed >= FUSION_PREFETCH_SECONDARY_SLICE_LIMIT) {
+              break;
+            }
+
+            const cacheKey = buildFuseboxCacheKey(sop, secondaryId, registrationId);
+            if (fuseboxCacheRef.current.has(cacheKey) || fusionPrefetchSetRef.current.has(cacheKey)) {
+              processed += 1;
+              continue;
+            }
+
+            fusionPrefetchSetRef.current.add(cacheKey);
+            try {
+              const slice = await fetchFuseboxSlice({
+                primarySeriesId: seriesId,
+                secondarySeriesId: secondaryId,
+                sopInstanceUID: sop,
+                registrationId: registrationId ?? undefined,
+              });
+              const prepared = convertSliceToCanvas(slice, modality || secondaryModality);
+              if (prepared) {
+                fuseboxCacheRef.current.set(cacheKey, { ...prepared, timestamp: Date.now() });
+              }
+            } catch (error) {
+              if (import.meta.env.DEV) {
+                console.warn('Fusebox secondary prefetch failed', {
+                  secondaryId,
+                  registrationId,
+                  error,
+                });
+              }
+              break;
+            } finally {
+              fusionPrefetchSetRef.current.delete(cacheKey);
+            }
+
+            processed += 1;
+            if (processed % 12 === 0) {
+              await new Promise((resolve) => setTimeout(resolve, FUSION_PREFETCH_SECONDARY_DELAY_MS));
+            }
+          }
+        } finally {
+          fusionSecondaryPrefetchRef.current.delete(taskKey);
+        }
+      })();
+    };
+
+    limited.forEach((candidate) => {
+      schedule(candidate.secondaryId, candidate.registrationId, candidate.modality);
+    });
+  }, [
+    buildFuseboxCacheKey,
+    convertSliceToCanvas,
+    images,
+    registrationOptions,
+    secondaryModality,
+    secondarySeriesId,
+    seriesId,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -3236,7 +3379,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [secondarySeriesId]);
 
   // Auto-trigger background loading when primary images and registration are ready
-  // TEMPORARILY DISABLED to fix scrolling and flashing issues
+  // TODO: Re-implement startBackgroundLoading function for performance optimization
   // useEffect(() => {
   //   if (images.length > 0 && registrationMatrix && registrationMatrix.length === 16) {
   //     // Small delay to ensure primary is fully loaded before starting background tasks
@@ -3283,7 +3426,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (cached) {
           console.log(`Using cached images for series ${seriesId}`);
           setImages(cached.images);
-          setCurrentIndex(0);
+          setCurrentIndex(Math.floor(cached.images.length / 2));
           setIsLoading(false);
           // Schedule initial render
           setTimeout(() => {
@@ -3425,7 +3568,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       });
 
       setImages(sortedImages);
-      setCurrentIndex(0);
+      setCurrentIndex(Math.floor(sortedImages.length / 2));
       
       // Cache the sorted images
       if (imageCache?.current) {
@@ -5240,11 +5383,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`🔍 Zoom: ${e.deltaY > 0 ? 'out' : 'in'} (factor: ${zoomFactor})`);
     } else {
       // Regular scroll for slice navigation
+      // Scroll down (deltaY > 0) = toward feet (lower index, lower Z)
+      // Scroll up (deltaY < 0) = toward head (higher index, higher Z)
       console.log(`🖱️ Scroll: deltaY=${e.deltaY} currentIndex=${currentIndex}`);
       if (e.deltaY > 0) {
-        goToNext();
+        goToPrevious(); // Scroll down = toward feet = lower index
       } else {
-        goToPrevious();
+        goToNext(); // Scroll up = toward head = higher index
       }
     }
   };

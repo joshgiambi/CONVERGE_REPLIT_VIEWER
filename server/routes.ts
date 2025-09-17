@@ -15,6 +15,7 @@ import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 import { logger } from './logger';
 import { spawn, spawnSync } from 'child_process';
+import crypto from 'crypto';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -203,6 +204,7 @@ const fuseboxHelperMetrics = {
 
 const fuseboxLogBuffer: string[] = [];
 const FUSEBOX_LOG_CAP = 300;
+const DERIVED_MANIFEST_VERSION = 1;
 
 const appendFuseboxLog = (level: string, message: string, data?: Record<string, unknown>) => {
   const entry = JSON.stringify({
@@ -549,6 +551,94 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
   });
 }
 
+function parseNumberList(value: any): number[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[\\\\\s]+/)
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v));
+  }
+  return [];
+}
+
+function normalizeVector(vec: number[]): number[] {
+  const length = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
+  if (!Number.isFinite(length) || length === 0) return [0, 0, 1];
+  return vec.map((v) => v / length);
+}
+
+function computeSliceNormal(imagesList: any[]): number[] {
+  for (const img of imagesList) {
+    const orientation = parseNumberList(
+      img.imageOrientation
+        ?? img.imageOrientationPatient
+        ?? img.metadata?.imageOrientationPatient
+    );
+    if (orientation.length >= 6) {
+      const row = orientation.slice(0, 3);
+      const col = orientation.slice(3, 6);
+      const normal = [
+        row[1] * col[2] - row[2] * col[1],
+        row[2] * col[0] - row[0] * col[2],
+        row[0] * col[1] - row[1] * col[0],
+      ];
+      const normalized = normalizeVector(normal);
+      if (normalized.some((component) => component !== 0)) {
+        return normalized;
+      }
+    }
+  }
+  return [0, 0, 1];
+}
+
+type PhysicalOrdering = {
+  sortedFiles: string[];
+  mapInstanceToPhysical: Map<number, number>;
+  mapPhysicalToInstance: Map<number, number>;
+};
+
+function computePhysicalOrdering(imagesList: any[], filePaths: string[]): PhysicalOrdering {
+  if (!Array.isArray(imagesList) || !Array.isArray(filePaths) || imagesList.length !== filePaths.length) {
+    return {
+      sortedFiles: filePaths.slice(),
+      mapInstanceToPhysical: new Map<number, number>(),
+      mapPhysicalToInstance: new Map<number, number>(),
+    };
+  }
+
+  const normal = computeSliceNormal(imagesList);
+  const entries = imagesList.map((img, idx) => {
+    const position = parseNumberList(
+      img.imagePosition
+        ?? img.imagePositionPatient
+        ?? img.metadata?.imagePositionPatient
+    );
+    const projection = position.length >= 3
+      ? normal[0] * position[0] + normal[1] * position[1] + normal[2] * position[2]
+      : idx;
+    return { projection, idx, file: filePaths[idx] };
+  });
+
+  entries.sort((a, b) => a.projection - b.projection);
+
+  const mapInstanceToPhysical = new Map<number, number>();
+  const mapPhysicalToInstance = new Map<number, number>();
+
+  entries.forEach((entry, physicalIndex) => {
+    mapInstanceToPhysical.set(entry.idx, physicalIndex);
+    mapPhysicalToInstance.set(physicalIndex, entry.idx);
+  });
+
+  return {
+    sortedFiles: entries.map((entry) => entry.file),
+    mapInstanceToPhysical,
+    mapPhysicalToInstance,
+  };
+}
+
 async function collectSeriesFiles(seriesId: number): Promise<string[]> {
   const images = await storage.getImagesBySeriesId(seriesId);
   if (!images?.length) return [];
@@ -556,6 +646,178 @@ async function collectSeriesFiles(seriesId: number): Promise<string[]> {
   return ordered
     .map((img: any) => img.filePath ? path.resolve(img.filePath) : null)
     .filter((p): p is string => !!p && fs.existsSync(p));
+}
+
+function computeTransformDigest(info: FuseboxTransformInfo): string {
+  try {
+    if (info.transformFile && fs.existsSync(info.transformFile)) {
+      const buffer = fs.readFileSync(info.transformFile);
+      return crypto.createHash('sha1').update(buffer).digest('hex');
+    }
+  } catch (err) {
+    logger.warn('Failed to hash transform file', {
+      transformFile: info.transformFile,
+      error: (err as Error)?.message || err,
+    });
+  }
+
+  if (Array.isArray(info.matrix)) {
+    return crypto.createHash('sha1').update(info.matrix.join(',')).digest('hex');
+  }
+
+  return 'unknown';
+}
+
+async function ensureDerivedSeries(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  requestedRegistrationId?: string | null,
+): Promise<{ manifest: any }> {
+  const primarySeries = await storage.getSeriesById(primarySeriesId);
+  const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+  if (!primarySeries || !secondarySeries) {
+    throw createFuseboxError('FUSEBOX_SERIES_MISSING', 'Series not found for derived Fusebox request', {
+      primarySeriesId,
+      secondarySeriesId,
+    });
+  }
+
+  const primaryStudy = primarySeries.studyId ? await storage.getStudy(primarySeries.studyId) : null;
+  const patient = primaryStudy?.patientId ? await storage.getPatient(primaryStudy.patientId) : null;
+  if (!patient) {
+    throw createFuseboxError('FUSEBOX_PATIENT_MISSING', 'Patient record missing for primary series', {
+      primarySeriesId,
+      studyId: primaryStudy?.id,
+    });
+  }
+
+  const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId || undefined);
+  if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
+    throw createFuseboxError('FUSEBOX_NO_TRANSFORM', 'No registration transform available for derived series generation', {
+      primarySeriesId,
+      secondarySeriesId,
+    });
+  }
+
+  const transformDigest = computeTransformDigest(transformInfo);
+  const transformKey = (
+    requestedRegistrationId
+    || transformInfo.registrationId
+    || transformDigest
+    || 'auto'
+  );
+
+  const patientDicomId = patient.patientID || String(patient.id);
+  const derivedDir = patientStorage.getDerivedSeriesPath(
+    patientDicomId,
+    primarySeries.seriesInstanceUID,
+    secondarySeries.seriesInstanceUID,
+    transformKey,
+  );
+  const manifestPath = path.join(derivedDir, 'manifest.json');
+
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      if (
+        manifest?.transformDigest === transformDigest &&
+        manifest?.orderingVersion === DERIVED_MANIFEST_VERSION &&
+        Array.isArray(manifest?.files)
+      ) {
+        const allFilesExist = manifest.files.every((file: string) => fs.existsSync(path.join(derivedDir, file)));
+        if (allFilesExist) {
+          return { manifest };
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to reuse Fusebox derived manifest; regenerating', {
+        manifestPath,
+        error: (err as Error)?.message || err,
+      });
+    }
+  }
+
+  const primaryFiles = await collectSeriesFiles(primarySeriesId);
+  const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
+  if (!primaryFiles.length || !secondaryFiles.length) {
+    throw createFuseboxError('FUSEBOX_MISSING_FILES', 'Unable to find DICOM files for derived series', {
+      primarySeriesId,
+      secondarySeriesId,
+    });
+  }
+
+  const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
+  const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
+  const primaryOrdering = computePhysicalOrdering(primaryImages, primaryFiles);
+  const secondaryOrdering = computePhysicalOrdering(secondaryImages, secondaryFiles);
+
+  await fs.promises.mkdir(derivedDir, { recursive: true });
+
+  const invertTransformFile = !!(
+    transformInfo.transformFile &&
+    !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())
+  );
+
+  const configPayload: Record<string, any> = {
+    primary: primaryOrdering.sortedFiles,
+    secondary: secondaryOrdering.sortedFiles,
+    transform: transformInfo.matrix,
+    transformFile: transformInfo.transformFile,
+    invertTransformFile,
+    interpolation: 'linear',
+    sliceIndex: 0,
+    writeSeriesDir: derivedDir,
+    seriesMetadata: {
+      modality: secondarySeries.modality || null,
+      patientId: patientDicomId,
+      patientName: patient.patientName || null,
+      patientBirthDate: patient.birthDate || null,
+      patientSex: patient.sex || null,
+      studyInstanceUID: primaryStudy?.studyInstanceUID || null,
+      primarySeriesInstanceUID: primarySeries.seriesInstanceUID,
+      secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
+      registrationId: transformKey,
+      primaryDescription: primarySeries.description || null,
+      secondaryDescription: secondarySeries.description || null,
+      seriesDescriptionSuffix: secondarySeries.description
+        ? `→ ${primarySeries.description || primarySeries.seriesInstanceUID}`
+        : undefined,
+    },
+  };
+
+  const result = await runFuseboxResample(configPayload);
+  if (!result || result.error) {
+    throw createFuseboxError('FUSEBOX_DERIVED_FAILURE', 'Fusebox series generation failed', {
+      primarySeriesId,
+      secondarySeriesId,
+      details: result?.error || null,
+    });
+  }
+
+  const derivedSeries = (result as any).derivedSeries;
+  if (!derivedSeries) {
+    throw createFuseboxError('FUSEBOX_DERIVED_MISSING', 'Derived series metadata missing from Fusebox helper output', {
+      primarySeriesId,
+      secondarySeriesId,
+    });
+  }
+
+  const manifest = {
+    primarySeriesId,
+    secondarySeriesId,
+    registrationId: transformKey,
+    transformDigest,
+    transformSource: transformInfo.transformSource || null,
+    transformFile: transformInfo.transformFile || null,
+    matrix: transformInfo.matrix || null,
+    createdAt: new Date().toISOString(),
+    directory: path.relative(process.cwd(), derivedSeries.directory),
+    orderingVersion: DERIVED_MANIFEST_VERSION,
+    ...derivedSeries,
+  };
+
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  return { manifest };
 }
 
 async function runFuseboxResample(config: Record<string, any>): Promise<any> {
@@ -3702,6 +3964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
+      const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
       if (!primaryImages.length) {
         return res.status(404).json({ error: 'Primary series has no images' });
       }
@@ -3717,6 +3980,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
       }
 
+      const primaryOrdering = computePhysicalOrdering(primaryImages, primaryFiles);
+      const secondaryOrdering = computePhysicalOrdering(secondaryImages, secondaryFiles);
+      const physicalSliceIndex = primaryOrdering.mapInstanceToPhysical.get(sliceIndex) ?? sliceIndex;
+      if (!primaryOrdering.mapInstanceToPhysical.has(sliceIndex)) {
+        logger.warn('Fusebox: slice index mapping missing, falling back to instance index', {
+          primarySeriesId,
+          secondarySeriesId,
+          sliceIndex,
+        });
+      }
+
       const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
       if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
@@ -3724,12 +3998,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
       const config = {
-        primary: primaryFiles,
-        secondary: secondaryFiles,
+        primary: primaryOrdering.sortedFiles,
+        secondary: secondaryOrdering.sortedFiles,
         transform: transformInfo.matrix,
         transformFile: transformInfo.transformFile,
         invertTransformFile,
-        sliceIndex,
+        sliceIndex: physicalSliceIndex,
         interpolation,
       };
 
@@ -3755,6 +4029,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       logger.error(`Fusebox endpoint failed: ${err?.message || String(err)}`);
       return res.status(500).json({ error: 'Fusebox endpoint failed', details: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/fusebox/derived-series", async (req: Request, res: Response) => {
+    try {
+      const body = req.body ?? {};
+      const primarySeriesId = Number(body.primarySeriesId);
+      const secondarySeriesId = Number(body.secondarySeriesId);
+      const registrationId = typeof body.registrationId === 'string' ? body.registrationId : undefined;
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId and secondarySeriesId are required' });
+      }
+
+      const { manifest } = await ensureDerivedSeries(primarySeriesId, secondarySeriesId, registrationId);
+      return res.json({ ok: true, derivedSeries: manifest });
+    } catch (err: any) {
+      const status = typeof err?.code === 'string' && err.code.startsWith('FUSEBOX_') ? 422 : 500;
+      logger.error('Fusebox derived-series error', {
+        error: err?.message || err,
+        code: err?.code,
+        context: err?.context,
+      });
+      return res.status(status).json({ error: err?.message || 'Failed to generate derived series' });
     }
   });
 
@@ -3789,6 +4087,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
 
+      const primaryOrdering = computePhysicalOrdering(primaryImages, primaryFiles);
+      const secondaryOrdering = computePhysicalOrdering(secondaryImages, secondaryFiles);
+
       const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
       if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
@@ -3810,8 +4111,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
       const baseConfig: Record<string, any> = {
-        primary: primaryFiles,
-        secondary: secondaryFiles,
+        primary: primaryOrdering.sortedFiles,
+        secondary: secondaryOrdering.sortedFiles,
         transform: transformInfo.matrix,
         transformFile: undefined, // Force matrix-only mode for debugging
         invertTransformFile,
@@ -3827,7 +4128,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }>;
 
       for (const sliceIndex of sliceIndices) {
-        const result = await runFuseboxResample({ ...baseConfig, sliceIndex });
+        const physicalSliceIndex = primaryOrdering.mapInstanceToPhysical.get(sliceIndex) ?? sliceIndex;
+        const result = await runFuseboxResample({ ...baseConfig, sliceIndex: physicalSliceIndex });
         if (!result || result.error) {
           return res.status(500).json({
             error: 'Fusebox resample failed',

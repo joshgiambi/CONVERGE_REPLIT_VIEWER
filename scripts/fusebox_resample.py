@@ -17,11 +17,17 @@ import base64
 import json
 import math
 import sys
+import uuid
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import SimpleITK as sitk
+
+try:  # pragma: no cover - optional dependency
+    from pydicom.uid import generate_uid as pydicom_generate_uid
+except Exception:  # pragma: no cover - fallback when pydicom unavailable
+    pydicom_generate_uid = None
 
 
 def parse_position_and_normal(reader: sitk.ImageFileReader) -> Tuple[np.ndarray, np.ndarray]:
@@ -40,6 +46,15 @@ def parse_position_and_normal(reader: sitk.ImageFileReader) -> Tuple[np.ndarray,
     if norm == 0:
         raise RuntimeError("Slice normal has zero length")
     return ipp, normal / norm
+
+
+def generate_dicom_uid() -> str:
+    if pydicom_generate_uid is not None:
+        try:
+            return pydicom_generate_uid()
+        except Exception:
+            pass
+    return f"2.25.{uuid.uuid4().int}"
 
 
 def sort_series_by_position(files: Sequence[str]) -> List[str]:
@@ -131,6 +146,18 @@ def describe_series(label: str, files: Sequence[str]) -> None:
         )
 
 
+def collect_metadata(file_path: str, keys: Sequence[str]) -> Dict[str, str]:
+    reader = sitk.ImageFileReader()
+    reader.SetFileName(str(file_path))
+    reader.LoadPrivateTagsOn()
+    reader.ReadImageInformation()
+    meta: Dict[str, str] = {}
+    for key in keys:
+        if reader.HasMetaDataKey(key):
+            meta[key] = reader.GetMetaData(key)
+    return meta
+
+
 def read_series(file_list: List[str]) -> sitk.Image:
     reader = sitk.ImageSeriesReader()
     reader.MetaDataDictionaryArrayUpdateOn()
@@ -206,7 +233,13 @@ def ensure_moving_to_fixed(xform: sitk.Transform) -> sitk.Transform:
         raise ValueError("Transform is not invertible") from exc
 
 
-def resample(primary: sitk.Image, secondary: sitk.Image, xform: sitk.Transform, interpolation: str) -> sitk.Image:
+def resample(
+    primary: sitk.Image,
+    secondary: sitk.Image,
+    xform: sitk.Transform,
+    interpolation: str,
+    output_pixel_type: int = sitk.sitkFloat32,
+) -> sitk.Image:
     resample_filter = sitk.ResampleImageFilter()
     resample_filter.SetReferenceImage(primary)
     resample_filter.SetTransform(xform)
@@ -215,7 +248,7 @@ def resample(primary: sitk.Image, secondary: sitk.Image, xform: sitk.Transform, 
     else:
         resample_filter.SetInterpolator(sitk.sitkLinear)
     resample_filter.SetDefaultPixelValue(0.0)
-    resample_filter.SetOutputPixelType(sitk.sitkFloat32)
+    resample_filter.SetOutputPixelType(output_pixel_type)
     return resample_filter.Execute(secondary)
 
 
@@ -251,6 +284,166 @@ def encode_slice(slice_array: np.ndarray) -> dict:
     }
 
 
+def write_derived_series(
+    image: sitk.Image,
+    reference_primary: sitk.Image,
+    primary_files: Sequence[str],
+    secondary_files: Sequence[str],
+    output_dir: str,
+    metadata_options: Optional[dict] = None,
+) -> dict:
+    metadata_options = metadata_options or {}
+    dest = Path(output_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # Remove stale DICOM slices before writing a fresh series
+    for existing in dest.glob('*.dcm'):
+        try:
+            existing.unlink()
+        except Exception as exc:  # pragma: no cover - diagnostic
+            print(f"🐟 FUSION: Unable to remove stale file {existing}: {exc}", file=sys.stderr)
+
+    primary_keys = [
+        "0008|0005", "0008|0020", "0008|0030", "0008|0050", "0008|0080",
+        "0008|0090", "0008|1030", "0008|103e", "0010|0010", "0010|0020",
+        "0010|0030", "0010|0040", "0018|5100", "0020|000d", "0020|0052",
+    ]
+    secondary_keys = [
+        "0008|0016", "0008|0060", "0008|103e", "0028|0002", "0028|0004",
+        "0028|0100", "0028|0101", "0028|0102", "0028|0103", "0028|1052",
+        "0028|1053", "0028|0106", "0028|0107",
+    ]
+
+    primary_meta = collect_metadata(primary_files[0], primary_keys) if primary_files else {}
+    secondary_meta = collect_metadata(secondary_files[0], secondary_keys) if secondary_files else {}
+
+    modality = (
+        metadata_options.get("modality")
+        or secondary_meta.get("0008|0060")
+        or "OT"
+    )
+    sop_class_uid = secondary_meta.get("0008|0016", "1.2.840.10008.5.1.4.1.1.2")
+    study_instance_uid = metadata_options.get("studyInstanceUID") or primary_meta.get("0020|000d")
+    frame_of_reference = metadata_options.get("frameOfReferenceUID") or primary_meta.get("0020|0052")
+    patient_id = metadata_options.get("patientId") or primary_meta.get("0010|0020")
+    patient_name = metadata_options.get("patientName") or primary_meta.get("0010|0010")
+    patient_birth = metadata_options.get("patientBirthDate") or primary_meta.get("0010|0030")
+    patient_sex = metadata_options.get("patientSex") or primary_meta.get("0010|0040")
+    charset = metadata_options.get("specificCharacterSet") or primary_meta.get("0008|0005")
+    series_uid = metadata_options.get("seriesInstanceUID") or generate_dicom_uid()
+
+    secondary_description = secondary_meta.get("0008|103e") or metadata_options.get("secondaryDescription")
+    primary_description = primary_meta.get("0008|103e") or metadata_options.get("primaryDescription")
+    description_suffix = metadata_options.get("seriesDescriptionSuffix")
+
+    derived_description_parts = [secondary_description or f"{modality} Derived"]
+    if description_suffix:
+        derived_description_parts.append(str(description_suffix))
+    elif primary_description:
+        derived_description_parts.append(f"→ {primary_description}")
+    series_description = " ".join(part for part in derived_description_parts if part)
+
+    derivation_description = metadata_options.get("derivationDescription")
+    if not derivation_description:
+        reg_id = metadata_options.get("registrationId")
+        secondary_uid = metadata_options.get("secondarySeriesInstanceUID")
+        primary_uid = metadata_options.get("primarySeriesInstanceUID")
+        derivation_description = (
+            "Fusebox rigid resample"
+            + (f" from {secondary_uid}" if secondary_uid else "")
+            + (f" to {primary_uid}" if primary_uid else "")
+            + (f" (registration {reg_id})" if reg_id else "")
+        ).strip()
+
+    size = image.GetSize()
+    spacing = image.GetSpacing()
+    origin = image.GetOrigin()
+    direction = reference_primary.GetDirection() if reference_primary else image.GetDirection()
+    row_dir = direction[:3]
+    col_dir = direction[3:6]
+    orientation_value = '\\'.join(f"{v:.12f}" for v in (*row_dir, *col_dir))
+    pixel_spacing_value = '\\'.join(f"{spacing[i]:.12f}" for i in range(2))
+    slice_thickness_value = f"{spacing[2]:.12f}"
+
+    writer = sitk.ImageSeriesWriter()
+    file_names = [str(dest / f"{index + 1:05d}.dcm") for index in range(size[2])]
+    writer.SetFileNames(file_names)
+    writer.SetUseCompression(True)
+
+    sop_instance_uids: List[str] = []
+    for index in range(size[2]):
+        sop_uid = generate_dicom_uid()
+        sop_instance_uids.append(sop_uid)
+        z_position = image.TransformIndexToPhysicalPoint((0, 0, index))
+        position_value = '\\'.join(f"{coord:.12f}" for coord in z_position)
+
+        writer.SetMetaData(index, "0008|0008", "DERIVED\\SECONDARY")
+        writer.SetMetaData(index, "0008|0016", sop_class_uid)
+        writer.SetMetaData(index, "0008|0018", sop_uid)
+        writer.SetMetaData(index, "0008|0060", modality)
+        if series_description:
+            writer.SetMetaData(index, "0008|103e", series_description)
+        if derivation_description:
+            writer.SetMetaData(index, "0008|2111", derivation_description)
+        if charset:
+            writer.SetMetaData(index, "0008|0005", charset)
+        if study_instance_uid:
+            writer.SetMetaData(index, "0020|000d", study_instance_uid)
+        writer.SetMetaData(index, "0020|000e", series_uid)
+        writer.SetMetaData(index, "0020|0013", str(index + 1))
+        writer.SetMetaData(index, "0020|0032", position_value)
+        writer.SetMetaData(index, "0020|0037", orientation_value)
+        if frame_of_reference:
+            writer.SetMetaData(index, "0020|0052", frame_of_reference)
+        if patient_id:
+            writer.SetMetaData(index, "0010|0020", patient_id)
+        if patient_name:
+            writer.SetMetaData(index, "0010|0010", patient_name)
+        if patient_birth:
+            writer.SetMetaData(index, "0010|0030", patient_birth)
+        if patient_sex:
+            writer.SetMetaData(index, "0010|0040", patient_sex)
+        if primary_meta.get("0008|0020"):
+            writer.SetMetaData(index, "0008|0020", primary_meta["0008|0020"])
+        if primary_meta.get("0008|0030"):
+            writer.SetMetaData(index, "0008|0030", primary_meta["0008|0030"])
+        if primary_meta.get("0018|5100"):
+            writer.SetMetaData(index, "0018|5100", primary_meta["0018|5100"])
+        if primary_meta.get("0008|0080"):
+            writer.SetMetaData(index, "0008|0080", primary_meta["0008|0080"])
+        if primary_meta.get("0008|0090"):
+            writer.SetMetaData(index, "0008|0090", primary_meta["0008|0090"])
+
+        writer.SetMetaData(index, "0028|0008", str(size[2]))
+        writer.SetMetaData(index, "0028|0010", str(size[1]))
+        writer.SetMetaData(index, "0028|0011", str(size[0]))
+        writer.SetMetaData(index, "0028|0030", pixel_spacing_value)
+        writer.SetMetaData(index, "0018|0050", slice_thickness_value)
+        writer.SetMetaData(index, "0018|0088", slice_thickness_value)
+
+        for tag in ("0028|0002", "0028|0004", "0028|0100", "0028|0101", "0028|0102", "0028|0103", "0028|0106", "0028|0107", "0028|1052", "0028|1053"):
+            value = secondary_meta.get(tag)
+            if value is not None:
+                writer.SetMetaData(index, tag, value)
+
+    writer.Execute(image)
+
+    return {
+        "directory": str(dest),
+        "seriesInstanceUID": series_uid,
+        "files": [Path(name).name for name in file_names],
+        "sopInstanceUIDs": sop_instance_uids,
+        "modality": modality,
+        "sliceCount": size[2],
+        "pixelSpacing": [float(spacing[0]), float(spacing[1])],
+        "sliceThickness": float(spacing[2]) if len(spacing) > 2 else None,
+        "frameOfReferenceUID": frame_of_reference,
+        "studyInstanceUID": study_instance_uid,
+        "seriesDescription": series_description,
+        "derivationDescription": derivation_description,
+    }
+
+
 def run_from_config(cfg: dict) -> dict:
     primary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("primary", [])])
     secondary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("secondary", [])])
@@ -263,6 +456,8 @@ def run_from_config(cfg: dict) -> dict:
     invert_transform_file = bool(cfg.get("invertTransformFile", True))
     slice_index = int(cfg.get("sliceIndex", 0))
     interpolation = cfg.get("interpolation", "linear")
+    derived_series_dir = cfg.get("writeSeriesDir")
+    derived_series_metadata = cfg.get("seriesMetadata") or {}
 
     if not primary_files or not secondary_files:
         raise ValueError("primary and secondary file lists required")
@@ -291,14 +486,34 @@ def run_from_config(cfg: dict) -> dict:
     print(f"🐟 FUSION: Starting resampling with {xform.GetName()}", file=sys.stderr)
     print(f"🐟 FUSION: Primary image size: {primary.GetSize()}", file=sys.stderr)
     print(f"🐟 FUSION: Secondary image size: {secondary.GetSize()}", file=sys.stderr)
-    
+
     try:
         resampled = resample(primary, secondary, xform, interpolation)
         print(f"🐟 FUSION: Resampling successful, output size: {resampled.GetSize()}", file=sys.stderr)
     except Exception as e:
         print(f"🐟 FUSION: Resampling failed: {e}", file=sys.stderr)
         raise
-    
+
+    derived_info = None
+    if derived_series_dir:
+        try:
+            native_cast = sitk.Cast(resampled, secondary.GetPixelID())
+            derived_info = write_derived_series(
+                native_cast,
+                primary,
+                primary_files,
+                secondary_files,
+                derived_series_dir,
+                derived_series_metadata,
+            )
+            print(
+                f"🐟 FUSION: Derived series written to {derived_info['directory']} ({derived_info['sliceCount']} slices)",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(f"🐟 FUSION: Failed to write derived series: {exc}", file=sys.stderr)
+            raise
+
     try:
         resampled_slice = select_slice(resampled, slice_index)
         print(f"🐟 FUSION: Slice extraction successful", file=sys.stderr)
@@ -309,14 +524,20 @@ def run_from_config(cfg: dict) -> dict:
     if cfg.get("includePrimary"):
         primary_slice = select_slice(primary, slice_index).astype(np.float32)
         blend_slice = (primary_slice * 0.5) + (resampled_slice * 0.5)
-        return {
+        payload = {
             "sliceIndex": slice_index,
             "primary": encode_slice(primary_slice),
             "secondary": encode_slice(resampled_slice),
             "blend": encode_slice(blend_slice),
         }
+        if derived_info:
+            payload["derivedSeries"] = derived_info
+        return payload
 
-    return encode_slice(resampled_slice)
+    result = encode_slice(resampled_slice)
+    if derived_info:
+        result["derivedSeries"] = derived_info
+    return result
 
 
 def main(argv: List[str]) -> int:

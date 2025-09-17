@@ -87,6 +87,24 @@ export class PatientStorage {
     return path.join(this.getStudyPath(patientId, studyInstanceUID), this.sanitizeId(seriesInstanceUID));
   }
 
+  getDerivedBasePath(patientId: string): string {
+    return path.join(this.getPatientPath(patientId), 'derived');
+  }
+
+  getDerivedSeriesPath(
+    patientId: string,
+    primarySeriesInstanceUID: string,
+    secondarySeriesInstanceUID: string,
+    transformKey: string,
+  ): string {
+    return path.join(
+      this.getDerivedBasePath(patientId),
+      this.sanitizeId(primarySeriesInstanceUID),
+      this.sanitizeId(secondarySeriesInstanceUID),
+      this.sanitizeId(transformKey || 'default'),
+    );
+  }
+
   /**
    * Get the full file path for a DICOM image
    */

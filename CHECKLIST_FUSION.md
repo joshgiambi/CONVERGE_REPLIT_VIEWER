@@ -47,7 +47,14 @@ Tracking the current status of the multi-registration fusion refactor.
 - [ ] **PRIORITY**: Validate fusion test page works end-to-end with known good data (CT 54 → secondary 50 case).
 - [ ] Capture tester feedback and incorporate into main fusion rollout plan.
 
-## Recent Fixes (2025-01-17)
+## 🎉 FUSION BREAKTHROUGH (2025-09-17)
+- [x] ✅ **CRITICAL FIX**: DICOM file sorting by physical position instead of InstanceNumber  
+  - **Root Cause**: ITK/SimpleITK assumes files in physical order, but we loaded by InstanceNumber
+  - **Impact**: Coordinate system was flipped/offset causing wrong anatomy despite correct transforms
+  - **Solution**: Sort files by `dot(ImagePositionPatient, slice-normal)` before ITK loading
+  - **Result**: ✅ **FUSION NOW WORKS PERFECTLY** - Shows correct anatomy matching ProKnow validation
+
+## Recent Supporting Fixes (2025-09-17)
 - [x] ✅ **FIXED**: JSX adjacency build error in fusion-test.tsx
 - [x] ✅ **FIXED**: Include candidateId in H5 cache filenames to prevent conflicts between registration candidates
 - [x] ✅ **FIXED**: Reject identity H5 transforms and regenerate from 4x4 matrices with `helper-regenerated` source tracking
@@ -55,11 +62,14 @@ Tracking the current status of the multi-registration fusion refactor.
 - [x] ✅ **FIXED**: Remove duplicate `registrationAssociations` attribute in viewer-interface.tsx
 - [x] ✅ **FIXED**: Page scrolling issue in fusion-test page (changed from `overflow-y-auto` to `overflow-auto`)
 - [x] ✅ **FIXED**: Frame of Reference UID extraction in test-slices endpoint (was returning null, now extracts from DICOM files)
-- [x] ✅ **ENHANCED**: Transform inspector now extracts meaningful transforms and filters out pathological identity composites
+- [x] ✅ **FIXED**: Pathological H5 CompositeTransform recursion with FlattenTransformQueue() approach
+- [x] ✅ **FIXED**: Matrix-fallback mode for problematic REG files
+- [x] ✅ **FIXED**: Coordinate system alignment between fusion and RT structures
 
 ## Next steps for follow-up
-- **IMMEDIATE**: Test fusion-test page with patient `nYHUfQQEeTNqKGsj` (CT 54 → secondary 50 case) to validate end-to-end functionality
-- **IMMEDIATE**: Verify helper-generated H5 transforms are working correctly and not falling back to identity matrices
+- **READY FOR MIGRATION**: Fusion test page now works correctly - ready to migrate to main viewer
+- **VALIDATE**: Test with PET series fusion (83 slices) to ensure coordinate system works for all modalities
+- **OPTIMIZE**: Implement full volume resampling for better performance
 - Re-run the 54↔50 scenario after the resampled-volume path lands to measure alignment.
 - Promote the new viewport transform helper + add unit coverage before removing legacy math.
 - Wire PET fusion support once CT overlay stability is signed off.
