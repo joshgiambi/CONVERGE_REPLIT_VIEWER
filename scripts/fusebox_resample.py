@@ -18,10 +18,117 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Sequence, Tuple
 
 import numpy as np
 import SimpleITK as sitk
+
+
+def parse_position_and_normal(reader: sitk.ImageFileReader) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract ImagePositionPatient and slice normal from DICOM metadata."""
+    def meta_vec(tag: str) -> np.ndarray:
+        if not reader.HasMetaDataKey(tag):
+            raise RuntimeError(f"Missing required DICOM tag {tag}")
+        raw = reader.GetMetaData(tag).strip().replace(',', '\\')
+        return np.array([float(x.strip()) for x in raw.split('\\') if x.strip()], dtype=np.float64)
+
+    ipp = meta_vec("0020|0032")
+    iop = meta_vec("0020|0037")
+    # Direction cosines: first three = row, next three = column
+    normal = np.cross(iop[:3], iop[3:])
+    norm = np.linalg.norm(normal)
+    if norm == 0:
+        raise RuntimeError("Slice normal has zero length")
+    return ipp, normal / norm
+
+
+def sort_series_by_position(files: Sequence[str]) -> List[str]:
+    """Ensure slices are ordered along the physical slice normal."""
+    if len(files) <= 1:
+        return list(files)
+
+    ordering: List[Tuple[float, str]] = []
+    for path in files:
+        reader = sitk.ImageFileReader()
+        reader.SetFileName(path)
+        reader.LoadPrivateTagsOn()
+        reader.ReadImageInformation()
+        try:
+            ipp, normal = parse_position_and_normal(reader)
+            distance = float(np.dot(ipp, normal))
+        except Exception as exc:  # pragma: no cover - diagnostic path
+            print(f"🐟 FUSION: Unable to compute slice ordering for {path}: {exc}", file=sys.stderr)
+            distance = 0.0
+        ordering.append((distance, path))
+
+    ordering.sort(key=lambda item: item[0])
+    return [path for _, path in ordering]
+
+
+def describe_series(label: str, files: Sequence[str]) -> None:
+    """Log basic DICOM metadata for the first instance in a series."""
+    if not files:
+        print(f"🐟 FUSION: {label} series list empty", file=sys.stderr)
+        return
+
+    first = files[0]
+    reader = sitk.ImageFileReader()
+    reader.SetFileName(first)
+    reader.LoadPrivateTagsOn()
+    try:
+        reader.ReadImageInformation()
+    except Exception as exc:  # pragma: no cover - debug aid only
+        print(f"🐟 FUSION: Unable to inspect {label} metadata for {first}: {exc}", file=sys.stderr)
+        return
+
+    def meta(key: str) -> str:
+        return reader.GetMetaData(key) if reader.HasMetaDataKey(key) else "unknown"
+
+    modality = meta("0008|0060")
+    description = meta("0008|103e")
+    frame_of_reference = meta("0020|0052")
+    series_uid = meta("0020|000e")
+
+    try:
+        ipp, normal = parse_position_and_normal(reader)
+        top_proj = float(np.dot(ipp, normal))
+    except Exception:
+        normal = None
+        top_proj = float('nan')
+
+    bottom_proj = float('nan')
+    if len(files) > 1:
+        tail_reader = sitk.ImageFileReader()
+        tail_reader.SetFileName(files[-1])
+        tail_reader.LoadPrivateTagsOn()
+        try:
+            tail_reader.ReadImageInformation()
+            tail_ipp, _ = parse_position_and_normal(tail_reader)
+            bottom_proj = float(np.dot(tail_ipp, normal)) if normal is not None else float('nan')
+        except Exception:
+            bottom_proj = float('nan')
+
+    print(
+        "🐟 FUSION: {label} → modality={modality} description={desc} series={series_uid} FoR={for_uid}".format(
+            label=label,
+            modality=modality or "unknown",
+            desc=(description or "").strip() or "(no description)",
+            series_uid=series_uid or "unknown",
+            for_uid=frame_of_reference or "unknown",
+        ),
+        file=sys.stderr,
+    )
+    if normal is not None:
+        normal_list = [float(v) for v in normal]
+        print(
+            "🐟 FUSION: {label} slice normal {normal} · range [{top_proj:.3f}, {bottom_proj:.3f}]".format(
+                label=label,
+                normal=normal_list,
+                top_proj=top_proj,
+                bottom_proj=bottom_proj,
+            ),
+            file=sys.stderr,
+        )
 
 
 def read_series(file_list: List[str]) -> sitk.Image:
@@ -41,11 +148,55 @@ def affine_from_row_major(flat: List[float]) -> sitk.AffineTransform:
         flat[8], flat[9], flat[10],
     ]
     translation = [flat[3], flat[7], flat[11]]
+    
+    # Debug the coordinate system mapping
+    print(f"🐟 FUSION: Raw matrix translation: [{flat[3]}, {flat[7]}, {flat[11]}]", file=sys.stderr)
+    print(f"🐟 FUSION: ProKnow expected: [-28.0, 471.2, 160.3]", file=sys.stderr)
+    print(f"🐟 FUSION: Our values: [{flat[3]}, {flat[7]}, {flat[11]}]", file=sys.stderr)
+    
     xform = sitk.AffineTransform(3)
     xform.SetMatrix(matrix)
     xform.SetTranslation(translation)
     return xform
 
+
+def flatten_composite_transform(xform: sitk.Transform) -> sitk.Transform:
+    """Flatten pathological CompositeTransform using ITK's FlattenTransformQueue."""
+    if isinstance(xform, sitk.CompositeTransform):
+        print(f"🐟 FUSION: Original CompositeTransform has {xform.GetNumberOfTransforms()} children", file=sys.stderr)
+        
+        try:
+            # Try flattening the original transform directly
+            xform.FlattenTransformQueue()
+            print(f"🐟 FUSION: After flattening original: {xform.GetNumberOfTransforms()} transforms", file=sys.stderr)
+            
+            # If we now have a single transform, extract it
+            if xform.GetNumberOfTransforms() == 1:
+                single_transform = xform.GetNthTransform(0)
+                print(f"🐟 FUSION: Extracted single transform: {single_transform.GetName()}", file=sys.stderr)
+                return single_transform
+            
+            # If still multiple, look for the first meaningful one
+            for i in range(min(xform.GetNumberOfTransforms(), 5)):
+                try:
+                    child = xform.GetNthTransform(i)
+                    if isinstance(child, (sitk.Euler3DTransform, sitk.AffineTransform)):
+                        params = list(child.GetParameters())
+                        if any(abs(p) > 1e-6 for p in params):
+                            print(f"🐟 FUSION: Found meaningful {child.GetName()} at index {i}", file=sys.stderr)
+                            return child
+                except Exception as e:
+                    print(f"🐟 FUSION: Error accessing child {i}: {e}", file=sys.stderr)
+            
+            print(f"🐟 FUSION: Using flattened composite with {xform.GetNumberOfTransforms()} transforms", file=sys.stderr)
+            return xform
+            
+        except Exception as e:
+            print(f"🐟 FUSION: Error during flattening: {e}", file=sys.stderr)
+            return xform
+    
+    print(f"🐟 FUSION: Not a CompositeTransform: {xform.GetName()}", file=sys.stderr)
+    return xform
 
 def ensure_moving_to_fixed(xform: sitk.Transform) -> sitk.Transform:
     """Fusebox consumes moving→fixed transforms; invert when needed."""
@@ -101,10 +252,15 @@ def encode_slice(slice_array: np.ndarray) -> dict:
 
 
 def run_from_config(cfg: dict) -> dict:
-    primary_files = [str(Path(p)) for p in cfg.get("primary", [])]
-    secondary_files = [str(Path(p)) for p in cfg.get("secondary", [])]
+    primary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("primary", [])])
+    secondary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("secondary", [])])
+    print(f"🐟 FUSION: Loading primary files: {primary_files[:2]}... ({len(primary_files)} total)", file=sys.stderr)
+    print(f"🐟 FUSION: Loading secondary files: {secondary_files[:2]}... ({len(secondary_files)} total)", file=sys.stderr)
+    describe_series("Primary", primary_files)
+    describe_series("Secondary", secondary_files)
     transform = cfg.get("transform", [])
     transform_file = cfg.get("transformFile")
+    invert_transform_file = bool(cfg.get("invertTransformFile", True))
     slice_index = int(cfg.get("sliceIndex", 0))
     interpolation = cfg.get("interpolation", "linear")
 
@@ -115,16 +271,52 @@ def run_from_config(cfg: dict) -> dict:
     secondary = read_series(secondary_files)
 
     if transform_file:
-        xform = ensure_moving_to_fixed(sitk.ReadTransform(transform_file))
+        raw_xform = sitk.ReadTransform(transform_file)
+        # Flatten pathological CompositeTransform structure using ITK's FlattenTransformQueue
+        xform = flatten_composite_transform(raw_xform)
+        if invert_transform_file:
+            xform = ensure_moving_to_fixed(xform)
     elif transform:
+        print(f"🐟 FUSION: Using matrix transform with values: {transform[:4]}...", file=sys.stderr)
         raw = affine_from_row_major([float(v) for v in transform])
+        print(f"🐟 FUSION: Created AffineTransform: {raw.GetName()}", file=sys.stderr)
+        print(f"🐟 FUSION: Matrix: {list(raw.GetMatrix())[:3]}...", file=sys.stderr)
+        print(f"🐟 FUSION: Translation: {list(raw.GetTranslation())}", file=sys.stderr)
         xform = ensure_moving_to_fixed(raw)
+        print(f"🐟 FUSION: After inversion: {xform.GetName()}", file=sys.stderr)
+        print(f"🐟 FUSION: Inverted translation: {list(xform.GetTranslation())}", file=sys.stderr)
     else:
         raise ValueError("Either transform or transformFile must be provided")
 
-    resampled = resample(primary, secondary, xform, interpolation)
-    slice_array = select_slice(resampled, slice_index)
-    return encode_slice(slice_array)
+    print(f"🐟 FUSION: Starting resampling with {xform.GetName()}", file=sys.stderr)
+    print(f"🐟 FUSION: Primary image size: {primary.GetSize()}", file=sys.stderr)
+    print(f"🐟 FUSION: Secondary image size: {secondary.GetSize()}", file=sys.stderr)
+    
+    try:
+        resampled = resample(primary, secondary, xform, interpolation)
+        print(f"🐟 FUSION: Resampling successful, output size: {resampled.GetSize()}", file=sys.stderr)
+    except Exception as e:
+        print(f"🐟 FUSION: Resampling failed: {e}", file=sys.stderr)
+        raise
+    
+    try:
+        resampled_slice = select_slice(resampled, slice_index)
+        print(f"🐟 FUSION: Slice extraction successful", file=sys.stderr)
+    except Exception as e:
+        print(f"🐟 FUSION: Slice extraction failed: {e}", file=sys.stderr)
+        raise
+
+    if cfg.get("includePrimary"):
+        primary_slice = select_slice(primary, slice_index).astype(np.float32)
+        blend_slice = (primary_slice * 0.5) + (resampled_slice * 0.5)
+        return {
+            "sliceIndex": slice_index,
+            "primary": encode_slice(primary_slice),
+            "secondary": encode_slice(resampled_slice),
+            "blend": encode_slice(blend_slice),
+        }
+
+    return encode_slice(resampled_slice)
 
 
 def main(argv: List[str]) -> int:

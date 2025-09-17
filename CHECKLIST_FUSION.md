@@ -22,9 +22,44 @@ Tracking the current status of the multi-registration fusion refactor.
 ## Current Issues Found
 - [ ] **ISSUE A**: PET series don't show fusion panels (only CT series work with anchor icons) - *DEFERRED until CT overlay working*
 - [x] **ISSUE B**: No actual fusion overlay rendering - ✅ **RESOLVED** - Fusion overlays now appear! 
-- [ ] **ISSUE C**: Fusion overlay instability - overlays pop in/out, misaligned, scale issues, opacity slider causes chaos - *Need rendering optimization*
+- [ ] **ISSUE C**: Fusion overlay instability - overlays pop in/out, misaligned, scale issues, opacity slider causes chaos - *Request-token guard + ITK prefetch shipped; still seeing flashing and misalignment*
+
+## Overlay Stabilization Workstream
+- [x] Guard overlay requests with a session token so stale async responses can’t clobber the current slice.
+- [x] Share the ITK slice-to-canvas conversion pipeline between live draws and background prefetch.
+- [x] Prefetch neighboring fused slices (±3) once overlay active to eliminate 10s waits on scroll.
+- [ ] Validate spatial alignment (CT 54 ↔ 50 workflow) against helper output and capture deltas.
+- [ ] Extract viewport transform math into dedicated module and add tests for mm-accurate alignment.
+
+## Server-Side Resampled Volume Rollout
+- [ ] Design cache layout for pre-resampled volumes (primary/secondary/registration) and define invalidation triggers.
+- [ ] Implement background ITK job to resample full secondary volume and emit manifest + verification PNGs.
+- [ ] Add `/api/fusebox/resampled-volume` endpoint that streams metadata + pixel slabs (fallback to legacy slice API while job runs).
+- [ ] Update frontend loader to detect cached volume, stream slices locally, and fall back only when cache missing.
+- [ ] Integrate verification panel in UI to preview/download generated PNGs for QA.
+
+## Fusion Test Harness
+- [x] ✅ **IMPLEMENTED**: Backend endpoint `/api/fusebox/test-slices` generates fusion test assets (primary, resampled secondary, blended overlay) and returns manifest with debug info.
+- [x] ✅ **IMPLEMENTED**: Lightweight test page at `/fusion-test?patientId=X` displays trio of images with slice navigation, registration metadata, and transform inspection.
+- [x] ✅ **IMPLEMENTED**: Transform inspector with recursion protection and helper log capture for debugging.
+- [ ] Add "Open Fusion Test" action in patient manager to trigger on-demand validation run.
+- [ ] Implement temp storage/cleanup for generated assets (per-session TTL).
+- [ ] **PRIORITY**: Validate fusion test page works end-to-end with known good data (CT 54 → secondary 50 case).
+- [ ] Capture tester feedback and incorporate into main fusion rollout plan.
+
+## Recent Fixes (2025-01-17)
+- [x] ✅ **FIXED**: JSX adjacency build error in fusion-test.tsx
+- [x] ✅ **FIXED**: Include candidateId in H5 cache filenames to prevent conflicts between registration candidates
+- [x] ✅ **FIXED**: Reject identity H5 transforms and regenerate from 4x4 matrices with `helper-regenerated` source tracking
+- [x] ✅ **FIXED**: Harden transform inspector against Composite recursion with depth limiting and error handling
+- [x] ✅ **FIXED**: Remove duplicate `registrationAssociations` attribute in viewer-interface.tsx
+- [x] ✅ **FIXED**: Page scrolling issue in fusion-test page (changed from `overflow-y-auto` to `overflow-auto`)
+- [x] ✅ **FIXED**: Frame of Reference UID extraction in test-slices endpoint (was returning null, now extracts from DICOM files)
+- [x] ✅ **ENHANCED**: Transform inspector now extracts meaningful transforms and filters out pathological identity composites
 
 ## Next steps for follow-up
-- Swap the front-end registration resolution logic to consume the new association map and drop `/api/registration/resolve`.
-- Complete the dropdown behavior (selection → helper request → overlay update) and add any missing UI affordances.
-- Re-run the 54↔50 scenario to prove the helper path is exercised end-to-end.
+- **IMMEDIATE**: Test fusion-test page with patient `nYHUfQQEeTNqKGsj` (CT 54 → secondary 50 case) to validate end-to-end functionality
+- **IMMEDIATE**: Verify helper-generated H5 transforms are working correctly and not falling back to identity matrices
+- Re-run the 54↔50 scenario after the resampled-volume path lands to measure alignment.
+- Promote the new viewport transform helper + add unit coverage before removing legacy math.
+- Wire PET fusion support once CT overlay stability is signed off.

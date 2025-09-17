@@ -1196,7 +1196,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   allowedSecondaryIds={regAssociations[selectedSeries.id] || []}
                   registrationAssociations={registrationRelationshipMap}
                   availableSeries={series}
-                  registrationAssociations={registrationRelationshipMap}
                 />
               
               {/* Structure Tags on Right Side - Responsive */}

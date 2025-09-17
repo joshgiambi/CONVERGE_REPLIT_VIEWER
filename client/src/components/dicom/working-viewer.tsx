@@ -248,6 +248,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // CT transform for fusion coordinate system alignment
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
   const scheduleRenderRef = useRef<(() => void) | null>(null);
+  const fusionRequestTokenRef = useRef(0);
+  const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
 
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
@@ -361,6 +363,117 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     console.log('registration options', { secondaryId, options, registrationAssociationsForPrimary });
     return options;
   }, [registrationAssociationsForPrimary, secondarySeriesId]);
+
+  const buildFuseboxCacheKey = useCallback(
+    (sopInstanceUID: string, secondaryId: number, registrationId: string | null) =>
+      `${sopInstanceUID}:${secondaryId}:${registrationId ?? 'default'}`,
+    [],
+  );
+
+  const drawFusionOverlay = useCallback(
+    (
+      ctx: CanvasRenderingContext2D,
+      overlayCanvas: HTMLCanvasElement,
+      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number },
+      alpha: number,
+    ) => {
+      if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
+      const targetWidth = transform.imageWidth * transform.scale;
+      const targetHeight = transform.imageHeight * transform.scale;
+      if (targetWidth === 0 || targetHeight === 0) return;
+
+      const widthScale = targetWidth / overlayCanvas.width;
+      const heightScale = targetHeight / overlayCanvas.height;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(
+        overlayCanvas,
+        0,
+        0,
+        overlayCanvas.width,
+        overlayCanvas.height,
+        transform.offsetX,
+        transform.offsetY,
+        overlayCanvas.width * widthScale,
+        overlayCanvas.height * heightScale,
+      );
+      ctx.restore();
+    },
+    [],
+  );
+
+  const convertSliceToCanvas = useCallback(
+    (slice: FuseboxSlice, defaultModality: string) => {
+      const { imageData, hasSignal } = fuseboxSliceToImageData(
+        slice,
+        slice.secondaryModality ?? defaultModality,
+      );
+      const overlayCanvas = document.createElement('canvas');
+      overlayCanvas.width = slice.width;
+      overlayCanvas.height = slice.height;
+      const overlayCtx = overlayCanvas.getContext('2d');
+      if (!overlayCtx) return null;
+      overlayCtx.putImageData(imageData, 0, 0);
+      return { canvas: overlayCanvas, slice, hasSignal };
+    },
+    [],
+  );
+
+  const FUSION_CACHE_MAX_AGE_MS = 45000;
+  const FUSION_PREFETCH_RADIUS = 3;
+
+  const prefetchFusionSlices = useCallback(
+    (centerIndex: number) => {
+      if (!secondarySeriesId || !images.length) return;
+
+      const registrationId = selectedRegistrationId ?? null;
+
+      for (let offset = -FUSION_PREFETCH_RADIUS; offset <= FUSION_PREFETCH_RADIUS; offset += 1) {
+        if (offset === 0) continue;
+        const targetIndex = centerIndex + offset;
+        if (targetIndex < 0 || targetIndex >= images.length) continue;
+        const targetImage = images[targetIndex];
+        const sop = targetImage?.sopInstanceUID;
+        if (!sop) continue;
+        const key = buildFuseboxCacheKey(sop, secondarySeriesId, registrationId);
+        if (fuseboxCacheRef.current.has(key) || fusionPrefetchSetRef.current.has(key)) continue;
+
+        fusionPrefetchSetRef.current.add(key);
+        fetchFuseboxSlice({
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+          sopInstanceUID: sop,
+          registrationId: registrationId ?? undefined,
+        })
+          .then((slice) => {
+            const prepared = convertSliceToCanvas(slice, secondaryModality);
+            if (prepared) {
+              fuseboxCacheRef.current.set(key, { ...prepared, timestamp: Date.now() });
+            }
+          })
+          .catch((error) => {
+            if (import.meta.env.DEV) {
+              console.warn('Fusion prefetch failed', error);
+            }
+          })
+          .finally(() => {
+            fusionPrefetchSetRef.current.delete(key);
+          });
+      }
+    },
+    [
+      buildFuseboxCacheKey,
+      convertSliceToCanvas,
+      images,
+      secondaryModality,
+      secondarySeriesId,
+      selectedRegistrationId,
+      seriesId,
+    ],
+  );
 
   useEffect(() => {
     return () => {
@@ -623,7 +736,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const cacheKey = `${currentImage.sopInstanceUID}:${secondarySeriesId}`;
+      const cacheKey = buildFuseboxCacheKey(
+        currentImage.sopInstanceUID,
+        secondarySeriesId,
+        selectedRegistrationId ?? null,
+      );
       const cached = fuseboxCacheRef.current.get(cacheKey);
       const t = ctTransform.current;
       const src = offscreenCanvasRef.current;
@@ -633,7 +750,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           fusionIssueRef.current = 'empty-fusebox-slice';
           return;
         }
-        ctx.save();
         // Redraw CT from offscreen canvas with existing transform
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.imageSmoothingEnabled = true;
@@ -641,9 +757,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
 
         // Draw cached fusion overlay with new opacity
-        ctx.globalAlpha = fusionOpacity;
-        ctx.drawImage(cached.canvas, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
-        ctx.restore();
+        drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
 
         // Redraw RT structures on top
         try {
@@ -691,7 +805,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Ignore errors and let scheduled render handle it
       scheduleRender();
     }
-  }, [fusionOpacity, secondarySeriesId, currentIndex, images, scheduleRender, imageMetadata, orientation, crosshairPos, panX, panY, zoom]);
+  }, [
+    buildFuseboxCacheKey,
+    drawFusionOverlay,
+    fusionOpacity,
+    secondarySeriesId,
+    selectedRegistrationId,
+    currentIndex,
+    images,
+    scheduleRender,
+    imageMetadata,
+    orientation,
+    crosshairPos,
+    panX,
+    panY,
+    zoom,
+  ]);
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
@@ -4340,7 +4469,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const interval = window.setInterval(() => {
       const now = Date.now();
       for (const [key, entry] of fuseboxCacheRef.current.entries()) {
-        if (now - entry.timestamp > 15000) {
+        if (now - entry.timestamp > FUSION_CACHE_MAX_AGE_MS) {
           fuseboxCacheRef.current.delete(key);
         }
       }
@@ -4348,16 +4477,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!secondarySeriesId) return;
+    prefetchFusionSlices(currentIndex);
+  }, [secondarySeriesId, selectedRegistrationId, currentIndex, prefetchFusionSlices]);
+
+  useEffect(() => {
+    if (secondarySeriesId) return;
+    fusionPrefetchSetRef.current.clear();
+  }, [secondarySeriesId]);
+
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    const requestToken = ++fusionRequestTokenRef.current;
+    const ensureActive = () => requestToken === fusionRequestTokenRef.current;
+
     if (!secondarySeriesId || fusionOpacity === 0) {
-      setFuseboxTransformSource(null);
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
     const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
 
     if (!primaryImage?.sopInstanceUID) {
-      setFuseboxTransformSource(null);
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
@@ -4377,9 +4519,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       missingMatrixLogRef.current = true;
     }
 
-    const cacheKey = `${primaryImage.sopInstanceUID}:${secondarySeriesId}:${selectedRegistrationId ?? 'default'}`;
+    const cacheKey = buildFuseboxCacheKey(
+      primaryImage.sopInstanceUID,
+      secondarySeriesId,
+      selectedRegistrationId ?? null,
+    );
     let cached = fuseboxCacheRef.current.get(cacheKey);
-    
+
     if (!cached) {
       try {
         const slice = await fetchFuseboxSlice({
@@ -4389,26 +4535,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           registrationId: selectedRegistrationId ?? undefined,
         });
 
-        if (slice.registrationId && slice.registrationId !== selectedRegistrationId) {
+        if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {
           setSelectedRegistrationId(slice.registrationId);
         }
 
-        if (slice.secondaryModality && slice.secondaryModality !== secondaryModality) {
+        if (slice.secondaryModality && slice.secondaryModality !== secondaryModality && ensureActive()) {
           setSecondaryModality(slice.secondaryModality);
         }
 
-        const { imageData, hasSignal } = fuseboxSliceToImageData(slice, slice.secondaryModality ?? secondaryModality);
-        const overlayCanvas = document.createElement('canvas');
-        overlayCanvas.width = slice.width;
-        overlayCanvas.height = slice.height;
-        const overlayCtx = overlayCanvas.getContext('2d');
-        if (!overlayCtx) {
+        const prepared = convertSliceToCanvas(slice, secondaryModality);
+        if (!prepared) {
+          if (ensureActive()) {
+            fusionIssueRef.current = 'overlay-canvas-error';
+            setFuseboxTransformSource(null);
+          }
           return;
         }
-        overlayCtx.putImageData(imageData, 0, 0);
-        cached = { canvas: overlayCanvas, slice, timestamp: Date.now(), hasSignal };
+        cached = { ...prepared, timestamp: Date.now() };
         fuseboxCacheRef.current.set(cacheKey, cached);
-        if (!hasSignal) {
+        if (!prepared.hasSignal) {
           pushFusionLog('Fusebox slice had no visible signal', {
             sop: primaryImage.sopInstanceUID,
             min: slice.min,
@@ -4416,40 +4561,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           });
         }
       } catch (error) {
-        console.error('Fusebox overlay fetch failed:', error);
-        fusionIssueRef.current = 'fusebox-fetch-error';
-        setFuseboxTransformSource(null);
+        if (ensureActive()) {
+          console.error('Fusebox overlay fetch failed:', error);
+          fusionIssueRef.current = 'fusebox-fetch-error';
+          setFuseboxTransformSource(null);
+        }
         return;
       }
     }
 
     if (!cached) {
-      setFuseboxTransformSource(null);
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
     if (!cached.hasSignal) {
-      fusionIssueRef.current = 'empty-fusebox-slice';
-      setFuseboxTransformSource(cached.slice.transformSource ?? null);
+      if (ensureActive()) {
+        fusionIssueRef.current = 'empty-fusebox-slice';
+        setFuseboxTransformSource(cached.slice.transformSource ?? null);
+      }
       return;
     }
+
+    if (!ensureActive()) return;
 
     const source = cached.slice.transformSource ?? null;
     setFuseboxTransformSource(source);
     fusionIssueRef.current = null;
 
-    ctx.save();
-    ctx.globalAlpha = fusionOpacity;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(
-      cached.canvas,
-      transform.offsetX,
-      transform.offsetY,
-      transform.imageWidth * transform.scale,
-      transform.imageHeight * transform.scale,
-    );
-    ctx.restore();
+    drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
+    prefetchFusionSlices(currentIndex);
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied

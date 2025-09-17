@@ -669,6 +669,16 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 View
               </Button>
             </Link>
+            <Link href={`/fusion-test?patientId=${patient.patientID}`}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-cyan-500 text-cyan-300 hover:bg-cyan-500/10"
+              >
+                <Layers className="h-4 w-4 mr-1" />
+                Fusion Test
+              </Button>
+            </Link>
           </div>
           
           <Button

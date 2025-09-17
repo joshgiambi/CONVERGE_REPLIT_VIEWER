@@ -1,4 +1,4 @@
-export type FuseboxTransformSource = 'helper-generated' | 'helper-cache';
+export type FuseboxTransformSource = 'helper-generated' | 'helper-cache' | 'helper-regenerated' | 'matrix-fallback' | 'matrix-validated';
 
 export interface RegistrationTransformCandidate {
   id: string;

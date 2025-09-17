@@ -184,7 +184,7 @@ function sortImagesByInstance(imagesList: any[]): any[] {
     });
 }
 
-type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache';
+type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache' | 'helper-regenerated' | 'matrix-fallback' | 'matrix-validated';
 type FuseboxTransformInfo = {
   matrix?: number[];
   filePath?: string;
@@ -199,6 +199,22 @@ const fuseboxHelperMetrics = {
   conversions: 0,
   failures: 0,
   disabled: 0,
+};
+
+const fuseboxLogBuffer: string[] = [];
+const FUSEBOX_LOG_CAP = 300;
+
+const appendFuseboxLog = (level: string, message: string, data?: Record<string, unknown>) => {
+  const entry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...(data || {}),
+  });
+  fuseboxLogBuffer.push(entry);
+  if (fuseboxLogBuffer.length > FUSEBOX_LOG_CAP) {
+    fuseboxLogBuffer.splice(0, fuseboxLogBuffer.length - FUSEBOX_LOG_CAP);
+  }
 };
 
 let fuseboxHelperDisabledLogged = false;
@@ -219,6 +235,7 @@ const logFuseboxHelper = (
   data: Record<string, unknown>,
 ) => {
   const payload = `${message} ${JSON.stringify({ event: 'fusebox.helper', ...data })}`;
+  appendFuseboxLog(level, message, data);
   if (level === 'debug') {
     logger.debug(payload);
   } else if (level === 'info') {
@@ -299,6 +316,24 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
 
   const maybeAttachHelperOutput = async (info: FuseboxTransformInfo | null, regPath?: string, candidateId?: string) => {
     if (!info || info.transformFile || !regPath) return info;
+    
+    // Skip helper for REG files that produce pathological transforms
+    const regFileName = path.basename(regPath);
+    const problematicRegFiles = [
+      // Temporarily empty list to allow all REG files to be tested
+      // '1.2.246.352.221.516840734399078479312302493491489751699.dcm', // This one has the good matrix but pathological H5
+    ];
+    
+    if (problematicRegFiles.includes(regFileName)) {
+      logFuseboxHelper('info', 'Skipping helper for pathological REG file, using matrix-only', {
+        primarySeriesId,
+        secondarySeriesId,
+        regFile: regFileName,
+        candidateId,
+      });
+      info.transformSource = 'matrix-validated';
+      return info;
+    }
     const helper = process.env.DICOM_REG_CONVERTER;
     if (!helper) {
       fuseboxHelperMetrics.disabled += 1;
@@ -328,7 +363,8 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
     const cacheDir = path.join(process.cwd(), 'tmp', 'fusebox-transforms');
     await fs.promises.mkdir(cacheDir, { recursive: true });
     const safeName = path.basename(regPath).replace(/[^a-zA-Z0-9_.-]+/g, '_');
-    const outPath = path.join(cacheDir, `${primarySeriesId}_${secondarySeriesId}_${safeName}.h5`);
+    const candidateIdSafe = candidateId ? candidateId.replace(/[^a-zA-Z0-9_.-]+/g, '_') : 'default';
+    const outPath = path.join(cacheDir, `${primarySeriesId}_${secondarySeriesId}_${candidateIdSafe}_${safeName}.h5`);
 
     let needsConversion = true;
     try {
@@ -337,7 +373,55 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
     } catch {}
 
     if (needsConversion) {
-      const args = ['--input', regPath, '--output', outPath, '--fixed', primaryFoR, '--moving', secondaryFoR];
+      // Use the REG file's own Frame of Reference UIDs if available
+      const regFoRs = await (async () => {
+        try {
+          const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
+          const parsed = parseDicomRegistrationFromFile(regPath);
+          return {
+            source: parsed?.sourceFrameOfReferenceUid,
+            target: parsed?.targetFrameOfReferenceUid
+          };
+        } catch {
+          return { source: null, target: null };
+        }
+      })();
+      
+      // Check if REG file contains self-mapping
+      const isSelfMapping = regFoRs.source && regFoRs.target && regFoRs.source === regFoRs.target;
+      
+      let args;
+      if (isSelfMapping) {
+        // For self-mapping REG files, we still need to map between the actual series FoRs
+        // The REG file contains transform within one FoR, but we need to apply it between different FoRs
+        logFuseboxHelper('info', 'Self-mapping REG detected, but need inter-FoR transform', {
+          primarySeriesId,
+          secondarySeriesId,
+          regFrameOfReference: regFoRs.source,
+          primaryFoR,
+          secondaryFoR,
+        });
+        
+        // Use the actual series Frame of Reference UIDs for the mapping
+        args = ['--input', regPath, '--output', outPath, '--fixed', primaryFoR, '--moving', secondaryFoR];
+      } else {
+        // Standard two-FoR mapping
+        const fixedFoR = regFoRs.target || primaryFoR;
+        const movingFoR = regFoRs.source || secondaryFoR;
+        
+        logFuseboxHelper('info', 'Helper conversion Frame of Reference mapping', {
+          primarySeriesId,
+          secondarySeriesId,
+          requestedFixed: primaryFoR,
+          requestedMoving: secondaryFoR,
+          regFileSource: regFoRs.source,
+          regFileTarget: regFoRs.target,
+          actualFixed: fixedFoR,
+          actualMoving: movingFoR,
+        });
+        
+        args = ['--input', regPath, '--output', outPath, '--fixed', fixedFoR, '--moving', movingFoR];
+      }
       const result = spawnSync(helper, args, { encoding: 'utf-8' });
       if (result.status !== 0) {
         fuseboxHelperMetrics.failures += 1;
@@ -357,11 +441,29 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
       }
       fuseboxHelperMetrics.conversions += 1;
     } else {
-      fuseboxHelperMetrics.cacheHits += 1;
+      // Check if cached H5 contains an identity transform - if so, use matrix-only
+      const { isIdentity4x4 } = await import('./registration/validators.ts');
+      if (info?.matrix && isIdentity4x4(info.matrix)) {
+        logFuseboxHelper('warn', 'Identity H5 transform detected, falling back to matrix-only', {
+          primarySeriesId,
+          secondarySeriesId,
+          transformFile: outPath,
+          candidateId,
+        });
+        // Don't regenerate, just use matrix-only approach
+        info.transformFile = undefined;
+        info.transformSource = 'matrix-validated';
+        fuseboxHelperMetrics.cacheHits += 1;
+        return info;
+      } else {
+        fuseboxHelperMetrics.cacheHits += 1;
+      }
     }
 
     info.transformFile = outPath;
-    info.transformSource = needsConversion ? 'helper-generated' : 'helper-cache';
+    if (!info.transformSource) {
+      info.transformSource = needsConversion ? 'helper-generated' : 'helper-cache';
+    }
     if (candidateId) info.registrationId = candidateId;
     logFuseboxHelper('info', 'Fusebox helper transform ready', {
       primarySeriesId,
@@ -435,7 +537,7 @@ async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesI
     }
   }
 
-  if (fallbackMatrix && fallbackMatrix.transformFile) {
+  if (fallbackMatrix && (fallbackMatrix.transformFile || fallbackMatrix.transformSource === 'matrix-validated')) {
     return fallbackMatrix;
   }
 
@@ -482,6 +584,30 @@ async function runFuseboxResample(config: Record<string, any>): Promise<any> {
         resolve(JSON.parse(stdout.trim()));
       } catch (err) {
         resolve({ error: `Failed to parse fusebox output: ${(err as Error).message}` });
+      }
+    });
+  });
+}
+
+async function runFuseboxInspectTransform(transformPath: string): Promise<any> {
+  const python = resolveFuseboxPython();
+  const scriptPath = path.resolve('scripts', 'fusebox_inspect_transform.py');
+
+  return new Promise((resolve) => {
+    const child = spawn(python, [scriptPath, transformPath], { cwd: process.cwd() });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve({ ok: false, error: stderr.trim() || stdout.trim() || `inspect transform exited with code ${code}` });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch (err) {
+        resolve({ ok: false, error: `Failed to parse inspect output: ${(err as Error).message}` });
       }
     });
   });
@@ -3596,11 +3722,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
       }
 
+      const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
       const config = {
         primary: primaryFiles,
         secondary: secondaryFiles,
         transform: transformInfo.matrix,
         transformFile: transformInfo.transformFile,
+        invertTransformFile,
         sliceIndex,
         interpolation,
       };
@@ -3627,6 +3755,180 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       logger.error(`Fusebox endpoint failed: ${err?.message || String(err)}`);
       return res.status(500).json({ error: 'Fusebox endpoint failed', details: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/fusebox/test-slices", async (req: Request, res: Response) => {
+    try {
+      const body = req.body ?? {};
+      const primarySeriesId = Number(body.primarySeriesId);
+      const secondarySeriesId = Number(body.secondarySeriesId);
+      const requestedRegistrationId = typeof body.registrationId === 'string' ? body.registrationId : undefined;
+      const interpolation = typeof body.interpolation === 'string' ? body.interpolation : 'linear';
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId and secondarySeriesId are required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) {
+        return res.status(404).json({ error: 'Series not found' });
+      }
+
+      const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
+      if (!primaryImages.length) {
+        return res.status(404).json({ error: 'Primary series has no images' });
+      }
+
+      const primaryFiles = await collectSeriesFiles(primarySeriesId);
+      const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
+      if (!primaryFiles.length || !secondaryFiles.length) {
+        return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
+      }
+
+      const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
+
+      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
+        return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
+      }
+
+      const sliceCount = primaryImages.length;
+      let sliceIndices: number[] = [];
+      if (Array.isArray(body.sliceIndices)) {
+        sliceIndices = body.sliceIndices
+          .map((idx: any) => Number(idx))
+          .filter((idx: number) => Number.isInteger(idx) && idx >= 0 && idx < sliceCount);
+      }
+
+      if (!sliceIndices.length) {
+        sliceIndices = [Math.floor(sliceCount / 2)];
+      }
+
+      sliceIndices = Array.from(new Set(sliceIndices)).sort((a, b) => a - b);
+
+      const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
+      const baseConfig: Record<string, any> = {
+        primary: primaryFiles,
+        secondary: secondaryFiles,
+        transform: transformInfo.matrix,
+        transformFile: undefined, // Force matrix-only mode for debugging
+        invertTransformFile,
+        interpolation,
+        includePrimary: true,
+      };
+
+      const slices = [] as Array<{
+        sliceIndex: number;
+        primary: any;
+        secondary: any;
+        blend: any;
+      }>;
+
+      for (const sliceIndex of sliceIndices) {
+        const result = await runFuseboxResample({ ...baseConfig, sliceIndex });
+        if (!result || result.error) {
+          return res.status(500).json({
+            error: 'Fusebox resample failed',
+            details: result?.error || 'Unknown error',
+            sliceIndex,
+          });
+        }
+        slices.push({
+          sliceIndex,
+          primary: result.primary,
+          secondary: {
+            ...(result.secondary || {}),
+            modality: secondarySeries.modality || null,
+          },
+          blend: result.blend,
+        });
+      }
+
+      // Extract Frame of Reference UIDs from DICOM files
+      const extractFrameOfReferenceUID = (filePath: string): string | null => {
+        try {
+          if (!fs.existsSync(filePath)) return null;
+          const buffer = fs.readFileSync(filePath);
+          const ds = (dicomParser as any).parseDicom(new Uint8Array(buffer), {});
+          return ds.string?.('x00200052')?.trim() || null;
+        } catch {
+          return null;
+        }
+      };
+
+      const primaryFrameOfReferenceUID = primaryImages[0]?.filePath 
+        ? extractFrameOfReferenceUID(primaryImages[0].filePath)
+        : null;
+      const secondaryFrameOfReferenceUID = secondaryImages[0]?.filePath 
+        ? extractFrameOfReferenceUID(secondaryImages[0].filePath)
+        : null;
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        primarySeriesId,
+        secondarySeriesId,
+        sliceIndices,
+        registrationId: transformInfo.registrationId || requestedRegistrationId || null,
+        transformSource: transformInfo.transformSource || (transformInfo.transformFile ? 'helper-generated' : undefined),
+        transformMatrix: Array.isArray(transformInfo.matrix) ? transformInfo.matrix : null,
+        transformFile: transformInfo.transformFile || null,
+        primaryFrameOfReferenceUID,
+        secondaryFrameOfReferenceUID,
+        slices,
+      });
+    } catch (err: any) {
+      if (err?.code && String(err.code).startsWith('FUSEBOX_')) {
+        logger.error(`Fusebox helper unavailable (test-slices): ${err?.message || String(err)}`);
+        return res.status(503).json({ error: 'Fusebox helper unavailable', details: err?.message || String(err) });
+      }
+      logger.error(`Fusion test endpoint failed: ${err?.message || String(err)}`);
+      return res.status(500).json({ error: 'Fusion test endpoint failed', details: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/fusebox/inspect-transform", async (req: Request, res: Response) => {
+    try {
+      const transformFile = typeof req.body?.transformFile === 'string' ? req.body.transformFile : null;
+      if (!transformFile) {
+        return res.status(400).json({ error: 'transformFile is required' });
+      }
+
+      const resolved = path.resolve(transformFile);
+      const transformsRoot = path.resolve(path.join(process.cwd(), 'tmp', 'fusebox-transforms'));
+      if (!resolved.startsWith(transformsRoot)) {
+        return res.status(400).json({ error: 'Transform path is outside allowed directory' });
+      }
+
+      const result = await runFuseboxInspectTransform(resolved);
+      if (!result?.ok) {
+        const errMsg = result?.error || 'Transform inspection failed';
+        return res.status(500).json({ error: errMsg });
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(result.payload ?? null);
+    } catch (err: any) {
+      logger.error(`Transform inspection failed: ${err?.message || String(err)}`);
+      return res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get("/api/fusebox/logs", (_req: Request, res: Response) => {
+    try {
+      const logs = fuseboxLogBuffer.slice(-FUSEBOX_LOG_CAP).map((entry) => {
+        try {
+          return JSON.parse(entry);
+        } catch {
+          return { raw: entry };
+        }
+      });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ logs });
+    } catch (err: any) {
+      logger.error(`Fusebox log retrieval failed: ${err?.message || String(err)}`);
+      res.status(500).json({ error: err?.message || String(err) });
     }
   });
 

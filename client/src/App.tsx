@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Viewer from "@/pages/viewer";
 import PatientManager from "@/pages/patient-manager";
+import FusionTestPage from "@/pages/fusion-test";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -15,6 +16,7 @@ function Router() {
       <Route path="/viewer" component={Viewer} />
       <Route path="/dicom-viewer" component={Viewer} />
       <Route path="/enhanced-viewer" component={Viewer} />
+      <Route path="/fusion-test" component={FusionTestPage} />
       <Route path="/patients/:id/studies" component={PatientManager} />
       <Route component={NotFound} />
     </Switch>
