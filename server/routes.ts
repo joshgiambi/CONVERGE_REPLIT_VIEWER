@@ -781,6 +781,14 @@ async function ensureDerivedSeries(
     });
   }
 
+  const effectiveTransform: FuseboxTransformInfo = {
+    matrix: transformInfo.matrix ? transformInfo.matrix.slice() : undefined,
+    transformFile: transformInfo.transformFile || undefined,
+    transformSource: transformInfo.transformSource,
+    registrationId: transformInfo.registrationId,
+    filePath: transformInfo.filePath,
+  };
+
   const transformDigest = computeTransformDigest(transformInfo);
   const transformKey = (
     requestedRegistrationId
@@ -836,15 +844,15 @@ async function ensureDerivedSeries(
   await fs.promises.mkdir(derivedDir, { recursive: true });
 
   const invertTransformFile = !!(
-    transformInfo.transformFile &&
-    !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())
+    effectiveTransform.transformFile &&
+    !['helper-generated', 'helper-cache'].includes((effectiveTransform.transformSource || '').toLowerCase())
   );
 
   const configPayload: Record<string, any> = {
     primary: primaryOrdering.sortedFiles,
     secondary: secondaryOrdering.sortedFiles,
-    transform: transformInfo.matrix,
-    transformFile: transformInfo.transformFile,
+    transform: effectiveTransform.matrix,
+    transformFile: effectiveTransform.transformFile,
     invertTransformFile,
     interpolation: 'linear',
     sliceIndex: 0,
@@ -889,9 +897,9 @@ async function ensureDerivedSeries(
     secondarySeriesId,
     registrationId: transformKey,
     transformDigest,
-    transformSource: transformInfo.transformSource || null,
-    transformFile: transformInfo.transformFile || null,
-    matrix: transformInfo.matrix || null,
+    transformSource: effectiveTransform.transformSource || transformInfo.transformSource || null,
+    transformFile: effectiveTransform.transformFile || null,
+    matrix: effectiveTransform.matrix || transformInfo.matrix || null,
     createdAt: new Date().toISOString(),
     directory: path.relative(process.cwd(), derivedSeries.directory),
     orderingVersion: DERIVED_MANIFEST_VERSION,
