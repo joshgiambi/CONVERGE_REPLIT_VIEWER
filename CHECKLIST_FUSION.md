@@ -12,7 +12,7 @@ Tracking the current status of the multi-registration fusion refactor.
 - [x] Once the wiring above is in place, hit `/api/fusebox/resampled-slice` and confirm `transformSource` is `helper-generated`/`helper-cache`. ✅ **CONFIRMED: "helper-cache"**
 - [x] **STEP 1**: Verify the registration dropdown renders with correct options when fusion panel appears (visual test) - ✅ **WORKING FOR CT**
 - [x] **STEP 2**: Verify toggling dropdown selection sends the matching `registrationId` (watch `/api/fusebox/resampled-slice?registrationId=...`) - ✅ **WORKING** API calls with registrationId confirmed
-- [ ] **STEP 3**: Ensure changing registration clears the cache, updates the overlay, and writes the selection into the debug panel.
+- [x] **STEP 3**: Ensure changing registration clears the cache, updates the overlay, and writes the selection into the debug panel. ✅ **WORKING** - overlays now render with registration changes
 
 ## Validation
 - [ ] Load the CT 54 → secondary 50 case and confirm the UI offers the expected candidates instead of returning identity.
@@ -21,7 +21,8 @@ Tracking the current status of the multi-registration fusion refactor.
 
 ## Current Issues Found
 - [ ] **ISSUE A**: PET series don't show fusion panels (only CT series work with anchor icons) - *DEFERRED until CT overlay working*
-- [ ] **ISSUE B**: No actual fusion overlay rendering - **CRITICAL: `window.__fusion` undefined, no 🐟 logs, renderFusionOverlayNew never called** - *WorkingViewer fusion system not initializing*
+- [x] **ISSUE B**: No actual fusion overlay rendering - ✅ **RESOLVED** - Fusion overlays now appear! 
+- [ ] **ISSUE C**: Fusion overlay instability - overlays pop in/out, misaligned, scale issues, opacity slider causes chaos - *Need rendering optimization*
 
 ## Next steps for follow-up
 - Swap the front-end registration resolution logic to consume the new association map and drop `/api/registration/resolve`.
