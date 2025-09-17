@@ -252,6 +252,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
   const fusionSecondaryPrefetchRef = useRef<Set<string>>(new Set());
   const fusionDerivedPrefetchRef = useRef<Set<string>>(new Set());
+  const derivedManifestRef = useRef<Map<string, DerivedSeriesManifest>>(new Map());
+
+  const manifestKeyFor = useCallback((secondaryId: number, registrationId: string | null) => (
+    `${secondaryId}:${registrationId ?? ''}`
+  ), []);
+
+  const getDerivedManifest = useCallback(async (
+    secondaryId: number,
+    registrationId: string | null,
+  ): Promise<DerivedSeriesManifest> => {
+    const key = manifestKeyFor(secondaryId, registrationId);
+    const cached = derivedManifestRef.current.get(key);
+    if (cached) return cached;
+    const manifest = await ensureDerivedSeriesManifest(
+      seriesId,
+      secondaryId,
+      registrationId ?? undefined,
+    );
+    derivedManifestRef.current.set(key, manifest);
+    return manifest;
+  }, [manifestKeyFor, seriesId]);
 
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
@@ -527,36 +548,34 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const limited = candidates.slice(0, FUSION_PREFETCH_SECONDARY_LIMIT);
     if (!limited.length) return;
 
-    const ensureDerivedSeries = (secondaryId: number, registrationId: string | null) => {
-      const key = `${secondaryId}:${registrationId ?? ''}`;
-      if (fusionDerivedPrefetchRef.current.has(key)) return;
-      fusionDerivedPrefetchRef.current.add(key);
-
-      fetch('/api/fusebox/derived-series', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          primarySeriesId: seriesId,
-          secondarySeriesId: secondaryId,
-          registrationId,
-        }),
-        keepalive: true,
-      }).catch((error) => {
-        if (import.meta.env.DEV) {
-          console.warn('Fusebox derived-series warmup failed', { secondaryId, registrationId, error });
-        }
-      });
-    };
-
     const schedule = (secondaryId: number, registrationId: string | null, modality: string) => {
-      const taskKey = `${secondaryId}:${registrationId ?? ''}`;
+      const taskKey = manifestKeyFor(secondaryId, registrationId);
       if (fusionSecondaryPrefetchRef.current.has(taskKey)) return;
       fusionSecondaryPrefetchRef.current.add(taskKey);
 
-      ensureDerivedSeries(secondaryId, registrationId);
-
       (async () => {
         try {
+          let manifest: DerivedSeriesManifest | null = null;
+          const manifestCacheKey = manifestKeyFor(secondaryId, registrationId);
+          if (!fusionDerivedPrefetchRef.current.has(manifestCacheKey)) {
+            fusionDerivedPrefetchRef.current.add(manifestCacheKey);
+          }
+          try {
+            manifest = await getDerivedManifest(secondaryId, registrationId);
+          } catch (manifestError) {
+            manifest = null;
+            derivedManifestRef.current.delete(manifestCacheKey);
+            if (import.meta.env.DEV) {
+              console.warn('Failed to warm derived manifest, falling back to helper', {
+                secondaryId,
+                registrationId,
+                manifestError,
+              });
+            }
+          } finally {
+            fusionDerivedPrefetchRef.current.delete(manifestCacheKey);
+          }
+
           let processed = 0;
           for (const sop of sopList) {
             if (processed >= FUSION_PREFETCH_SECONDARY_SLICE_LIMIT) {
@@ -576,7 +595,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 secondarySeriesId: secondaryId,
                 sopInstanceUID: sop,
                 registrationId: registrationId ?? undefined,
-              });
+              }, { derivedManifest: manifest ?? undefined, fallbackToHelper: true });
               const prepared = convertSliceToCanvas(slice, modality || secondaryModality);
               if (prepared) {
                 fuseboxCacheRef.current.set(cacheKey, { ...prepared, timestamp: Date.now() });
@@ -611,7 +630,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [
     buildFuseboxCacheKey,
     convertSliceToCanvas,
+    getDerivedManifest,
     images,
+    manifestKeyFor,
     registrationOptions,
     secondaryModality,
     secondarySeriesId,
@@ -622,6 +643,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => {
       fuseboxCacheRef.current.clear();
       clearFuseboxCache();
+      derivedManifestRef.current.clear();
+      fusionDerivedPrefetchRef.current.clear();
+      fusionSecondaryPrefetchRef.current.clear();
+      fusionPrefetchSetRef.current.clear();
     };
   }, []);
 
@@ -3345,6 +3370,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fuseboxCacheRef.current.clear();
     clearFuseboxCache();
     setFuseboxTransformSource(null);
+    derivedManifestRef.current.clear();
     scheduleRender();
   }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
 
@@ -3354,6 +3380,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setFuseboxTransformSource(null);
       fuseboxCacheRef.current.clear();
       clearFuseboxCache();
+      derivedManifestRef.current.clear();
       return;
     }
 
@@ -4671,12 +4698,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     if (!cached) {
       try {
+        let manifest: DerivedSeriesManifest | null = null;
+        try {
+          manifest = await getDerivedManifest(secondarySeriesId, selectedRegistrationId ?? null);
+        } catch (manifestError) {
+          if (import.meta.env.DEV) {
+            console.warn('Derived manifest unavailable, falling back to helper', {
+              secondarySeriesId,
+              registrationId: selectedRegistrationId,
+              manifestError,
+            });
+          }
+          derivedManifestRef.current.delete(manifestKeyFor(secondarySeriesId, selectedRegistrationId ?? null));
+        }
+
         const slice = await fetchFuseboxSlice({
           primarySeriesId: seriesId,
           secondarySeriesId,
           sopInstanceUID: primaryImage.sopInstanceUID,
           registrationId: selectedRegistrationId ?? undefined,
-        });
+        }, { derivedManifest: manifest ?? undefined, fallbackToHelper: true });
 
         if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {
           setSelectedRegistrationId(slice.registrationId);

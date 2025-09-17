@@ -639,6 +639,88 @@ function computePhysicalOrdering(imagesList: any[], filePaths: string[]): Physic
   };
 }
 
+function loadDerivedSlice(filePath: string) {
+  if (!fs.existsSync(filePath)) {
+    throw createFuseboxError('FUSEBOX_DERIVED_FILE_MISSING', 'Derived slice file missing', { filePath });
+  }
+
+  const buffer = fs.readFileSync(filePath);
+  const byteArray = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const dataSet = dicomParser.parseDicom(byteArray);
+
+  const rows = dataSet.uint16('x00280010') || 0;
+  const columns = dataSet.uint16('x00280011') || 0;
+  const samplesPerPixel = dataSet.uint16('x00280002') || 1;
+  const bitsAllocated = dataSet.uint16('x00280100') || 16;
+  const pixelRepresentation = dataSet.uint16('x00280103') || 0; // 0 unsigned, 1 signed
+  const slope = parseFloat(dataSet.string('x00281053') || '1') || 1;
+  const intercept = parseFloat(dataSet.string('x00281052') || '0') || 0;
+
+  if (!rows || !columns) {
+    throw createFuseboxError('FUSEBOX_DERIVED_INVALID', 'Derived slice missing dimensions', { filePath });
+  }
+  if (samplesPerPixel !== 1) {
+    throw createFuseboxError('FUSEBOX_DERIVED_UNSUPPORTED', 'Only single-sample derived images supported', {
+      samplesPerPixel,
+    });
+  }
+
+  const pixelDataElement = dataSet.elements.x7fe00010;
+  if (!pixelDataElement) {
+    throw createFuseboxError('FUSEBOX_DERIVED_NO_PIXEL_DATA', 'Derived slice missing pixel data', { filePath });
+  }
+
+  const bytesPerSample = bitsAllocated / 8;
+  const length = rows * columns;
+  let view: Iterable<number>;
+
+  const offset = pixelDataElement.dataOffset + buffer.byteOffset;
+  if (bitsAllocated === 16) {
+    if (pixelRepresentation === 1) {
+      view = new Int16Array(buffer.buffer, offset, length);
+    } else {
+      view = new Uint16Array(buffer.buffer, offset, length);
+    }
+  } else if (bitsAllocated === 32) {
+    if (pixelRepresentation === 1) {
+      view = new Int32Array(buffer.buffer, offset, length);
+    } else {
+      view = new Uint32Array(buffer.buffer, offset, length);
+    }
+  } else if (bitsAllocated === 8) {
+    view = new Uint8Array(buffer.buffer, offset, length);
+  } else {
+    throw createFuseboxError('FUSEBOX_DERIVED_UNSUPPORTED_BITS', 'Unsupported bits allocated in derived slice', {
+      bitsAllocated,
+    });
+  }
+
+  const floatPixels = new Float32Array(length);
+  let min = Infinity;
+  let max = -Infinity;
+  let index = 0;
+  for (const sample of view) {
+    const value = sample * slope + intercept;
+    floatPixels[index] = value;
+    if (value < min) min = value;
+    if (value > max) max = value;
+    index += 1;
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    min = 0;
+    max = 1;
+  }
+
+  const data = Buffer.from(floatPixels.buffer, floatPixels.byteOffset, floatPixels.byteLength).toString('base64');
+  return {
+    width: columns,
+    height: rows,
+    min,
+    max,
+    data,
+  };
+}
+
 async function collectSeriesFiles(seriesId: number): Promise<string[]> {
   const images = await storage.getImagesBySeriesId(seriesId);
   if (!images?.length) return [];
@@ -4053,6 +4135,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
         context: err?.context,
       });
       return res.status(status).json({ error: err?.message || 'Failed to generate derived series' });
+    }
+  });
+
+  app.get("/api/fusebox/derived-slice", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      const secondarySeriesId = Number(req.query.secondarySeriesId);
+      const primarySOP = String(req.query.primarySOP || '');
+      const requestedRegistrationId = typeof req.query.registrationId === 'string' ? req.query.registrationId : undefined;
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId) || !primarySOP) {
+        return res.status(400).json({ error: 'primarySeriesId, secondarySeriesId, and primarySOP are required' });
+      }
+
+      const primarySeries = await storage.getSeriesById(primarySeriesId);
+      const secondarySeries = await storage.getSeriesById(secondarySeriesId);
+      if (!primarySeries || !secondarySeries) {
+        return res.status(404).json({ error: 'Series not found' });
+      }
+
+      const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
+      if (!primaryImages.length) {
+        return res.status(404).json({ error: 'Primary series has no images' });
+      }
+
+      const sliceIndex = primaryImages.findIndex((img: any) => img.sopInstanceUID === primarySOP);
+      if (sliceIndex === -1) {
+        return res.status(404).json({ error: 'Primary SOP not found in series' });
+      }
+
+      const primaryFiles = await collectSeriesFiles(primarySeriesId);
+      const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
+      if (!primaryFiles.length || !secondaryFiles.length) {
+        return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
+      }
+
+      const { manifest } = await ensureDerivedSeries(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      const primaryOrdering = computePhysicalOrdering(primaryImages, primaryFiles);
+      const physicalIndex = primaryOrdering.mapInstanceToPhysical.get(sliceIndex) ?? sliceIndex;
+      if (physicalIndex < 0 || physicalIndex >= manifest.sliceCount) {
+        return res.status(404).json({ error: 'Derived slice index out of range' });
+      }
+
+      const derivedDir = path.isAbsolute(manifest.directory)
+        ? manifest.directory
+        : path.join(process.cwd(), manifest.directory);
+      const fileName = manifest.files?.[physicalIndex];
+      if (!fileName) {
+        return res.status(404).json({ error: 'Derived slice file missing' });
+      }
+
+      const filePath = path.join(derivedDir, fileName);
+      const encoded = loadDerivedSlice(filePath);
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        ...encoded,
+        sliceIndex: physicalIndex,
+        secondaryModality: manifest.modality || secondarySeries.modality || null,
+        registrationFile: manifest.transformFile || null,
+        transformSource: manifest.transformSource || 'derived-cache',
+        registrationId: manifest.registrationId || requestedRegistrationId || null,
+      });
+    } catch (err: any) {
+      if (err?.code && String(err.code).startsWith('FUSEBOX_')) {
+        logger.error(`Fusebox derived-slice error: ${err?.message || String(err)}`);
+        return res.status(422).json({ error: err?.message || 'Fusebox derived slice failed' });
+      }
+      logger.error(`Fusebox derived-slice failure: ${err?.message || String(err)}`);
+      return res.status(500).json({ error: 'Fusebox derived slice failed', details: err?.message || String(err) });
     }
   });
 

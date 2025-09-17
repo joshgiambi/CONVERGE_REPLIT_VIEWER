@@ -47,6 +47,7 @@ Notes:
 - The `/api/fusebox/resampled-slice` response now includes `transformSource` (`helper-generated`, `helper-cache`, or `matrix`) so the UI can surface helper fallbacks inline.
 - Resampler now sorts DICOM filenames by physical slice normal before loading; log output prints modality/FoR and z-range so physical alignment regressions are visible immediately.
 - New backend helper `/api/fusebox/derived-series` writes cached derived stacks (`storage/patients/<id>/derived/...`) and returns manifest metadata for preloading.
+- Added `/api/fusebox/derived-slice` to stream derived stack slices without invoking the Python helper, enabling the viewer to reuse cached DICOM data.
 - Documented next-step expectations for registration ingestion below; update once implemented.
 
 ## Registration Pipeline – Remaining Work
