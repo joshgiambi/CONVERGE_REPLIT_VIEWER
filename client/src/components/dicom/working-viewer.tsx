@@ -238,6 +238,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [regDetailsText, setRegDetailsText] = useState('');
   const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
   const fusionIssueRef = useRef<string | null>(null);
+  const missingMatrixLogRef = useRef(false);
   const fuseboxCacheRef = useRef<Map<string, {
     canvas: HTMLCanvasElement;
     slice: FuseboxSlice;
@@ -391,8 +392,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!fusionIssueRef.current) {
         if (!secondarySeriesId) {
           derivedReason = 'no-secondary-series';
-        } else if (!registrationMatrix || registrationMatrix.length !== 16) {
-          derivedReason = 'no-registration-matrix';
         } else if (cacheSnapshot.length === 0) {
           derivedReason = 'waiting-for-cache';
         } else {
@@ -419,6 +418,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Assign to window for debugging
       (window as any).__fusion = debug;
+      console.log('🐟 FUSION: Assigned debug to window.__fusion', debug.reason);
       
       return JSON.stringify(debug, null, 2);
     } catch (e) {
@@ -4349,16 +4349,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, []);
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+    console.log('🐟 FUSION: renderFusionOverlayNew START', {
+      secondarySeriesId, 
+      fusionOpacity,
+      registrationOptions: registrationOptions.length,
+      selectedRegistrationId
+    });
+    
     if (!secondarySeriesId || fusionOpacity === 0) {
+      console.log('🐟 FUSION: Early exit - no secondary or zero opacity');
       setFuseboxTransformSource(null);
       return;
     }
 
-    if (!registrationMatrix || registrationMatrix.length !== 16) {
-      fusionIssueRef.current = 'no-registration-matrix';
-      setFuseboxTransformSource(null);
-      return;
-    }
+    const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
 
     if (!primaryImage?.sopInstanceUID) {
       setFuseboxTransformSource(null);
@@ -4368,6 +4372,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const transform = ctTransform.current;
     if (!transform) {
       return;
+    }
+
+    if (hasRegistrationMatrix) {
+      missingMatrixLogRef.current = false;
+    } else if (!missingMatrixLogRef.current) {
+      pushFusionLog('Proceeding without client-side matrix; expecting helper output', {
+        primary: seriesId,
+        secondary: secondarySeriesId,
+        registrationId: selectedRegistrationId ?? null,
+      });
+      missingMatrixLogRef.current = true;
     }
 
     const cacheKey = `${primaryImage.sopInstanceUID}:${secondarySeriesId}:${selectedRegistrationId ?? 'default'}`;
