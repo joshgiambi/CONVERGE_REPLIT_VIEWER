@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, fuseboxSliceToImageData } from "@/lib/fusion-utils";
+import { getFusedSlice, fuseboxSliceToImageData, clearFusionCaches } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
@@ -493,6 +493,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     return () => {
       fuseboxCacheRef.current.clear();
+      clearFusionCaches();
     };
   }, []);
 
@@ -564,6 +565,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleRegistrationSelect = useCallback((registrationId: string | null) => {
     setSelectedRegistrationId(registrationId);
     fuseboxCacheRef.current.clear();
+    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRenderRef.current?.();
   }, []);
@@ -3229,6 +3231,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
+    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRender();
   }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
@@ -3238,6 +3241,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setSecondaryModality('MR');
       setFuseboxTransformSource(null);
       fuseboxCacheRef.current.clear();
+      clearFusionCaches();
       return;
     }
 
@@ -3254,6 +3258,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
 
     fuseboxCacheRef.current.clear();
+    clearFusionCaches();
     loadMetadata();
 
     return () => {

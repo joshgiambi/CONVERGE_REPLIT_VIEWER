@@ -127,25 +127,40 @@ export function unionContoursSimple(
 export function unionMultipleContoursSimple(contours: number[][]): number[][] {
   if (contours.length === 0) return [];
   if (contours.length === 1) return contours;
-  
+
   try {
     console.log('🔹 Union multiple contours:', contours.length);
+
+    // Convert and iteratively union into an accumulated MultiPolygon
+    type Ring = [number, number][];
+    type Polygon = Ring[];
+    type MultiPolygon = Polygon[];
     
-    // Use iterative approach - union pairs
-    let result = contours[0];
+    const toPolygon = (c: number[]): Polygon => [contourToPolygon(c)];
+    const toMultiPolygon = (c: number[]): MultiPolygon => [toPolygon(c)];
+
+    const z = contours[0][2] || 0;
+    let accum: MultiPolygon = toMultiPolygon(contours[0]);
     for (let i = 1; i < contours.length; i++) {
-      const unionResult = unionContoursSimple(result, contours[i]);
-      if (unionResult.length > 0) {
-        result = unionResult[0]; // Take first result
+      const nextMp: MultiPolygon = toMultiPolygon(contours[i]);
+      accum = polygonClipping.union(accum as any, nextMp as any) as MultiPolygon;
+    }
+
+    // Convert only outer rings of each polygon back to contours (ignore holes)
+    const resultContours: number[][] = [];
+    for (const polygon of accum) {
+      const outer: Ring | undefined = polygon[0];
+      if (outer && outer.length >= 3) {
+        resultContours.push(polygonToContour(outer, z));
       }
     }
-    
-    console.log('🔹 ✅ Multiple union completed');
-    return [result];
-    
+
+    console.log('🔹 ✅ Multiple union completed with', resultContours.length, 'blob(s)');
+    return resultContours;
+
   } catch (error) {
     console.error('🔹 ❌ Multiple union failed:', error);
-    return contours; // Return originals if operation fails
+    return contours; // Preserve originals if operation fails
   }
 }
 
