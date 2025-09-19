@@ -345,6 +345,24 @@ export function DICOMUploader() {
             title: "Import successful",
             description: `Successfully imported ${parseResult.patientPreviews?.length || 1} patients with ${parseResult.data?.length || 0} images.`,
           });
+
+          // Post-import cleanup of orphan/derived series for imported patients
+          try {
+            if (matchingTriage.parseResult?.patientPreviews?.length) {
+              const previews = matchingTriage.parseResult.patientPreviews as any[];
+              // Fetch current patients to map DICOM patientID -> DB id
+              const patientsResp = await fetch('/api/patients');
+              const patientsList = patientsResp.ok ? await patientsResp.json() : [];
+              for (const p of previews) {
+                const dicomId = p.patientId || p.patientID || p.id;
+                if (!dicomId) continue;
+                const match = patientsList.find((row: any) => String(row.patientID) === String(dicomId));
+                if (match?.id) {
+                  try { await fetch(`/api/patients/${match.id}/cleanup-series`, { method: 'POST' }); } catch {}
+                }
+              }
+            }
+          } catch {}
           
           // Track recently imported patients with timestamps
           if (parseResult.patientPreviews) {
@@ -395,6 +413,23 @@ export function DICOMUploader() {
         title: "Import successful",
         description: `Successfully imported ${parseResult.patientPreviews?.length || 0} patients with their studies and series.`,
       });
+
+      // Post-import cleanup of orphan/derived series for imported patients
+      try {
+        if (parseResult.patientPreviews?.length) {
+          const previews = parseResult.patientPreviews as any[];
+          const patientsResp = await fetch('/api/patients');
+          const patientsList = patientsResp.ok ? await patientsResp.json() : [];
+          for (const p of previews) {
+            const dicomId = p.patientId || p.patientID || p.id;
+            if (!dicomId) continue;
+            const match = patientsList.find((row: any) => String(row.patientID) === String(dicomId));
+            if (match?.id) {
+              try { await fetch(`/api/patients/${match.id}/cleanup-series`, { method: 'POST' }); } catch {}
+            }
+          }
+        }
+      } catch {}
 
       // Track recently imported patients with timestamps
       if (parseResult.patientPreviews) {

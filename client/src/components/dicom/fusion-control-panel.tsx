@@ -42,6 +42,13 @@ export function FusionControlPanel({
     return secondaryOptions.find((sec) => sec.secondarySeriesId === selectedSecondaryId) ?? null;
   }, [secondaryOptions, selectedSecondaryId]);
 
+  const manifestPreset = useMemo(() => {
+    const center = activeDescriptor?.windowCenter?.[0];
+    const width = activeDescriptor?.windowWidth?.[0];
+    if (!Number.isFinite(center) || !Number.isFinite(width)) return null;
+    return { label: 'Manifest', window: width, level: center };
+  }, [activeDescriptor?.windowCenter, activeDescriptor?.windowWidth]);
+
   const modalityPresets = useMemo(() => {
     const modality = (activeDescriptor?.secondaryModality || '').toUpperCase();
     const presetsByModality: Record<string, Array<{ label: string; window: number; level: number }>> = {
@@ -66,8 +73,12 @@ export function FusionControlPanel({
         { label: 'Low Dose', window: 3, level: 1.5 },
       ],
     };
-    return presetsByModality[modality] ?? [];
-  }, [activeDescriptor?.secondaryModality]);
+    const base = presetsByModality[modality] ?? [];
+    if (manifestPreset) {
+      return [manifestPreset, ...base];
+    }
+    return base;
+  }, [activeDescriptor?.secondaryModality, manifestPreset]);
 
   const handleOpacityChange = (values: number[]) => {
     const next = values[0];
@@ -198,6 +209,31 @@ export function FusionControlPanel({
                 </div>
               )}
             </div>
+            {activeDescriptor && (
+              <div className="mt-3 rounded-md border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
+                <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500">
+                  <span>Active Overlay Details</span>
+                  {secondaryStatuses.get(activeDescriptor.secondarySeriesId)?.status === 'ready' ? (
+                    <span className="text-emerald-300">Ready</span>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded bg-slate-800/70 px-2 py-1 font-semibold text-slate-100">
+                    {activeDescriptor.secondaryModality ?? 'Overlay'}
+                  </span>
+                  <span className="rounded bg-slate-800/70 px-2 py-1">Series {activeDescriptor.secondarySeriesId}</span>
+                  <span className="rounded bg-slate-800/70 px-2 py-1">{activeDescriptor.sliceCount} slices</span>
+                  {activeDescriptor.registrationId && (
+                    <span className="rounded bg-slate-800/70 px-2 py-1">Reg {activeDescriptor.registrationId}</span>
+                  )}
+                </div>
+                {activeDescriptor.secondarySeriesDescription && (
+                  <div className="mt-2 line-clamp-2 text-[10px] text-slate-400">
+                    {activeDescriptor.secondarySeriesDescription}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {modalityPresets.length > 0 && (

@@ -23,6 +23,7 @@ Tracking the current status of the multi-registration fusion refactor.
 - [ ] **ISSUE A**: PET series don't show fusion panels (only CT series work with anchor icons) - *DEFERRED until CT overlay working*
 - [x] **ISSUE B**: No actual fusion overlay rendering - ✅ **RESOLVED** - Fusion overlays now appear! 
 - [ ] **ISSUE C**: Fusion overlay instability - overlays pop in/out, misaligned, scale issues, opacity slider causes chaos - *Request-token guard + ITK prefetch shipped; still seeing flashing and misalignment*
+- [ ] **ISSUE D**: Regression — series dropdown still surfaces derived/resampled fusion outputs and manifest preload isn’t firing (anchor control remains inert) *(Reopened 2025-09-19 pending PET/CT sidebar + manifest gating fixes — FoR-based fallback now wired on 2025-09-19 to keep PET/MR siblings together; validate on CT 54→PT 50)*
 
 ## Overlay Stabilization Workstream
 - [x] Guard overlay requests with a session token so stale async responses can’t clobber the current slice.
@@ -69,6 +70,9 @@ Tracking the current status of the multi-registration fusion refactor.
   - [x] Refactor series dropdown + anchor/launch buttons so “Anchor” loads fused secondary and “Open” loads standalone CT without exposing derived series in the list.
   - [x] Implement manifest prefetch/preload flows that aggressively fetch all fused secondaries on initial CT load.
   - [ ] Eliminate contour flashing by syncing overlay rendering with manifest-backed image cache (investigate current re-render path).
-  - [x] Add modality-specific window/level presets (MRI, CT, PET) accessible from the fusion toolbar.
+  - [x] Add modality-specific window/level presets (MRI, CT, PET) accessible from the fusion toolbar with presets surfaced in UI and applied to overlay render path.
   - [ ] Redesign fusion toolbar to list all fused secondaries with color-coded chrome and fast switching.
   - [x] Ensure planning CT’s latest RT structure set is auto-selected while ignoring secondaries’ structure sets.
+  - [x] Hide derived/resampled secondary series from the main series dropdown; anchor toggles fused overlay using manifest, open button keeps standalone CT/MR/etc.
+  - [x] Ensure co-registered sibling series inherit fusion availability (sharing REG or FoR) including multi-MR and PET/CT pairs.
+  - [x] Confirm series dropdown labels stay concise; adjust layout so anchor button remains visible even for long study names.

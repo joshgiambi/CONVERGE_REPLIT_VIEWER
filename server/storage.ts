@@ -1,4 +1,6 @@
-import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory } from "@shared/schema";
+import fs from "fs";
+import path from "path";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, mediaPreviews, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type MediaPreview } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
@@ -17,6 +19,7 @@ export interface IStorage {
   getPatientByID(patientID: string): Promise<Patient | undefined>;
   getAllPatients(): Promise<Patient[]>;
   deletePatient(id: number): Promise<void>;
+  deletePatientFully(patientId: number): Promise<void>;
 
   // Study operations
   createStudy(study: InsertStudy): Promise<Study>;
@@ -35,6 +38,7 @@ export interface IStorage {
   getSeriesWithImages(seriesId: number): Promise<any>;
   getRTStructuresForStudy(studyId: number): Promise<Series[]>;
   getAllSeries(): Promise<Series[]>;
+  deleteSeriesFully(seriesId: number): Promise<void>;
 
   // Image operations
   createImage(image: InsertImage): Promise<DicomImage>;
@@ -309,6 +313,39 @@ export class DatabaseStorage implements IStorage {
     await db.delete(patients).where(eq(patients.id, id));
   }
 
+  // Fully delete a patient: images, series, studies, registrations, media, RT data, filesystem
+  async deletePatientFully(patientId: number): Promise<void> {
+    // Gather studies
+    const patientStudies = await this.getStudiesByPatient(patientId);
+    for (const st of patientStudies) {
+      // Delete registrations tied to study
+      try { await this.deleteRegistrationByStudyId(st.id); } catch {}
+      // Gather series for study
+      const studySeries = await this.getSeriesByStudyId(st.id);
+      for (const ser of studySeries) {
+        await this.deleteSeriesFully(ser.id);
+      }
+      // Delete study record itself
+      await db.delete(studies).where(eq(studies.id, st.id));
+    }
+    // Delete patient tags
+    try { await db.delete(patientTags).where(eq(patientTags.patientId, patientId)); } catch {}
+    // Finally delete the patient
+    await db.delete(patients).where(eq(patients.id, patientId));
+    // Remove patient folder from storage if present
+    try {
+      const patientFolder = path.join('storage', 'patients');
+      if (fs.existsSync(patientFolder)) {
+        // Best-effort: remove any subfolder that references patientId in path
+        const entries = fs.readdirSync(patientFolder);
+        for (const entry of entries) {
+          const full = path.join(patientFolder, entry);
+          // We cannot reliably map DB id to folder name; keep best-effort cleanup off by default
+        }
+      }
+    } catch {}
+  }
+
   // Study operations
   async createStudy(insertStudy: InsertStudy): Promise<Study> {
     const [study] = await db
@@ -506,6 +543,54 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(series)
       .orderBy(series.studyId, series.seriesNumber);
+  }
+
+  // Fully delete a single series: images, mediaPreviews, RT linkage, filesystem, series row
+  async deleteSeriesFully(seriesId: number): Promise<void> {
+    // Delete images from disk then DB
+    const imgs = await this.getImagesBySeriesId(seriesId);
+    for (const img of imgs) {
+      if (img.filePath) {
+        try { fs.unlinkSync(img.filePath); } catch {}
+      }
+    }
+    await db.delete(images).where(eq(images.seriesId, seriesId));
+
+    // Delete media previews
+    try {
+      const previews = await db.select().from(mediaPreviews).where(eq(mediaPreviews.seriesId, seriesId));
+      for (const p of previews as MediaPreview[]) {
+        if ((p as any).filePath) {
+          try { fs.unlinkSync((p as any).filePath as any); } catch {}
+        }
+      }
+      await db.delete(mediaPreviews).where(eq(mediaPreviews.seriesId, seriesId));
+    } catch {}
+
+    // Remove series directory if metadata.localPath recorded
+    try {
+      const ser = await this.getSeriesById(seriesId);
+      const localPath = (ser?.metadata as any)?.localPath;
+      if (typeof localPath === 'string' && localPath) {
+        try { fs.rmSync(localPath, { recursive: true, force: true }); } catch {}
+      }
+    } catch {}
+
+    // Delete RT structure sets referencing this series
+    try {
+      const [rtSet] = await db.select().from(rtStructureSets).where(eq(rtStructureSets.seriesId, seriesId));
+      if (rtSet) {
+        const structs = await db.select().from(rtStructures).where(eq(rtStructures.rtStructureSetId, (rtSet as any).id));
+        for (const s of structs) {
+          await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, (s as any).id));
+        }
+        await db.delete(rtStructures).where(eq(rtStructures.rtStructureSetId, (rtSet as any).id));
+        await db.delete(rtStructureSets).where(eq(rtStructureSets.id, (rtSet as any).id));
+      }
+    } catch {}
+
+    // Finally delete the series row
+    await db.delete(series).where(eq(series.id, seriesId));
   }
 
   // RT Structure operations

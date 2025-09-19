@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink, Bug } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink, Bug, Loader2, AlertTriangle } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -45,6 +45,8 @@ interface SeriesSelectorProps {
   secondaryLoadingStates?: Map<number, {progress: number, isLoading: boolean}>;
   currentlyLoadingSecondary?: number | null;
   fusionStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
+  fusionCandidatesByPrimary?: Map<number, number[]>;
+  fusionSiblingMap?: Map<number, Map<'PET' | 'MR', Map<number, number[]>>>;
 }
 
 export function SeriesSelector({
@@ -78,6 +80,8 @@ export function SeriesSelector({
   secondaryLoadingStates,
   currentlyLoadingSecondary,
   fusionStatuses,
+  fusionCandidatesByPrimary,
+  fusionSiblingMap,
 }: SeriesSelectorProps) {
   
   // Debug logging removed for performance
@@ -114,6 +118,39 @@ export function SeriesSelector({
   const [newStructureColor, setNewStructureColor] = useState('#FF0000');
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
+
+  const seriesById = useMemo(() => {
+    const map = new Map<number, DICOMSeries>();
+    series.forEach((entry) => {
+      if (!entry) return;
+      const numericId = Number(entry.id);
+      if (Number.isFinite(numericId)) {
+        map.set(numericId, entry);
+      }
+    });
+    return map;
+  }, [series]);
+
+  const getCandidatesForPrimary = (primaryId: number): number[] => {
+    if (fusionCandidatesByPrimary && fusionCandidatesByPrimary.has(primaryId)) {
+      return fusionCandidatesByPrimary.get(primaryId) ?? [];
+    }
+    const fallback = regAssociations?.[primaryId];
+    if (Array.isArray(fallback)) {
+      return fallback;
+    }
+    return [];
+  };
+
+  const formatSeriesLabel = (item: { seriesDescription?: string | null; seriesNumber?: number | null; id?: number }) => {
+    const rawDescription = (item.seriesDescription || '').trim();
+    const seriesNumber = typeof item.seriesNumber === 'number' ? `#${item.seriesNumber}` : null;
+    const fallback = item.id != null ? `Series ${item.id}` : 'Series';
+    const baseLabel = rawDescription.length
+      ? (rawDescription.length > 60 ? `${rawDescription.slice(0, 57)}…` : rawDescription)
+      : fallback;
+    return seriesNumber ? `${seriesNumber} · ${baseLabel}` : baseLabel;
+  };
   
   // Use external selectedForEdit if provided, otherwise use local state
   const selectedForEdit = externalSelectedForEdit !== undefined ? externalSelectedForEdit : localSelectedForEdit;
@@ -699,14 +736,15 @@ export function SeriesSelector({
                   {/* Organize series hierarchically */}
                   {(() => {
                     // Build top-level modality buckets
-                    const mrSeries = series.filter(s => s.modality === 'MR');
-                    const ptSeries = series.filter(s => s.modality === 'PT');
-                    const regSeries = series.filter(s => s.modality === 'REG');
-                    const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'REG', 'RTSTRUCT'].includes(s.modality));
+                    const modalityOf = (entry: DICOMSeries) => (entry.modality || '').toUpperCase();
+                    const mrSeries = series.filter(s => modalityOf(s) === 'MR');
+                    const ptSeries = series.filter(s => ['PT', 'PET', 'NM'].includes(modalityOf(s)));
+                    const regSeries = series.filter(s => modalityOf(s) === 'REG');
+                    const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'PET', 'NM', 'REG', 'RTSTRUCT'].includes(modalityOf(s)));
 
                     // Helper: choose a single Planning CT as the parent (if any CT exists)
                     const choosePlanningCT = () => {
-                      const allCTSeries = series.filter(s => s.modality === 'CT');
+                      const allCTSeries = series.filter(s => modalityOf(s) === 'CT');
                       if (allCTSeries.length === 0) return null;
 
                       // Gather signals
@@ -753,8 +791,74 @@ export function SeriesSelector({
                     return (
                       <>
                         {/* Primary Series (CT, MR, PT, or others) */}
-                        {primarySeries.map((seriesItem) => (
-                          <div key={seriesItem.id}>
+                        {primarySeries.map((seriesItem) => {
+                          const candidateIds = getCandidatesForPrimary(seriesItem.id);
+                          const candidateSet = new Set<number>(candidateIds);
+                          const candidateSetWithPrimary = new Set<number>(candidateSet);
+                          candidateSetWithPrimary.add(seriesItem.id);
+
+                          const perPrimarySiblingMap = fusionSiblingMap?.get(seriesItem.id);
+                          const petMapForPrimary = perPrimarySiblingMap?.get('PET');
+                          const mrMapForPrimary = perPrimarySiblingMap?.get('MR');
+
+                          const ctIdsLinkedToPet = new Set<number>();
+                          petMapForPrimary?.forEach((ctList) => {
+                            ctList.forEach((ctId) => {
+                              if (Number.isFinite(ctId)) ctIdsLinkedToPet.add(ctId);
+                            });
+                          });
+
+                          const explicitMrAssoc = mrSeries.filter((s) => candidateSet.has(s.id));
+                          const mrAssoc = explicitMrAssoc.length > 0 ? explicitMrAssoc : mrSeries;
+
+                          let ptAssoc: DICOMSeries[] = [];
+                          if (petMapForPrimary && petMapForPrimary.size) {
+                            ptAssoc = Array.from(petMapForPrimary.keys())
+                              .map((petId) => seriesById.get(petId))
+                              .filter((entry): entry is DICOMSeries => Boolean(entry));
+                          }
+                          if (!ptAssoc.length) {
+                            const explicitPtAssoc = ptSeries.filter((s) => candidateSet.has(s.id));
+                            ptAssoc = explicitPtAssoc.length > 0 ? explicitPtAssoc : ptSeries;
+                          }
+
+                          const additionalMrAssoc: DICOMSeries[] = [];
+                          if (mrMapForPrimary && mrMapForPrimary.size) {
+                            mrMapForPrimary.forEach((linkedIds, mrId) => {
+                              const mrEntry = seriesById.get(mrId);
+                              if (mrEntry && !additionalMrAssoc.includes(mrEntry)) {
+                                additionalMrAssoc.push(mrEntry);
+                              }
+                              linkedIds.forEach((linkedId) => {
+                                const linkedEntry = seriesById.get(linkedId);
+                                if (
+                                  linkedEntry &&
+                                  linkedEntry.modality &&
+                                  (linkedEntry.modality.toUpperCase() === 'MR' || linkedEntry.modality.toUpperCase() === 'PT' || linkedEntry.modality.toUpperCase() === 'PET') &&
+                                  !additionalMrAssoc.includes(linkedEntry)
+                                ) {
+                                  additionalMrAssoc.push(linkedEntry);
+                                }
+                              });
+                            });
+                          }
+
+                          const fusionReadyMr = Array.from(new Map([...mrAssoc, ...additionalMrAssoc].map((entry) => [entry.id, entry])).values());
+
+                          const ctCandidatesForPet = series.filter(
+                            (s) => modalityOf(s) === 'CT' && candidateSetWithPrimary.has(s.id),
+                          );
+
+                          const hasExplicitPetCandidates = Boolean(petMapForPrimary && petMapForPrimary.size);
+
+                          const registeredCtAssoc = series.filter((s) => {
+                            if (modalityOf(s) !== 'CT') return false;
+                            if (!candidateSet.has(s.id)) return false;
+                            if (ctIdsLinkedToPet.has(s.id)) return false;
+                            return true;
+                          });
+                          return (
+                            <div key={seriesItem.id}>
                             <div
                               className={`
                                 p-2 rounded-lg border cursor-pointer transition-all duration-200 backdrop-blur-sm
@@ -779,7 +883,7 @@ export function SeriesSelector({
                                   `}
                                 >
                                   {seriesItem.modality}
-                                  {seriesItem.modality === 'CT' && ctSeriesTop.length > 0 && seriesItem.id === ctSeriesTop[0].id ? ' • Planning' : ''}
+                                  {modalityOf(seriesItem) === 'CT' && ctSeriesTop.length > 0 && seriesItem.id === ctSeriesTop[0].id ? ' • Planning' : ''}
                                 </Badge>
                                 <span className="text-xs text-gray-400">
                                   {seriesItem.imageCount} images
@@ -790,7 +894,7 @@ export function SeriesSelector({
                                 text-sm font-medium truncate
                                 ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
                               `}>
-                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                                {formatSeriesLabel(seriesItem)}
                               </h4>
                             </div>
 
@@ -798,45 +902,77 @@ export function SeriesSelector({
                             <div className="ml-4 mt-2 space-y-1">
                               {/* Registered CT secondaries (REG-derived only; PET/CT CTs are shown under PET) */}
                               {(() => {
-                                const explicitSecIds = new Set<number>(
-                                  regAssociations && regAssociations[seriesItem.id]
-                                    ? regAssociations[seriesItem.id]
-                                    : []
-                                );
-                                if (explicitSecIds.size === 0) return null;
-                                const ctAssoc = series.filter(s => s.modality === 'CT' && explicitSecIds.has(s.id));
-                                if (ctAssoc.length === 0) return null;
+                                if (registeredCtAssoc.length === 0) return null;
                                 return (
                                   <div className="space-y-1 border-l-2 border-blue-500/30 pl-3">
                                     <div className="text-xs text-blue-300 mb-1">Registered CT</div>
-                                    {ctAssoc.map(ctS => (
-                                      <div
-                                        key={ctS.id}
-                                        className={`w-full p-2 text-left text-xs rounded-lg transition-all border ${
-                                          secondarySeriesId === ctS.id
-                                            ? 'bg-blue-500/40 border-blue-400'
-                                            : 'bg-blue-600/10 border-blue-500/30 hover:bg-blue-600/20'
-                                        }`}
-                                      >
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex items-center space-x-2 flex-1">
-                                            <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs font-semibold">CT</Badge>
-                                            <span className="truncate text-xs">{ctS.seriesDescription || 'CT Series'} ({ctS.imageCount} images)</span>
-                                          </div>
-                                          {onSecondarySeriesSelect && (
-                                            <Button
-                                              size="icon"
-                                              variant="ghost"
-                                              className="h-6 w-6 hover:bg-green-700/30"
-                                              onClick={(e) => { e.stopPropagation(); onSecondarySeriesSelect(ctS.id); }}
-                                              title="Fuse this CT"
-                                            >
-                                              <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                            </Button>
+                                    {registeredCtAssoc.map((ctS) => {
+                                      const loadingState = secondaryLoadingStates?.get(ctS.id);
+                                      const fusionStatus = fusionStatuses?.get(ctS.id);
+                                      const isLoading = Boolean(loadingState?.isLoading || fusionStatus?.status === 'loading');
+                                      const isReady = fusionStatus?.status === 'ready';
+                                      const hasError = fusionStatus?.status === 'error';
+                                      const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
+                                      const statusLabel = hasError
+                                        ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
+                                        : isLoading
+                                          ? `Preparing overlay${progress ? ` (${Math.round(progress)}%)` : ''}`
+                                          : isReady
+                                            ? 'Activate fusion overlay'
+                                            : 'Fusion overlay unavailable';
+                                      const buttonDisabled = !isReady;
+
+                                      return (
+                                        <div
+                                          key={ctS.id}
+                                          className={`relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                            secondarySeriesId === ctS.id
+                                              ? 'bg-blue-500/40 border-blue-400 shadow-lg shadow-blue-500/30'
+                                              : hasError
+                                                ? 'bg-amber-900/20 border-amber-500/40'
+                                                : 'bg-blue-600/10 border-blue-500/30 hover:bg-blue-600/20'
+                                          }`}
+                                        >
+                                          {isLoading && (
+                                            <div
+                                              className="absolute inset-0 bg-gradient-to-r from-cyan-500/30 to-cyan-400/10 transition-all duration-300"
+                                              style={{ width: `${progress}%` }}
+                                            />
                                           )}
+                                          <div className="relative z-10 flex items-center justify-between">
+                                            <div className="flex items-center space-x-2 flex-1">
+                                              <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs font-semibold">CT</Badge>
+                                              <span className="truncate text-xs">
+                                                {formatSeriesLabel(ctS)} ({ctS.imageCount} images)
+                                              </span>
+                                            </div>
+                                            {onSecondarySeriesSelect && (
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className={`h-6 w-6 ${buttonDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-green-700/30'}`}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  if (!buttonDisabled) {
+                                                    onSecondarySeriesSelect(ctS.id);
+                                                  }
+                                                }}
+                                                title={statusLabel}
+                                                disabled={buttonDisabled}
+                                              >
+                                                {isLoading ? (
+                                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
+                                                ) : hasError ? (
+                                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                                                ) : (
+                                                  <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                )}
+                                              </Button>
+                                            )}
+                                          </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 );
                               })()}
@@ -874,10 +1010,7 @@ export function SeriesSelector({
                               
                               {/* Registration and MR Series that can be fused (REG-preferred; fallback: all MR) */}
                               {(() => {
-                                const secSet = new Set<number>(regAssociations && regAssociations[seriesItem.id] ? regAssociations[seriesItem.id] : []);
-                                let mrAssoc = mrSeries.filter(s => secSet.has(s.id));
-                                if (mrAssoc.length === 0) mrAssoc = mrSeries; // fallback to all MR for patient
-                                if (mrAssoc.length === 0) return null;
+                                if (fusionReadyMr.length === 0) return null;
                                 return (
                                  <div className="space-y-1 border-l-2 border-purple-500/30 pl-3">
                                    <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
@@ -888,15 +1021,22 @@ export function SeriesSelector({
                                    </div>
                                    
                                    {/* MR Series that can be fused */}
-                                   {mrAssoc.map((mrS) => {
-                                     const loadingState = secondaryLoadingStates?.get?.(mrS.id);
+                                   {fusionReadyMr.map((mrS) => {
+                                     const loadingState = secondaryLoadingStates?.get(mrS.id);
                                      const isCurrentlyLoading = currentlyLoadingSecondary === mrS.id;
-                                     const progress = loadingState?.progress || 0;
-                                     const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                     const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
                                      const fusionStatus = fusionStatuses?.get(mrS.id);
-                                     
-                                     // Loading states handled via UI only
-                                     
+                                     const isReady = fusionStatus?.status === 'ready';
+                                     const hasError = fusionStatus?.status === 'error';
+                                     const isLoading = Boolean(loadingState?.isLoading || isCurrentlyLoading || fusionStatus?.status === 'loading');
+                                     const statusLabel = hasError
+                                       ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
+                                       : isLoading
+                                         ? `Preparing overlay${progress ? ` (${Math.round(progress)}%)` : ''}`
+                                         : isReady
+                                           ? 'Enable fusion overlay'
+                                           : 'Fusion overlay unavailable';
+
                                      return (
                                      <div
                                        key={mrS.id}
@@ -908,10 +1048,15 @@ export function SeriesSelector({
                                            ? 'bg-purple-500/20 border-purple-500 shadow-lg'
                                            : hoveredRegSeries
                                            ? 'bg-green-500/10 border-green-500/50 shadow-md'
+                                           : hasError
+                                           ? 'bg-amber-900/20 border-amber-500/40'
                                            : 'bg-purple-600/10 border-purple-500/30 hover:bg-purple-600/20'
                                          } border
                                        `}
-                                       onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(mrS.id); }}
+                                      onClick={() => {
+                                        if (!isReady) return;
+                                        if (onSecondarySeriesSelect) onSecondarySeriesSelect(mrS.id);
+                                      }}
                                      >
                                        {/* Loading progress background */}
                                        {isLoading && (
@@ -921,18 +1066,18 @@ export function SeriesSelector({
                                          />
                                        )}
                                        
-                                       <div className="relative z-10 flex items-center justify-between">
-                                         <div className="flex items-center space-x-2 flex-1">
-                                           <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                             MR
-                                           </Badge>
-                                           <span className="truncate text-xs">
-                                             {mrS.seriesDescription || 'MR Series'} ({mrS.imageCount} images)
-                                           </span>
-                                         </div>
-                                         <div className="flex items-center gap-1">
-                                           <Button
-                                             size="icon"
+                                         <div className="relative z-10 flex items-center justify-between">
+                                           <div className="flex items-center space-x-2 flex-1">
+                                             <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
+                                               MR
+                                             </Badge>
+                                             <span className="truncate text-xs">
+                                               {formatSeriesLabel(mrS)} ({mrS.imageCount} images)
+                                             </span>
+                                           </div>
+                                           <div className="flex items-center gap-1">
+                                             <Button
+                                               size="icon"
                                              variant="ghost"
                                              className="h-6 w-6 hover:bg-purple-700/30"
                                              onClick={(e) => {
@@ -944,11 +1089,11 @@ export function SeriesSelector({
                                                  onSecondarySeriesSelect(null);
                                                }
                                              }}
-                                             title="View MRI standalone"
-                                           >
-                                             <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
-                                           </Button>
-                                           {secondarySeriesId === mrS.id ? (
+                                               title="View MRI standalone"
+                                             >
+                                               <ExternalLink className="h-3.5 w-3.5 text-purple-300" />
+                                             </Button>
+                                             {secondarySeriesId === mrS.id ? (
                                              <TooltipProvider delayDuration={0}>
                                                <Tooltip>
                                                  <TooltipTrigger asChild>
@@ -975,30 +1120,32 @@ export function SeriesSelector({
                                            ) : (
                                             <TooltipProvider delayDuration={0}>
                                               <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 hover:bg-green-700/30"
-                                                    disabled={fusionStatus?.status !== 'ready'}
+                                               <TooltipTrigger asChild>
+                                                 <Button
+                                                   size="icon"
+                                                   variant="ghost"
+                                                    className={`h-6 w-6 ${isReady ? 'hover:bg-green-700/30' : 'cursor-not-allowed opacity-60'}`}
+                                                    disabled={!isReady}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
-                                                      console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
-                                                      // Toggle fusion on
                                                       if (onSecondarySeriesSelect) {
-                                                        console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
                                                         onSecondarySeriesSelect(mrS.id);
-                                                      } else {
-                                                        console.error('❌ onSecondarySeriesSelect is not defined!');
                                                       }
                                                     }}
+                                                    title={statusLabel}
                                                   >
-                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                    {isLoading ? (
+                                                      <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
+                                                    ) : hasError ? (
+                                                      <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                                                    ) : (
+                                                      <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                    )}
                                                   </Button>
                                                 </TooltipTrigger>
                                                 <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                  <p className="font-medium">Enable fusion overlay</p>
-                                                  {fusionStatus?.status !== 'ready' && (
+                                                  <p className="font-medium">{statusLabel}</p>
+                                                  {isLoading && (
                                                     <p className="text-[10px] opacity-80">Preparing fused MRI…</p>
                                                   )}
                                                 </TooltipContent>
@@ -1044,13 +1191,6 @@ export function SeriesSelector({
                               
                               {/* PET Series that can be fused with CT (REG preferred; fallback: all PET for patient) */}
                               {(() => {
-                                const secSet = new Set<number>(
-                                  regAssociations && regAssociations[seriesItem.id]
-                                    ? regAssociations[seriesItem.id]
-                                    : []
-                                );
-                                let ptAssoc = ptSeries.filter(s => secSet.has(s.id));
-                                if (ptAssoc.length === 0) ptAssoc = ptSeries;
                                 if (ptAssoc.length === 0) return null;
                                 return (
                                   <div className="space-y-1 border-l-2 border-yellow-500/30 pl-3">
@@ -1063,13 +1203,44 @@ export function SeriesSelector({
                                     
                                     {/* PT + Related CT cards as siblings */}
                                    {ptAssoc.flatMap((ptS) => {
-                                     const ctSiblings = series.filter(s => s.modality === 'CT' && s.studyId === ptS.studyId && s.id !== seriesItem.id);
-                                     const loadingState = secondaryLoadingStates?.get?.(ptS.id);
+                                     const ptStudyIdNumber = Number(ptS?.studyId);
+                                     let ctSiblings: DICOMSeries[] = [];
+
+                                     const linkedCtIds = petMapForPrimary?.get(ptS.id) ?? null;
+                                     if (linkedCtIds && linkedCtIds.length) {
+                                       ctSiblings = linkedCtIds
+                                         .map((ctId) => (Number.isFinite(ctId) ? seriesById.get(Number(ctId)) : undefined))
+                                         .filter((entry): entry is DICOMSeries => Boolean(entry))
+                                         .filter((ctEntry) => ctEntry.id !== seriesItem.id);
+                                     }
+
+                                     if (!ctSiblings.length && hasExplicitPetCandidates) {
+                                       ctSiblings = series.filter((ctCandidate) => {
+                                         if (modalityOf(ctCandidate) !== 'CT') return false;
+                                         if (ctCandidate.id === seriesItem.id) return false;
+                                         if (!candidateSetWithPrimary.has(ctCandidate.id)) return false;
+                                         const ctStudyIdNumber = Number(ctCandidate?.studyId);
+                                         if (!Number.isFinite(ptStudyIdNumber) || !Number.isFinite(ctStudyIdNumber)) {
+                                           return false;
+                                         }
+                                         return ctStudyIdNumber === ptStudyIdNumber;
+                                       });
+                                     }
+                                     const loadingState = secondaryLoadingStates?.get(ptS.id);
                                      const isCurrentlyLoading = currentlyLoadingSecondary === ptS.id;
-                                     const progress = loadingState?.progress || 0;
-                                     const isLoading = loadingState?.isLoading || isCurrentlyLoading;
                                      const fusionStatus = fusionStatuses?.get(ptS.id);
-                                     
+                                     const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
+                                     const isLoading = Boolean(loadingState?.isLoading || isCurrentlyLoading || fusionStatus?.status === 'loading');
+                                     const isReady = fusionStatus?.status === 'ready';
+                                     const hasError = fusionStatus?.status === 'error';
+                                     const statusLabel = hasError
+                                       ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
+                                       : isLoading
+                                         ? (progress ? `Preparing overlay (${Math.round(progress)}%)` : 'Preparing overlay')
+                                         : isReady
+                                           ? 'Enable PET fusion'
+                                           : 'Fusion overlay unavailable';
+
                                        const petCard = (
                                        <div
                                          key={`pt-${ptS.id}`}
@@ -1079,12 +1250,17 @@ export function SeriesSelector({
                                              ? 'bg-yellow-500/40 border-yellow-400 shadow-lg ring-2 ring-yellow-400/50'
                                              : selectedSeries?.id === ptS.id
                                              ? 'bg-yellow-500/20 border-yellow-500 shadow-lg'
+                                             : hasError
+                                             ? 'bg-amber-900/20 border-amber-500/40'
                                              : hoveredRegSeries
                                              ? 'bg-green-500/10 border-green-500/50 shadow-md'
                                              : 'bg-yellow-600/10 border-yellow-500/30 hover:bg-yellow-600/20'
                                            } border
                                          `}
-                                         onClick={() => { if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }}
+                                         onClick={() => {
+                                           if (!isReady) return;
+                                           if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id);
+                                         }}
                                        >
                                          {/* Loading progress background */}
                                          {isLoading && (
@@ -1097,7 +1273,7 @@ export function SeriesSelector({
                                          <div className="relative z-10 flex items-center justify-between">
                                            <div className="flex items-center space-x-2 flex-1">
                                              <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">PT</Badge>
-                                             <span className="truncate text-xs">{ptS.seriesDescription || 'PET Series'} ({ptS.imageCount} images)</span>
+                                           <span className="truncate text-xs">{formatSeriesLabel(ptS)} ({ptS.imageCount} images)</span>
                                            </div>
                                            <div className="flex items-center gap-1">
                                              <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-yellow-700/30"
@@ -1122,19 +1298,30 @@ export function SeriesSelector({
                                                      <Button
                                                        size="icon"
                                                        variant="ghost"
-                                                       className="h-6 w-6 hover:bg-green-700/30"
-                                                       disabled={fusionStatus?.status !== 'ready'}
-                                                       onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }}
-                                                       title="Enable PET fusion"
+                                                       className={`h-6 w-6 ${isReady ? 'hover:bg-green-700/30' : 'cursor-not-allowed opacity-60'}`}
+                                                       disabled={!isReady}
+                                                       onClick={(e) => {
+                                                         e.stopPropagation();
+                                                         if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id);
+                                                       }}
+                                                       title={statusLabel}
                                                      >
-                                                       <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                       {isLoading ? (
+                                                         <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
+                                                       ) : hasError ? (
+                                                         <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                                                       ) : (
+                                                         <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                       )}
                                                      </Button>
                                                    </TooltipTrigger>
                                                    <TooltipContent className="bg-gradient-to-r from-green-500/80 to-emerald-600/80 backdrop-blur-lg border-green-400/40 text-white">
-                                                     <p className="text-xs font-semibold">Enable PET/CT fusion overlay</p>
-                                                     {fusionStatus?.status !== 'ready'
-                                                       ? <p className="text-[10px] opacity-80">Preparing fused PET…</p>
-                                                       : <p className="text-[10px] opacity-80">Projects PET signals onto the planning CT</p>}
+                                                     <p className="text-xs font-semibold">{statusLabel}</p>
+                                                     {isLoading ? (
+                                                       <p className="text-[10px] opacity-80">Preparing fused PET…</p>
+                                                     ) : isReady ? (
+                                                       <p className="text-[10px] opacity-80">Projects PET signals onto the planning CT</p>
+                                                     ) : null}
                                                    </TooltipContent>
                                                  </Tooltip>
                                                </TooltipProvider>
@@ -1143,43 +1330,66 @@ export function SeriesSelector({
                                          </div>
                                        </div>
                                      );
-                                       const ctCards = ctSiblings.map(ctS => {
-                                         const rtForCt = (rtSeries || []).filter((rtS: any) => rtS.referencedSeriesId === ctS.id);
-                                         const loadingState = secondaryLoadingStates?.get?.(ctS.id);
-                                         const isCurrentlyLoading = currentlyLoadingSecondary === ctS.id;
-                                         const progress = loadingState?.progress || 0;
-                                         const isLoading = loadingState?.isLoading || isCurrentlyLoading;
-                                         const fusionStatusCt = fusionStatuses?.get(ctS.id);
-                                         
-                                         return (
-                                           <div key={`ptct-${ptS.id}-${ctS.id}`} className="space-y-1">
-                                             <div
-                                               className={`relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all border ${
-                                                 secondarySeriesId === ctS.id
-                                                   ? 'bg-blue-500/40 border-blue-300 shadow-lg ring-2 ring-blue-300/50'
-                                                   : selectedSeries?.id === ctS.id
+
+                                     const ctCards = ctSiblings.map((ctS) => {
+                                       const rtForCt = (rtSeries || []).filter((rtS: any) => rtS.referencedSeriesId === ctS.id);
+                                       const loadingState = secondaryLoadingStates?.get(ctS.id);
+                                       const isCurrentlyLoading = currentlyLoadingSecondary === ctS.id;
+                                       const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
+                                       const fusionStatusCt = fusionStatuses?.get(ctS.id);
+                                       const isReadyCt = fusionStatusCt?.status === 'ready';
+                                       const hasErrorCt = fusionStatusCt?.status === 'error';
+                                       const isLoadingCt = Boolean(loadingState?.isLoading || isCurrentlyLoading || fusionStatusCt?.status === 'loading');
+                                       const statusLabelCt = hasErrorCt
+                                         ? `Fusion failed${fusionStatusCt?.error ? `: ${fusionStatusCt.error}` : ''}`
+                                         : isLoadingCt
+                                           ? (progress ? `Preparing overlay (${Math.round(progress)}%)` : 'Preparing overlay')
+                                           : isReadyCt
+                                             ? 'Activate fusion overlay'
+                                             : 'Fusion overlay unavailable';
+
+                                       return (
+                                         <div key={`ptct-${ptS.id}-${ctS.id}`} className="space-y-1">
+                                           <div
+                                             className={`relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                               secondarySeriesId === ctS.id
+                                                 ? 'bg-blue-500/40 border-blue-300 shadow-lg ring-2 ring-blue-300/50'
+                                                 : selectedSeries?.id === ctS.id
                                                    ? 'bg-blue-500/25 border-blue-300 shadow-lg'
-                                                   : 'bg-blue-500/15 border-blue-400/50 hover:bg-blue-500/20'
-                                               }`}
-                                               onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }}
-                                             >
-                                               {/* Loading progress background */}
-                                               {isLoading && (
-                                                 <div 
-                                                   className="absolute inset-0 bg-gradient-to-r from-blue-500/40 to-blue-500/10 transition-all duration-300"
-                                                   style={{ width: `${progress}%` }}
-                                                 />
-                                               )}
-                                               
-                                               <div className="relative z-10 flex items-center justify-between">
+                                                   : hasErrorCt
+                                                     ? 'bg-amber-900/20 border-amber-500/40'
+                                                     : 'bg-blue-500/15 border-blue-400/50 hover:bg-blue-500/20'
+                                             }`}
+                                             onClick={(e) => {
+                                               e.stopPropagation();
+                                               if (!isReadyCt) return;
+                                               if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id);
+                                             }}
+                                           >
+                                             {isLoadingCt && (
+                                               <div
+                                                 className="absolute inset-0 bg-gradient-to-r from-blue-500/40 to-blue-500/10 transition-all duration-300"
+                                                 style={{ width: `${progress}%` }}
+                                               />
+                                             )}
+
+                                             <div className="relative z-10 flex items-center justify-between">
                                                <div className="flex items-center space-x-2 flex-1">
                                                  <Badge variant="outline" className="border-blue-400 text-blue-300 text-xs font-semibold">CT</Badge>
-                                                 <span className="truncate text-xs">{ctS.seriesDescription || 'CT Series'} ({ctS.imageCount} images)</span>
+                                                 <span className="truncate text-xs">{formatSeriesLabel(ctS)} ({ctS.imageCount} images)</span>
                                                </div>
                                                <div className="flex items-center gap-1">
-                                                 <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-blue-700/30"
-                                                   onClick={(e) => { e.stopPropagation(); onSeriesSelect(ctS); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
-                                                   title="View CT standalone">
+                                                 <Button
+                                                   size="icon"
+                                                   variant="ghost"
+                                                   className="h-6 w-6 hover:bg-blue-700/30"
+                                                   onClick={(e) => {
+                                                     e.stopPropagation();
+                                                     onSeriesSelect(ctS);
+                                                     if (onSecondarySeriesSelect) onSecondarySeriesSelect(null);
+                                                   }}
+                                                   title="View CT standalone"
+                                                 >
                                                    <ExternalLink className="h-3.5 w-3.5 text-blue-300" />
                                                  </Button>
                                                  {secondarySeriesId === ctS.id ? (
@@ -1187,7 +1397,10 @@ export function SeriesSelector({
                                                      size="icon"
                                                      variant="ghost"
                                                      className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
+                                                     onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       if (onSecondarySeriesSelect) onSecondarySeriesSelect(null);
+                                                     }}
                                                      title="Disable fusion"
                                                    >
                                                      <Anchor className="h-3.5 w-3.5 text-white" />
@@ -1196,17 +1409,25 @@ export function SeriesSelector({
                                                    <Button
                                                      size="icon"
                                                      variant="ghost"
-                                                     className="h-6 w-6 hover:bg-green-700/30"
-                                                     disabled={fusionStatusCt?.status !== 'ready'}
-                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }}
-                                                     title="Fuse this CT"
+                                                     className={`h-6 w-6 ${isReadyCt ? 'hover:bg-green-700/30' : 'cursor-not-allowed opacity-60'}`}
+                                                     disabled={!isReadyCt}
+                                                     onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id);
+                                                     }}
+                                                     title={statusLabelCt}
                                                    >
-                                                     <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                     {isLoadingCt ? (
+                                                       <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
+                                                     ) : hasErrorCt ? (
+                                                       <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                                                     ) : (
+                                                       <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                     )}
                                                    </Button>
                                                  )}
                                                </div>
                                              </div>
-                                             {/* RT sets for this CT, shown within the card */}
                                              {rtForCt.length > 0 && (
                                                <div className="mt-2 pt-1 space-y-1 border-t border-green-500/20">
                                                  {rtForCt.map((rtS: any) => (
@@ -1238,8 +1459,9 @@ export function SeriesSelector({
                                 );
                               })()}
                             </div>
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                         
                         {/* MR Series as standalone when no CT present */}
                         {ctSeriesTop.length === 0 && mrSeries.length > 0 && mrSeries.map((seriesItem) => (
@@ -1276,7 +1498,7 @@ export function SeriesSelector({
                                 text-sm font-medium truncate
                                 ${selectedSeries?.id === seriesItem.id ? 'text-purple-400' : 'text-white'}
                               `}>
-                                {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
+                                {formatSeriesLabel(seriesItem)}
                               </h4>
                             </div>
                           </div>
@@ -1336,9 +1558,9 @@ export function SeriesSelector({
                                       <h4 className={`
                                         text-sm font-medium truncate
                                         ${selectedSeries?.id === seriesItem.id ? 'text-blue-400' : 'text-white'}
-                                      `}>
-                                        {seriesItem.seriesDescription || `Series ${seriesItem.seriesNumber}`}
-                                      </h4>
+                              `}>
+                                {formatSeriesLabel(seriesItem)}
+                              </h4>
                                     </div>
                                   </div>
                                 ))}

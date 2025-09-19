@@ -148,7 +148,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
     
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/patients/${patient.id}`, {
+      const response = await fetch(`/api/patients/${patient.id}?full=true`, {
         method: 'DELETE',
       });
       
@@ -161,7 +161,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
         description: `Successfully deleted ${patient.patientName} and all associated data.`,
       });
       
-      // Call the onUpdate callback to refresh the patient list
       if (onUpdate) {
         onUpdate();
       }
@@ -336,6 +335,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                     <span className="flex-1 min-w-0">Description</span>
                     <span className="w-12 text-right">Imgs</span>
                     <span className="w-16 text-right">Vendor</span>
+                    <span className="w-24 text-right">Actions</span>
                   </div>
                   {studiesWithSeries.flatMap(study => study.series)
                     .filter(s => ['CT', 'MR', 'PT', 'RTSTRUCT', 'REG'].includes(s.modality))
@@ -348,6 +348,18 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                       const isCtac = associationData?.ctacSeriesIds.includes(s.id);
                       const isCoReg = association && association.relationship === 'shared-frame';
                       const isReg = association && association.relationship === 'registered';
+
+                      const handleDeleteSeries = async () => {
+                        if (!confirm(`Delete series ${s.seriesDescription || s.id}? This removes files and DB rows.`)) return;
+                        try {
+                          const res = await fetch(`/api/series/${s.id}`, { method: 'DELETE' });
+                          if (!res.ok) throw new Error('Failed');
+                          toast({ title: 'Series deleted', description: `Series ${s.id} removed.` });
+                          if (onUpdate) onUpdate();
+                        } catch (err) {
+                          toast({ title: 'Delete failed', description: `Could not delete series ${s.id}`, variant: 'destructive' });
+                        }
+                      };
 
                       return (
                         <div 
@@ -380,6 +392,13 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                           <span className="w-12 text-gray-400 text-right text-xs">{s.imageCount}</span>
                           <span className="w-16 text-gray-500 text-right text-xs truncate">
                             {(s as any).metadata?.manufacturer?.substring(0, 6) || '--'}
+                          </span>
+                          <span className="w-24 text-right">
+                            <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-100"
+                              onClick={handleDeleteSeries}
+                            >
+                              Delete
+                            </Button>
                           </span>
                         </div>
                       );

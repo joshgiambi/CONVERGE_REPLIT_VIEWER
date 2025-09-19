@@ -447,7 +447,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const registrationId = selectedRegistrationId ?? null;
 
       for (let offset = -FUSION_PREFETCH_RADIUS; offset <= FUSION_PREFETCH_RADIUS; offset += 1) {
-        if (offset === 0) continue;
         const targetIndex = centerIndex + offset;
         if (targetIndex < 0 || targetIndex >= images.length) continue;
         const targetImage = images[targetIndex];

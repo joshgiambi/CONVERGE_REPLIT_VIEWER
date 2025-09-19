@@ -17,7 +17,7 @@ import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract }
 import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import type { RegistrationAssociation, RegistrationSeriesDetail } from '@/types/fusion';
-import type { FusionManifest } from '@/types/fusion';
+import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
 import { fetchFusionManifest, preloadFusionSecondary, getFusionManifest, clearFusionCaches } from '@/lib/fusion-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
@@ -42,6 +42,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
   const [series, setSeries] = useState<DICOMSeries[]>([]);
+  const [visibleSeries, setVisibleSeries] = useState<DICOMSeries[]>([]);
   const [regAssociations, setRegAssociations] = useState<Record<number, number[]>>({});
   const [registrationRelationshipMap, setRegistrationRelationshipMap] = useState<Map<number, RegistrationAssociation[]>>(new Map());
   // Single-view mode only; MPR uses floating windows inside WorkingViewer
@@ -79,6 +80,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [fusionManifestError, setFusionManifestError] = useState<string | null>(null);
   const [fusionManifestLoading, setFusionManifestLoading] = useState(false);
   const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
+  const fusionManifestRequestRef = useRef(0);
   
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
@@ -134,6 +136,65 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   }, [selectedForEdit, rtStructures]);
 
   // Fetch series data for all studies
+  const DERIVED_DESCRIPTION_KEYWORDS = useMemo(
+    () => [
+      'resampled',
+      're-sampled',
+      'fused',
+      'fusion',
+      'helper cache',
+      'helper-cache',
+      'fusion manifest',
+      'qa fusion',
+      'qcfx',
+      'qgfx',
+      'manifest overlay',
+      'resample cache',
+    ],
+    [],
+  );
+
+  const DERIVED_UID_MARKERS = useMemo(
+    () => ['.fused', '.fusion', '.resampled', '.resample', '_fused', '_fusion', '_resamp', '-fused', '-fusion'],
+    [],
+  );
+
+  const shouldHideSeries = useCallback(
+    (entry: any): boolean => {
+      if (!entry) return true;
+      const modality = (entry.modality || '').toUpperCase();
+
+      if (['RTSTRUCT', 'RT', 'REG'].includes(modality)) {
+        return false;
+      }
+
+      if (['DERIVED', 'SECONDARY', 'OT'].includes(modality)) {
+        return true;
+      }
+
+      const metadata = (entry?.metadata ?? {}) as Record<string, any>;
+      const description = (entry.seriesDescription || '').toLowerCase();
+      const uid = (entry.seriesInstanceUID || '').toLowerCase();
+
+      const derivedByKeywords = DERIVED_DESCRIPTION_KEYWORDS.some((keyword) => description.includes(keyword));
+      const derivedByUid = DERIVED_UID_MARKERS.some((marker) => uid.includes(marker));
+      const flaggedFusion = Boolean(metadata?.fusion);
+      const fusionCandidateModality = ['PT', 'PET', 'MR', 'NM'].includes(modality);
+
+      if (flaggedFusion && !fusionCandidateModality) {
+        return true;
+      }
+
+      if ((derivedByKeywords || derivedByUid) && !fusionCandidateModality) {
+        // Hide derived CT/resampled overlays, but keep PET/MR secondaries available.
+        return true;
+      }
+
+      return false;
+    },
+    [DERIVED_DESCRIPTION_KEYWORDS, DERIVED_UID_MARKERS],
+  );
+
   const { data: seriesData, isLoading } = useQuery({
     queryKey: ['/api/studies', studyData.studies?.map((s: any) => s.id), 'series'],
     queryFn: async () => {
@@ -147,14 +208,28 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           throw new Error(`Failed to fetch series for study ${study.id}: ${response.statusText}`);
         }
         const series = await response.json();
+        const extractFoR = (input: unknown): string | null => {
+          if (typeof input === 'string') {
+            const trimmed = input.trim();
+            return trimmed.length ? trimmed : null;
+          }
+          return null;
+        };
         // Add study info to each series for reference
-        allSeries.push(...series.map((s: any) => ({ ...s, studyId: study.id, studyDate: study.studyDate })));
+        allSeries.push(
+          ...series.map((s: any) => {
+            const foFromRoot = extractFoR(s?.frameOfReferenceUID ?? s?.frame_of_reference_uid);
+            const foFromMetadata = extractFoR(s?.metadata?.frameOfReferenceUID ?? s?.metadata?.FrameOfReferenceUID ?? s?.metadata?.frame_of_reference_uid);
+            return {
+              ...s,
+              studyId: study.id,
+              studyDate: study.studyDate,
+              frameOfReferenceUID: foFromRoot ?? foFromMetadata ?? null,
+            };
+          }),
+        );
       }
-      return allSeries.filter((series: any) => {
-        const metadata = series?.metadata ?? {};
-        const fusionMeta = metadata?.fusion;
-        return !fusionMeta;
-      });
+      return allSeries;
     },
     enabled: !!studyData.studies?.length,
   });
@@ -545,11 +620,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   useEffect(() => {
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
+      setVisibleSeries(seriesData.filter((entry) => !shouldHideSeries(entry)));
       
       // Auto-select planning CT if no series is selected yet
       if (!selectedSeries && seriesData.length > 0) {
         // Use the same planning CT selection logic as in series-selector.tsx
-        const ctSeries = seriesData.filter(s => s.modality === 'CT');
+        const ctSeries = seriesData.filter((s) => s.modality === 'CT' && !shouldHideSeries(s));
         
         if (ctSeries.length > 0) {
           // Score CT series to find the best planning CT
@@ -565,7 +641,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           };
 
           // Pick best CT by score
-          const bestCT = ctSeries.sort((a, b) => scoreCT(b) - scoreCT(a))[0];
+          const bestCT = [...ctSeries].sort((a, b) => scoreCT(b) - scoreCT(a))[0];
           if (bestCT) {
             console.log(`🎯 Auto-selecting planning CT: ${bestCT.seriesDescription} (ID: ${bestCT.id})`);
             handleSeriesSelect(bestCT);
@@ -573,7 +649,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       }
     }
-  }, [seriesData, selectedSeries]);
+  }, [seriesData, selectedSeries, shouldHideSeries]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -876,10 +952,19 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     setFusionWindowLevel(null);
   }, []);
 
+  const fusionDescriptorMap = useMemo(() => {
+    const map = new Map<number, FusionSecondaryDescriptor>();
+    if (fusionManifest?.secondaries?.length) {
+      fusionManifest.secondaries.forEach((secondary) => {
+        map.set(secondary.secondarySeriesId, secondary);
+      });
+    }
+    return map;
+  }, [fusionManifest]);
+
   const fusionSecondaryStatuses = useMemo(() => {
     const map = new Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>();
-    if (!fusionManifest) return map;
-    fusionManifest.secondaries.forEach((secondary) => {
+    fusionDescriptorMap.forEach((secondary) => {
       const loadingState = secondaryLoadingStates.get(secondary.secondarySeriesId);
       if (loadingState?.isLoading) {
         map.set(secondary.secondarySeriesId, { status: 'loading' });
@@ -894,13 +979,401 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       }
     });
     return map;
-  }, [fusionManifest, secondaryLoadingStates]);
+  }, [fusionDescriptorMap, secondaryLoadingStates]);
+
+  const seriesById = useMemo(() => {
+    const map = new Map<number, DICOMSeries>();
+    series.forEach((entry) => {
+      if (!entry) return;
+      const parsedId = Number(entry.id);
+      if (Number.isFinite(parsedId)) {
+        map.set(parsedId, entry);
+      }
+    });
+    return map;
+  }, [series]);
+
+  const visibleSeriesIdSet = useMemo(() => {
+    const set = new Set<number>();
+    visibleSeries.forEach((entry) => {
+      if (!entry) return;
+      const parsedId = Number(entry.id);
+      if (Number.isFinite(parsedId)) {
+        set.add(parsedId);
+      }
+    });
+    return set;
+  }, [visibleSeries]);
+
+  const seriesByFoR = useMemo(() => {
+    const map = new Map<string, number[]>();
+    const sanitizeFo = (value: unknown): string | null => {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length ? trimmed : null;
+      }
+      return null;
+    };
+
+    visibleSeries.forEach((entry) => {
+      if (!entry) return;
+      const id = Number(entry.id);
+      if (!Number.isFinite(id)) return;
+      const fo = sanitizeFo(entry.frameOfReferenceUID ?? (entry as any)?.metadata?.frameOfReferenceUID);
+      if (!fo) return;
+      const list = map.get(fo) ?? [];
+      list.push(id);
+      map.set(fo, list);
+    });
+
+    return map;
+  }, [visibleSeries]);
+
+  const getCandidateSecondaryIds = useCallback(
+    (primarySeriesId: number): number[] => {
+      const normalizeSeriesId = (value: unknown): number | null => {
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'bigint') {
+          const asNumber = Number(value);
+          return Number.isFinite(asNumber) ? asNumber : null;
+        }
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (!trimmed) return null;
+          const parsed = Number(trimmed);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      const allowedModalities = new Set(['CT', 'MR', 'PT', 'PET', 'NM']);
+      const candidates = new Map<number, string>();
+
+      const associations = registrationRelationshipMap.get(primarySeriesId) ?? [];
+
+      const hasPetSibling = (assoc: RegistrationAssociation): boolean => {
+        if (!Array.isArray(assoc.sourceSeriesDetails)) return false;
+        return assoc.sourceSeriesDetails.some((detail) => {
+          const modality = (detail?.modality || '').toUpperCase();
+          return modality === 'PT' || modality === 'PET';
+        });
+      };
+
+      const hasMrSibling = (assoc: RegistrationAssociation): boolean => {
+        if (!Array.isArray(assoc.sourceSeriesDetails)) return false;
+        return assoc.sourceSeriesDetails.some((detail) => {
+          const modality = (detail?.modality || '').toUpperCase();
+          return modality === 'MR';
+        });
+      };
+
+      const tryAddCandidate = (
+        value: unknown,
+        association: RegistrationAssociation | null,
+        options?: { isSibling?: boolean; detail?: RegistrationSeriesDetail | null },
+      ) => {
+        const normalizedId = normalizeSeriesId(value);
+        if (normalizedId == null || normalizedId === primarySeriesId) {
+          return;
+        }
+        if (candidates.has(normalizedId)) {
+          return;
+        }
+
+        const seriesEntry = seriesById.get(normalizedId);
+        const detail = options?.detail ?? null;
+        const resolvedModality = ((seriesEntry?.modality ?? detail?.modality) || '').toUpperCase();
+        if (!resolvedModality) {
+          return;
+        }
+
+        if (!allowedModalities.has(resolvedModality)) {
+          return;
+        }
+
+        if (!visibleSeriesIdSet.has(normalizedId)) {
+          return;
+        }
+
+        if (options?.isSibling) {
+          if (resolvedModality === 'CT' && !(association ? hasPetSibling(association) : false)) {
+            return;
+          }
+          if (resolvedModality === 'MR' && !(association ? hasMrSibling(association) || hasPetSibling(association) : false)) {
+            return;
+          }
+        }
+
+        candidates.set(normalizedId, resolvedModality);
+      };
+
+      const associationDetailIndex = new Map<number, RegistrationSeriesDetail | null>();
+      associations.forEach((assoc) => {
+        if (!Array.isArray(assoc.sourceSeriesDetails)) return;
+        assoc.sourceSeriesDetails.forEach((detail) => {
+          const normalizedId = normalizeSeriesId(detail?.id);
+          if (normalizedId != null && !associationDetailIndex.has(normalizedId)) {
+            associationDetailIndex.set(normalizedId, detail ?? null);
+          }
+        });
+      });
+
+      const initialIds = regAssociations?.[primarySeriesId] ?? [];
+      initialIds.forEach((id) => {
+        const normalizedId = normalizeSeriesId(id);
+        if (normalizedId == null) return;
+        tryAddCandidate(normalizedId, null, { detail: associationDetailIndex.get(normalizedId) ?? null });
+      });
+
+      associations.forEach((assoc) => {
+        if (Array.isArray(assoc.sourcesSeriesIds)) {
+          assoc.sourcesSeriesIds.forEach((id) => {
+            const normalizedId = normalizeSeriesId(id);
+            if (normalizedId == null) return;
+            const detail = associationDetailIndex.get(normalizedId) ?? null;
+            tryAddCandidate(normalizedId, assoc, { detail });
+          });
+        }
+        if (Array.isArray(assoc.siblingSeriesIds)) {
+          assoc.siblingSeriesIds.forEach((id) => {
+            const normalizedId = normalizeSeriesId(id);
+            if (normalizedId == null) return;
+            const detail = associationDetailIndex.get(normalizedId) ?? null;
+            tryAddCandidate(normalizedId, assoc, { isSibling: true, detail });
+          });
+        }
+      });
+
+      const primaryEntry = seriesById.get(primarySeriesId);
+      const primaryFoR = typeof primaryEntry?.frameOfReferenceUID === 'string' ? primaryEntry.frameOfReferenceUID.trim() : '';
+      if (primaryFoR) {
+        const foMatches = seriesByFoR.get(primaryFoR) ?? [];
+        foMatches.forEach((secondaryId) => {
+          if (secondaryId === primarySeriesId) return;
+          if (candidates.has(secondaryId)) return;
+          if (!visibleSeriesIdSet.has(secondaryId)) return;
+          const entry = seriesById.get(secondaryId);
+          if (!entry) return;
+          const modality = (entry.modality || '').toUpperCase();
+          if (!allowedModalities.has(modality)) return;
+          candidates.set(secondaryId, modality);
+        });
+      }
+
+      const candidateIds = Array.from(candidates.keys());
+      if (import.meta.env.DEV) {
+        log.debug(
+          `Fusion candidates for primary ${primarySeriesId} (patient ${studyData?.patient?.id ?? 'unknown'}): ${candidateIds.join(', ')}`,
+          'viewer-interface',
+        );
+      }
+      return candidateIds;
+    },
+    [regAssociations, registrationRelationshipMap, seriesById, seriesByFoR, visibleSeriesIdSet, studyData?.patient?.id],
+  );
+
+  const fusionCandidatesByPrimary = useMemo(() => {
+    const map = new Map<number, number[]>();
+    series.forEach((entry) => {
+      if (!entry) return;
+      const parsedId = Number(entry.id);
+      if (!Number.isFinite(parsedId)) return;
+      map.set(parsedId, getCandidateSecondaryIds(parsedId));
+    });
+    return map;
+  }, [series, getCandidateSecondaryIds]);
+
+  const fusionSiblingMap = useMemo(() => {
+    const normalizeSeriesIdLocal = (value: unknown): number | null => {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'bigint') {
+        const asNumber = Number(value);
+        return Number.isFinite(asNumber) ? asNumber : null;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const modalityOf = (id: number | null): string => {
+      if (id == null) return '';
+      const entry = seriesById.get(id);
+      return (entry?.modality || '').toUpperCase();
+    };
+
+    const map = new Map<number, Map<'PET' | 'MR', Map<number, number[]>>>();
+
+    registrationRelationshipMap.forEach((associations, primaryId) => {
+      const petMapping = new Map<number, Set<number>>();
+      const mrMapping = new Map<number, Set<number>>();
+
+      (associations ?? []).forEach((assoc) => {
+        const petIds = new Set<number>();
+        const ctIds = new Set<number>();
+        const mrIds = new Set<number>();
+
+        const registerByModality = (rawId: unknown, modality: string | null | undefined) => {
+          const normalizedId = normalizeSeriesIdLocal(rawId);
+          if (normalizedId == null || normalizedId === primaryId) return;
+          const resolvedModality = (modality || modalityOf(normalizedId)).toUpperCase();
+          if (!resolvedModality) return;
+          if (!visibleSeriesIdSet.has(normalizedId)) return;
+          if (resolvedModality === 'CT') {
+            ctIds.add(normalizedId);
+          } else if (resolvedModality === 'PT' || resolvedModality === 'PET' || resolvedModality === 'NM') {
+            petIds.add(normalizedId);
+          } else if (resolvedModality === 'MR') {
+            mrIds.add(normalizedId);
+          }
+        };
+
+        if (Array.isArray(assoc.sourceSeriesDetails)) {
+          assoc.sourceSeriesDetails.forEach((detail) => {
+            registerByModality(detail?.id, detail?.modality);
+          });
+        }
+
+        if (Array.isArray(assoc.sourcesSeriesIds)) {
+          assoc.sourcesSeriesIds.forEach((value) => {
+            registerByModality(value, null);
+          });
+        }
+
+        if (Array.isArray(assoc.siblingSeriesIds)) {
+          assoc.siblingSeriesIds.forEach((value) => {
+            registerByModality(value, null);
+          });
+        }
+
+        if (petIds.size) {
+          petIds.forEach((petId) => {
+            const entry = petMapping.get(petId) ?? new Set<number>();
+            ctIds.forEach((ctId) => entry.add(ctId));
+            petMapping.set(petId, entry);
+          });
+        }
+
+        if (mrIds.size) {
+          mrIds.forEach((mrId) => {
+            const entry = mrMapping.get(mrId) ?? new Set<number>();
+            // MR siblings may include other MR series within same FoR or PET-driven MR matches
+            mrIds.forEach((otherMrId) => {
+              if (otherMrId !== mrId) entry.add(otherMrId);
+            });
+            // also allow CT siblings when PET present
+            if (petIds.size) {
+              ctIds.forEach((ctId) => entry.add(ctId));
+            }
+            mrMapping.set(mrId, entry);
+          });
+        }
+      });
+
+      const primaryEntry = seriesById.get(primaryId);
+      const primaryFoR = typeof primaryEntry?.frameOfReferenceUID === 'string' ? primaryEntry.frameOfReferenceUID.trim() : '';
+      if (primaryFoR) {
+        const foMatches = seriesByFoR.get(primaryFoR) ?? [];
+        const ctFoRIds = new Set<number>();
+        ctFoRIds.add(primaryId);
+        const petFoRIds = new Set<number>();
+        const mrFoRIds = new Set<number>();
+
+        foMatches.forEach((secondaryId) => {
+          if (secondaryId === primaryId) return;
+          if (!visibleSeriesIdSet.has(secondaryId)) return;
+          const entry = seriesById.get(secondaryId);
+          if (!entry) return;
+          const modality = (entry.modality || '').toUpperCase();
+          if (modality === 'CT') {
+            ctFoRIds.add(secondaryId);
+          } else if (['PT', 'PET', 'NM'].includes(modality)) {
+            petFoRIds.add(secondaryId);
+          } else if (modality === 'MR') {
+            mrFoRIds.add(secondaryId);
+          }
+        });
+
+        if (petFoRIds.size) {
+          if (!ctFoRIds.size) {
+            ctFoRIds.add(primaryId);
+          }
+          petFoRIds.forEach((petId) => {
+            const entry = petMapping.get(petId) ?? new Set<number>();
+            ctFoRIds.forEach((ctId) => entry.add(ctId));
+            petMapping.set(petId, entry);
+          });
+        }
+
+        if (mrFoRIds.size) {
+          mrFoRIds.forEach((mrId) => {
+            const entry = mrMapping.get(mrId) ?? new Set<number>();
+            mrFoRIds.forEach((otherMrId) => {
+              if (otherMrId !== mrId) entry.add(otherMrId);
+            });
+            entry.add(primaryId);
+            petFoRIds.forEach((petId) => entry.add(petId));
+            mrMapping.set(mrId, entry);
+          });
+        }
+      }
+
+      if (petMapping.size || mrMapping.size) {
+        const forPrimary = new Map<'PET' | 'MR', Map<number, number[]>>();
+        if (petMapping.size) {
+          const petArrayMap = new Map<number, number[]>();
+          petMapping.forEach((set, petId) => {
+            petArrayMap.set(petId, Array.from(set.values()));
+          });
+          forPrimary.set('PET', petArrayMap);
+        }
+        if (mrMapping.size) {
+          const mrArrayMap = new Map<number, number[]>();
+          mrMapping.forEach((set, mrId) => {
+            mrArrayMap.set(mrId, Array.from(set.values()));
+          });
+          forPrimary.set('MR', mrArrayMap);
+        }
+        map.set(primaryId, forPrimary);
+      }
+    });
+
+    return map;
+  }, [registrationRelationshipMap, seriesById, seriesByFoR, visibleSeriesIdSet]);
 
   useEffect(() => {
-    if (!fusionManifest || secondarySeriesId == null) {
+    if (import.meta.env.DEV) {
+      const entries = Array.from(fusionCandidatesByPrimary.entries()).map(([primaryId, ids]) => ({
+        primaryId,
+        candidateIds: ids,
+      }));
+      console.debug('Fusion candidate map', entries);
+    }
+  }, [fusionCandidatesByPrimary]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      const modalities = visibleSeries.map((entry) => ({
+        id: entry.id,
+        modality: entry.modality,
+        description: entry.seriesDescription,
+      }));
+      console.debug('Visible series after derived filter', modalities);
+    }
+  }, [visibleSeries]);
+
+  useEffect(() => {
+    if (!fusionDescriptorMap.size || secondarySeriesId == null) {
       return;
     }
-    const descriptor = fusionManifest.secondaries.find((sec) => sec.secondarySeriesId === secondarySeriesId);
+    const descriptor = fusionDescriptorMap.get(secondarySeriesId);
     if (!descriptor) return;
     const defaultWindow = getDefaultFusionWindow(descriptor.secondaryModality);
     setFusionWindowLevel(defaultWindow);
@@ -959,8 +1432,55 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     [],
   );
 
+  const pollFusionManifestUntilReady = useCallback(
+    async (
+      primarySeriesId: number,
+      requestedSecondaryIds: number[],
+      requestToken: number,
+      attempt: number = 0,
+    ): Promise<FusionManifest | null> => {
+      if (fusionManifestRequestRef.current !== requestToken) return null;
+      const MAX_ATTEMPTS = 8;
+      if (attempt >= MAX_ATTEMPTS) {
+        return null;
+      }
+
+      const delayMs = Math.min(4000, 500 * Math.pow(2, attempt));
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      if (fusionManifestRequestRef.current !== requestToken) return null;
+
+      try {
+        const refreshed = await fetchFusionManifest(primarySeriesId, {
+          preload: true,
+          secondarySeriesIds: requestedSecondaryIds,
+          force: true,
+        });
+        if (fusionManifestRequestRef.current !== requestToken) return null;
+        setFusionManifest(refreshed);
+        const relevantIds = requestedSecondaryIds.length ? new Set(requestedSecondaryIds) : null;
+        const pending = refreshed.secondaries.filter((sec) => {
+          if (sec.status === 'ready' || sec.status === 'error') return false;
+          if (relevantIds && !relevantIds.has(sec.secondarySeriesId)) return false;
+          return true;
+        });
+        if (pending.length) {
+          return pollFusionManifestUntilReady(primarySeriesId, requestedSecondaryIds, requestToken, attempt + 1);
+        }
+        return refreshed;
+      } catch (error) {
+        console.error('Failed to refresh fusion manifest', error);
+        return null;
+      }
+    },
+    [],
+  );
+
   const initializeFusionForSeries = useCallback(
     async (seriesEntry: DICOMSeries | null) => {
+      const requestToken = ++fusionManifestRequestRef.current;
       if (!seriesEntry) {
         resetFusionState(true);
         return;
@@ -977,7 +1497,12 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       setFusionManifestError(null);
 
       try {
-        const manifest = await fetchFusionManifest(seriesEntry.id, { preload: true });
+        const candidateSecondaryIds = getCandidateSecondaryIds(seriesEntry.id);
+        let manifest = await fetchFusionManifest(seriesEntry.id, {
+          preload: true,
+          secondarySeriesIds: candidateSecondaryIds,
+        });
+        if (fusionManifestRequestRef.current !== requestToken) return;
         setFusionManifest(manifest);
 
         if (!manifest.secondaries.length) {
@@ -987,22 +1512,75 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           return;
         }
 
+        const relevantIds = candidateSecondaryIds.length
+          ? candidateSecondaryIds
+          : manifest.secondaries.map((sec) => sec.secondarySeriesId);
+        const pending = manifest.secondaries.filter(
+          (sec) =>
+            relevantIds.includes(sec.secondarySeriesId) &&
+            sec.status !== 'ready' &&
+            sec.status !== 'error',
+        );
+
+        if (pending.length) {
+          const refreshed = await pollFusionManifestUntilReady(seriesEntry.id, relevantIds, requestToken);
+          if (fusionManifestRequestRef.current !== requestToken) return;
+          if (refreshed) {
+            manifest = refreshed;
+          }
+        }
+
+        if (fusionManifestRequestRef.current !== requestToken) return;
+
+        const pendingAfterPoll = manifest.secondaries.some(
+          (sec) =>
+            relevantIds.includes(sec.secondarySeriesId) &&
+            sec.status !== 'ready' &&
+            sec.status !== 'error',
+        );
+        if (pendingAfterPoll) {
+          setFusionManifestError((prev) => prev ?? 'Fusion cache is still generating. Please retry shortly.');
+        }
+
         setSecondarySeriesId(null);
         setShowFusionPanel(true);
 
         await preloadAllFusionSecondaries(seriesEntry.id, manifest);
       } catch (error: any) {
+        if (fusionManifestRequestRef.current !== requestToken) return;
         console.error('Failed to initialize fusion manifest', error);
         setFusionManifest(null);
         setFusionManifestError(error?.message || String(error));
         setShowFusionPanel(false);
         setSecondarySeriesId(null);
       } finally {
-        setFusionManifestLoading(false);
+        if (fusionManifestRequestRef.current === requestToken) {
+          setFusionManifestLoading(false);
+        }
       }
     },
-    [preloadAllFusionSecondaries, resetFusionState],
+    [getCandidateSecondaryIds, pollFusionManifestUntilReady, preloadAllFusionSecondaries, resetFusionState],
   );
+
+  useEffect(() => {
+    if (!selectedSeries) return;
+    const modality = (selectedSeries.modality || '').toUpperCase();
+    if (modality !== 'CT') return;
+    if (fusionManifestLoading) return;
+
+    const candidateSecondaryIds = getCandidateSecondaryIds(selectedSeries.id);
+    const manifestMatchesSeries = fusionManifest?.primarySeriesId === selectedSeries.id;
+    const manifestIds = manifestMatchesSeries
+      ? new Set(fusionManifest.secondaries.map((sec) => sec.secondarySeriesId))
+      : null;
+    const hasMissing = manifestIds
+      ? candidateSecondaryIds.some((id) => !manifestIds.has(id))
+      : candidateSecondaryIds.length > 0;
+
+    if (!manifestMatchesSeries || hasMissing) {
+      initializeFusionForSeries(selectedSeries);
+    }
+  }, [getCandidateSecondaryIds, regAssociations, selectedSeries, fusionManifest, fusionManifestLoading, initializeFusionForSeries]);
 
   const handleContourUpdate = (payload: any) => {
     console.log('Contour update received:', payload);
@@ -1245,7 +1823,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         {/* Series Selector - Responsive Width */}
         <div className="w-full md:w-96 h-full overflow-hidden flex-shrink-0 hidden md:block">
           <SeriesSelector
-            series={series}
+            series={visibleSeries}
             selectedSeries={selectedSeries}
             onSeriesSelect={handleSeriesSelect}
             windowLevel={windowLevel}
@@ -1295,6 +1873,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             secondaryLoadingStates={secondaryLoadingStates}
             currentlyLoadingSecondary={currentlyLoadingSecondary}
             fusionStatuses={fusionSecondaryStatuses}
+            fusionCandidatesByPrimary={fusionCandidatesByPrimary}
+            fusionSiblingMap={fusionSiblingMap}
           />
         </div>
 
@@ -1358,14 +1938,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={Boolean(fusionManifest?.secondaries?.length)}
+                  hasSecondarySeriesForFusion={fusionDescriptorMap.size > 0}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
                   onMPRToggle={() => setMprVisible(!mprVisible)}
                   isMPRVisible={mprVisible}
                   // Mirror associations from Series panel: restrict Fusion choices
-                  allowedSecondaryIds={regAssociations[selectedSeries.id] || []}
+                  allowedSecondaryIds={Array.from(fusionDescriptorMap.keys())}
                   registrationAssociations={registrationRelationshipMap}
                   availableSeries={series}
                   fusionWindowLevel={fusionWindowLevel}

@@ -8,6 +8,7 @@ export interface DICOMSeries {
   seriesNumber?: number;
   imageCount: number;
   sliceThickness?: string;
+  frameOfReferenceUID?: string | null;
   images: DICOMImage[];
 }
 

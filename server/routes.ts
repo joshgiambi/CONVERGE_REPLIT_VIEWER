@@ -1803,11 +1803,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/patients/:id", async (req, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      await storage.deletePatient(patientId);
+      if ((req.query as any)?.full === 'true') {
+        await (storage as any).deletePatientFully(patientId);
+      } else {
+        await storage.deletePatient(patientId);
+      }
       res.json({ success: true, message: "Patient deleted successfully" });
     } catch (error) {
       console.error('Error deleting patient:', error);
       res.status(500).json({ message: "Failed to delete patient" });
+    }
+  });
+
+  // Delete a single series and all associated files/images/RT/media
+  app.delete("/api/series/:id", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.id);
+      await (storage as any).deleteSeriesFully(seriesId);
+      res.json({ success: true, message: "Series deleted successfully" });
+    } catch (error) {
+      console.error('Error deleting series:', error);
+      res.status(500).json({ message: "Failed to delete series" });
+    }
+  });
+
+  // Cleanup orphan/derived series without files for a patient (useful after re-imports)
+  app.post("/api/patients/:id/cleanup-series", async (req: Request, res: Response) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) return res.status(400).json({ error: 'Invalid patient id' });
+
+      const studies = await storage.getStudiesByPatient(patientId);
+      let removed = 0;
+      for (const st of studies) {
+        const serList = await storage.getSeriesByStudyId(st.id);
+        for (const s of serList) {
+          try {
+            const imgs = await storage.getImagesBySeriesId(s.id);
+            const isDerived = Boolean((s.metadata as any)?.isFusedSeries || (s.seriesDescription || '').toUpperCase().includes('RESAMPLED'));
+            const hasNoImages = imgs.length === 0;
+            // If images exist, verify at least one file exists
+            let filesMissing = false;
+            if (!hasNoImages) {
+              const first = imgs[0] as any;
+              filesMissing = !first?.filePath || !fs.existsSync(first.filePath);
+            }
+            if (hasNoImages || filesMissing || isDerived && filesMissing) {
+              await (storage as any).deleteSeriesFully(s.id);
+              removed++;
+            }
+          } catch {}
+        }
+      }
+      return res.json({ success: true, removed });
+    } catch (err: any) {
+      console.error('Cleanup failed', err);
+      return res.status(500).json({ error: 'Cleanup failed', details: err?.message });
     }
   });
 
