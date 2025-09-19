@@ -66,6 +66,16 @@ npm run dev
 
 Visit: http://localhost:3000
 
+### 6. (Optional) Launch Fusebox Helper + Dev Server
+
+If you are working on fusion overlays, use the bundled helper script instead of the manual environment setup:
+
+```bash
+./scripts/start-fusebox.sh
+```
+
+The script activates `sam_env`, ensures SimpleITK is present, exports the required helper paths, and then runs `npm run dev:itk` for you.
+
 ## Adding New Patient Data
 
 1. Add DICOM files to `storage/patients/NEW_PATIENT_NAME/`

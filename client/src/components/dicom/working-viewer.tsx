@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, fuseboxSliceToImageData, clearFusionCaches } from "@/lib/fusion-utils";
+import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
@@ -449,6 +449,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
       if (!secondarySeriesId || !images.length) return;
+      // Gate prefetch on manifest readiness to avoid 'manifest not loaded' errors
+      const status = fusionSecondaryStatuses?.get(secondarySeriesId);
+      const manifestMatches = Number(fusionManifestPrimarySeriesId) === Number(seriesId);
+      const localManifest = getFusionManifest(seriesId);
+      const localReady = !!localManifest && localManifest.secondaries.some((s) => s.secondarySeriesId === secondarySeriesId && s.status === 'ready');
+      if (fusionManifestLoading || status?.status !== 'ready' || !manifestMatches || !localReady) {
+        return;
+      }
 
       const registrationId = selectedRegistrationId ?? null;
 
@@ -462,7 +470,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (fuseboxCacheRef.current.has(key) || fusionPrefetchSetRef.current.has(key)) continue;
 
         fusionPrefetchSetRef.current.add(key);
+        const instNumber = Number(targetImage.instanceNumber ?? targetImage.metadata?.instanceNumber ?? NaN);
+        const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : targetIndex;
         getFusedSlice(seriesId, secondarySeriesId, sop)
+          .catch((error) => {
+            if (error instanceof Error && error.message.includes('not found in manifest')) {
+              return getFusedSliceSmart(
+                seriesId,
+                secondarySeriesId,
+                sop,
+                Number.isFinite(instNumber) ? instNumber : null,
+                preferredIndex,
+              );
+            }
+            throw error;
+          })
           .then((slice) => {
             const prepared = convertSliceToCanvas(slice, secondaryModality);
             if (prepared) {
@@ -487,15 +509,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       secondarySeriesId,
       selectedRegistrationId,
       seriesId,
+      fusionManifestLoading,
+      fusionSecondaryStatuses,
+      fusionManifestPrimarySeriesId,
     ],
   );
 
   useEffect(() => {
+    const activeSeriesId = seriesId;
     return () => {
       fuseboxCacheRef.current.clear();
-      clearFusionCaches();
+      clearFusionSlices(activeSeriesId);
     };
-  }, []);
+  }, [seriesId]);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -565,10 +591,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleRegistrationSelect = useCallback((registrationId: string | null) => {
     setSelectedRegistrationId(registrationId);
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
+    clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
     scheduleRenderRef.current?.();
-  }, []);
+  }, [seriesId]);
 
   const openFusionDebug = useCallback((reason: string) => {
     fusionIssueRef.current = reason;
@@ -3231,17 +3257,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
+    clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
     scheduleRender();
-  }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
+  }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender, seriesId]);
 
   useEffect(() => {
     if (!secondarySeriesId) {
       setSecondaryModality('MR');
       setFuseboxTransformSource(null);
       fuseboxCacheRef.current.clear();
-      clearFusionCaches();
+      clearFusionSlices(seriesId);
       return;
     }
 
@@ -3258,13 +3284,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
 
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
+    clearFusionSlices(seriesId);
     loadMetadata();
 
     return () => {
       cancelled = true;
     };
-  }, [secondarySeriesId]);
+  }, [secondarySeriesId, seriesId]);
 
   // Auto-trigger background loading when primary images and registration are ready
   // TEMPORARILY DISABLED to fix scrolling and flashing issues
@@ -4528,12 +4554,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (fusionManifestLoading) {
+      // Gate rendering while the manifest is still loading
+      if (ensureActive()) {
+        fusionIssueRef.current = 'manifest-not-ready';
+        setFuseboxTransformSource(null);
+      }
       return;
     }
 
     const status = fusionSecondaryStatuses?.get(secondarySeriesId);
-    const manifestMatches = fusionManifestPrimarySeriesId === seriesId;
-    if (status?.status !== 'ready' || !manifestMatches) {
+    // Normalize ID comparison to avoid string/number mismatch gating overlays forever
+    const manifestMatches = Number(fusionManifestPrimarySeriesId) === Number(seriesId);
+    const localManifest = getFusionManifest(seriesId);
+    const localReady = !!localManifest && localManifest.secondaries.some((s) => s.secondarySeriesId === secondarySeriesId && s.status === 'ready');
+    if (status?.status !== 'ready' || !manifestMatches || !localReady) {
       if (ensureActive()) {
         fusionIssueRef.current = 'manifest-not-ready';
         setFuseboxTransformSource(null);
@@ -4573,7 +4607,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     if (!cached) {
       try {
-        const slice = await getFusedSlice(seriesId, secondarySeriesId, primaryImage.sopInstanceUID);
+        // Try exact SOP match first; if not found, fall back by instance number or index
+        let slice: FuseboxSlice;
+        try {
+          slice = await getFusedSlice(seriesId, secondarySeriesId, primaryImage.sopInstanceUID);
+        } catch (e) {
+          const instNumber = Number(primaryImage.instanceNumber ?? primaryImage.metadata?.instanceNumber ?? NaN);
+          const index = Number.isFinite(instNumber) ? instNumber - 1 : currentIndex;
+          slice = await getFusedSliceSmart(seriesId, secondarySeriesId, primaryImage.sopInstanceUID, Number.isFinite(instNumber) ? instNumber : null, index);
+        }
 
         if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {
           setSelectedRegistrationId(slice.registrationId);

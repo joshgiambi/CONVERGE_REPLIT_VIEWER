@@ -226,26 +226,42 @@ const maybeAttachHelperOutput = async (
     };
   }
 
-  return await new Promise<FuseboxTransformInfo | null>((resolve, reject) => {
-    const child = spawn(helper, ['matrix', '--primary', primaryFoR, '--secondary', secondaryFoR, '--reg', regPath, '--output', cachePath], {
+  return await new Promise<FuseboxTransformInfo | null>((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    const fallback = () => {
+      fuseboxHelperMetrics.failures += 1;
+      if (info) {
+        logHelper(emit, 'warn', 'Fusebox helper failed; falling back to matrix transform', {
+          primarySeriesId,
+          secondarySeriesId,
+          regFile: regPath,
+          candidateId,
+          stdout,
+          stderr,
+        });
+        resolve({
+          ...info,
+          transformSource: info.transformSource ?? 'matrix-fallback',
+        });
+      } else {
+        resolve(null);
+      }
+    };
+
+    const args = ['--input', regPath, '--output', cachePath];
+    if (primaryFoR) args.push('--fixed', primaryFoR);
+    if (secondaryFoR) args.push('--moving', secondaryFoR);
+    const child = spawn(helper, args, {
       cwd: process.cwd(),
       env: process.env,
     });
-    let stdout = '';
-    let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (err) => reject(err));
+    child.on('error', () => fallback());
     child.on('close', (code) => {
       if (code !== 0 || !fs.existsSync(cachePath)) {
-        fuseboxHelperMetrics.failures += 1;
-        reject(createFuseboxError('FUSEBOX_HELPER_FAILED', 'Fusebox helper failed', {
-          primarySeriesId,
-          secondarySeriesId,
-          code,
-          stdout,
-          stderr,
-        }));
+        fallback();
         return;
       }
       fuseboxHelperMetrics.conversions += 1;

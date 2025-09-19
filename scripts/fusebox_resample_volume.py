@@ -97,6 +97,29 @@ def format_multi(values: List[float] | None) -> str | None:
     return "\\".join(f"{v:g}" for v in values)
 
 
+def normalize_dicom_value(value: Any) -> str | None:
+    """Convert supported metadata values into DICOM-friendly strings."""
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return f"{float(value):g}"
+    if isinstance(value, (list, tuple)):
+        parts = [normalize_dicom_value(v) for v in value]
+        parts = [p for p in parts if p is not None]
+        if not parts:
+            return None
+        return "\\".join(parts)
+    return str(value)
+
+
 def determine_sop_class(modality: str | None) -> str:
     if not modality:
         return "1.2.840.10008.5.1.4.1.1.2"  # default CT
@@ -114,7 +137,10 @@ def determine_sop_class(modality: str | None) -> str:
 
 def apply_shared_tags(slice_img: sitk.Image, tags: Dict[str, str]) -> None:
     for key, value in tags.items():
-        slice_img.SetMetaData(key, value)
+        normalized = normalize_dicom_value(value)
+        if normalized is None:
+            continue
+        slice_img.SetMetaData(key, normalized)
 
 
 def write_dicom_series(
@@ -154,10 +180,12 @@ def write_dicom_series(
     frame_of_reference_uid = primary_meta.get("FrameOfReferenceUID") or dicom_uid()
     series_description = derived_meta.get("SeriesDescription") or "Fusion Secondary"
     series_number = derived_meta.get("SeriesNumber")
-    if series_number is not None:
-        series_number_str = str(int(series_number))
-    else:
-        series_number_str = "9901"
+    series_number_str = "9901"
+    if series_number not in (None, ""):
+        try:
+            series_number_str = str(int(series_number))
+        except (TypeError, ValueError):
+            series_number_str = "9901"
 
     window_center = derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter")
     window_width = derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth")
@@ -175,15 +203,15 @@ def write_dicom_series(
         "0008|0016": sop_class_uid,
         "0008|0060": modality,
         "0008|103e": series_description,
-        "0010|0010": patient_meta.get("PatientName", ""),
-        "0010|0020": patient_meta.get("PatientID", ""),
-        "0010|0030": patient_meta.get("PatientBirthDate", ""),
-        "0010|0040": patient_meta.get("PatientSex", ""),
-        "0010|1010": patient_meta.get("PatientAge", ""),
-        "0008|0020": study_meta.get("StudyDate", ""),
-        "0008|0030": study_meta.get("StudyTime", ""),
-        "0008|0050": study_meta.get("AccessionNumber", ""),
-        "0008|0090": study_meta.get("ReferringPhysicianName", ""),
+        "0010|0010": patient_meta.get("PatientName") or "",
+        "0010|0020": patient_meta.get("PatientID") or "",
+        "0010|0030": patient_meta.get("PatientBirthDate") or "",
+        "0010|0040": patient_meta.get("PatientSex") or "",
+        "0010|1010": patient_meta.get("PatientAge") or "",
+        "0008|0020": study_meta.get("StudyDate") or "",
+        "0008|0030": study_meta.get("StudyTime") or "",
+        "0008|0050": study_meta.get("AccessionNumber") or "",
+        "0008|0090": study_meta.get("ReferringPhysicianName") or "",
         "0020|000d": study_uid,
         "0020|000e": series_uid,
         "0020|0011": series_number_str,

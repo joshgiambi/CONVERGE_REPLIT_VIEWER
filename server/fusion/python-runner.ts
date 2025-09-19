@@ -37,7 +37,11 @@ export async function runFuseboxScript<T = any>(scriptName: string, config: Reco
 
       if (code !== 0) {
         const errorMessage = stderr.trim() || stdout.trim() || `fusebox script exited with ${code}`;
-        reject(new Error(errorMessage));
+        const err: any = new Error(errorMessage);
+        err.code = code;
+        err.stderr = stderr;
+        err.stdout = stdout;
+        reject(err);
         return;
       }
 

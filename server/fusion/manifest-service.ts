@@ -222,10 +222,16 @@ export class FusionManifestService {
         updatedSecondaries.push(descriptor);
       } catch (err: any) {
         const message = err?.message || String(err);
+        const stderr = err?.context?.stderr ?? null;
+        const stdout = err?.context?.stdout ?? null;
+        const code = err?.context?.code ?? null;
         logger?.('warn', 'Fusion secondary generation failed', {
           primarySeriesId,
           secondarySeriesId,
           error: message,
+          code,
+          stderr,
+          stdout,
         });
         if (existing) {
           updatedSecondaries.push(createSecondaryDescriptor(existing, {
@@ -351,7 +357,40 @@ export class FusionManifestService {
       metadata: metadataPayload,
     };
 
-    const response = await this.resampler.execute(request);
+    let response = await this.resampler.execute(request).catch((err: any) => {
+      const message = err?.message || String(err);
+      logger?.('warn', 'Fusebox volume resample failed (transform file path)', {
+        primarySeriesId,
+        secondarySeriesId,
+        error: message,
+        code: err?.code ?? null,
+        stderr: err?.stderr ?? null,
+        stdout: err?.stdout ?? null,
+      });
+      return null;
+    });
+
+    // Fallback: matrix-only resample if helper-based transform fails
+    if (!response) {
+      const requestMatrixOnly = {
+        ...request,
+        transformFilePath: undefined,
+        invertTransformFile: undefined,
+      } as typeof request;
+      response = await this.resampler.execute(requestMatrixOnly).catch((err: any) => {
+        const message = err?.message || String(err);
+        logger?.('warn', 'Fusebox volume resample failed (matrix-only fallback)', {
+          primarySeriesId,
+          secondarySeriesId,
+          error: message,
+          code: err?.code ?? null,
+          stderr: err?.stderr ?? null,
+          stdout: err?.stdout ?? null,
+        });
+        return null;
+      });
+    }
+    if (!response) throw new Error('Fusebox resample failed');
 
     const seriesInstanceUID = response.seriesInstanceUID || transformInfo.registrationId || secondarySeries.seriesInstanceUID + '.fused';
     const frameOfReferenceUID = response.frameOfReferenceUID || primaryMeta.frameOfReferenceUID || null;

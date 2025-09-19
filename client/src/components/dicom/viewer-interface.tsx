@@ -1190,6 +1190,18 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     return map;
   }, [series, getCandidateSecondaryIds]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !import.meta.env.DEV) return;
+    (window as any).__fusionCandidates = Array.from(
+      fusionCandidatesByPrimary.entries(),
+    ).map(([primaryId, candidateIds]) => ({ primaryId, candidateIds }));
+  }, [fusionCandidatesByPrimary]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !import.meta.env.DEV) return;
+    (window as any).__currentFusionManifest = fusionManifest;
+  }, [fusionManifest]);
+
   const fusionSiblingMap = useMemo(() => {
     const normalizeSeriesIdLocal = (value: unknown): number | null => {
       if (value === null || value === undefined) return null;
@@ -1553,10 +1565,29 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           setFusionManifestError((prev) => prev ?? 'Fusion cache is still generating. Please retry shortly.');
         }
 
-        setSecondarySeriesId(null);
+        // Keep any user selection; panel will reflect actual readiness via badges
         setShowFusionPanel(true);
 
         await preloadAllFusionSecondaries(seriesEntry.id, manifest, requestToken);
+
+        // Auto-select a READY secondary once preload completes, gated by the active token
+        if (fusionManifestRequestRef.current === requestToken) {
+          try {
+            // Prefer secondaries marked 'ready' in the manifest
+            const readyIds = manifest.secondaries
+              .filter((sec) => sec.status === 'ready')
+              .map((sec) => sec.secondarySeriesId);
+
+            // Fall back: intersect with currently allowed descriptors if available
+            // Note: fusionDescriptorMap is derived via useMemo and may not be updated synchronously here,
+            // so prefer manifest readiness as the primary signal.
+            const candidate = readyIds[0] ?? null;
+
+            if (candidate != null) {
+              setSecondarySeriesId(candidate);
+            }
+          } catch {}
+        }
       } catch (error: any) {
         if (fusionManifestRequestRef.current !== requestToken) return;
         console.error('Failed to initialize fusion manifest', error);
@@ -1573,6 +1604,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     [getCandidateSecondaryIds, pollFusionManifestUntilReady, preloadAllFusionSecondaries, resetFusionState],
   );
 
+  // Prevent manifest init deathloops by gating on candidate set changes and a short cooldown
+  const prevCandidateKeyRef = useRef<string | null>(null);
+  const lastInitAtRef = useRef<number>(0);
+
   useEffect(() => {
     if (!selectedSeries) return;
     const modality = (selectedSeries.modality || '').toUpperCase();
@@ -1581,14 +1616,22 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
     const candidateSecondaryIds = getCandidateSecondaryIds(selectedSeries.id);
     const manifestMatchesSeries = fusionManifest?.primarySeriesId === selectedSeries.id;
-    const manifestIds = manifestMatchesSeries
-      ? new Set(fusionManifest.secondaries.map((sec) => sec.secondarySeriesId))
-      : null;
-    const hasMissing = manifestIds
-      ? candidateSecondaryIds.some((id) => !manifestIds.has(id))
-      : candidateSecondaryIds.length > 0;
+    const manifestIds = manifestMatchesSeries ? new Set(fusionManifest.secondaries.map((sec) => sec.secondarySeriesId)) : null;
+    const hasMissing = manifestIds ? candidateSecondaryIds.some((id) => !manifestIds.has(id)) : candidateSecondaryIds.length > 0;
 
+    // Build a stable key for current candidates
+    const candidateKey = candidateSecondaryIds.slice().sort((a, b) => a - b).join(',');
+    const unchangedCandidates = prevCandidateKeyRef.current === candidateKey;
+    const withinCooldown = Date.now() - lastInitAtRef.current < 5000; // 5s cooldown
+
+    // Only (re)initialize if:
+    // - manifest is for a different series, or
+    // - there are genuinely new candidates not in the current manifest
+    // And avoid tight loops when candidates/associations flicker
     if (!manifestMatchesSeries || hasMissing) {
+      if (unchangedCandidates && withinCooldown) return;
+      prevCandidateKeyRef.current = candidateKey;
+      lastInitAtRef.current = Date.now();
       initializeFusionForSeries(selectedSeries);
     }
   }, [getCandidateSecondaryIds, regAssociations, selectedSeries, fusionManifest, fusionManifestLoading, initializeFusionForSeries]);

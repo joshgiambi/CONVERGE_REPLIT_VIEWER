@@ -44,6 +44,30 @@ type ManifestCacheEntry = {
 
 const manifestCache = new Map<number, ManifestCacheEntry>();
 
+type TypedArrayConstructor<T extends ArrayBufferView> = {
+  new (buffer: ArrayBufferLike, byteOffset?: number, length?: number): T;
+  BYTES_PER_ELEMENT: number;
+};
+
+function createAlignedTypedArray<T extends ArrayBufferView>(
+  source: Uint8Array,
+  dataOffset: number,
+  byteLength: number,
+  ctor: TypedArrayConstructor<T>,
+): T {
+  const bytesPerElement = ctor.BYTES_PER_ELEMENT;
+  if (byteLength % bytesPerElement !== 0) {
+    throw new Error(`Invalid byte length ${byteLength} for ${bytesPerElement}-byte elements`);
+  }
+  const absoluteOffset = source.byteOffset + dataOffset;
+  const elementLength = byteLength / bytesPerElement;
+  if (absoluteOffset % bytesPerElement === 0) {
+    return new ctor(source.buffer, absoluteOffset, elementLength);
+  }
+  const copy = source.slice(dataOffset, dataOffset + byteLength);
+  return new ctor(copy.buffer, copy.byteOffset, elementLength);
+}
+
 function getOrCreateManifestEntry(primarySeriesId: number): ManifestCacheEntry {
   let entry = manifestCache.get(primarySeriesId);
   if (!entry) {
@@ -102,29 +126,28 @@ function createSliceFromDicom(
   }
 
   const { dataOffset, length } = pixelElement as any;
-  const byteOffset = byteArray.byteOffset + dataOffset;
-  const buffer = byteArray.buffer;
   let floatPixels: Float32Array;
 
   if (bitsAllocated === 32) {
-    const raw = new Float32Array(buffer, byteOffset, length / 4);
+    const raw = createAlignedTypedArray(byteArray, dataOffset, length, Float32Array);
     floatPixels = new Float32Array(raw.length);
     for (let i = 0; i < raw.length; i += 1) {
       floatPixels[i] = raw[i] * slope + intercept;
     }
   } else if (bitsAllocated === 16) {
-    const count = length / 2;
     if (pixelRepresentation === 0) {
-      const raw = new Uint16Array(buffer, byteOffset, count);
+      const raw = createAlignedTypedArray(byteArray, dataOffset, length, Uint16Array);
+      const count = raw.length;
       floatPixels = new Float32Array(count);
       for (let i = 0; i < count; i += 1) floatPixels[i] = raw[i] * slope + intercept;
     } else {
-      const raw = new Int16Array(buffer, byteOffset, count);
+      const raw = createAlignedTypedArray(byteArray, dataOffset, length, Int16Array);
+      const count = raw.length;
       floatPixels = new Float32Array(count);
       for (let i = 0; i < count; i += 1) floatPixels[i] = raw[i] * slope + intercept;
     }
   } else if (bitsAllocated === 8) {
-    const raw = new Uint8Array(buffer, byteOffset, length);
+    const raw = createAlignedTypedArray(byteArray, dataOffset, length, Uint8Array);
     floatPixels = new Float32Array(raw.length);
     for (let i = 0; i < raw.length; i += 1) floatPixels[i] = raw[i] * slope + intercept;
   } else {
@@ -282,6 +305,39 @@ export async function getFusedSlice(
   return loadSlice(cache, instance);
 }
 
+// More tolerant lookup that falls back when SOP UIDs differ between primary and fused instances
+export async function getFusedSliceSmart(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  sopInstanceUID: string,
+  preferredInstanceNumber?: number | null,
+  preferredIndex?: number | null,
+): Promise<FuseboxSlice> {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) throw new Error('Fusion manifest not loaded');
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) throw new Error('Fusion secondary missing in manifest cache');
+
+  const descriptor = cache.descriptor;
+  // 1) Try exact SOP match
+  let target = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID) || null;
+  // 2) Fall back to instanceNumber match if available
+  if (!target && preferredInstanceNumber != null) {
+    target = descriptor.instances.find((inst) => inst.instanceNumber === preferredInstanceNumber) || null;
+  }
+  // 3) Fall back to index if provided and in-bounds
+  if (!target && preferredIndex != null) {
+    const idx = Math.max(0, Math.min(descriptor.instances.length - 1, preferredIndex));
+    target = descriptor.instances[idx] || null;
+  }
+  // 4) Final fallback: use middle slice
+  if (!target && descriptor.instances.length) {
+    target = descriptor.instances[Math.floor(descriptor.instances.length / 2)];
+  }
+  if (!target) throw new Error('Fusion instance not found');
+  return loadSlice(cache, target);
+}
+
 export function fuseboxSliceToImageData(
   slice: FuseboxSlice,
   modality: string | null,
@@ -388,4 +444,17 @@ export function clearFusionCaches(primarySeriesId?: number) {
   } else {
     manifestCache.clear();
   }
+}
+
+export function clearFusionSlices(primarySeriesId: number, secondarySeriesId?: number) {
+  if (!Number.isFinite(primarySeriesId)) return;
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) return;
+  if (typeof secondarySeriesId === 'number' && Number.isFinite(secondarySeriesId)) {
+    entry.secondaries.get(secondarySeriesId)?.slices.clear();
+    return;
+  }
+  entry.secondaries.forEach((cache) => {
+    cache.slices.clear();
+  });
 }

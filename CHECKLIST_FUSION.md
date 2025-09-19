@@ -7,6 +7,7 @@ Tracking the current status of the multi-registration fusion refactor.
 - [x] Replace `/api/registration/resolve` calls in `working-viewer.tsx` with the `registrationAssociations` data and surface `transformCandidates`.
 - [x] Confirm `/api/registration/associations` exposes the full relationship graph for patient `nYHUfQQEeTNqKGsj` (siblings, multiple REGs, candidate IDs).
 - [x] **FIXED**: Remove duplicate `registrationAssociations` prop in `viewer-interface.tsx` - fusion control panels now appear for CT series when clicking anchor icons.
+- [x] Ship a one-touch Fusebox starter (`./scripts/start-fusebox.sh`) so devs don’t have to manually activate the venv, upgrade SimpleITK, and export helper paths before running `npm run dev:itk`.
 
 ## Helper integration
 - [x] Once the wiring above is in place, hit `/api/fusebox/resampled-slice` and confirm `transformSource` is `helper-generated`/`helper-cache`. ✅ **CONFIRMED: "helper-cache"**
