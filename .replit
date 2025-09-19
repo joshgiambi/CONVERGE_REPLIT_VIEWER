@@ -1,10 +1,10 @@
 modules = ["nodejs-20", "web", "postgresql-16", "python-3.11", "python3"]
-run = "./dev-with-itk.sh"
-hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+run = "./replit-setup-and-start.sh"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist", "build", "sam_env"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["jq", "libuuid", "unzip"]
+file = "replit.nix"
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -12,7 +12,7 @@ build = ["npm", "run", "build"]
 run = ["npm", "run", "start"]
 
 [[ports]]
-localPort = 5000
+localPort = 3000
 externalPort = 80
 
 [workflows]
@@ -34,4 +34,4 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
-waitForPort = 5000
+waitForPort = 3000

@@ -382,6 +382,10 @@ export function getFusionSecondaryStatus(primarySeriesId: number, secondarySerie
   return manifestCache.get(primarySeriesId)?.secondaries.get(secondarySeriesId)?.status;
 }
 
-export function clearFusionCaches() {
-  manifestCache.clear();
+export function clearFusionCaches(primarySeriesId?: number) {
+  if (typeof primarySeriesId === 'number' && Number.isFinite(primarySeriesId)) {
+    manifestCache.delete(primarySeriesId);
+  } else {
+    manifestCache.clear();
+  }
 }

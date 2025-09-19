@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, fuseboxSliceToImageData, clearFusionCaches } from "@/lib/fusion-utils";
+import { getFusedSlice, fuseboxSliceToImageData } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
@@ -142,6 +142,9 @@ interface WorkingViewerProps {
   allowedSecondaryIds?: number[];
   registrationAssociations?: Map<number, RegistrationAssociation[]>;
   fusionWindowLevel?: { window: number; level: number } | null;
+  fusionSecondaryStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
+  fusionManifestLoading?: boolean;
+  fusionManifestPrimarySeriesId?: number | null;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -178,6 +181,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     availableSeries,
     registrationAssociations,
     fusionWindowLevel,
+    fusionSecondaryStatuses,
+    fusionManifestLoading = false,
+    fusionManifestPrimarySeriesId = null,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -487,7 +493,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     return () => {
       fuseboxCacheRef.current.clear();
-      clearFusionCaches();
     };
   }, []);
 
@@ -559,7 +564,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleRegistrationSelect = useCallback((registrationId: string | null) => {
     setSelectedRegistrationId(registrationId);
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRenderRef.current?.();
   }, []);
@@ -2072,11 +2076,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // Remove all existing contours at this slice
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-      );
-
       if (intersectsWithExisting) {
         // Union brush with intersecting contours only
         const polygonsToUnion: number[][] = [];
@@ -2092,8 +2091,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Perform union of intersecting polygons using simple operations
         const unionResults = unionMultipleContoursSimple(polygonsToUnion);
         
-        // Add all unified contours (there can be multiple disjoint polygons)
+        // Only remove existing contours AFTER confirming union succeeded
         if (unionResults && unionResults.length > 0) {
+          // Union succeeded - remove ALL existing contours at this slice and replace with union result
+          structure.contours = structure.contours.filter(
+            (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
+          );
+          
+          // Add all unified contours (there can be multiple disjoint polygons)
           for (const polygon of unionResults) {
             if (polygon && polygon.length >= 9) {
               structure.contours.push({
@@ -2103,29 +2108,23 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               });
             }
           }
-        } else {
-          // Fallback: if union failed/returned empty, do not lose data.
-          // Keep original intersecting contours and add the brush polygon as a new blob.
-          for (const contour of intersectingContours) {
+          
+          // Re-add non-intersecting contours as separate blobs
+          for (const contour of nonIntersectingContours) {
             structure.contours.push({
               slicePosition: payload.slicePosition,
               points: contour.points,
               numberOfPoints: contour.numberOfPoints,
             });
           }
+        } else {
+          // Fallback: if union failed/returned empty, preserve ALL existing contours
+          // Just add the brush polygon as a separate blob without removing anything
+          console.warn('🔸 BRUSH FIX: Union failed - preserving existing contours to prevent disappearing blobs');
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: brushPolygon,
             numberOfPoints: brushPolygon.length / 3,
-          });
-        }
-        
-        // Re-add non-intersecting contours as separate blobs
-        for (const contour of nonIntersectingContours) {
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: contour.points,
-            numberOfPoints: contour.numberOfPoints,
           });
         }
       } else {
@@ -2228,6 +2227,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
+      // Trigger immediate render to show contours
+      try { 
+        scheduleRender(); 
+        // Temporary debugging notification
+        console.log('🎯 CONTOUR FIX: Immediate render triggered after brush stroke');
+      } catch {}
     } else if (payload.action === "smart_brush_stroke") {
       // Handle smart brush stroke - add already processed contour points
       if (false) console.log("🎯 Processing smart brush stroke:", payload);
@@ -2316,6 +2321,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'smart_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'smart_brush_stroke');
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "erase_stroke") {
       // Handle erase stroke - subtract points from contour
       console.log("🔹 Processing erase stroke:", payload);
@@ -2395,6 +2402,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'erase_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'erase_brush_stroke');
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
@@ -2439,6 +2448,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
+      // Trigger immediate render to show contours
+      try { 
+        scheduleRender(); 
+        // Temporary debugging notification
+        console.log('🎯 CONTOUR FIX: Immediate render triggered after pen tool operation:', payload.action);
+      } catch {}
     } else if (payload.action === "pen_boolean_operation") {
       // Handle pen tool boolean operations (union/subtract)
       const structure = updatedStructures.structures.find(
@@ -2589,6 +2604,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'pen_boolean_operation');
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
@@ -2598,6 +2615,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       // Save to server
       saveContourUpdates(updatedStructures, 'pen_tool');
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
@@ -3210,7 +3229,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRender();
   }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
@@ -3220,7 +3238,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setSecondaryModality('MR');
       setFuseboxTransformSource(null);
       fuseboxCacheRef.current.clear();
-      clearFusionCaches();
       return;
     }
 
@@ -3237,7 +3254,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
 
     fuseboxCacheRef.current.clear();
-    clearFusionCaches();
     loadMetadata();
 
     return () => {
@@ -4503,6 +4519,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     if (!secondarySeriesId || fusionOpacity === 0) {
       if (ensureActive()) setFuseboxTransformSource(null);
+      return;
+    }
+
+    if (fusionManifestLoading) {
+      return;
+    }
+
+    const status = fusionSecondaryStatuses?.get(secondarySeriesId);
+    const manifestMatches = fusionManifestPrimarySeriesId === seriesId;
+    if (status?.status !== 'ready' || !manifestMatches) {
+      if (ensureActive()) {
+        fusionIssueRef.current = 'manifest-not-ready';
+        setFuseboxTransformSource(null);
+      }
       return;
     }
 

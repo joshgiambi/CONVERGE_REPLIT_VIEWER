@@ -936,10 +936,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   }, []);
 
-  const resetFusionState = useCallback((clearCache: boolean = false) => {
+  const resetFusionState = useCallback((options?: { clearCache?: boolean; primarySeriesId?: number | null }) => {
+    const { clearCache = false, primarySeriesId = null } = options ?? {};
     if (clearCache) {
       try {
-        clearFusionCaches();
+        if (primarySeriesId != null) {
+          clearFusionCaches(primarySeriesId);
+        } else {
+          clearFusionCaches();
+        }
       } catch {}
     }
     setFusionManifest(null);
@@ -1386,7 +1391,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   }, [secondarySeriesId]);
 
   const preloadAllFusionSecondaries = useCallback(
-    async (primarySeriesId: number, manifest: FusionManifest) => {
+    async (primarySeriesId: number, manifest: FusionManifest, requestToken: number) => {
       const readySecondaries = manifest.secondaries.filter((sec) => sec.status === 'ready');
       if (!readySecondaries.length) {
         setSecondaryLoadingStates(new Map());
@@ -1401,9 +1406,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       setSecondaryLoadingStates(loadingMap);
 
       for (const secondary of readySecondaries) {
+        if (fusionManifestRequestRef.current !== requestToken) break;
         setCurrentlyLoadingSecondary(secondary.secondarySeriesId);
         try {
           await preloadFusionSecondary(primarySeriesId, secondary.secondarySeriesId, ({ completed, total }) => {
+            if (fusionManifestRequestRef.current !== requestToken) return;
             setSecondaryLoadingStates((prev) => {
               const next = new Map(prev);
               const fraction = total ? (completed / total) * 100 : 100;
@@ -1411,12 +1418,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               return next;
             });
           });
+          if (fusionManifestRequestRef.current !== requestToken) break;
           setSecondaryLoadingStates((prev) => {
             const next = new Map(prev);
             next.set(secondary.secondarySeriesId, { isLoading: false, progress: 100 });
             return next;
           });
         } catch (error: any) {
+          if (fusionManifestRequestRef.current !== requestToken) break;
           console.error('Fusion preload failed', error);
           setFusionManifestError(error?.message || String(error));
           setSecondaryLoadingStates((prev) => {
@@ -1427,7 +1436,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       }
 
-      setCurrentlyLoadingSecondary(null);
+      if (fusionManifestRequestRef.current === requestToken) {
+        setCurrentlyLoadingSecondary(null);
+      }
     },
     [],
   );
@@ -1482,17 +1493,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     async (seriesEntry: DICOMSeries | null) => {
       const requestToken = ++fusionManifestRequestRef.current;
       if (!seriesEntry) {
-        resetFusionState(true);
+        resetFusionState({ clearCache: true });
         return;
       }
 
       const modality = (seriesEntry.modality || '').toUpperCase();
       if (modality !== 'CT') {
-        resetFusionState(true);
+        resetFusionState({ clearCache: true, primarySeriesId: seriesEntry.id });
         return;
       }
 
-      resetFusionState(true);
+      resetFusionState({ clearCache: true, primarySeriesId: seriesEntry.id });
       setFusionManifestLoading(true);
       setFusionManifestError(null);
 
@@ -1545,7 +1556,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setSecondarySeriesId(null);
         setShowFusionPanel(true);
 
-        await preloadAllFusionSecondaries(seriesEntry.id, manifest);
+        await preloadAllFusionSecondaries(seriesEntry.id, manifest, requestToken);
       } catch (error: any) {
         if (fusionManifestRequestRef.current !== requestToken) return;
         console.error('Failed to initialize fusion manifest', error);
@@ -1949,6 +1960,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   registrationAssociations={registrationRelationshipMap}
                   availableSeries={series}
                   fusionWindowLevel={fusionWindowLevel}
+                  fusionSecondaryStatuses={fusionSecondaryStatuses}
+                  fusionManifestLoading={fusionManifestLoading}
+                  fusionManifestPrimarySeriesId={fusionManifest?.primarySeriesId ?? null}
                 />
               
               {/* Structure Tags on Right Side - Responsive */}
