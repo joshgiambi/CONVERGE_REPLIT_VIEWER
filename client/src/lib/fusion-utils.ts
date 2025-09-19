@@ -1,11 +1,15 @@
-import type { FuseboxTransformSource, RegistrationAssociation } from '@/types/fusion';
+import dicomParser from 'dicom-parser';
+import type {
+  FusionManifest,
+  FusionSecondaryDescriptor,
+  FusionInstanceDescriptor,
+  FusionManifestStatus,
+  FuseboxTransformSource,
+} from '@/types/fusion';
 
-export type FuseboxSliceRequest = {
-  primarySeriesId: number;
-  secondarySeriesId: number;
-  sopInstanceUID: string;
-  interpolation?: 'linear' | 'nearest';
-  registrationId?: string | null;
+export type FusionPreloadProgress = {
+  completed: number;
+  total: number;
 };
 
 export type FuseboxSlice = {
@@ -19,7 +23,6 @@ export type FuseboxSlice = {
   registrationFile: string | null;
   transformSource?: FuseboxTransformSource;
   registrationId?: string;
-  associations?: RegistrationAssociation[];
 };
 
 export type FuseboxImageData = {
@@ -27,104 +30,274 @@ export type FuseboxImageData = {
   hasSignal: boolean;
 };
 
-const fuseboxSliceCache = new Map<string, Promise<FuseboxSlice>>();
+type SecondaryCacheEntry = {
+  descriptor: FusionSecondaryDescriptor;
+  slices: Map<string, Promise<FuseboxSlice>>;
+  status: FusionManifestStatus | 'idle' | 'loading';
+  error?: string;
+};
 
-function decodeBase64ToFloat32(encoded: string): Float32Array {
-  let binary: string;
-  if (typeof atob === 'function') {
-    binary = atob(encoded);
-  } else if (typeof Buffer !== 'undefined') {
-    binary = Buffer.from(encoded, 'base64').toString('binary');
+type ManifestCacheEntry = {
+  manifest: FusionManifest;
+  secondaries: Map<number, SecondaryCacheEntry>;
+};
+
+const manifestCache = new Map<number, ManifestCacheEntry>();
+
+function getOrCreateManifestEntry(primarySeriesId: number): ManifestCacheEntry {
+  let entry = manifestCache.get(primarySeriesId);
+  if (!entry) {
+    entry = {
+      manifest: {
+        manifestVersion: 1,
+        studyId: 0,
+        patientId: null,
+        primarySeriesId,
+        primarySeriesInstanceUID: '',
+        primarySeriesDescription: null,
+        primaryModality: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        settings: {
+          interpolation: 'linear',
+          preload: true,
+        },
+        secondaries: [],
+      },
+      secondaries: new Map(),
+    };
+    manifestCache.set(primarySeriesId, entry);
+  }
+  return entry;
+}
+
+function parseWindowValues(value: string | null | undefined): number[] | null {
+  if (!value) return null;
+  const tokens = value.split('\\').map((token) => Number(token.trim())).filter((n) => Number.isFinite(n));
+  return tokens.length ? tokens : null;
+}
+
+function createSliceFromDicom(
+  arrayBuffer: ArrayBuffer,
+  descriptor: FusionSecondaryDescriptor,
+  instance: FusionInstanceDescriptor,
+): FuseboxSlice {
+  const byteArray = new Uint8Array(arrayBuffer);
+  const dataSet = dicomParser.parseDicom(byteArray, {});
+
+  const rows = dataSet.uint16?.('x00280010') ?? 0;
+  const cols = dataSet.uint16?.('x00280011') ?? 0;
+  if (!rows || !cols) {
+    throw new Error('Fused DICOM missing Rows/Columns');
+  }
+
+  const bitsAllocated = dataSet.uint16?.('x00280100') ?? 16;
+  const pixelRepresentation = dataSet.uint16?.('x00280103') ?? 0;
+  const slope = Number(dataSet.string?.('x00281053') ?? '1') || 1;
+  const intercept = Number(dataSet.string?.('x00281052') ?? '0') || 0;
+
+  const pixelElement = dataSet.elements?.['x7fe00010'];
+  if (!pixelElement) {
+    throw new Error('Fused DICOM missing pixel data');
+  }
+
+  const { dataOffset, length } = pixelElement as any;
+  const byteOffset = byteArray.byteOffset + dataOffset;
+  const buffer = byteArray.buffer;
+  let floatPixels: Float32Array;
+
+  if (bitsAllocated === 32) {
+    const raw = new Float32Array(buffer, byteOffset, length / 4);
+    floatPixels = new Float32Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) {
+      floatPixels[i] = raw[i] * slope + intercept;
+    }
+  } else if (bitsAllocated === 16) {
+    const count = length / 2;
+    if (pixelRepresentation === 0) {
+      const raw = new Uint16Array(buffer, byteOffset, count);
+      floatPixels = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) floatPixels[i] = raw[i] * slope + intercept;
+    } else {
+      const raw = new Int16Array(buffer, byteOffset, count);
+      floatPixels = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) floatPixels[i] = raw[i] * slope + intercept;
+    }
+  } else if (bitsAllocated === 8) {
+    const raw = new Uint8Array(buffer, byteOffset, length);
+    floatPixels = new Float32Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) floatPixels[i] = raw[i] * slope + intercept;
   } else {
-    throw new Error('No base64 decoder available in this environment');
+    throw new Error(`Unsupported BitsAllocated for fused DICOM: ${bitsAllocated}`);
   }
 
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < floatPixels.length; i += 1) {
+    const value = floatPixels[i];
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
   }
-  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    min = Number.isFinite(min) ? min : 0;
+    max = min + 1;
+  }
+
+  const sliceIndex = Number.isFinite(instance.instanceNumber)
+    ? Math.max(0, instance.instanceNumber - 1)
+    : 0;
+
+  return {
+    width: cols,
+    height: rows,
+    min,
+    max,
+    data: floatPixels,
+    sliceIndex,
+    secondaryModality: descriptor.secondaryModality,
+    registrationFile: null,
+    transformSource: 'helper-cache',
+    registrationId: descriptor.registrationId ?? undefined,
+  };
 }
 
-const toCacheKey = (request: FuseboxSliceRequest) =>
-  [
-    request.primarySeriesId,
-    request.secondarySeriesId,
-    request.sopInstanceUID,
-    request.interpolation ?? 'linear',
-    request.registrationId ?? '',
-  ].join(':');
+async function loadSlice(
+  cache: SecondaryCacheEntry,
+  instance: FusionInstanceDescriptor,
+): Promise<FuseboxSlice> {
+  const cached = cache.slices.get(instance.sopInstanceUID);
+  if (cached) return cached;
 
-export function clearFuseboxCache() {
-  fuseboxSliceCache.clear();
+  const promise = (async () => {
+    const response = await fetch(`/api/images/${encodeURIComponent(instance.sopInstanceUID)}`, {
+      cache: 'force-cache',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to load fused image ${instance.sopInstanceUID} (${response.status} ${response.statusText})`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return createSliceFromDicom(arrayBuffer, cache.descriptor, instance);
+  })();
+
+  cache.slices.set(instance.sopInstanceUID, promise);
+  return promise;
 }
 
-export async function fetchFuseboxSlice(request: FuseboxSliceRequest): Promise<FuseboxSlice> {
-  const key = toCacheKey(request);
-  let pending = fuseboxSliceCache.get(key);
-
-  if (!pending) {
-    pending = (async () => {
-      const params = new URLSearchParams({
-        primarySeriesId: String(request.primarySeriesId),
-        secondarySeriesId: String(request.secondarySeriesId),
-        primarySOP: request.sopInstanceUID,
-      });
-
-      if (request.interpolation) {
-        params.set('interpolation', request.interpolation);
-      }
-      if (request.registrationId) {
-        params.set('registrationId', request.registrationId);
-      }
-
-      const response = await fetch(`/api/fusebox/resampled-slice?${params.toString()}`, {
-        cache: 'no-store',
-      });
-
-      if (!response.ok) {
-        throw new Error(`Fusebox request failed (${response.status} ${response.statusText})`);
-      }
-
-      const payload = await response.json();
-      if (!payload || typeof payload.data !== 'string') {
-        throw new Error('Fusebox payload missing image data');
-      }
-
-      return {
-        width: Number(payload.width) || 0,
-        height: Number(payload.height) || 0,
-        min: typeof payload.min === 'number' ? payload.min : 0,
-        max: typeof payload.max === 'number' ? payload.max : 1,
-        data: decodeBase64ToFloat32(payload.data),
-        sliceIndex: Number(payload.sliceIndex) || 0,
-        secondaryModality: payload.secondaryModality ?? null,
-        registrationFile: payload.registrationFile ?? null,
-        transformSource: payload.transformSource === 'helper-generated' || payload.transformSource === 'helper-cache'
-          ? payload.transformSource
-          : undefined,
-        registrationId: typeof payload.registrationId === 'string' ? payload.registrationId : undefined,
-        associations: Array.isArray(payload.associations) ? payload.associations : undefined,
-      } as FuseboxSlice;
-    })();
-
-    fuseboxSliceCache.set(key, pending);
+function updateSecondaryCache(entry: ManifestCacheEntry, descriptor: FusionSecondaryDescriptor) {
+  const existing = entry.secondaries.get(descriptor.secondarySeriesId);
+  if (existing) {
+    existing.descriptor = descriptor;
+    if (descriptor.status === 'error') existing.error = descriptor.error;
+    if (descriptor.status === 'ready' && existing.status !== 'loading') existing.status = 'idle';
+  } else {
+    entry.secondaries.set(descriptor.secondarySeriesId, {
+      descriptor,
+      slices: new Map(),
+      status: descriptor.status === 'ready' ? 'idle' : descriptor.status,
+      error: descriptor.error,
+    });
   }
+}
+
+export async function fetchFusionManifest(
+  primarySeriesId: number,
+  options?: {
+    secondarySeriesIds?: number[];
+    force?: boolean;
+    interpolation?: 'linear' | 'nearest';
+    preload?: boolean;
+  },
+): Promise<FusionManifest> {
+  const params = new URLSearchParams({ primarySeriesId: String(primarySeriesId) });
+  if (options?.secondarySeriesIds?.length) params.set('secondarySeriesIds', options.secondarySeriesIds.join(','));
+  if (options?.force) params.set('force', 'true');
+  if (options?.interpolation) params.set('interpolation', options.interpolation);
+  if (typeof options?.preload === 'boolean') params.set('preload', String(options.preload));
+
+  const response = await fetch(`/api/fusion/manifest?${params.toString()}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Fusion manifest request failed (${response.status} ${response.statusText})`);
+  }
+  const manifest = (await response.json()) as FusionManifest;
+
+  const entry = getOrCreateManifestEntry(primarySeriesId);
+  entry.manifest = manifest;
+  manifest.secondaries.forEach((descriptor) => updateSecondaryCache(entry, descriptor));
+  return manifest;
+}
+
+export async function preloadFusionSecondary(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  onProgress?: (progress: FusionPreloadProgress) => void,
+): Promise<void> {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) throw new Error('Fusion manifest not loaded');
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) throw new Error('Fusion secondary missing in manifest cache');
+  if (cache.status === 'loading') return;
+
+  const { descriptor } = cache;
+  if (descriptor.status !== 'ready') {
+    throw new Error(`Fusion secondary ${secondarySeriesId} not ready (status=${descriptor.status})`);
+  }
+
+  const instances = descriptor.instances;
+  cache.status = 'loading';
+  cache.error = undefined;
 
   try {
-    return await pending;
-  } catch (error) {
-    fuseboxSliceCache.delete(key);
+    const total = instances.length;
+    let completed = 0;
+    for (const instance of instances) {
+      await loadSlice(cache, instance);
+      completed += 1;
+      onProgress?.({ completed, total });
+    }
+    cache.status = 'ready';
+  } catch (error: any) {
+    cache.status = 'error';
+    cache.error = error?.message || String(error);
     throw error;
   }
 }
 
-export function fuseboxSliceToImageData(slice: FuseboxSlice, modality: string | null): FuseboxImageData {
+export async function getFusedSlice(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  sopInstanceUID: string,
+): Promise<FuseboxSlice> {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) throw new Error('Fusion manifest not loaded');
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) throw new Error('Fusion secondary missing in manifest cache');
+
+  const descriptor = cache.descriptor;
+  const instance = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID);
+  if (!instance) {
+    throw new Error(`Fusion SOP ${sopInstanceUID} not found in manifest`);
+  }
+
+  return loadSlice(cache, instance);
+}
+
+export function fuseboxSliceToImageData(
+  slice: FuseboxSlice,
+  modality: string | null,
+  windowLevel?: { window: number; level: number } | null,
+): FuseboxImageData {
   const imageData = new ImageData(slice.width, slice.height);
   const buffer = imageData.data;
   const source = slice.data;
-  const min = slice.min;
-  const max = slice.max;
+  const windowWidth = windowLevel?.window ?? slice.max - slice.min;
+  const windowLevelVal = windowLevel?.level ?? (slice.min + slice.max) / 2;
+  const min = windowLevel?.window
+    ? windowLevelVal - windowWidth / 2
+    : slice.min;
+  const max = windowLevel?.window
+    ? windowLevelVal + windowWidth / 2
+    : slice.max;
   const range = Math.max(1e-6, max - min);
   const mode = (modality || '').toUpperCase();
   const isPET = mode === 'PT' || mode === 'PET';
@@ -199,4 +372,16 @@ export function fuseboxSliceToImageData(slice: FuseboxSlice, modality: string | 
   }
 
   return { imageData, hasSignal };
+}
+
+export function getFusionManifest(primarySeriesId: number): FusionManifest | null {
+  return manifestCache.get(primarySeriesId)?.manifest ?? null;
+}
+
+export function getFusionSecondaryStatus(primarySeriesId: number, secondarySeriesId: number): FusionManifestStatus | 'idle' | 'loading' | undefined {
+  return manifestCache.get(primarySeriesId)?.secondaries.get(secondarySeriesId)?.status;
+}
+
+export function clearFusionCaches() {
+  manifestCache.clear();
 }

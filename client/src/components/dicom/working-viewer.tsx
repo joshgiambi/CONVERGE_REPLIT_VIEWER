@@ -9,7 +9,6 @@ import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 
-import { FusionControlPanel } from "./fusion-control-panel";
 import { MeasurementTool } from "./measurement-tool";
 import { MPRFloating } from './mpr-floating';
 import { BrushOperation } from "@shared/schema";
@@ -24,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { fetchFuseboxSlice, fuseboxSliceToImageData, clearFuseboxCache } from "@/lib/fusion-utils";
+import { getFusedSlice, fuseboxSliceToImageData, clearFusionCaches } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
@@ -133,7 +132,6 @@ interface WorkingViewerProps {
   orientation?: 'axial' | 'sagittal' | 'coronal';
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
-  onSecondaryLoadingStateChange?: (seriesId: number, state: { isLoading: boolean; progress: number }) => void;
   availableSeries?: Array<{
     id: number;
     modality?: string;
@@ -143,6 +141,7 @@ interface WorkingViewerProps {
   }>;
   allowedSecondaryIds?: number[];
   registrationAssociations?: Map<number, RegistrationAssociation[]>;
+  fusionWindowLevel?: { window: number; level: number } | null;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -176,9 +175,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     allStructuresVisible = true,
     imageCache,
     orientation = 'axial',
-    onSecondaryLoadingStateChange, // @ts-ignore - Added for loading state feedback
     availableSeries,
     registrationAssociations,
+    fusionWindowLevel,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -223,7 +222,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
-  const [mriWindowLevel, setMriWindowLevel] = useState({ width: 0, center: 0 }); // Use auto-calculated values by default
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
@@ -410,6 +408,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const { imageData, hasSignal } = fuseboxSliceToImageData(
         slice,
         slice.secondaryModality ?? defaultModality,
+        fusionWindowLevel,
       );
       const overlayCanvas = document.createElement('canvas');
       overlayCanvas.width = slice.width;
@@ -419,8 +418,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       overlayCtx.putImageData(imageData, 0, 0);
       return { canvas: overlayCanvas, slice, hasSignal };
     },
-    [],
+    [fusionWindowLevel],
   );
+
+  useEffect(() => {
+    const entries = Array.from(fuseboxCacheRef.current.entries());
+    if (!entries.length) return;
+    const updatedCache = new Map<string, { canvas: HTMLCanvasElement; slice: FuseboxSlice; timestamp: number; hasSignal: boolean }>();
+    entries.forEach(([key, value]) => {
+      const updated = convertSliceToCanvas(value.slice, value.slice.secondaryModality ?? secondaryModality ?? '');
+      if (updated) {
+        updatedCache.set(key, { ...updated, timestamp: Date.now() });
+      }
+    });
+    if (updatedCache.size) {
+      fuseboxCacheRef.current = updatedCache;
+      setRenderTrigger((prev) => prev + 1);
+    }
+  }, [convertSliceToCanvas, secondaryModality]);
 
   const FUSION_CACHE_MAX_AGE_MS = 45000;
   const FUSION_PREFETCH_RADIUS = 3;
@@ -442,12 +457,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (fuseboxCacheRef.current.has(key) || fusionPrefetchSetRef.current.has(key)) continue;
 
         fusionPrefetchSetRef.current.add(key);
-        fetchFuseboxSlice({
-          primarySeriesId: seriesId,
-          secondarySeriesId,
-          sopInstanceUID: sop,
-          registrationId: registrationId ?? undefined,
-        })
+        getFusedSlice(seriesId, secondarySeriesId, sop)
           .then((slice) => {
             const prepared = convertSliceToCanvas(slice, secondaryModality);
             if (prepared) {
@@ -478,7 +488,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     return () => {
       fuseboxCacheRef.current.clear();
-      clearFuseboxCache();
+      clearFusionCaches();
     };
   }, []);
 
@@ -550,7 +560,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleRegistrationSelect = useCallback((registrationId: string | null) => {
     setSelectedRegistrationId(registrationId);
     fuseboxCacheRef.current.clear();
-    clearFuseboxCache();
+    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRenderRef.current?.();
   }, []);
@@ -2987,6 +2997,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setCrosshairMode(true);
       console.log('Crosshair mode activated');
     },
+    openFusionDebug,
     navigateToSlice: (targetZ: number) => {
       if (!images || images.length === 0) {
         console.warn('🎯 Cannot navigate: no images available');
@@ -3200,7 +3211,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
-    clearFuseboxCache();
+    clearFusionCaches();
     setFuseboxTransformSource(null);
     scheduleRender();
   }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender]);
@@ -3210,7 +3221,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setSecondaryModality('MR');
       setFuseboxTransformSource(null);
       fuseboxCacheRef.current.clear();
-      clearFuseboxCache();
+      clearFusionCaches();
       return;
     }
 
@@ -3227,7 +3238,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
 
     fuseboxCacheRef.current.clear();
-    clearFuseboxCache();
+    clearFusionCaches();
     loadMetadata();
 
     return () => {
@@ -4528,12 +4539,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     if (!cached) {
       try {
-        const slice = await fetchFuseboxSlice({
-          primarySeriesId: seriesId,
-          secondarySeriesId,
-          sopInstanceUID: primaryImage.sopInstanceUID,
-          registrationId: selectedRegistrationId ?? undefined,
-        });
+        const slice = await getFusedSlice(seriesId, secondarySeriesId, primaryImage.sopInstanceUID);
 
         if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {
           setSelectedRegistrationId(slice.registrationId);
@@ -4554,7 +4560,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         cached = { ...prepared, timestamp: Date.now() };
         fuseboxCacheRef.current.set(cacheKey, cached);
         if (!prepared.hasSignal) {
-          pushFusionLog('Fusebox slice had no visible signal', {
+          pushFusionLog('Fused slice had no visible signal', {
             sop: primaryImage.sopInstanceUID,
             min: slice.min,
             max: slice.max,
@@ -4562,7 +4568,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       } catch (error) {
         if (ensureActive()) {
-          console.error('Fusebox overlay fetch failed:', error);
+          console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';
           setFuseboxTransformSource(null);
         }
@@ -5171,15 +5177,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const newWidth = Math.max(1, startWindow + deltaX * 2);
         const newCenter = startCenter - deltaY * 1.5;
 
-        // Check if we're in fusion mode with MRI overlay
-        if (secondarySeriesId && fusionOpacity > 0) {
-          // Adjust MRI window/level when in fusion mode
-          setMriWindowLevel({ width: newWidth, center: newCenter });
-          console.log(`MRI Window/Level adjusted via drag: Center=${newCenter}, Width=${newWidth}`);
-        } else {
-          // Adjust CT window/level normally
-          updateWindowLevel({ width: newWidth, center: newCenter });
-        }
+        updateWindowLevel({ width: newWidth, center: newCenter });
       };
 
       const handleWindowLevelEnd = (endEvent: MouseEvent) => {
@@ -6091,33 +6089,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           </AlertDialogContent>
         </AlertDialog>
 
-          {/* RT Structure Overlay removed - structures are rendered in displayCurrentImage */}
-
-          {/* Removed overlaid text - now in titlebar */}
-          
-          {/* Fusion Control Panel - Visible when study has secondary series available for fusion */}
-          {studyId && props.hasSecondarySeriesForFusion && registrationOptions.length > 0 && props.onSecondarySeriesSelect && props.onFusionOpacityChange && (
-            <FusionControlPanel
-              primarySeriesId={seriesId}
-              studyId={studyId}
-              onSecondarySeriesSelect={(id) => props.onSecondarySeriesSelect!(id ? id : null)}
-              opacity={fusionOpacity}
-              onOpacityChange={props.onFusionOpacityChange}
-              isVisible={true}
-              mriWindowLevel={mriWindowLevel}
-              onMriWindowLevelChange={setMriWindowLevel}
-              selectedSecondaryId={typeof secondarySeriesId === 'number' ? secondarySeriesId : null}
-              onOpenDebug={() => openFusionDebug('manual')}
-              secondaryModality={secondaryModality}
-              transformSource={fuseboxTransformSource}
-              allowedSecondaryIds={props.allowedSecondaryIds}
-              availableSeries={availableSeries}
-              registrationOptions={registrationOptions}
-              selectedRegistrationId={selectedRegistrationId}
-              onRegistrationSelect={handleRegistrationSelect}
-            />
-          )}
-          
           {/* Floating MPR windows for sagittal and coronal views */}
           {orientation === 'axial' && images.length > 0 && mprVisible && (
             <div className="absolute right-4 top-16 flex flex-col gap-3">

@@ -14,7 +14,17 @@ import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 import { logger } from './logger';
-import { spawn, spawnSync } from 'child_process';
+import {
+  resolveFuseboxTransform,
+  runFuseboxResample,
+  runFuseboxInspectTransform,
+  collectSeriesFiles,
+  sortImagesByInstance,
+  resolveFuseboxPython,
+  fuseboxHelperMetrics,
+  type FuseboxLogEmitter,
+} from './fusion/fusebox';
+import { fusionManifestService } from './fusion/manifest-service';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -173,34 +183,6 @@ function invertMatrix4x4RowMajor(matrix: number[]): number[] | null {
   return inv;
 }
 
-function sortImagesByInstance(imagesList: any[]): any[] {
-  return imagesList
-    .slice()
-    .sort((a, b) => {
-      const ai = Number((a.instanceNumber ?? a.metadata?.instanceNumber ?? 0) as number);
-      const bi = Number((b.instanceNumber ?? b.metadata?.instanceNumber ?? 0) as number);
-      if (Number.isFinite(ai) && Number.isFinite(bi) && ai !== bi) return ai - bi;
-      return String(a.fileName || a.sopInstanceUID || '').localeCompare(String(b.fileName || b.sopInstanceUID || ''));
-    });
-}
-
-type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache' | 'helper-regenerated' | 'matrix-fallback' | 'matrix-validated';
-type FuseboxTransformInfo = {
-  matrix?: number[];
-  filePath?: string;
-  transformFile?: string;
-  transformSource?: FuseboxTransformSource;
-  registrationId?: string;
-};
-
-const fuseboxHelperMetrics = {
-  attempts: 0,
-  cacheHits: 0,
-  conversions: 0,
-  failures: 0,
-  disabled: 0,
-};
-
 const fuseboxLogBuffer: string[] = [];
 const FUSEBOX_LOG_CAP = 300;
 
@@ -217,25 +199,9 @@ const appendFuseboxLog = (level: string, message: string, data?: Record<string, 
   }
 };
 
-let fuseboxHelperDisabledLogged = false;
-let resolvedFuseboxPython: string | null = null;
-const fuseboxPythonFailureLogged = new Set<string>();
-let fuseboxPythonFallbackLogged = false;
-
-const createFuseboxError = (code: string, message: string, context: Record<string, unknown>) => {
-  const error = new Error(message);
-  (error as any).code = code;
-  (error as any).context = context;
-  return error;
-};
-
-const logFuseboxHelper = (
-  level: 'debug' | 'info' | 'warn',
-  message: string,
-  data: Record<string, unknown>,
-) => {
-  const payload = `${message} ${JSON.stringify({ event: 'fusebox.helper', ...data })}`;
+const fuseboxEmit: FuseboxLogEmitter = (level, message, data = {}) => {
   appendFuseboxLog(level, message, data);
+  const payload = `${message} ${JSON.stringify({ event: 'fusebox.helper', ...data })}`;
   if (level === 'debug') {
     logger.debug(payload);
   } else if (level === 'info') {
@@ -245,373 +211,7 @@ const logFuseboxHelper = (
   }
 };
 
-const resolveFuseboxPython = (): string => {
-  if (resolvedFuseboxPython) return resolvedFuseboxPython;
 
-  const candidateList = [
-    process.env.FUSEBOX_PYTHON,
-    process.env.SIMPLEITK_PYTHON,
-    process.env.PYTHON,
-    path.join(process.cwd(), 'sam_env', 'bin', 'python'),
-    'python3',
-    'python',
-  ]
-    .filter((candidate): candidate is string => !!candidate)
-    .filter((candidate, index, arr) => arr.indexOf(candidate) === index);
-
-  for (const candidate of candidateList) {
-    try {
-      const check = spawnSync(candidate, ['-c', 'import numpy; import SimpleITK'], { encoding: 'utf-8' });
-      if (check.status === 0) {
-        resolvedFuseboxPython = candidate;
-        logFuseboxHelper('info', 'Resolved Fusebox python interpreter', { candidate });
-        return candidate;
-      }
-      if (!fuseboxPythonFailureLogged.has(candidate)) {
-        fuseboxPythonFailureLogged.add(candidate);
-        logFuseboxHelper('warn', 'Fusebox python candidate missing numpy/SimpleITK', {
-          candidate,
-          status: check.status,
-          stderr: check.stderr,
-        });
-      }
-    } catch (err: any) {
-      if (!fuseboxPythonFailureLogged.has(candidate)) {
-        fuseboxPythonFailureLogged.add(candidate);
-        logFuseboxHelper('warn', 'Fusebox python candidate unavailable', {
-          candidate,
-          err: err?.message || err,
-        });
-      }
-    }
-  }
-
-  const fallback = candidateList[0] || 'python3';
-  resolvedFuseboxPython = fallback;
-  if (!fuseboxPythonFallbackLogged) {
-    fuseboxPythonFallbackLogged = true;
-    logFuseboxHelper('warn', 'Falling back to default Fusebox python without dependency validation', {
-      fallback,
-      candidates: candidateList,
-    });
-  }
-  return fallback;
-};
-
-async function resolveFuseboxTransform(primarySeriesId: number, secondarySeriesId: number, registrationId?: string): Promise<FuseboxTransformInfo | null> {
-  const primarySeries = await storage.getSeriesById(primarySeriesId);
-  const secondarySeries = await storage.getSeriesById(secondarySeriesId);
-  if (!primarySeries || !secondarySeries) return null;
-
-  const [primaryImages, secondaryImages] = await Promise.all([
-    storage.getImagesBySeriesId(primarySeriesId),
-    storage.getImagesBySeriesId(secondarySeriesId),
-  ]);
-  if (!primaryImages?.length || !secondaryImages?.length) return null;
-
-  const primaryMeta = primaryImages[0]?.filePath ? parseMinimalDicomMeta(primaryImages[0].filePath) : null;
-  const secondaryMeta = secondaryImages[0]?.filePath ? parseMinimalDicomMeta(secondaryImages[0].filePath) : null;
-  const primaryFoR = primaryMeta?.frameOfReference || null;
-  const secondaryFoR = secondaryMeta?.frameOfReference || null;
-
-  const maybeAttachHelperOutput = async (info: FuseboxTransformInfo | null, regPath?: string, candidateId?: string) => {
-    if (!info || info.transformFile || !regPath) return info;
-    
-    // Skip helper for REG files that produce pathological transforms
-    const regFileName = path.basename(regPath);
-    const problematicRegFiles = [
-      // Temporarily empty list to allow all REG files to be tested
-      // '1.2.246.352.221.516840734399078479312302493491489751699.dcm', // This one has the good matrix but pathological H5
-    ];
-    
-    if (problematicRegFiles.includes(regFileName)) {
-      logFuseboxHelper('info', 'Skipping helper for pathological REG file, using matrix-only', {
-        primarySeriesId,
-        secondarySeriesId,
-        regFile: regFileName,
-        candidateId,
-      });
-      info.transformSource = 'matrix-validated';
-      return info;
-    }
-    const helper = process.env.DICOM_REG_CONVERTER;
-    if (!helper) {
-      fuseboxHelperMetrics.disabled += 1;
-      if (!fuseboxHelperDisabledLogged) {
-        logFuseboxHelper('warn', 'Fusebox helper disabled (DICOM_REG_CONVERTER not set)', {
-          primarySeriesId,
-          secondarySeriesId,
-        });
-        fuseboxHelperDisabledLogged = true;
-      }
-      throw createFuseboxError('FUSEBOX_HELPER_MISSING', 'Fusebox helper is not configured (DICOM_REG_CONVERTER unset)', {
-        primarySeriesId,
-        secondarySeriesId,
-      });
-    }
-    if (!primaryFoR || !secondaryFoR) {
-      throw createFuseboxError('FUSEBOX_MISSING_FOR', 'Frame of Reference UID missing for helper conversion', {
-        primarySeriesId,
-        secondarySeriesId,
-        primaryFoR,
-        secondaryFoR,
-      });
-    }
-
-    fuseboxHelperMetrics.attempts += 1;
-
-    const cacheDir = path.join(process.cwd(), 'tmp', 'fusebox-transforms');
-    await fs.promises.mkdir(cacheDir, { recursive: true });
-    const safeName = path.basename(regPath).replace(/[^a-zA-Z0-9_.-]+/g, '_');
-    const candidateIdSafe = candidateId ? candidateId.replace(/[^a-zA-Z0-9_.-]+/g, '_') : 'default';
-    const outPath = path.join(cacheDir, `${primarySeriesId}_${secondarySeriesId}_${candidateIdSafe}_${safeName}.h5`);
-
-    let needsConversion = true;
-    try {
-      await fs.promises.access(outPath, fs.constants.R_OK);
-      needsConversion = false;
-    } catch {}
-
-    if (needsConversion) {
-      // Use the REG file's own Frame of Reference UIDs if available
-      const regFoRs = await (async () => {
-        try {
-          const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
-          const parsed = parseDicomRegistrationFromFile(regPath);
-          return {
-            source: parsed?.sourceFrameOfReferenceUid,
-            target: parsed?.targetFrameOfReferenceUid
-          };
-        } catch {
-          return { source: null, target: null };
-        }
-      })();
-      
-      // Check if REG file contains self-mapping
-      const isSelfMapping = regFoRs.source && regFoRs.target && regFoRs.source === regFoRs.target;
-      
-      let args;
-      if (isSelfMapping) {
-        // For self-mapping REG files, we still need to map between the actual series FoRs
-        // The REG file contains transform within one FoR, but we need to apply it between different FoRs
-        logFuseboxHelper('info', 'Self-mapping REG detected, but need inter-FoR transform', {
-          primarySeriesId,
-          secondarySeriesId,
-          regFrameOfReference: regFoRs.source,
-          primaryFoR,
-          secondaryFoR,
-        });
-        
-        // Use the actual series Frame of Reference UIDs for the mapping
-        args = ['--input', regPath, '--output', outPath, '--fixed', primaryFoR, '--moving', secondaryFoR];
-      } else {
-        // Standard two-FoR mapping
-        const fixedFoR = regFoRs.target || primaryFoR;
-        const movingFoR = regFoRs.source || secondaryFoR;
-        
-        logFuseboxHelper('info', 'Helper conversion Frame of Reference mapping', {
-          primarySeriesId,
-          secondarySeriesId,
-          requestedFixed: primaryFoR,
-          requestedMoving: secondaryFoR,
-          regFileSource: regFoRs.source,
-          regFileTarget: regFoRs.target,
-          actualFixed: fixedFoR,
-          actualMoving: movingFoR,
-        });
-        
-        args = ['--input', regPath, '--output', outPath, '--fixed', fixedFoR, '--moving', movingFoR];
-      }
-      const result = spawnSync(helper, args, { encoding: 'utf-8' });
-      if (result.status !== 0) {
-        fuseboxHelperMetrics.failures += 1;
-        logFuseboxHelper('warn', 'Fusebox helper conversion failed', {
-          helper,
-          args,
-          status: result.status,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          primarySeriesId,
-          secondarySeriesId,
-        });
-        throw createFuseboxError('FUSEBOX_HELPER_FAILED', 'Fusebox helper failed to convert REG to H5', {
-          helper,
-          status: result.status,
-        });
-      }
-      fuseboxHelperMetrics.conversions += 1;
-    } else {
-      // Check if cached H5 contains an identity transform - if so, use matrix-only
-      const { isIdentity4x4 } = await import('./registration/validators.ts');
-      if (info?.matrix && isIdentity4x4(info.matrix)) {
-        logFuseboxHelper('warn', 'Identity H5 transform detected, falling back to matrix-only', {
-          primarySeriesId,
-          secondarySeriesId,
-          transformFile: outPath,
-          candidateId,
-        });
-        // Don't regenerate, just use matrix-only approach
-        info.transformFile = undefined;
-        info.transformSource = 'matrix-validated';
-        fuseboxHelperMetrics.cacheHits += 1;
-        return info;
-      } else {
-        fuseboxHelperMetrics.cacheHits += 1;
-      }
-    }
-
-    info.transformFile = outPath;
-    if (!info.transformSource) {
-      info.transformSource = needsConversion ? 'helper-generated' : 'helper-cache';
-    }
-    if (candidateId) info.registrationId = candidateId;
-    logFuseboxHelper('info', 'Fusebox helper transform ready', {
-      primarySeriesId,
-      secondarySeriesId,
-      cacheHit: !needsConversion,
-      transformFile: outPath,
-    });
-    return info;
-  };
-
-  const primaryStudy = primarySeries.studyId ? await storage.getStudy(primarySeries.studyId) : null;
-  const patientId = primaryStudy?.patientId ?? null;
-  const { findAllRegFilesForPatient, findRegFileForStudy } = await import('./registration/reg-resolver.ts');
-  const regCandidates = patientId ? await findAllRegFilesForPatient(patientId) : [];
-  if (!regCandidates.length && primarySeries.studyId) {
-    const fallback = await findRegFileForStudy(primarySeries.studyId);
-    if (fallback) regCandidates.push(fallback as any);
-  }
-
-  const { parseDicomRegistrationFromFile } = await import('./registration/reg-parser.ts');
-  let fallbackMatrix: FuseboxTransformInfo | null = null;
-  let helperError: Error | null = null;
-  for (const reg of regCandidates) {
-    const parsed = parseDicomRegistrationFromFile(reg.filePath);
-    if (!parsed) continue;
-    const candidates = parsed.candidates?.length
-      ? parsed.candidates
-      : (parsed.matrixRowMajor4x4 ? [{
-          matrix: parsed.matrixRowMajor4x4,
-          sourceFoR: parsed.sourceFrameOfReferenceUid,
-          targetFoR: parsed.targetFrameOfReferenceUid,
-        }] : []);
-    for (let idx = 0; idx < candidates.length; idx++) {
-      const cand = candidates[idx];
-      if (!cand.matrix || cand.matrix.length !== 16) continue;
-      const sourceFoR = cand.sourceFoR || parsed.sourceFrameOfReferenceUid;
-      const targetFoR = cand.targetFoR || parsed.targetFrameOfReferenceUid;
-      const candidateId = `${path.basename(reg.filePath)}::${idx}`;
-
-      if (registrationId && candidateId !== registrationId) {
-        continue;
-      }
-
-      if (primaryFoR && secondaryFoR && sourceFoR && targetFoR) {
-        if (sourceFoR === secondaryFoR && targetFoR === primaryFoR) {
-          try {
-            return await maybeAttachHelperOutput({ matrix: cand.matrix.slice(), filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
-          } catch (err: any) {
-            helperError = err;
-          }
-        }
-        if (sourceFoR === primaryFoR && targetFoR === secondaryFoR) {
-          const inverted = invertMatrix4x4RowMajor(cand.matrix.slice());
-          if (inverted) {
-            try {
-              return await maybeAttachHelperOutput({ matrix: inverted, filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
-            } catch (err: any) {
-              helperError = err;
-            }
-          }
-        }
-      }
-
-      if (!fallbackMatrix && (!registrationId || registrationId === candidateId)) {
-        try {
-          fallbackMatrix = await maybeAttachHelperOutput({ matrix: cand.matrix.slice(), filePath: reg.filePath, transformSource: 'matrix', registrationId: candidateId }, reg.filePath, candidateId);
-        } catch (err: any) {
-          helperError = err;
-        }
-      }
-    }
-  }
-
-  if (fallbackMatrix && (fallbackMatrix.transformFile || fallbackMatrix.transformSource === 'matrix-validated')) {
-    return fallbackMatrix;
-  }
-
-  if (helperError) throw helperError;
-
-  throw createFuseboxError('FUSEBOX_NO_TRANSFORM', 'No registration transform produced a helper output', {
-    primarySeriesId,
-    secondarySeriesId,
-  });
-}
-
-async function collectSeriesFiles(seriesId: number): Promise<string[]> {
-  const images = await storage.getImagesBySeriesId(seriesId);
-  if (!images?.length) return [];
-  const ordered = sortImagesByInstance(images);
-  return ordered
-    .map((img: any) => img.filePath ? path.resolve(img.filePath) : null)
-    .filter((p): p is string => !!p && fs.existsSync(p));
-}
-
-async function runFuseboxResample(config: Record<string, any>): Promise<any> {
-  const python = resolveFuseboxPython();
-  logger.debug(`🐍 Using Python: ${python} (FUSEBOX_PYTHON=${process.env.FUSEBOX_PYTHON || 'unset'}) for Fusebox resample`);
-  const scriptPath = path.resolve('scripts', 'fusebox_resample.py');
-  const tmpBase = path.join(process.cwd(), 'tmp');
-  await fs.promises.mkdir(tmpBase, { recursive: true });
-  const tmpDir = await fs.promises.mkdtemp(path.join(tmpBase, 'fusebox-'));
-  const configPath = path.join(tmpDir, 'config.json');
-  await fs.promises.writeFile(configPath, JSON.stringify(config), 'utf-8');
-
-  return new Promise((resolve) => {
-    const child = spawn(python, [scriptPath, '--config', configPath], { cwd: process.cwd() });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('close', async (code) => {
-      try { await fs.promises.rm(tmpDir, { recursive: true, force: true }); } catch {}
-      if (code !== 0) {
-        resolve({ error: stderr.trim() || stdout.trim() || `fusebox exited with code ${code}` });
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout.trim()));
-      } catch (err) {
-        resolve({ error: `Failed to parse fusebox output: ${(err as Error).message}` });
-      }
-    });
-  });
-}
-
-async function runFuseboxInspectTransform(transformPath: string): Promise<any> {
-  const python = resolveFuseboxPython();
-  const scriptPath = path.resolve('scripts', 'fusebox_inspect_transform.py');
-
-  return new Promise((resolve) => {
-    const child = spawn(python, [scriptPath, transformPath], { cwd: process.cwd() });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('close', (code) => {
-      if (code !== 0) {
-        resolve({ ok: false, error: stderr.trim() || stdout.trim() || `inspect transform exited with code ${code}` });
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout.trim()));
-      } catch (err) {
-        resolve({ ok: false, error: `Failed to parse inspect output: ${(err as Error).message}` });
-      }
-    });
-  });
-}
 
 // Configure multer to use session-specific upload directories
 const upload = multer({ 
@@ -3717,7 +3317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
       }
 
-      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId, fuseboxEmit);
       if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
       }
@@ -3733,7 +3333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         interpolation,
       };
 
-      const result = await runFuseboxResample(config);
+      const result = await runFuseboxResample(config, fuseboxEmit);
       if (!result || result.error) {
         logger.error(`Fusebox resample failed: ${result?.error || 'Unknown error'}`);
         return res.status(500).json({ error: 'Fusebox resample failed', details: result?.error || 'Unknown error' });
@@ -3789,7 +3389,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
 
-      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId);
+      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId, fuseboxEmit);
       if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
       }
@@ -3827,7 +3427,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }>;
 
       for (const sliceIndex of sliceIndices) {
-        const result = await runFuseboxResample({ ...baseConfig, sliceIndex });
+        const result = await runFuseboxResample({ ...baseConfig, sliceIndex }, fuseboxEmit);
         if (!result || result.error) {
           return res.status(500).json({
             error: 'Fusebox resample failed',
@@ -3901,7 +3501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Transform path is outside allowed directory' });
       }
 
-      const result = await runFuseboxInspectTransform(resolved);
+      const result = await runFuseboxInspectTransform(resolved, fuseboxEmit);
       if (!result?.ok) {
         const errMsg = result?.error || 'Transform inspection failed';
         return res.status(500).json({ error: errMsg });
@@ -3929,6 +3529,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       logger.error(`Fusebox log retrieval failed: ${err?.message || String(err)}`);
       res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get("/api/fusion/manifest", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.query.primarySeriesId);
+      if (!Number.isFinite(primarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId is required' });
+      }
+
+      const parseIds = (input: unknown): number[] => {
+        if (Array.isArray(input)) {
+          return input
+            .map((value) => Number(value))
+            .filter((n) => Number.isFinite(n));
+        }
+        if (typeof input === 'string') {
+          return input
+            .split(',')
+            .map((value) => Number(value.trim()))
+            .filter((n) => Number.isFinite(n));
+        }
+        return [];
+      };
+
+      const secondarySeriesIds = Array.from(new Set([
+        ...parseIds(req.query.secondarySeriesIds),
+        ...parseIds(req.query.secondarySeriesId),
+      ]));
+
+      const force = typeof req.query.force === 'string' && ['1', 'true', 'yes'].includes(req.query.force.toLowerCase());
+      const interpolationParam = typeof req.query.interpolation === 'string' ? req.query.interpolation.toLowerCase() : undefined;
+      const interpolation = interpolationParam === 'nearest' ? 'nearest' : interpolationParam === 'linear' ? 'linear' : undefined;
+      const preload = typeof req.query.preload === 'string' ? ['1', 'true', 'yes'].includes(req.query.preload.toLowerCase()) : undefined;
+
+      const manifest = await fusionManifestService.getManifest({
+        primarySeriesId,
+        secondarySeriesIds,
+        force,
+        interpolation,
+        preload,
+        logger: fuseboxEmit,
+      });
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(manifest);
+    } catch (err: any) {
+      logger.error(`fusion manifest failed: ${err?.message || String(err)}`);
+      res.status(500).json({ error: 'fusion-manifest failed', details: err?.message || String(err) });
     }
   });
 
@@ -3968,7 +3617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           transformFile: transformInfo.transformFile,
           sliceIndex,
           interpolation: 'linear',
-        });
+        }, fuseboxEmit);
         if (!response || response.error) throw new Error(response?.error || 'Fusebox resample failed');
         return response;
       })();

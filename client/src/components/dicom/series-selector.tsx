@@ -44,6 +44,7 @@ interface SeriesSelectorProps {
   highlightedStructures?: { inputs: string[]; output: string };
   secondaryLoadingStates?: Map<number, {progress: number, isLoading: boolean}>;
   currentlyLoadingSecondary?: number | null;
+  fusionStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
 }
 
 export function SeriesSelector({
@@ -75,7 +76,8 @@ export function SeriesSelector({
   previewStructureInfo,
   highlightedStructures = { inputs: [], output: '' },
   secondaryLoadingStates,
-  currentlyLoadingSecondary
+  currentlyLoadingSecondary,
+  fusionStatuses,
 }: SeriesSelectorProps) {
   
   // Debug logging removed for performance
@@ -891,6 +893,7 @@ export function SeriesSelector({
                                      const isCurrentlyLoading = currentlyLoadingSecondary === mrS.id;
                                      const progress = loadingState?.progress || 0;
                                      const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                     const fusionStatus = fusionStatuses?.get(mrS.id);
                                      
                                      // Loading states handled via UI only
                                      
@@ -970,34 +973,38 @@ export function SeriesSelector({
                                                </Tooltip>
                                              </TooltipProvider>
                                            ) : (
-                                             <TooltipProvider delayDuration={0}>
-                                               <Tooltip>
-                                                 <TooltipTrigger asChild>
-                                                   <Button
-                                                     size="icon"
-                                                     variant="ghost"
-                                                     className="h-6 w-6 hover:bg-green-700/30"
-                                                     onClick={(e) => {
-                                                       e.stopPropagation();
-                                                       console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
-                                                       // Toggle fusion on
-                                                       if (onSecondarySeriesSelect) {
-                                                         console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
-                                                         onSecondarySeriesSelect(mrS.id);
-                                                       } else {
-                                                         console.error('❌ onSecondarySeriesSelect is not defined!');
-                                                       }
-                                                     }}
-                                                   >
-                                                     <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                                   </Button>
-                                                 </TooltipTrigger>
-                                                 <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
-                                                   <p className="font-medium">Enable fusion overlay</p>
-                                                 </TooltipContent>
-                                               </Tooltip>
-                                             </TooltipProvider>
-                                           )}
+                                            <TooltipProvider delayDuration={0}>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-6 w-6 hover:bg-green-700/30"
+                                                    disabled={fusionStatus?.status !== 'ready'}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      console.log('🚀 Anchor button clicked! Enabling fusion with MRI series:', mrS.id);
+                                                      // Toggle fusion on
+                                                      if (onSecondarySeriesSelect) {
+                                                        console.log('🚀 Calling onSecondarySeriesSelect with:', mrS.id);
+                                                        onSecondarySeriesSelect(mrS.id);
+                                                      } else {
+                                                        console.error('❌ onSecondarySeriesSelect is not defined!');
+                                                      }
+                                                    }}
+                                                  >
+                                                    <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                  </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
+                                                  <p className="font-medium">Enable fusion overlay</p>
+                                                  {fusionStatus?.status !== 'ready' && (
+                                                    <p className="text-[10px] opacity-80">Preparing fused MRI…</p>
+                                                  )}
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                          )}
                                          </div>
                                        </div>
                                        {/* RT Structure Series that reference this MRI */}
@@ -1061,6 +1068,7 @@ export function SeriesSelector({
                                      const isCurrentlyLoading = currentlyLoadingSecondary === ptS.id;
                                      const progress = loadingState?.progress || 0;
                                      const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                     const fusionStatus = fusionStatuses?.get(ptS.id);
                                      
                                        const petCard = (
                                        <div
@@ -1098,15 +1106,38 @@ export function SeriesSelector({
                                                <ExternalLink className="h-3.5 w-3.5 text-yellow-300" />
                                              </Button>
                                              {secondarySeriesId === ptS.id ? (
-                                               <Button size="icon" variant="ghost" className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                 onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }} title="Disable fusion">
+                                               <Button
+                                                 size="icon"
+                                                 variant="ghost"
+                                                 className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                 onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
+                                                 title="Disable fusion"
+                                               >
                                                  <Anchor className="h-3.5 w-3.5 text-white" />
                                                </Button>
                                              ) : (
-                                               <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-700/30"
-                                                 onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }} title="Enable PET fusion">
-                                                 <Anchor className="h-3.5 w-3.5 text-green-300" />
-                                               </Button>
+                                               <TooltipProvider delayDuration={0}>
+                                                 <Tooltip>
+                                                   <TooltipTrigger asChild>
+                                                     <Button
+                                                       size="icon"
+                                                       variant="ghost"
+                                                       className="h-6 w-6 hover:bg-green-700/30"
+                                                       disabled={fusionStatus?.status !== 'ready'}
+                                                       onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id); }}
+                                                       title="Enable PET fusion"
+                                                     >
+                                                       <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                     </Button>
+                                                   </TooltipTrigger>
+                                                   <TooltipContent className="bg-gradient-to-r from-green-500/80 to-emerald-600/80 backdrop-blur-lg border-green-400/40 text-white">
+                                                     <p className="text-xs font-semibold">Enable PET/CT fusion overlay</p>
+                                                     {fusionStatus?.status !== 'ready'
+                                                       ? <p className="text-[10px] opacity-80">Preparing fused PET…</p>
+                                                       : <p className="text-[10px] opacity-80">Projects PET signals onto the planning CT</p>}
+                                                   </TooltipContent>
+                                                 </Tooltip>
+                                               </TooltipProvider>
                                              )}
                                            </div>
                                          </div>
@@ -1118,6 +1149,7 @@ export function SeriesSelector({
                                          const isCurrentlyLoading = currentlyLoadingSecondary === ctS.id;
                                          const progress = loadingState?.progress || 0;
                                          const isLoading = loadingState?.isLoading || isCurrentlyLoading;
+                                         const fusionStatusCt = fusionStatuses?.get(ctS.id);
                                          
                                          return (
                                            <div key={`ptct-${ptS.id}-${ctS.id}`} className="space-y-1">
@@ -1151,13 +1183,24 @@ export function SeriesSelector({
                                                    <ExternalLink className="h-3.5 w-3.5 text-blue-300" />
                                                  </Button>
                                                  {secondarySeriesId === ctS.id ? (
-                                                   <Button size="icon" variant="ghost" className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }} title="Disable fusion">
+                                                   <Button
+                                                     size="icon"
+                                                     variant="ghost"
+                                                     className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
+                                                     title="Disable fusion"
+                                                   >
                                                      <Anchor className="h-3.5 w-3.5 text-white" />
                                                    </Button>
                                                  ) : (
-                                                   <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-700/30"
-                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }} title="Fuse this CT">
+                                                   <Button
+                                                     size="icon"
+                                                     variant="ghost"
+                                                     className="h-6 w-6 hover:bg-green-700/30"
+                                                     disabled={fusionStatusCt?.status !== 'ready'}
+                                                     onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id); }}
+                                                     title="Fuse this CT"
+                                                   >
                                                      <Anchor className="h-3.5 w-3.5 text-green-300" />
                                                    </Button>
                                                  )}

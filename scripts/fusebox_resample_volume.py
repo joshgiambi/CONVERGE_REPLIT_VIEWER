@@ -1,317 +1,357 @@
 #!/usr/bin/env python3
-"""
-Volume resampling for fusion precomputation.
-Resamples entire secondary series to primary's frame of reference and saves as DICOM.
+"""Fusebox volume resampler.
+
+Reads a JSON config via --config with keys:
+  primary: list[str]
+  secondary: list[str]
+  transform: list[16] optional
+  transformFile: str optional
+  invertTransformFile: bool optional (default True)
+  interpolation: 'linear' | 'nearest' (default 'linear')
+  outputDirectory: str (destination root)
+  metadata: dict with patient/study/series information
+
+Outputs JSON summary describing generated series and instances.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
+import uuid
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Tuple
 
-import numpy as np
 import SimpleITK as sitk
-import time
-import random
+import numpy as np
 
-# Add parent directory to path for imports
+# Add parent directory for helper imports
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from fusebox_resample import (
+from fusebox_resample import (  # noqa: E402
+    sort_series_by_position,
     read_series,
     affine_from_row_major,
     flatten_composite_transform,
     ensure_moving_to_fixed,
-    describe_series
 )
 
 
-def copy_dicom_tags(reader: sitk.ImageSeriesReader, resampled: sitk.Image) -> None:
-    """Copy essential DICOM tags from original to resampled image."""
-    # Get metadata keys from first file
-    if reader.GetFileNames():
-        first_file = reader.GetFileNames()[0]
-        reader_single = sitk.ImageFileReader()
-        reader_single.SetFileName(first_file)
-        reader_single.LoadPrivateTagsOn()
-        reader_single.ReadImageInformation()
-        
-        # Copy important tags
-        important_tags = [
-            "0008|0060",  # Modality
-            "0008|0008",  # Image Type
-            "0008|0070",  # Manufacturer
-            "0018|0050",  # Slice Thickness
-            "0018|0088",  # Spacing Between Slices
-            "0028|0030",  # Pixel Spacing
-            "0028|1050",  # Window Center
-            "0028|1051",  # Window Width
-            "0028|1052",  # Rescale Intercept
-            "0028|1053",  # Rescale Slope
-        ]
-        
-        for tag in important_tags:
-            if reader_single.HasMetaDataKey(tag):
-                value = reader_single.GetMetaData(tag)
-                # Set for all slices
-                for i in range(resampled.GetDepth()):
-                    resampled.SetMetaData(f"{i}.{tag}", value)
+def dicom_uid(root: str = "2.25") -> str:
+    return f"{root}.{uuid.uuid4().int}"
 
 
-def save_as_dicom_series(
+def ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def load_transform(cfg: Dict[str, Any]) -> sitk.Transform:
+    transform_file = cfg.get("transformFile")
+    invert_transform_file = bool(cfg.get("invertTransformFile", True))
+    transform = cfg.get("transform", []) or None
+
+    if transform_file:
+        raw_xform = sitk.ReadTransform(str(transform_file))
+        xform = flatten_composite_transform(raw_xform)
+        if invert_transform_file:
+            xform = ensure_moving_to_fixed(xform)
+        return xform
+
+    if transform:
+        matrix_vals = [float(v) for v in transform]
+        raw = affine_from_row_major(matrix_vals)
+        xform = ensure_moving_to_fixed(raw)
+        return xform
+
+    raise ValueError("Either transform or transformFile must be provided")
+
+
+def extract_orientation(image: sitk.Image) -> Tuple[List[float], List[float]]:
+    direction = list(image.GetDirection())
+    if len(direction) == 9:
+        row = [direction[0], direction[3], direction[6]]
+        col = [direction[1], direction[4], direction[7]]
+        return row, col
+    if len(direction) == 6:
+        return direction[:3], direction[3:]
+    raise ValueError("Unexpected direction length")
+
+
+def transform_index_to_position(image: sitk.Image, index: Tuple[int, int, int]) -> List[float]:
+    point = image.TransformIndexToPhysicalPoint(index)
+    return [float(point[0]), float(point[1]), float(point[2])]
+
+
+def cast_to_float(image: sitk.Image) -> sitk.Image:
+    if image.GetPixelID() == sitk.sitkFloat32:
+        return image
+    return sitk.Cast(image, sitk.sitkFloat32)
+
+
+def format_multi(values: List[float] | None) -> str | None:
+    if not values:
+        return None
+    return "\\".join(f"{v:g}" for v in values)
+
+
+def determine_sop_class(modality: str | None) -> str:
+    if not modality:
+        return "1.2.840.10008.5.1.4.1.1.2"  # default CT
+    mode = modality.upper()
+    if mode in {"CT"}:
+        return "1.2.840.10008.5.1.4.1.1.2"
+    if mode in {"PT", "PET"}:
+        return "1.2.840.10008.5.1.4.1.1.128"
+    if mode in {"MR"}:
+        return "1.2.840.10008.5.1.4.1.1.4"
+    if mode in {"CBCT"}:
+        return "1.2.840.10008.5.1.4.1.1.13"
+    return "1.2.840.10008.5.1.4.1.1.2"
+
+
+def apply_shared_tags(slice_img: sitk.Image, tags: Dict[str, str]) -> None:
+    for key, value in tags.items():
+        slice_img.SetMetaData(key, value)
+
+
+def write_dicom_series(
     image: sitk.Image,
-    output_dir: str,
-    series_description: str = "Fused Series",
-    original_series_uid: str = "",
-) -> None:
-    """Save the resampled image as individual DICOM slices."""
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate UIDs
-    series_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(1000, 9999)}"
-    study_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(10000, 19999)}"
-    frame_of_ref_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(20000, 29999)}"
-    
-    # Get the size of the 3D image
-    size = image.GetSize()
-    depth = size[2] if len(size) > 2 else 1
-    
-    # Write each slice as individual DICOM file
+    output_dir: Path,
+    metadata: Dict[str, Any],
+    instances: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    ensure_directory(output_dir)
     writer = sitk.ImageFileWriter()
     writer.KeepOriginalImageUIDOn()
-    
-    for i in range(depth):
-        # Extract slice
-        if depth > 1:
-            slice_filter = sitk.ExtractImageFilter()
-            slice_filter.SetSize([size[0], size[1], 0])
-            slice_filter.SetIndex([0, 0, i])
-            slice_img = slice_filter.Execute(image)
-        else:
-            slice_img = image
-        
-        # Set metadata
-        slice_img.SetMetaData("0008|0060", "CT")  # Modality
-        slice_img.SetMetaData("0008|0031", series_description)  # Series Description
-        slice_img.SetMetaData("0020|000e", series_uid)  # Series Instance UID
-        slice_img.SetMetaData("0020|000d", study_uid)  # Study Instance UID
-        slice_img.SetMetaData("0020|0052", frame_of_ref_uid)  # Frame of Reference UID
-        slice_img.SetMetaData("0020|0013", str(i + 1))  # Instance Number
-        slice_img.SetMetaData("0008|0018", f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(30000 + i, 39999 + i)}")  # SOP Instance UID
-        
-        # Calculate position for this slice
-        origin = list(image.GetOrigin())
-        spacing = image.GetSpacing()
-        direction = image.GetDirection()
-        
-        # Z position moves with slice
-        if len(size) > 2 and len(spacing) > 2:
-            origin[2] += i * spacing[2]
-        
-        slice_img.SetOrigin(origin)
-        
-        # Convert to appropriate pixel type for DICOM (signed 16-bit)
-        cast_filter = sitk.CastImageFilter()
-        cast_filter.SetOutputPixelType(sitk.sitkInt16)
-        slice_img_int16 = cast_filter.Execute(slice_img)
-        
-        # Write the slice
-        filename = f"slice_{i:04d}.dcm"
-        filepath = os.path.join(output_dir, filename)
-        writer.SetFileName(filepath)
-        writer.SetUseCompression(False)
-        writer.Execute(slice_img_int16)
-    
-    print(f"Saved {depth} DICOM slices to {output_dir}")
 
+    size = image.GetSize()
+    depth = size[2] if len(size) > 2 else 1
+    row_cosines, col_cosines = extract_orientation(image)
+    pixel_spacing = list(image.GetSpacing())
+    if len(pixel_spacing) < 3:
+        pixel_spacing = list(pixel_spacing) + [1.0]
+    spacing_row = pixel_spacing[1]
+    spacing_col = pixel_spacing[0]
+    slice_thickness = metadata.get("sliceThickness") or f"{pixel_spacing[2]:g}"
+    spacing_between = metadata.get("spacingBetweenSlices") or f"{pixel_spacing[2]:g}"
 
-def save_as_dicom_series_old(
-    image: sitk.Image,
-    output_dir: str,
-    series_description: str = "Fused Series",
-    original_series_uid: str = "",
-) -> None:
-    """Save a 3D image as a DICOM series."""
-    writer = sitk.ImageSeriesWriter()
-    
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate file names
-    depth = image.GetDepth()
-    file_names = [
-        os.path.join(output_dir, f"slice_{i:04d}.dcm")
-        for i in range(depth)
-    ]
-    
-    # Set up the writer
-    writer.SetFileNames(file_names)
-    
-    # Generate new UIDs
-    series_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(1000, 9999)}"
-    study_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(10000, 19999)}"
-    frame_of_ref_uid = f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(20000, 29999)}"
-    
-    # Set essential DICOM tags
-    base_tags = {
-        "0008|0060": "CT",  # Modality (will be overridden by copied tags)
-        "0008|0020": "",    # Study Date
-        "0008|0030": "",    # Study Time
-        "0008|0050": "",    # Accession Number
-        "0008|0090": "",    # Referring Physician
-        "0010|0010": "",    # Patient Name
-        "0010|0020": "",    # Patient ID
-        "0010|0030": "",    # Patient Birth Date
-        "0010|0040": "",    # Patient Sex
-        "0020|000d": study_uid,     # Study Instance UID
-        "0020|000e": series_uid,    # Series Instance UID
-        "0020|0010": "",            # Study ID
-        "0020|0011": "1001",        # Series Number (offset to avoid conflicts)
-        "0020|0052": frame_of_ref_uid,  # Frame of Reference UID
-        "0008|103e": series_description,  # Series Description
+    patient_meta = metadata.get("patient", {})
+    study_meta = metadata.get("study", {})
+    primary_meta = metadata.get("primarySeries", {})
+    secondary_meta = metadata.get("secondarySeries", {})
+    derived_meta = metadata.get("derivedSeries", {})
+
+    modality = secondary_meta.get("Modality") or primary_meta.get("Modality") or "CT"
+    sop_class_uid = determine_sop_class(modality)
+    image_type = derived_meta.get("ImageType") or ["DERIVED", "SECONDARY", "FUSED"]
+    image_type_str = "\\".join(image_type)
+
+    study_uid = study_meta.get("StudyInstanceUID") or dicom_uid()
+    series_uid = derived_meta.get("SeriesInstanceUID") or dicom_uid()
+    frame_of_reference_uid = primary_meta.get("FrameOfReferenceUID") or dicom_uid()
+    series_description = derived_meta.get("SeriesDescription") or "Fusion Secondary"
+    series_number = derived_meta.get("SeriesNumber")
+    if series_number is not None:
+        series_number_str = str(int(series_number))
+    else:
+        series_number_str = "9901"
+
+    window_center = derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter")
+    window_width = derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth")
+    rescale_intercept = secondary_meta.get("RescaleIntercept")
+    rescale_slope = secondary_meta.get("RescaleSlope")
+    photometric = secondary_meta.get("PhotometricInterpretation") or "MONOCHROME2"
+    samples_per_pixel = secondary_meta.get("SamplesPerPixel") or 1
+    bits_allocated = secondary_meta.get("BitsAllocated") or 32
+    bits_stored = secondary_meta.get("BitsStored") or 32
+    high_bit = secondary_meta.get("HighBit") or (bits_stored - 1)
+    pixel_representation = secondary_meta.get("PixelRepresentation") or 0
+
+    shared_tags = {
+        "0008|0008": image_type_str,
+        "0008|0016": sop_class_uid,
+        "0008|0060": modality,
+        "0008|103e": series_description,
+        "0010|0010": patient_meta.get("PatientName", ""),
+        "0010|0020": patient_meta.get("PatientID", ""),
+        "0010|0030": patient_meta.get("PatientBirthDate", ""),
+        "0010|0040": patient_meta.get("PatientSex", ""),
+        "0010|1010": patient_meta.get("PatientAge", ""),
+        "0008|0020": study_meta.get("StudyDate", ""),
+        "0008|0030": study_meta.get("StudyTime", ""),
+        "0008|0050": study_meta.get("AccessionNumber", ""),
+        "0008|0090": study_meta.get("ReferringPhysicianName", ""),
+        "0020|000d": study_uid,
+        "0020|000e": series_uid,
+        "0020|0011": series_number_str,
+        "0020|0052": frame_of_reference_uid,
+        "0028|0002": str(samples_per_pixel),
+        "0028|0004": photometric,
+        "0028|0030": f"{spacing_row:g}\\{spacing_col:g}",
+        "0018|0050": str(slice_thickness),
+        "0018|0088": str(spacing_between),
+        "0028|0100": str(bits_allocated),
+        "0028|0101": str(bits_stored),
+        "0028|0102": str(high_bit),
+        "0028|0103": str(pixel_representation),
     }
-    
-    # Apply tags to each slice
-    for i in range(depth):
-        for tag, value in base_tags.items():
-            image.SetMetaData(f"{i}.{tag}", value)
-        
-        # Set slice-specific tags
-        image.SetMetaData(f"{i}.0020|0013", str(i + 1))  # Instance Number
-        image.SetMetaData(f"{i}.0008|0018", f"1.2.826.0.1.3680043.2.1125.{int(time.time())}.{random.randint(30000 + i, 39999 + i)}")  # SOP Instance UID
-        
-        # Calculate Image Position Patient for this slice
-        # This is critical for proper display
-        origin = image.GetOrigin()
-        spacing = image.GetSpacing()
-        direction = image.GetDirection()
-        
-        # Calculate position for this slice
-        # Assuming axial slices (most common case)
-        slice_pos = [
-            origin[0],
-            origin[1],
-            origin[2] + i * spacing[2]
-        ]
-        
-        ipp_string = f"{slice_pos[0]:.6f}\\{slice_pos[1]:.6f}\\{slice_pos[2]:.6f}"
-        image.SetMetaData(f"{i}.0020|0032", ipp_string)  # Image Position Patient
-        
-        # Image Orientation Patient (assuming axial)
-        iop_string = f"{direction[0]:.6f}\\{direction[3]:.6f}\\{direction[6]:.6f}\\{direction[1]:.6f}\\{direction[4]:.6f}\\{direction[7]:.6f}"
-        image.SetMetaData(f"{i}.0020|0037", iop_string)
-    
-    # Execute the writing
-    writer.Execute(image)
-    print(f"Saved {depth} DICOM slices to {output_dir}")
+
+    if window_center:
+        shared_tags["0028|1050"] = "\\".join(str(float(v)) for v in window_center)
+    if window_width:
+        shared_tags["0028|1051"] = "\\".join(str(float(v)) for v in window_width)
+    if rescale_intercept is not None:
+        shared_tags["0028|1052"] = str(float(rescale_intercept))
+    if rescale_slope is not None:
+        shared_tags["0028|1053"] = str(float(rescale_slope))
+    if derived_meta.get("DerivationDescription"):
+        shared_tags["0008|2111"] = derived_meta["DerivationDescription"]
+
+    referenced_series_uid = derived_meta.get("ReferencedSeriesInstanceUID") or primary_meta.get("SeriesInstanceUID")
+    if referenced_series_uid:
+        shared_tags["0008|1115"] = json.dumps({
+            "SeriesInstanceUID": referenced_series_uid,
+        })
+
+    for tag, value in derived_meta.get("AdditionalTags", {}).items():
+        shared_tags[tag] = value
+
+    depth_range = range(depth)
+    for idx in depth_range:
+        slice_img = sitk.Extract(image, [size[0], size[1], 0], [0, 0, idx])
+        slice_img = cast_to_float(slice_img)
+        sop_uid = dicom_uid()
+        position = transform_index_to_position(image, (0, 0, idx))
+
+        instance_tags = {
+            **shared_tags,
+            "0008|0018": sop_uid,
+            "0020|0013": str(idx + 1),
+            "0020|0037": f"{row_cosines[0]:.12f}\\{row_cosines[1]:.12f}\\{row_cosines[2]:.12f}\\{col_cosines[0]:.12f}\\{col_cosines[1]:.12f}\\{col_cosines[2]:.12f}",
+            "0020|0032": f"{position[0]:.12f}\\{position[1]:.12f}\\{position[2]:.12f}",
+        }
+
+        apply_shared_tags(slice_img, instance_tags)
+
+        file_name = f"slice_{idx:04d}.dcm"
+        file_path = output_dir / file_name
+        writer.SetFileName(str(file_path))
+        writer.Execute(slice_img)
+
+        instances.append({
+            "index": idx,
+            "sopInstanceUID": sop_uid,
+            "fileName": file_name,
+            "filePath": str(file_path),
+            "instanceNumber": idx + 1,
+            "imagePositionPatient": position,
+            "sliceLocation": position[2],
+            "windowCenter": window_center,
+            "windowWidth": window_width,
+        })
+
+    return {
+        "seriesInstanceUID": series_uid,
+        "studyInstanceUID": study_uid,
+        "frameOfReferenceUID": frame_of_reference_uid,
+    }
 
 
-def resample_volume(
-    primary: sitk.Image,
-    secondary: sitk.Image,
-    transform: sitk.Transform,
-    interpolation: str = "linear"
-) -> sitk.Image:
-    """Resample entire secondary volume to primary's grid."""
+def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    primary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("primary", [])])
+    secondary_files = sort_series_by_position([str(Path(p)) for p in cfg.get("secondary", [])])
+    if not primary_files or not secondary_files:
+        raise ValueError("primary and secondary file lists required")
+
+    primary = read_series(primary_files)
+    secondary = read_series(secondary_files)
+    transform = load_transform(cfg)
+
+    interpolation = cfg.get("interpolation", "linear").lower()
+    interpolator = sitk.sitkLinear if interpolation != "nearest" else sitk.sitkNearestNeighbor
+
     resample_filter = sitk.ResampleImageFilter()
     resample_filter.SetReferenceImage(primary)
     resample_filter.SetTransform(transform)
-    
-    if interpolation.lower() == "nearest":
-        resample_filter.SetInterpolator(sitk.sitkNearestNeighbor)
-    else:
-        resample_filter.SetInterpolator(sitk.sitkLinear)
-    
+    resample_filter.SetInterpolator(interpolator)
     resample_filter.SetDefaultPixelValue(0.0)
-    resample_filter.SetOutputPixelType(secondary.GetPixelID())
-    
-    return resample_filter.Execute(secondary)
+    resample_filter.SetOutputPixelType(sitk.sitkFloat32)
+    resampled = resample_filter.Execute(secondary)
+
+    output_root = Path(cfg.get("outputDirectory"))
+    dicom_dir = output_root / "dicom"
+    ensure_directory(output_root)
+    ensure_directory(dicom_dir)
+
+    metadata = cfg.get("metadata", {})
+
+    instances: List[Dict[str, Any]] = []
+    series_info = write_dicom_series(resampled, dicom_dir, metadata, instances)
+
+    rows = resampled.GetSize()[1]
+    cols = resampled.GetSize()[0]
+    depth = resampled.GetSize()[2]
+    spacing = list(resampled.GetSpacing())
+    pixel_spacing = [spacing[1], spacing[0]] if len(spacing) >= 2 else [1.0, 1.0]
+    row_cos, col_cos = extract_orientation(resampled)
+    first_pos = transform_index_to_position(resampled, (0, 0, 0))
+    last_pos = transform_index_to_position(resampled, (0, 0, depth - 1)) if depth > 0 else first_pos
+
+    derived_meta = metadata.get("derivedSeries", {})
+    secondary_meta = metadata.get("secondarySeries", {})
+
+    summary = {
+        "ok": True,
+        "modality": secondary_meta.get("Modality") or metadata.get("primarySeries", {}).get("Modality"),
+        "seriesDescription": derived_meta.get("SeriesDescription"),
+        "studyInstanceUID": series_info.get("studyInstanceUID") or metadata.get("study", {}).get("StudyInstanceUID"),
+        "seriesInstanceUID": series_info.get("seriesInstanceUID"),
+        "frameOfReferenceUID": series_info.get("frameOfReferenceUID") or metadata.get("primarySeries", {}).get("FrameOfReferenceUID"),
+        "sliceCount": depth,
+        "rows": rows,
+        "columns": cols,
+        "pixelSpacing": pixel_spacing,
+        "imageOrientationPatient": row_cos + col_cos,
+        "imagePositionPatientFirst": first_pos,
+        "imagePositionPatientLast": last_pos,
+        "windowCenter": derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter"),
+        "windowWidth": derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth"),
+        "outputDirectory": str(dicom_dir),
+        "manifestPath": str(output_root / "manifest.json"),
+        "instances": instances,
+    }
+
+    # Write per-run manifest for debugging
+    manifest_path = output_root / "manifest.json"
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    return summary
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Resample full volume for fusion")
-    parser.add_argument("--config", required=True, help="Path to JSON config file")
-    args = parser.parse_args()
-    
-    # Load configuration
-    with open(args.config, 'r') as f:
-        config = json.load(f)
-    
-    primary_files = config["primary"]
-    secondary_files = config["secondary"]
-    output_dir = config["outputDir"]
-    transform_data = config.get("transform")
-    transform_file = config.get("transformFile")
-    invert_transform = config.get("invertTransformFile", True)
-    interpolation = config.get("interpolation", "linear")
-    
-    if not primary_files or not secondary_files:
-        raise ValueError("Primary and secondary file lists required")
-    
-    print(f"Loading primary series ({len(primary_files)} files)...")
-    primary = read_series(primary_files)
-    
-    print(f"Loading secondary series ({len(secondary_files)} files)...")
-    secondary = read_series(secondary_files)
-    
-    # Get transform
-    if transform_file:
-        print(f"Loading transform from: {transform_file}")
-        raw_xform = sitk.ReadTransform(transform_file)
-        xform = flatten_composite_transform(raw_xform)
-        if invert_transform:
-            xform = ensure_moving_to_fixed(xform)
-    elif transform_data:
-        print(f"Using matrix transform")
-        raw = affine_from_row_major([float(v) for v in transform_data])
-        xform = ensure_moving_to_fixed(raw)
-    else:
-        raise ValueError("Either transform or transformFile must be provided")
-    
-    print(f"Transform type: {xform.GetName()}")
-    print(f"Primary size: {primary.GetSize()}, spacing: {primary.GetSpacing()}")
-    print(f"Secondary size: {secondary.GetSize()}, spacing: {secondary.GetSpacing()}")
-    
-    # Resample the volume
-    print("Resampling volume...")
-    resampled = resample_volume(primary, secondary, xform, interpolation)
-    print(f"Resampled size: {resampled.GetSize()}")
-    
-    # Copy metadata from original secondary
-    reader = sitk.ImageSeriesReader()
-    reader.SetFileNames(secondary_files)
-    copy_dicom_tags(reader, resampled)
-    
-    # Determine series description
-    modality = "Unknown"
-    if secondary_files:
-        try:
-            temp_reader = sitk.ImageFileReader()
-            temp_reader.SetFileName(secondary_files[0])
-            temp_reader.LoadPrivateTagsOn()
-            temp_reader.ReadImageInformation()
-            if temp_reader.HasMetaDataKey("0008|0060"):
-                modality = temp_reader.GetMetaData("0008|0060")
-        except:
-            pass
-    
-    series_desc = f"{modality} fused to primary"
-    
-    # Save as DICOM series
-    print(f"Saving to {output_dir}...")
-    save_as_dicom_series(
-        resampled,
-        output_dir,
-        series_description=series_desc,
-    )
-    
-    print("Volume resampling complete!")
+def main(argv: List[str]) -> int:
+    parser = argparse.ArgumentParser(description="Fusebox volume resampler")
+    parser.add_argument("--config", required=True)
+    args = parser.parse_args(argv)
+
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(json.dumps({"error": f"config not found: {config_path}"}))
+        return 1
+
+    cfg = json.loads(config_path.read_text())
+    try:
+        payload = run_from_config(cfg)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 2
+
+    print(json.dumps(payload))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -32,11 +32,11 @@ Tracking the current status of the multi-registration fusion refactor.
 - [ ] Extract viewport transform math into dedicated module and add tests for mm-accurate alignment.
 
 ## Server-Side Resampled Volume Rollout
-- [ ] Design cache layout for pre-resampled volumes (primary/secondary/registration) and define invalidation triggers.
-- [ ] Implement background ITK job to resample full secondary volume and emit manifest + verification PNGs.
-- [ ] Add `/api/fusebox/resampled-volume` endpoint that streams metadata + pixel slabs (fallback to legacy slice API while job runs).
-- [ ] Update frontend loader to detect cached volume, stream slices locally, and fall back only when cache missing.
-- [ ] Integrate verification panel in UI to preview/download generated PNGs for QA.
+- [x] Design cache layout for pre-resampled volumes (primary/secondary/registration) and define invalidation triggers. *(See `server/fusion/path-utils.ts` + manifest storage plan.)*
+- [x] Implement background ITK job to resample full secondary volume and emit manifest + verification PNGs. *(Initial SimpleITK pipeline in `scripts/fusebox_resample_volume.py`; manifest JSON written per pair.)*
+- [x] Add `/api/fusion/manifest` endpoint that exposes cached volume metadata for frontend consumption. *(Replaces former slice-only contract.)*
+- [ ] Update frontend loader to detect cached volume, stream slices locally, and fall back only when cache missing. *(Pending — new workstream.)*
+- [ ] Integrate verification panel in UI to preview/download generated QA assets.
 
 ## Fusion Test Harness
 - [x] ✅ **IMPLEMENTED**: Backend endpoint `/api/fusebox/test-slices` generates fusion test assets (primary, resampled secondary, blended overlay) and returns manifest with debug info.
@@ -63,3 +63,12 @@ Tracking the current status of the multi-registration fusion refactor.
 - Re-run the 54↔50 scenario after the resampled-volume path lands to measure alignment.
 - Promote the new viewport transform helper + add unit coverage before removing legacy math.
 - Wire PET fusion support once CT overlay stability is signed off.
+
+- **Frontend Manifest Migration (2025-01-18)**
+  - [x] Remove legacy slice-by-slice fusebox requests from `fusion-utils` and viewer components; rely exclusively on manifest-driven cached DICOMs.
+  - [x] Refactor series dropdown + anchor/launch buttons so “Anchor” loads fused secondary and “Open” loads standalone CT without exposing derived series in the list.
+  - [x] Implement manifest prefetch/preload flows that aggressively fetch all fused secondaries on initial CT load.
+  - [ ] Eliminate contour flashing by syncing overlay rendering with manifest-backed image cache (investigate current re-render path).
+  - [x] Add modality-specific window/level presets (MRI, CT, PET) accessible from the fusion toolbar.
+  - [ ] Redesign fusion toolbar to list all fused secondaries with color-coded chrome and fast switching.
+  - [x] Ensure planning CT’s latest RT structure set is auto-selected while ignoring secondaries’ structure sets.

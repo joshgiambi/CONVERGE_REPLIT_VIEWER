@@ -17,6 +17,8 @@ import { union as vipUnion, intersect as vipIntersect, subtract as vipSubtract }
 import { vipToRectContours } from '@/boolean/simpleContours';
 import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import type { RegistrationAssociation, RegistrationSeriesDetail } from '@/types/fusion';
+import type { FusionManifest } from '@/types/fusion';
+import { fetchFusionManifest, preloadFusionSecondary, getFusionManifest, clearFusionCaches } from '@/lib/fusion-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
 
@@ -73,6 +75,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Secondary loading states for visual feedback
   const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
   const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
+  const [fusionManifest, setFusionManifest] = useState<FusionManifest | null>(null);
+  const [fusionManifestError, setFusionManifestError] = useState<string | null>(null);
+  const [fusionManifestLoading, setFusionManifestLoading] = useState(false);
+  const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
   
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
@@ -89,9 +95,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     if (secondarySeriesId !== null) {
       log.debug('Secondary series selected, showing fusion panel', 'viewer-interface');
       setShowFusionPanel(true);
-    } else {
-      log.debug('No secondary series, hiding fusion panel', 'viewer-interface');
-      setShowFusionPanel(false);
     }
   }, [secondarySeriesId]);
   
@@ -137,7 +140,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       if (!studyData.studies || studyData.studies.length === 0) throw new Error('No studies');
       
       // Fetch series for all studies and combine them
-      const allSeries = [];
+      const allSeries = [] as any[];
       for (const study of studyData.studies) {
         const response = await fetch(`/api/studies/${study.id}/series`);
         if (!response.ok) {
@@ -147,7 +150,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         // Add study info to each series for reference
         allSeries.push(...series.map((s: any) => ({ ...s, studyId: study.id, studyDate: study.studyDate })));
       }
-      return allSeries;
+      return allSeries.filter((series: any) => {
+        const metadata = series?.metadata ?? {};
+        const fusionMeta = metadata?.fusion;
+        return !fusionMeta;
+      });
     },
     enabled: !!studyData.studies?.length,
   });
@@ -633,6 +640,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           // Don't throw error - RT structures are optional
         }
       }
+
+      await initializeFusionForSeries(seriesData);
       
     } catch (error) {
       log.error(`Error selecting series: ${String(error)}`, 'viewer-interface');
@@ -836,6 +845,165 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
+  const getDefaultFusionWindow = useCallback((modality?: string | null) => {
+    const mode = (modality || '').toUpperCase();
+    switch (mode) {
+      case 'MR':
+        return { window: 80, level: 40 };
+      case 'PT':
+      case 'PET':
+        return { window: 5, level: 2.5 };
+      case 'CT':
+        return { window: 400, level: 40 };
+      default:
+        return null;
+    }
+  }, []);
+
+  const resetFusionState = useCallback((clearCache: boolean = false) => {
+    if (clearCache) {
+      try {
+        clearFusionCaches();
+      } catch {}
+    }
+    setFusionManifest(null);
+    setFusionManifestError(null);
+    setFusionManifestLoading(false);
+    setSecondarySeriesId(null);
+    setShowFusionPanel(false);
+    setSecondaryLoadingStates(new Map());
+    setCurrentlyLoadingSecondary(null);
+    setFusionWindowLevel(null);
+  }, []);
+
+  const fusionSecondaryStatuses = useMemo(() => {
+    const map = new Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>();
+    if (!fusionManifest) return map;
+    fusionManifest.secondaries.forEach((secondary) => {
+      const loadingState = secondaryLoadingStates.get(secondary.secondarySeriesId);
+      if (loadingState?.isLoading) {
+        map.set(secondary.secondarySeriesId, { status: 'loading' });
+      } else if (secondary.status === 'error') {
+        map.set(secondary.secondarySeriesId, { status: 'error', error: secondary.error ?? null });
+      } else if (secondary.status === 'ready') {
+        map.set(secondary.secondarySeriesId, { status: 'ready' });
+      } else if (secondary.status === 'generating' || secondary.status === 'pending') {
+        map.set(secondary.secondarySeriesId, { status: 'loading' });
+      } else {
+        map.set(secondary.secondarySeriesId, { status: 'idle' });
+      }
+    });
+    return map;
+  }, [fusionManifest, secondaryLoadingStates]);
+
+  useEffect(() => {
+    if (!fusionManifest || secondarySeriesId == null) {
+      return;
+    }
+    const descriptor = fusionManifest.secondaries.find((sec) => sec.secondarySeriesId === secondarySeriesId);
+    if (!descriptor) return;
+    const defaultWindow = getDefaultFusionWindow(descriptor.secondaryModality);
+    setFusionWindowLevel(defaultWindow);
+  }, [fusionManifest, secondarySeriesId, getDefaultFusionWindow]);
+
+  useEffect(() => {
+    if (secondarySeriesId == null) {
+      setFusionWindowLevel(null);
+    }
+  }, [secondarySeriesId]);
+
+  const preloadAllFusionSecondaries = useCallback(
+    async (primarySeriesId: number, manifest: FusionManifest) => {
+      const readySecondaries = manifest.secondaries.filter((sec) => sec.status === 'ready');
+      if (!readySecondaries.length) {
+        setSecondaryLoadingStates(new Map());
+        setCurrentlyLoadingSecondary(null);
+        return;
+      }
+
+      const loadingMap = new Map<number, { progress: number; isLoading: boolean }>();
+      readySecondaries.forEach((sec) => {
+        loadingMap.set(sec.secondarySeriesId, { progress: 0, isLoading: true });
+      });
+      setSecondaryLoadingStates(loadingMap);
+
+      for (const secondary of readySecondaries) {
+        setCurrentlyLoadingSecondary(secondary.secondarySeriesId);
+        try {
+          await preloadFusionSecondary(primarySeriesId, secondary.secondarySeriesId, ({ completed, total }) => {
+            setSecondaryLoadingStates((prev) => {
+              const next = new Map(prev);
+              const fraction = total ? (completed / total) * 100 : 100;
+              next.set(secondary.secondarySeriesId, { isLoading: true, progress: fraction });
+              return next;
+            });
+          });
+          setSecondaryLoadingStates((prev) => {
+            const next = new Map(prev);
+            next.set(secondary.secondarySeriesId, { isLoading: false, progress: 100 });
+            return next;
+          });
+        } catch (error: any) {
+          console.error('Fusion preload failed', error);
+          setFusionManifestError(error?.message || String(error));
+          setSecondaryLoadingStates((prev) => {
+            const next = new Map(prev);
+            next.set(secondary.secondarySeriesId, { isLoading: false, progress: 0 });
+            return next;
+          });
+        }
+      }
+
+      setCurrentlyLoadingSecondary(null);
+    },
+    [],
+  );
+
+  const initializeFusionForSeries = useCallback(
+    async (seriesEntry: DICOMSeries | null) => {
+      if (!seriesEntry) {
+        resetFusionState(true);
+        return;
+      }
+
+      const modality = (seriesEntry.modality || '').toUpperCase();
+      if (modality !== 'CT') {
+        resetFusionState(true);
+        return;
+      }
+
+      resetFusionState(true);
+      setFusionManifestLoading(true);
+      setFusionManifestError(null);
+
+      try {
+        const manifest = await fetchFusionManifest(seriesEntry.id, { preload: true });
+        setFusionManifest(manifest);
+
+        if (!manifest.secondaries.length) {
+          setShowFusionPanel(false);
+          setSecondarySeriesId(null);
+          setSecondaryLoadingStates(new Map());
+          return;
+        }
+
+        setSecondarySeriesId(null);
+        setShowFusionPanel(true);
+
+        await preloadAllFusionSecondaries(seriesEntry.id, manifest);
+      } catch (error: any) {
+        console.error('Failed to initialize fusion manifest', error);
+        setFusionManifest(null);
+        setFusionManifestError(error?.message || String(error));
+        setShowFusionPanel(false);
+        setSecondarySeriesId(null);
+      } finally {
+        setFusionManifestLoading(false);
+      }
+    },
+    [preloadAllFusionSecondaries, resetFusionState],
+  );
+
   const handleContourUpdate = (payload: any) => {
     console.log('Contour update received:', payload);
     
@@ -877,6 +1045,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       setRTStructures(state.rtStructures);
     }
   };
+
+  const triggerFusionDebug = useCallback(() => {
+    try {
+      workingViewerRef.current?.openFusionDebug?.('manual');
+    } catch (error) {
+      console.warn('Unable to open fusion debug panel', error);
+    }
+  }, []);
 
   // Subscribe to undo manager changes to refresh toolbar state
   const [historyState, setHistoryState] = useState({
@@ -1118,6 +1294,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             loadedRTSeriesId={loadedRTSeriesId}
             secondaryLoadingStates={secondaryLoadingStates}
             currentlyLoadingSecondary={currentlyLoadingSecondary}
+            fusionStatuses={fusionSecondaryStatuses}
           />
         </div>
 
@@ -1181,21 +1358,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionOpacity={fusionOpacity}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
-                  hasSecondarySeriesForFusion={series.filter(s => s.id !== selectedSeries.id).length > 0}
+                  hasSecondarySeriesForFusion={Boolean(fusionManifest?.secondaries?.length)}
                   onImageMetadataChange={setImageMetadata}
                   allStructuresVisible={allStructuresVisible}
                   imageCache={imageCache}
                   onMPRToggle={() => setMprVisible(!mprVisible)}
-                  // @ts-ignore - Added for loading state feedback  
-                  onSecondaryLoadingStateChange={(currentlyLoading: number | null, loadingStates: Map<number, {progress: number, isLoading: boolean}>) => {
-                    setSecondaryLoadingStates(loadingStates);
-                    setCurrentlyLoadingSecondary(currentlyLoading);
-                  }}
                   isMPRVisible={mprVisible}
                   // Mirror associations from Series panel: restrict Fusion choices
                   allowedSecondaryIds={regAssociations[selectedSeries.id] || []}
                   registrationAssociations={registrationRelationshipMap}
                   availableSeries={series}
+                  fusionWindowLevel={fusionWindowLevel}
                 />
               
               {/* Structure Tags on Right Side - Responsive */}
@@ -1707,7 +1880,23 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {/* Fusion Control Panel is rendered inside WorkingViewer to avoid duplication */}
+      {fusionManifest && fusionManifest.secondaries.length > 0 && (
+        <FusionControlPanel
+          opacity={fusionOpacity}
+          onOpacityChange={setFusionOpacity}
+          secondaryOptions={fusionManifest.secondaries}
+          selectedSecondaryId={secondarySeriesId}
+          onSecondarySeriesSelect={setSecondarySeriesId}
+          secondaryStatuses={fusionSecondaryStatuses}
+          manifestLoading={fusionManifestLoading}
+          manifestError={fusionManifestError}
+          onOpenDebug={triggerFusionDebug}
+          minimized={!showFusionPanel}
+          onToggleMinimized={(minimized) => setShowFusionPanel(!minimized)}
+          windowLevel={fusionWindowLevel}
+          onWindowLevelPreset={(preset) => setFusionWindowLevel(preset)}
+        />
+      )}
 
       {/* Margin Toolbar */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
