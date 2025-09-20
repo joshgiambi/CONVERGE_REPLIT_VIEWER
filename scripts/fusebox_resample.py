@@ -23,6 +23,12 @@ from typing import List, Sequence, Tuple
 import numpy as np
 import SimpleITK as sitk
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from transform_utils import pick_moving_to_fixed  # noqa: E402
+
 
 def parse_position_and_normal(reader: sitk.ImageFileReader) -> Tuple[np.ndarray, np.ndarray]:
     """Extract ImagePositionPatient and slice normal from DICOM metadata."""
@@ -312,6 +318,12 @@ def run_from_config(cfg: dict) -> dict:
         print(f"🐟 FUSION: Inverted translation: {list(xform.GetTranslation())}", file=sys.stderr)
     else:
         raise ValueError("Either transform or transformFile must be provided")
+
+    try:
+        xform = pick_moving_to_fixed(primary, secondary, xform)
+        print("🐟 FUSION: pick_moving_to_fixed selected moving→fixed orientation", file=sys.stderr)
+    except Exception as exc:
+        print(f"🐟 FUSION: pick_moving_to_fixed failed, keeping original orientation: {exc}", file=sys.stderr)
 
     print(f"🐟 FUSION: Starting resampling with {xform.GetName()}", file=sys.stderr)
     print(f"🐟 FUSION: Primary image size: {primary.GetSize()}", file=sys.stderr)

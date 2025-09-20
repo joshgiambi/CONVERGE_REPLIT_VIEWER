@@ -55,7 +55,7 @@ export interface FusionSecondaryDescriptor {
 }
 
 export interface FusionManifest {
-  manifestVersion: 1;
+  manifestVersion: number;
   studyId: number;
   patientId: number | null;
   primarySeriesId: number;

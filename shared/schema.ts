@@ -210,6 +210,25 @@ export const registrations = pgTable("registrations", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const fuseboxRuns = pgTable("fusebox_runs", {
+  id: serial("id").primaryKey(),
+  primarySeriesId: integer("primary_series_id").references(() => series.id).notNull(),
+  secondarySeriesId: integer("secondary_series_id").references(() => series.id).notNull(),
+  registrationId: text("registration_id"),
+  transformSource: text("transform_source"),
+  status: text("status").notNull().default('pending'),
+  error: text("error"),
+  outputDirectory: text("output_directory"),
+  manifestPath: text("manifest_path"),
+  sliceCount: integer("slice_count"),
+  rows: integer("rows"),
+  columns: integer("columns"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // RT Structure Set table to store metadata and associations
 export const rtStructureSets = pgTable("rt_structure_sets", {
   id: serial("id").primaryKey(),
@@ -294,6 +313,15 @@ export const insertRegistrationSchema = createInsertSchema(registrations).omit({
 
 export type Registration = typeof registrations.$inferSelect;
 export type InsertRegistration = z.infer<typeof insertRegistrationSchema>;
+
+export const insertFuseboxRunSchema = createInsertSchema(fuseboxRuns).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type FuseboxRun = typeof fuseboxRuns.$inferSelect;
+export type InsertFuseboxRun = z.infer<typeof insertFuseboxRunSchema>;
 
 // V2 Professional Contour System - Medical Grade Types
 export interface Point {

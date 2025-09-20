@@ -73,7 +73,7 @@ function getOrCreateManifestEntry(primarySeriesId: number): ManifestCacheEntry {
   if (!entry) {
     entry = {
       manifest: {
-        manifestVersion: 1,
+        manifestVersion: 2,
         studyId: 0,
         patientId: null,
         primarySeriesId,
@@ -129,10 +129,26 @@ function createSliceFromDicom(
   let floatPixels: Float32Array;
 
   if (bitsAllocated === 32) {
-    const raw = createAlignedTypedArray(byteArray, dataOffset, length, Float32Array);
-    floatPixels = new Float32Array(raw.length);
-    for (let i = 0; i < raw.length; i += 1) {
-      floatPixels[i] = raw[i] * slope + intercept;
+    if (pixelRepresentation === 0) {
+      const raw = createAlignedTypedArray(byteArray, dataOffset, length, Uint32Array);
+      const count = raw.length;
+      floatPixels = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) {
+        floatPixels[i] = raw[i] * slope + intercept;
+      }
+    } else if (pixelRepresentation === 1) {
+      const raw = createAlignedTypedArray(byteArray, dataOffset, length, Int32Array);
+      const count = raw.length;
+      floatPixels = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) {
+        floatPixels[i] = raw[i] * slope + intercept;
+      }
+    } else {
+      const raw = createAlignedTypedArray(byteArray, dataOffset, length, Float32Array);
+      floatPixels = new Float32Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) {
+        floatPixels[i] = raw[i] * slope + intercept;
+      }
     }
   } else if (bitsAllocated === 16) {
     if (pixelRepresentation === 0) {
@@ -387,15 +403,19 @@ export function fuseboxSliceToImageData(
   };
 
   if (isCT) {
+    // Make CT overlay transparent where values sit at the minimum (background/no-data),
+    // preventing a black sheet from covering the base image when fused slices are empty.
     for (let i = 0; i < source.length; i++) {
-      const normalized = Math.max(0, Math.min(1, (source[i] - min) / range));
+      const s = source[i];
+      const normalized = Math.max(0, Math.min(1, (s - min) / range));
       const value = Math.round(normalized * 255);
       const offset = i * 4;
       buffer[offset] = value;
       buffer[offset + 1] = value;
       buffer[offset + 2] = value;
-      buffer[offset + 3] = 255;
-      if (!hasSignal && Math.abs(source[i] - min) > 1e-6) {
+      // Transparent if at background; opaque otherwise
+      buffer[offset + 3] = normalized <= 0 ? 0 : 255;
+      if (!hasSignal && normalized > 0) {
         hasSignal = true;
       }
     }

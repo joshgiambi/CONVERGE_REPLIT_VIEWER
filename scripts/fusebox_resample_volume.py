@@ -35,9 +35,12 @@ from fusebox_resample import (  # noqa: E402
     sort_series_by_position,
     read_series,
     affine_from_row_major,
+)
+from transform_utils import (
     flatten_composite_transform,
     ensure_moving_to_fixed,
-)
+    pick_moving_to_fixed,
+)  # noqa: E402
 
 
 def dicom_uid(root: str = "2.25") -> str:
@@ -298,12 +301,25 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     secondary = read_series(secondary_files)
     transform = load_transform(cfg)
 
+    # Harness parity: probe representative voxels to pick the moving→fixed orientation.
+    try:
+        transform = pick_moving_to_fixed(primary, secondary, transform)
+    except Exception:
+        # Leave the original orientation if probing fails (e.g. transform not invertible).
+        pass
+
     interpolation = cfg.get("interpolation", "linear").lower()
     interpolator = sitk.sitkLinear if interpolation != "nearest" else sitk.sitkNearestNeighbor
 
+    # Harness parity: invert before resampling so the transform maps output→input.
+    try:
+        transform_for_resample = transform.GetInverse()
+    except Exception:
+        transform_for_resample = transform
+
     resample_filter = sitk.ResampleImageFilter()
     resample_filter.SetReferenceImage(primary)
-    resample_filter.SetTransform(transform)
+    resample_filter.SetTransform(transform_for_resample)
     resample_filter.SetInterpolator(interpolator)
     resample_filter.SetDefaultPixelValue(0.0)
     resample_filter.SetOutputPixelType(sitk.sitkFloat32)

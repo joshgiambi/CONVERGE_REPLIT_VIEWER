@@ -96,7 +96,7 @@ export function FusionControlPanel({
     if (status.status === 'loading') {
       return (
         <Badge variant="outline" className="bg-sky-900/40 border-sky-700/50 text-sky-200 flex items-center gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" /> Loading
+          <Loader2 className="h-3 w-3 animate-spin" /> Building
         </Badge>
       );
     }
@@ -177,16 +177,36 @@ export function FusionControlPanel({
               {secondaryOptions.map((descriptor) => {
                 const status = secondaryStatuses.get(descriptor.secondarySeriesId);
                 const isActive = descriptor.secondarySeriesId === selectedSecondaryId;
+                const isReady = status?.status === 'ready';
+                const disableBecause = (() => {
+                  if (manifestLoading && !isActive) return 'Fusion cache is still preparing';
+                  if (!isReady) {
+                    if (status?.status === 'loading') return 'Overlay is still generating';
+                    if (status?.status === 'error') return status.error || 'Fusion run failed';
+                    return 'Overlay not ready yet';
+                  }
+                  return null;
+                })();
+                const isDisabled = Boolean(disableBecause) && !isActive;
+                const handleClick = () => {
+                  if (isDisabled && !isActive) return;
+                  onSecondarySeriesSelect(isActive ? null : descriptor.secondarySeriesId);
+                };
                 return (
                   <Button
                     key={descriptor.secondarySeriesId}
                     variant={isActive ? 'default' : 'secondary'}
                     className={cn(
                       'w-full justify-between text-left text-xs',
-                      isActive ? 'bg-cyan-600/70 hover:bg-cyan-600 text-slate-900' : 'bg-slate-800/70 hover:bg-slate-700 text-slate-200',
+                      isActive
+                        ? 'bg-cyan-600/70 hover:bg-cyan-600 text-slate-900'
+                        : isDisabled
+                          ? 'bg-slate-800/50 text-slate-400 cursor-not-allowed'
+                          : 'bg-slate-800/70 hover:bg-slate-700 text-slate-200',
                     )}
-                    onClick={() => onSecondarySeriesSelect(isActive ? null : descriptor.secondarySeriesId)}
-                    disabled={status?.status === 'loading'}
+                    onClick={handleClick}
+                    disabled={isDisabled}
+                    title={disableBecause ?? undefined}
                   >
                     <div className="flex flex-col">
                       <span className="font-semibold">
@@ -199,6 +219,9 @@ export function FusionControlPanel({
                     <div className="flex items-center gap-2">
                       {renderStatusBadge(descriptor.secondarySeriesId)}
                       {status?.status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-cyan-200" />}
+                      {isDisabled && status?.status === 'error' && status?.error && (
+                        <span className="text-[10px] text-amber-200/80">{status.error}</span>
+                      )}
                     </div>
                   </Button>
                 );
@@ -235,6 +258,12 @@ export function FusionControlPanel({
               </div>
             )}
           </div>
+
+          {!manifestLoading && secondaryOptions.length > 0 && secondaryOptions.every((descriptor) => secondaryStatuses.get(descriptor.secondarySeriesId)?.status !== 'ready') && (
+            <div className="rounded-md border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
+              All overlays are still generating. They will enable automatically once the helper cache finishes.
+            </div>
+          )}
 
           {modalityPresets.length > 0 && (
             <div>

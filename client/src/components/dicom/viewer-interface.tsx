@@ -1402,6 +1402,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   }, [secondarySeriesId]);
 
+  useEffect(() => {
+    if (secondarySeriesId == null) return;
+    const status = fusionSecondaryStatuses.get(secondarySeriesId);
+    if (status?.status === 'error') {
+      setSecondarySeriesId(null);
+    }
+  }, [secondarySeriesId, fusionSecondaryStatuses]);
+
   const preloadAllFusionSecondaries = useCallback(
     async (primarySeriesId: number, manifest: FusionManifest, requestToken: number) => {
       const readySecondaries = manifest.secondaries.filter((sec) => sec.status === 'ready');

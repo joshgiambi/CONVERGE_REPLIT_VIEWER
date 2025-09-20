@@ -3373,7 +3373,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
       }
 
-      const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
+      const invertTransformFile = transformInfo.transformFile ? true : undefined;
       const config = {
         primary: primaryFiles,
         secondary: secondaryFiles,
@@ -3459,7 +3459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       sliceIndices = Array.from(new Set(sliceIndices)).sort((a, b) => a - b);
 
-      const invertTransformFile = !!(transformInfo.transformFile && !['helper-generated', 'helper-cache'].includes((transformInfo.transformSource || '').toLowerCase())) ? true : false;
+      const invertTransformFile = transformInfo.transformFile ? true : undefined;
       const baseConfig: Record<string, any> = {
         primary: primaryFiles,
         secondary: secondaryFiles,
