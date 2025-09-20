@@ -255,6 +255,30 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const fusionRequestTokenRef = useRef(0);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
 
+  const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
+    if (!image) return null;
+    const direct = Array.isArray(image.imagePositionPatient) ? image.imagePositionPatient : null;
+    if (direct && direct.length >= 3) {
+      const coords = direct.map((value: any) => Number(value)) as [number, number, number];
+      if (coords.every((value) => Number.isFinite(value))) return coords;
+    }
+    const metaArray = Array.isArray(image.metadata?.imagePositionPatient) ? image.metadata.imagePositionPatient : null;
+    if (metaArray && metaArray.length >= 3) {
+      const coords = metaArray.map((value: any) => Number(value)) as [number, number, number];
+      if (coords.every((value) => Number.isFinite(value))) return coords;
+    }
+    const rawString = typeof image.imagePosition === 'string'
+      ? image.imagePosition
+      : (typeof image.metadata?.imagePosition === 'string' ? image.metadata.imagePosition : null);
+    if (rawString) {
+      const parts = rawString.split('\\').map((part: string) => Number(part.trim()));
+      if (parts.length >= 3 && parts.every((value) => Number.isFinite(value))) {
+        return [parts[0], parts[1], parts[2]];
+      }
+    }
+    return null;
+  }, []);
+
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
       console.log('registrationOptions: no secondary selected');
@@ -472,6 +496,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         fusionPrefetchSetRef.current.add(key);
         const instNumber = Number(targetImage.instanceNumber ?? targetImage.metadata?.instanceNumber ?? NaN);
         const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : targetIndex;
+        const preferredPosition = parseImagePosition(targetImage);
         getFusedSlice(seriesId, secondarySeriesId, sop)
           .catch((error) => {
             if (error instanceof Error && error.message.includes('not found in manifest')) {
@@ -481,6 +506,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 sop,
                 Number.isFinite(instNumber) ? instNumber : null,
                 preferredIndex,
+                preferredPosition,
               );
             }
             throw error;
@@ -4609,12 +4635,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       try {
         // Try exact SOP match first; if not found, fall back by instance number or index
         let slice: FuseboxSlice;
+        const preferredPosition = parseImagePosition(primaryImage);
         try {
           slice = await getFusedSlice(seriesId, secondarySeriesId, primaryImage.sopInstanceUID);
         } catch (e) {
           const instNumber = Number(primaryImage.instanceNumber ?? primaryImage.metadata?.instanceNumber ?? NaN);
           const index = Number.isFinite(instNumber) ? instNumber - 1 : currentIndex;
-          slice = await getFusedSliceSmart(seriesId, secondarySeriesId, primaryImage.sopInstanceUID, Number.isFinite(instNumber) ? instNumber : null, index);
+          slice = await getFusedSliceSmart(
+            seriesId,
+            secondarySeriesId,
+            primaryImage.sopInstanceUID,
+            Number.isFinite(instNumber) ? instNumber : null,
+            index,
+            preferredPosition,
+          );
         }
 
         if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {

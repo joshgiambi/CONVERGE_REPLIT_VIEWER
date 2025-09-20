@@ -81,6 +81,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [fusionManifestLoading, setFusionManifestLoading] = useState(false);
   const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
   const fusionManifestRequestRef = useRef(0);
+  const [manifestActionStatus, setManifestActionStatus] = useState<string | null>(null);
+  const [fusionDebugSnapshot, setFusionDebugSnapshot] = useState<string | null>(null);
   
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
@@ -1053,121 +1055,69 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         return Number.isFinite(parsed) ? parsed : null;
       };
 
-      const allowedModalities = new Set(['CT', 'MR', 'PT', 'PET', 'NM']);
-      const candidates = new Map<number, string>();
+      const allowedModalities = new Set(['CT', 'PT', 'PET', 'MR', 'NM']);
 
-      const associations = registrationRelationshipMap.get(primarySeriesId) ?? [];
-
-      const hasPetSibling = (assoc: RegistrationAssociation): boolean => {
-        if (!Array.isArray(assoc.sourceSeriesDetails)) return false;
-        return assoc.sourceSeriesDetails.some((detail) => {
-          const modality = (detail?.modality || '').toUpperCase();
-          return modality === 'PT' || modality === 'PET';
-        });
+      const shouldIncludeSeries = (seriesId: number): boolean => {
+        if (seriesId === primarySeriesId) return false;
+        const entry = seriesById.get(seriesId);
+        if (!entry) return false;
+        if (shouldHideSeries(entry)) return false;
+        const modality = (entry.modality || '').toUpperCase();
+        return allowedModalities.has(modality);
       };
 
-      const hasMrSibling = (assoc: RegistrationAssociation): boolean => {
-        if (!Array.isArray(assoc.sourceSeriesDetails)) return false;
-        return assoc.sourceSeriesDetails.some((detail) => {
-          const modality = (detail?.modality || '').toUpperCase();
-          return modality === 'MR';
-        });
-      };
-
-      const tryAddCandidate = (
-        value: unknown,
-        association: RegistrationAssociation | null,
-        options?: { isSibling?: boolean; detail?: RegistrationSeriesDetail | null },
+      const enqueueNeighbor = (
+        neighborId: number | null,
+        queue: number[],
+        visited: Set<number>,
+        results: Set<number>,
       ) => {
-        const normalizedId = normalizeSeriesId(value);
-        if (normalizedId == null || normalizedId === primarySeriesId) {
-          return;
+        if (neighborId == null) return;
+        if (!Number.isFinite(neighborId)) return;
+        const id = Number(neighborId);
+        if (shouldIncludeSeries(id)) {
+          results.add(id);
         }
-        if (candidates.has(normalizedId)) {
-          return;
+        if (!visited.has(id)) {
+          visited.add(id);
+          queue.push(id);
         }
-
-        const seriesEntry = seriesById.get(normalizedId);
-        const detail = options?.detail ?? null;
-        const resolvedModality = ((seriesEntry?.modality ?? detail?.modality) || '').toUpperCase();
-        if (!resolvedModality) {
-          return;
-        }
-
-        if (!allowedModalities.has(resolvedModality)) {
-          return;
-        }
-
-        if (!visibleSeriesIdSet.has(normalizedId)) {
-          return;
-        }
-
-        if (options?.isSibling) {
-          if (resolvedModality === 'CT' && !(association ? hasPetSibling(association) : false)) {
-            return;
-          }
-          if (resolvedModality === 'MR' && !(association ? hasMrSibling(association) || hasPetSibling(association) : false)) {
-            return;
-          }
-        }
-
-        candidates.set(normalizedId, resolvedModality);
       };
 
-      const associationDetailIndex = new Map<number, RegistrationSeriesDetail | null>();
-      associations.forEach((assoc) => {
-        if (!Array.isArray(assoc.sourceSeriesDetails)) return;
-        assoc.sourceSeriesDetails.forEach((detail) => {
-          const normalizedId = normalizeSeriesId(detail?.id);
-          if (normalizedId != null && !associationDetailIndex.has(normalizedId)) {
-            associationDetailIndex.set(normalizedId, detail ?? null);
-          }
+      const visited = new Set<number>([primarySeriesId]);
+      const results = new Set<number>();
+      const queue: number[] = [primarySeriesId];
+
+      while (queue.length) {
+        const current = queue.shift()!;
+
+        const direct = regAssociations?.[current] ?? [];
+        direct.forEach((neighbor) => {
+          enqueueNeighbor(normalizeSeriesId(neighbor), queue, visited, results);
         });
-      });
 
-      const initialIds = regAssociations?.[primarySeriesId] ?? [];
-      initialIds.forEach((id) => {
-        const normalizedId = normalizeSeriesId(id);
-        if (normalizedId == null) return;
-        tryAddCandidate(normalizedId, null, { detail: associationDetailIndex.get(normalizedId) ?? null });
-      });
-
-      associations.forEach((assoc) => {
-        if (Array.isArray(assoc.sourcesSeriesIds)) {
-          assoc.sourcesSeriesIds.forEach((id) => {
-            const normalizedId = normalizeSeriesId(id);
-            if (normalizedId == null) return;
-            const detail = associationDetailIndex.get(normalizedId) ?? null;
-            tryAddCandidate(normalizedId, assoc, { detail });
-          });
-        }
-        if (Array.isArray(assoc.siblingSeriesIds)) {
-          assoc.siblingSeriesIds.forEach((id) => {
-            const normalizedId = normalizeSeriesId(id);
-            if (normalizedId == null) return;
-            const detail = associationDetailIndex.get(normalizedId) ?? null;
-            tryAddCandidate(normalizedId, assoc, { isSibling: true, detail });
-          });
-        }
-      });
-
-      const primaryEntry = seriesById.get(primarySeriesId);
-      const primaryFoR = typeof primaryEntry?.frameOfReferenceUID === 'string' ? primaryEntry.frameOfReferenceUID.trim() : '';
-      if (primaryFoR) {
-        const foMatches = seriesByFoR.get(primaryFoR) ?? [];
-        foMatches.forEach((secondaryId) => {
-          if (secondaryId === primarySeriesId) return;
-          if (candidates.has(secondaryId)) return;
-          if (!visibleSeriesIdSet.has(secondaryId)) return;
-          const entry = seriesById.get(secondaryId);
-          if (!entry) return;
-          const modality = (entry.modality || '').toUpperCase();
-          if (!allowedModalities.has(modality)) return;
-          candidates.set(secondaryId, modality);
+        const relations = registrationRelationshipMap.get(current) ?? [];
+        relations.forEach((assoc) => {
+          const neighborIds = new Set<number>();
+          const targetId = normalizeSeriesId(assoc.targetSeriesId);
+          if (targetId != null && targetId !== current) neighborIds.add(targetId);
+          if (Array.isArray(assoc.sourcesSeriesIds)) {
+            assoc.sourcesSeriesIds.forEach((id) => {
+              const normalized = normalizeSeriesId(id);
+              if (normalized != null) neighborIds.add(normalized);
+            });
+          }
+          if (Array.isArray(assoc.siblingSeriesIds)) {
+            assoc.siblingSeriesIds.forEach((id) => {
+              const normalized = normalizeSeriesId(id);
+              if (normalized != null) neighborIds.add(normalized);
+            });
+          }
+          neighborIds.forEach((id) => enqueueNeighbor(id, queue, visited, results));
         });
       }
 
-      const candidateIds = Array.from(candidates.keys());
+      const candidateIds = Array.from(results.values()).filter((id) => shouldIncludeSeries(id));
       if (import.meta.env.DEV) {
         log.debug(
           `Fusion candidates for primary ${primarySeriesId} (patient ${studyData?.patient?.id ?? 'unknown'}): ${candidateIds.join(', ')}`,
@@ -1176,7 +1126,14 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       }
       return candidateIds;
     },
-    [regAssociations, registrationRelationshipMap, seriesById, seriesByFoR, visibleSeriesIdSet, studyData?.patient?.id],
+    [
+      regAssociations,
+      registrationRelationshipMap,
+      seriesById,
+      visibleSeriesIdSet,
+      shouldHideSeries,
+      studyData?.patient?.id,
+    ],
   );
 
   const fusionCandidatesByPrimary = useMemo(() => {
@@ -1694,6 +1651,57 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   }, []);
 
+  const captureFusionDebug = useCallback(() => {
+    try {
+      const payload = (window as any)?.__fusion;
+      if (!payload) {
+        setFusionDebugSnapshot('window.__fusion is empty');
+        return;
+      }
+      setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
+    } catch (error: any) {
+      setFusionDebugSnapshot(`Failed to read window.__fusion: ${error?.message || String(error)}`);
+    }
+  }, []);
+
+  const handleRebuildManifest = useCallback(async () => {
+    if (!selectedSeries) {
+      setManifestActionStatus('Select a primary series first.');
+      return;
+    }
+
+    setManifestActionStatus('Rebuilding manifest…');
+    setFusionDebugSnapshot(null);
+
+    try {
+      const response = await fetch(
+        `/api/fusion/manifest?primarySeriesId=${selectedSeries.id}&force=true&preload=true`,
+        { cache: 'no-store' },
+      );
+
+      let payload: any = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message = payload?.error || payload?.details || response.statusText;
+        setManifestActionStatus(`Manifest rebuild failed: ${message}`);
+        if (payload) setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      setManifestActionStatus(`Manifest rebuilt at ${new Date().toLocaleTimeString()}`);
+      if (payload) setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
+
+      await initializeFusionForSeries(selectedSeries);
+    } catch (error: any) {
+      setManifestActionStatus(`Manifest rebuild threw: ${error?.message || String(error)}`);
+    }
+  }, [initializeFusionForSeries, selectedSeries]);
+
   // Subscribe to undo manager changes to refresh toolbar state
   const [historyState, setHistoryState] = useState({
     canUndo: false,
@@ -1879,7 +1887,42 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   }
 
   return (
-    <div className="animate-in fade-in-50 duration-500">
+    <>
+      <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
+        <div className="flex flex-col gap-0.5 pr-2">
+          <span className="font-semibold text-slate-100">Fusion Debug</span>
+          <span>Primary: {selectedSeries ? `${selectedSeries.id}` : '—'}</span>
+          <span>Secondary: {secondarySeriesId ?? '—'}</span>
+          <span>Status: {manifestActionStatus ?? 'idle'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={handleRebuildManifest}>
+            Rebuild Manifest
+          </Button>
+          <Button size="sm" variant="secondary" onClick={captureFusionDebug}>
+            Capture Debug
+          </Button>
+          <Button size="sm" variant="secondary" onClick={triggerFusionDebug}>
+            Open Viewer Debug
+          </Button>
+        </div>
+      </div>
+
+      {fusionDebugSnapshot && (
+        <div className="fixed top-20 right-4 z-40 max-h-80 w-[420px] overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-950/95 p-3 text-[11px] text-slate-200 shadow-xl shadow-black/50 backdrop-blur">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-semibold">Captured Debug Snapshot</span>
+            <Button size="sm" variant="ghost" onClick={() => setFusionDebugSnapshot(null)}>
+              Dismiss
+            </Button>
+          </div>
+          <pre className="max-h-64 whitespace-pre-wrap break-all text-[10px] leading-snug">
+            {fusionDebugSnapshot}
+          </pre>
+        </div>
+      )}
+
+      <div className="animate-in fade-in-50 duration-500">
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
         {/* Series Selector - Responsive Width */}
@@ -2625,5 +2668,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         className="animate-in slide-in-from-right-2 duration-300"
       />
     </div>
+    </>
   );
 }

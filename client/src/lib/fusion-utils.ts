@@ -23,6 +23,7 @@ export type FuseboxSlice = {
   registrationFile: string | null;
   transformSource?: FuseboxTransformSource;
   registrationId?: string;
+  primarySopInstanceUID: string | null;
 };
 
 export type FuseboxImageData = {
@@ -198,6 +199,7 @@ function createSliceFromDicom(
     registrationFile: null,
     transformSource: 'helper-cache',
     registrationId: descriptor.registrationId ?? undefined,
+    primarySopInstanceUID: instance.primarySopInstanceUID ?? null,
   };
 }
 
@@ -313,7 +315,10 @@ export async function getFusedSlice(
   if (!cache) throw new Error('Fusion secondary missing in manifest cache');
 
   const descriptor = cache.descriptor;
-  const instance = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID);
+  let instance = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID);
+  if (!instance) {
+    instance = descriptor.instances.find((inst) => inst.primarySopInstanceUID === sopInstanceUID) || null;
+  }
   if (!instance) {
     throw new Error(`Fusion SOP ${sopInstanceUID} not found in manifest`);
   }
@@ -328,6 +333,7 @@ export async function getFusedSliceSmart(
   sopInstanceUID: string,
   preferredInstanceNumber?: number | null,
   preferredIndex?: number | null,
+  preferredImagePosition?: [number, number, number] | null,
 ): Promise<FuseboxSlice> {
   const entry = manifestCache.get(primarySeriesId);
   if (!entry) throw new Error('Fusion manifest not loaded');
@@ -337,6 +343,9 @@ export async function getFusedSliceSmart(
   const descriptor = cache.descriptor;
   // 1) Try exact SOP match
   let target = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID) || null;
+  if (!target) {
+    target = descriptor.instances.find((inst) => inst.primarySopInstanceUID === sopInstanceUID) || null;
+  }
   // 2) Fall back to instanceNumber match if available
   if (!target && preferredInstanceNumber != null) {
     target = descriptor.instances.find((inst) => inst.instanceNumber === preferredInstanceNumber) || null;
@@ -346,7 +355,25 @@ export async function getFusedSliceSmart(
     const idx = Math.max(0, Math.min(descriptor.instances.length - 1, preferredIndex));
     target = descriptor.instances[idx] || null;
   }
-  // 4) Final fallback: use middle slice
+  // 4) Fall back to closest image position if available
+  if (!target && preferredImagePosition && Array.isArray(preferredImagePosition)) {
+    let best: { inst: FusionInstanceDescriptor | null; distance: number } = { inst: null, distance: Number.POSITIVE_INFINITY };
+    const preferredZ = Number(preferredImagePosition[2]);
+    descriptor.instances.forEach((inst) => {
+      const pos = Array.isArray(inst.imagePositionPatient) ? inst.imagePositionPatient : null;
+      if (!pos || pos.length < 3) return;
+      const z = Number(pos[2]);
+      if (!Number.isFinite(z)) return;
+      const distance = Math.abs(z - preferredZ);
+      if (distance < best.distance) {
+        best = { inst, distance };
+      }
+    });
+    if (best.inst) {
+      target = best.inst;
+    }
+  }
+  // 5) Final fallback: use middle slice
   if (!target && descriptor.instances.length) {
     target = descriptor.instances[Math.floor(descriptor.instances.length / 2)];
   }

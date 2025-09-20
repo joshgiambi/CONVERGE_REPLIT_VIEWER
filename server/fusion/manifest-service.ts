@@ -83,7 +83,7 @@ const fileExists = (filePath: string): boolean => {
   }
 };
 
-const toInstanceDescriptor = (instance: any): FusionInstanceDescriptor => {
+const toInstanceDescriptor = (instance: any, primarySopInstanceUID?: string | null): FusionInstanceDescriptor => {
   return {
     sopInstanceUID: instance.sopInstanceUID,
     instanceNumber: instance.instanceNumber,
@@ -95,6 +95,7 @@ const toInstanceDescriptor = (instance: any): FusionInstanceDescriptor => {
     sliceLocation: typeof instance.sliceLocation === 'number' ? instance.sliceLocation : null,
     windowCenter: Array.isArray(instance.windowCenter) ? instance.windowCenter : null,
     windowWidth: Array.isArray(instance.windowWidth) ? instance.windowWidth : null,
+    primarySopInstanceUID: primarySopInstanceUID ?? null,
   };
 };
 
@@ -454,28 +455,83 @@ export class FusionManifestService {
           ] as [number, number, number]
         : null;
 
-      const descriptor: FusionSecondaryDescriptor = {
-        secondarySeriesId,
-        secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
-        secondarySeriesDescription: secondarySeries.seriesDescription ?? null,
-        secondaryModality: secondarySeries.modality ?? null,
-        registrationId: transformInfo.registrationId ?? null,
-        status: 'ready',
-        generatedAt: new Date().toISOString(),
-        frameOfReferenceUID,
-        sliceCount: response.sliceCount,
-        rows: response.rows,
-        columns: response.columns,
-        pixelSpacing,
-        imageOrientationPatient: orientation,
-        imagePositionPatientFirst: positionFirst,
-        imagePositionPatientLast: positionLast,
-        windowCenter: Array.isArray(response.windowCenter) ? response.windowCenter : null,
-        windowWidth: Array.isArray(response.windowWidth) ? response.windowWidth : null,
-        outputDirectory: response.outputDirectory,
-        manifestPath: response.manifestPath ?? path.join(dicomOutputDir, 'manifest.json'),
-        instances: response.instances.map(toInstanceDescriptor),
+    const parsePosition = (value: unknown): [number, number, number] | null => {
+      if (!value) return null;
+      if (Array.isArray(value) && value.length >= 3) {
+        const coords = value.map((component) => Number(component)) as [number, number, number];
+        if (coords.every((component) => Number.isFinite(component))) return coords;
+      }
+      if (typeof value === 'string') {
+        const parts = value.split('\\').map((part) => Number(part.trim()));
+        if (parts.length >= 3 && parts.every((component) => Number.isFinite(component))) {
+          return [parts[0], parts[1], parts[2]];
+        }
+      }
+      return null;
+    };
+
+    const primaryPositionMap = primaryImages.map((image, index) => {
+      const position = parsePosition(
+        image?.imagePositionPatient ??
+        image?.imagePosition ??
+        image?.metadata?.imagePositionPatient ??
+        image?.metadata?.imagePosition,
+      );
+      return {
+        sopInstanceUID: image?.sopInstanceUID ?? null,
+        index,
+        position,
       };
+    });
+
+    const resolvePrimarySopForInstance = (inst: any, fallbackIndex: number): string | null => {
+      const instPosition = parsePosition(inst?.imagePositionPatient);
+      if (instPosition) {
+        const instZ = instPosition[2];
+        if (Number.isFinite(instZ)) {
+          let bestMatch: { sop: string | null; distance: number } | null = null;
+          primaryPositionMap.forEach((candidate) => {
+            if (!candidate.position || candidate.sopInstanceUID == null) return;
+            const distance = Math.abs(candidate.position[2] - instZ);
+            if (!bestMatch || distance < bestMatch.distance) {
+              bestMatch = { sop: candidate.sopInstanceUID, distance };
+            }
+          });
+          if (bestMatch?.sop) return bestMatch.sop;
+        }
+      }
+
+      const fallback = primaryImages[fallbackIndex];
+      if (fallback?.sopInstanceUID) return fallback.sopInstanceUID;
+      const candidate = primaryPositionMap[fallbackIndex];
+      return candidate?.sopInstanceUID ?? null;
+    };
+
+    const descriptor: FusionSecondaryDescriptor = {
+      secondarySeriesId,
+      secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
+      secondarySeriesDescription: secondarySeries.seriesDescription ?? null,
+      secondaryModality: secondarySeries.modality ?? null,
+      registrationId: transformInfo.registrationId ?? null,
+      status: 'ready',
+      generatedAt: new Date().toISOString(),
+      frameOfReferenceUID,
+      sliceCount: response.sliceCount,
+      rows: response.rows,
+      columns: response.columns,
+      pixelSpacing,
+      imageOrientationPatient: orientation,
+      imagePositionPatientFirst: positionFirst,
+      imagePositionPatientLast: positionLast,
+      windowCenter: Array.isArray(response.windowCenter) ? response.windowCenter : null,
+      windowWidth: Array.isArray(response.windowWidth) ? response.windowWidth : null,
+      outputDirectory: response.outputDirectory,
+      manifestPath: response.manifestPath ?? path.join(dicomOutputDir, 'manifest.json'),
+      instances: response.instances.map((inst, idx) => {
+        const mappedPrimarySop = resolvePrimarySopForInstance(inst, idx);
+        return toInstanceDescriptor(inst, mappedPrimarySop);
+      }),
+    };
 
       await markFuseboxRunReady({
         ...baseRunContext,

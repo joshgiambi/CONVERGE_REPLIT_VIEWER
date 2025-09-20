@@ -52,6 +52,7 @@ export interface FusionInstanceDescriptor {
   sliceLocation: number | null;
   windowCenter: number[] | null;
   windowWidth: number[] | null;
+  primarySopInstanceUID?: string | null;
 }
 
 export interface FusionSecondaryDescriptor {
