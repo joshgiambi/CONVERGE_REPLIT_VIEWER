@@ -119,9 +119,30 @@ export function SeriesSelector({
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
 
+  // Deduplicate series by keeping only the entry with the lowest ID for each (seriesNumber, seriesDescription) combination
+  const deduplicatedSeries = useMemo(() => {
+    const seriesMap = new Map<string, DICOMSeries>();
+    
+    series.forEach((entry) => {
+      if (!entry) return;
+      
+      // Create a key based on seriesNumber and seriesDescription
+      const seriesNumber = entry.seriesNumber ?? 'null';
+      const seriesDescription = (entry.seriesDescription || '').trim();
+      const key = `${seriesNumber}|${seriesDescription}`;
+      
+      const existing = seriesMap.get(key);
+      if (!existing || entry.id < existing.id) {
+        seriesMap.set(key, entry);
+      }
+    });
+    
+    return Array.from(seriesMap.values());
+  }, [series]);
+
   const seriesById = useMemo(() => {
     const map = new Map<number, DICOMSeries>();
-    series.forEach((entry) => {
+    deduplicatedSeries.forEach((entry) => {
       if (!entry) return;
       const numericId = Number(entry.id);
       if (Number.isFinite(numericId)) {
@@ -129,7 +150,7 @@ export function SeriesSelector({
       }
     });
     return map;
-  }, [series]);
+  }, [deduplicatedSeries]);
 
   const getCandidatesForPrimary = (primaryId: number): number[] => {
     if (fusionCandidatesByPrimary && fusionCandidatesByPrimary.has(primaryId)) {
@@ -737,14 +758,14 @@ export function SeriesSelector({
                   {(() => {
                     // Build top-level modality buckets
                     const modalityOf = (entry: DICOMSeries) => (entry.modality || '').toUpperCase();
-                    const mrSeries = series.filter(s => modalityOf(s) === 'MR');
-                    const ptSeries = series.filter(s => ['PT', 'PET', 'NM'].includes(modalityOf(s)));
-                    const regSeries = series.filter(s => modalityOf(s) === 'REG');
-                    const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'PET', 'NM', 'REG', 'RTSTRUCT'].includes(modalityOf(s)));
+                    const mrSeries = deduplicatedSeries.filter(s => modalityOf(s) === 'MR');
+                    const ptSeries = deduplicatedSeries.filter(s => ['PT', 'PET', 'NM'].includes(modalityOf(s)));
+                    const regSeries = deduplicatedSeries.filter(s => modalityOf(s) === 'REG');
+                    const otherSeries = deduplicatedSeries.filter(s => !['CT', 'MR', 'PT', 'PET', 'NM', 'REG', 'RTSTRUCT'].includes(modalityOf(s)));
 
                     // Helper: choose a single Planning CT as the parent (if any CT exists)
                     const choosePlanningCT = () => {
-                      const allCTSeries = series.filter(s => modalityOf(s) === 'CT');
+                      const allCTSeries = deduplicatedSeries.filter(s => modalityOf(s) === 'CT');
                       if (allCTSeries.length === 0) return null;
 
                       // Gather signals
@@ -843,19 +864,49 @@ export function SeriesSelector({
                             });
                           }
 
-                          const fusionReadyMr = Array.from(new Map([...mrAssoc, ...additionalMrAssoc].map((entry) => [entry.id, entry])).values());
+                          // Also include MRIs with same Frame of Reference as the primary series
+                          const sameForMrAssoc = deduplicatedSeries.filter((s) => {
+                            if (modalityOf(s) !== 'MR') return false;
+                            if (s.id === seriesItem.id) return false; // Exclude the primary series itself
+                            
+                            // Skip if already included in explicit associations
+                            if (mrAssoc.some(mr => mr.id === s.id)) return false;
+                            if (additionalMrAssoc.some(mr => mr.id === s.id)) return false;
+                            
+                            // Include if it shares the same Frame of Reference as the primary series
+                            const primaryFOR = seriesItem.frameOfReferenceUID;
+                            const thisFOR = s.frameOfReferenceUID;
+                            if (primaryFOR && thisFOR && primaryFOR === thisFOR) {
+                              return true;
+                            }
+                            
+                            return false;
+                          });
 
-                          const ctCandidatesForPet = series.filter(
+                          const fusionReadyMr = Array.from(new Map([...mrAssoc, ...additionalMrAssoc, ...sameForMrAssoc].map((entry) => [entry.id, entry])).values());
+
+                          const ctCandidatesForPet = deduplicatedSeries.filter(
                             (s) => modalityOf(s) === 'CT' && candidateSetWithPrimary.has(s.id),
                           );
 
                           const hasExplicitPetCandidates = Boolean(petMapForPrimary && petMapForPrimary.size);
 
-                          const registeredCtAssoc = series.filter((s) => {
+                          const registeredCtAssoc = deduplicatedSeries.filter((s) => {
                             if (modalityOf(s) !== 'CT') return false;
-                            if (!candidateSet.has(s.id)) return false;
+                            if (s.id === seriesItem.id) return false; // Exclude the planning CT itself
                             if (ctIdsLinkedToPet.has(s.id)) return false;
-                            return true;
+                            
+                            // Include if it has explicit registration
+                            if (candidateSet.has(s.id)) return true;
+                            
+                            // Include if it shares the same Frame of Reference as the planning CT
+                            const planningCtFOR = seriesItem.frameOfReferenceUID;
+                            const thisFOR = s.frameOfReferenceUID;
+                            if (planningCtFOR && thisFOR && planningCtFOR === thisFOR) {
+                              return true;
+                            }
+                            
+                            return false;
                           });
                           return (
                             <div key={seriesItem.id}>
@@ -900,12 +951,12 @@ export function SeriesSelector({
 
                             {/* Always show nested items under CT series */}
                             <div className="ml-4 mt-2 space-y-1">
-                              {/* Registered CT secondaries (REG-derived only; PET/CT CTs are shown under PET) */}
+                              {/* Associated CT secondaries (REG-derived or same Frame of Reference; PET/CT CTs are shown under PET) */}
                               {(() => {
                                 if (registeredCtAssoc.length === 0) return null;
                                 return (
                                   <div className="space-y-1 border-l-2 border-blue-500/30 pl-3">
-                                    <div className="text-xs text-blue-300 mb-1">Registered CT</div>
+                                    <div className="text-xs text-blue-300 mb-1">Associated CT</div>
                                     {registeredCtAssoc.map((ctS) => {
                                       const loadingState = secondaryLoadingStates?.get(ctS.id);
                                       const fusionStatus = fusionStatuses?.get(ctS.id);
@@ -1215,7 +1266,7 @@ export function SeriesSelector({
                                      }
 
                                      if (!ctSiblings.length && hasExplicitPetCandidates) {
-                                       ctSiblings = series.filter((ctCandidate) => {
+                                       ctSiblings = deduplicatedSeries.filter((ctCandidate) => {
                                          if (modalityOf(ctCandidate) !== 'CT') return false;
                                          if (ctCandidate.id === seriesItem.id) return false;
                                          if (!candidateSetWithPrimary.has(ctCandidate.id)) return false;

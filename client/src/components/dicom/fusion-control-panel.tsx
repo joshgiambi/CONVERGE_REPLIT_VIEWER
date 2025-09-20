@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Layers, Loader2, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
+import { Layers, Loader2, AlertTriangle, Maximize2, Minimize2, Eye, EyeOff, Activity, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FusionSecondaryDescriptor } from '@/types/fusion';
 
@@ -108,7 +108,7 @@ export function FusionControlPanel({
 
   if (minimized) {
     return (
-      <div className="fixed bottom-4 right-6 z-50 flex items-center gap-3 rounded-xl border border-slate-700/40 bg-black/60 px-3 py-2 backdrop-blur">
+      <div className="fixed bottom-4 right-6 z-50 flex items-center gap-3 rounded-lg border border-slate-700/40 bg-slate-950/95 px-3 py-2 backdrop-blur shadow-lg shadow-black/40">
         <Badge variant="outline" className="bg-slate-900/80 text-slate-200 border-slate-600/50">
           Fusion
         </Badge>
@@ -130,46 +130,68 @@ export function FusionControlPanel({
   }
 
   return (
-    <div className="fixed bottom-4 right-6 z-50">
-      <Card className="w-[22rem] bg-slate-900/80 backdrop-blur border border-slate-700/60 shadow-lg shadow-black/40">
-        <div className="flex items-center justify-between border-b border-slate-700/60 px-4 py-3">
-          <div className="flex items-center gap-2 text-slate-100">
-            <Layers className="h-4 w-4 text-cyan-300" />
-            <span className="text-sm font-semibold">Fusion Overlay</span>
+    <div className="fixed bottom-4 right-6 z-50" style={{ animationName: 'fadeInScale', animationDuration: '300ms', animationTimingFunction: 'ease-out', animationFillMode: 'both' }}>
+      <div className="backdrop-blur-md border border-cyan-500/60 rounded-xl px-4 py-3 shadow-2xl bg-gray-900/90 w-[24rem]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div 
+              className="w-4 h-4 rounded border-2 border-white/60 shadow-sm"
+              style={{ backgroundColor: '#06b6d4' }}
+            />
+            <span className="text-white text-sm font-medium">Fusion Overlay</span>
             {manifestLoading && (
-              <Badge variant="outline" className="bg-sky-900/40 border-sky-700/50 text-sky-200 flex items-center gap-1">
+              <Badge variant="outline" className="bg-cyan-900/40 border-cyan-400/60 text-cyan-200 flex items-center gap-1 backdrop-blur-sm shadow-sm">
                 <Loader2 className="h-3 w-3 animate-spin" /> Preparing
               </Badge>
             )}
             {manifestError && (
-              <Badge variant="outline" className="bg-amber-900/40 border-amber-700/50 text-amber-200">
+              <Badge variant="outline" className="bg-red-900/40 border-red-400/60 text-red-200 backdrop-blur-sm shadow-sm">
+                <AlertTriangle className="h-3 w-3 mr-1" />
                 Error
               </Badge>
             )}
           </div>
           <div className="flex items-center gap-2">
             {onOpenDebug && (
-              <Button variant="ghost" size="icon" onClick={onOpenDebug} className="h-8 w-8 text-amber-300 hover:text-amber-200">
-                <AlertTriangle className="h-4 w-4" />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={onOpenDebug} 
+                className="h-7 px-2 bg-orange-900/30 border-2 border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-lg backdrop-blur-sm shadow-sm"
+              >
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                <span className="text-xs font-medium">Debug</span>
               </Button>
             )}
-            <Button variant="ghost" size="icon" onClick={() => onToggleMinimized?.(true)} className="h-8 w-8 text-slate-200">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => onToggleMinimized?.(true)} 
+              className="h-7 w-7 p-0 text-white/70 hover:text-white hover:bg-white/20 rounded-lg backdrop-blur-sm shadow-sm"
+            >
               <Minimize2 className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        <div className="space-y-4 px-4 py-4 text-slate-100">
+        <div className="space-y-3">
           {manifestError && (
-            <div className="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-2 text-sm text-amber-200">
-              {manifestError}
+            <div className="rounded-lg border border-red-400/60 bg-red-900/30 px-3 py-2 text-sm text-red-200 backdrop-blur-sm shadow-sm">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="font-medium">Fusion Error</span>
+              </div>
+              <div className="mt-1 text-xs text-red-200/80">{manifestError}</div>
             </div>
           )}
 
           <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wide text-slate-400">Overlay Series</span>
-              <Badge variant="outline" className="bg-slate-800/60 border-slate-600/50 text-[10px] text-slate-300">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-cyan-300" />
+                <span className="text-sm font-medium text-white">Overlay Series</span>
+              </div>
+              <Badge variant="outline" className="bg-purple-900/40 border-purple-400/60 text-purple-200 backdrop-blur-sm shadow-sm text-xs">
                 {secondaryOptions.length} available
               </Badge>
             </div>
@@ -192,67 +214,101 @@ export function FusionControlPanel({
                   if (isDisabled && !isActive) return;
                   onSecondarySeriesSelect(isActive ? null : descriptor.secondarySeriesId);
                 };
+                const modalityColor = (() => {
+                  const modality = (descriptor.secondaryModality || '').toUpperCase();
+                  switch (modality) {
+                    case 'PT':
+                    case 'PET':
+                      return { bg: 'bg-yellow-900/30', border: 'border-yellow-400/60', text: 'text-yellow-200', hover: 'hover:bg-yellow-800/40' };
+                    case 'MR':
+                      return { bg: 'bg-purple-900/30', border: 'border-purple-400/60', text: 'text-purple-200', hover: 'hover:bg-purple-800/40' };
+                    case 'CT':
+                      return { bg: 'bg-blue-900/30', border: 'border-blue-400/60', text: 'text-blue-200', hover: 'hover:bg-blue-800/40' };
+                    default:
+                      return { bg: 'bg-cyan-900/30', border: 'border-cyan-400/60', text: 'text-cyan-200', hover: 'hover:bg-cyan-800/40' };
+                  }
+                })();
+
                 return (
                   <Button
                     key={descriptor.secondarySeriesId}
-                    variant={isActive ? 'default' : 'secondary'}
+                    variant="outline"
                     className={cn(
-                      'w-full justify-between text-left text-xs',
+                      'w-full justify-between text-left h-auto p-3 rounded-lg backdrop-blur-sm shadow-sm border-2 transition-all duration-200',
                       isActive
-                        ? 'bg-cyan-600/70 hover:bg-cyan-600 text-slate-900'
+                        ? `${modalityColor.bg} ${modalityColor.border} ${modalityColor.text} hover:text-white ${modalityColor.hover} shadow-lg`
                         : isDisabled
-                          ? 'bg-slate-800/50 text-slate-400 cursor-not-allowed'
-                          : 'bg-slate-800/70 hover:bg-slate-700 text-slate-200',
+                          ? 'bg-gray-800/30 border-gray-600/40 text-gray-500 cursor-not-allowed'
+                          : `bg-white/10 border-white/30 text-white hover:text-white hover:bg-white/20 hover:shadow-lg`,
                     )}
                     onClick={handleClick}
                     disabled={isDisabled}
                     title={disableBecause ?? undefined}
                   >
-                    <div className="flex flex-col">
-                      <span className="font-semibold">
-                        {descriptor.secondaryModality ?? 'Overlay'} · {descriptor.secondarySeriesId}
-                      </span>
-                      <span className="text-[10px] opacity-70 line-clamp-1">
-                        {descriptor.secondarySeriesDescription || 'Unnamed series'}
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-3 h-3 rounded border border-white/60 shadow-sm",
+                      )} style={{ backgroundColor: isActive ? (modalityColor.text === 'text-yellow-200' ? '#fbbf24' : modalityColor.text === 'text-purple-200' ? '#a855f7' : modalityColor.text === 'text-blue-200' ? '#3b82f6' : '#06b6d4') : '#6b7280' }} />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-sm">
+                          {descriptor.secondaryModality ?? 'Overlay'} · {descriptor.secondarySeriesId}
+                        </span>
+                        <span className="text-xs opacity-80 line-clamp-1">
+                          {descriptor.secondarySeriesDescription || 'Unnamed series'}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {renderStatusBadge(descriptor.secondarySeriesId)}
-                      {status?.status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-cyan-200" />}
-                      {isDisabled && status?.status === 'error' && status?.error && (
-                        <span className="text-[10px] text-amber-200/80">{status.error}</span>
-                      )}
+                      {status?.status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />}
                     </div>
                   </Button>
                 );
               })}
               {!secondaryOptions.length && !manifestLoading && (
-                <div className="rounded-md border border-slate-700/60 bg-slate-900/50 px-3 py-2 text-xs text-slate-300">
-                  No registered secondary overlays found for this primary series.
+                <div className="rounded-lg border border-gray-400/40 bg-gray-800/30 px-3 py-2 text-sm text-gray-300 backdrop-blur-sm shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <EyeOff className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium">No Overlay Available</span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-400">No registered secondary overlays found for this primary series.</div>
                 </div>
               )}
             </div>
             {activeDescriptor && (
-              <div className="mt-3 rounded-md border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
-                <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500">
-                  <span>Active Overlay Details</span>
+              <div className="mt-3 rounded-lg border border-white/20 bg-white/5 px-3 py-3 backdrop-blur-sm shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-cyan-300" />
+                    <span className="text-sm font-medium text-white">Active Overlay</span>
+                  </div>
                   {secondaryStatuses.get(activeDescriptor.secondarySeriesId)?.status === 'ready' ? (
-                    <span className="text-emerald-300">Ready</span>
+                    <Badge variant="outline" className="bg-emerald-900/40 border-emerald-400/60 text-emerald-200 backdrop-blur-sm shadow-sm">
+                      Ready
+                    </Badge>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="rounded bg-slate-800/70 px-2 py-1 font-semibold text-slate-100">
+                  <span className="rounded-lg bg-cyan-900/40 border border-cyan-400/60 px-2 py-1 font-semibold text-cyan-200 text-xs backdrop-blur-sm shadow-sm">
                     {activeDescriptor.secondaryModality ?? 'Overlay'}
                   </span>
-                  <span className="rounded bg-slate-800/70 px-2 py-1">Series {activeDescriptor.secondarySeriesId}</span>
-                  <span className="rounded bg-slate-800/70 px-2 py-1">{activeDescriptor.sliceCount} slices</span>
+                  <span className="rounded-lg bg-purple-900/40 border border-purple-400/60 px-2 py-1 text-purple-200 text-xs backdrop-blur-sm shadow-sm">
+                    Series {activeDescriptor.secondarySeriesId}
+                  </span>
+                  <span className="rounded-lg bg-green-900/40 border border-green-400/60 px-2 py-1 text-green-200 text-xs backdrop-blur-sm shadow-sm">
+                    {activeDescriptor.sliceCount} slices
+                  </span>
                   {activeDescriptor.registrationId && (
-                    <span className="rounded bg-slate-800/70 px-2 py-1">Reg {activeDescriptor.registrationId}</span>
+                    <span className="rounded-lg bg-orange-900/40 border border-orange-400/60 px-2 py-1 text-orange-200 text-xs backdrop-blur-sm shadow-sm">
+                      Reg {activeDescriptor.registrationId}
+                    </span>
                   )}
                 </div>
                 {activeDescriptor.secondarySeriesDescription && (
-                  <div className="mt-2 line-clamp-2 text-[10px] text-slate-400">
-                    {activeDescriptor.secondarySeriesDescription}
+                  <div className="mt-2 p-2 rounded bg-white/5 border border-white/10 backdrop-blur-sm">
+                    <div className="text-xs text-white/80 line-clamp-2 leading-relaxed">
+                      {activeDescriptor.secondarySeriesDescription}
+                    </div>
                   </div>
                 )}
               </div>
@@ -260,50 +316,85 @@ export function FusionControlPanel({
           </div>
 
           {!manifestLoading && secondaryOptions.length > 0 && secondaryOptions.every((descriptor) => secondaryStatuses.get(descriptor.secondarySeriesId)?.status !== 'ready') && (
-            <div className="rounded-md border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
-              All overlays are still generating. They will enable automatically once the helper cache finishes.
+            <div className="rounded-lg border border-blue-400/40 bg-blue-900/30 px-3 py-2 text-sm text-blue-200 backdrop-blur-sm shadow-sm">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="font-medium">Processing Overlays</span>
+              </div>
+              <div className="mt-1 text-xs text-blue-200/80">All overlays are still generating. They will enable automatically once the helper cache finishes.</div>
             </div>
           )}
 
           {modalityPresets.length > 0 && (
             <div>
-              <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Window / Level Presets</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="w-px h-4 bg-white/30" />
+                <span className="text-sm font-medium text-white">Window / Level Presets</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 {modalityPresets.map((preset) => {
                   const isActive = windowLevel && Math.abs(windowLevel.window - preset.window) < 1e-3 && Math.abs(windowLevel.level - preset.level) < 1e-3;
                   return (
                     <Button
                       key={`${preset.label}-${preset.window}-${preset.level}`}
+                      variant="outline"
                       size="sm"
-                      variant={isActive ? 'default' : 'secondary'}
-                      className={cn('text-xs', isActive ? 'bg-cyan-600/70 hover:bg-cyan-600 text-slate-900' : 'bg-slate-800/70 hover:bg-slate-700 text-slate-200')}
+                      className={cn(
+                        'h-8 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 transition-all duration-200',
+                        isActive 
+                          ? 'bg-indigo-900/30 border-indigo-400/60 text-indigo-200 hover:text-white hover:bg-indigo-800/40'
+                          : 'bg-white/10 border-white/30 text-white hover:text-white hover:bg-white/20'
+                      )}
                       onClick={() => onWindowLevelPreset?.({ window: preset.window, level: preset.level })}
                     >
-                      {preset.label}
+                      <span className="font-medium">{preset.label}</span>
                     </Button>
                   );
                 })}
                 <Button
+                  variant="outline"
                   size="sm"
-                  variant={windowLevel ? 'secondary' : 'default'}
-                  className="text-xs"
+                  className={cn(
+                    'h-8 text-xs rounded-lg backdrop-blur-sm shadow-sm border-2 transition-all duration-200',
+                    !windowLevel 
+                      ? 'bg-green-900/30 border-green-400/60 text-green-200 hover:text-white hover:bg-green-800/40'
+                      : 'bg-white/10 border-white/30 text-white hover:text-white hover:bg-white/20'
+                  )}
                   onClick={() => onWindowLevelPreset?.(null)}
                 >
-                  Auto
+                  <span className="font-medium">Auto</span>
                 </Button>
               </div>
             </div>
           )}
 
           <div>
-            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
-              <span>Overlay Opacity</span>
-              <span className="text-slate-200">{Math.round(opacity * 100)}%</span>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-px h-4 bg-white/30" />
+                <span className="text-sm font-medium text-white">Overlay Opacity</span>
+              </div>
+              <Badge variant="outline" className="bg-cyan-900/40 border-cyan-400/60 text-cyan-200 backdrop-blur-sm shadow-sm text-xs">
+                {Math.round(opacity * 100)}%
+              </Badge>
             </div>
-            <Slider value={[opacity]} min={0} max={1} step={0.01} onValueChange={handleOpacityChange} />
+            <div className="px-1">
+              <Slider 
+                value={[opacity]} 
+                min={0} 
+                max={1} 
+                step={0.01} 
+                onValueChange={handleOpacityChange}
+                className="[&_[role=slider]]:bg-cyan-400 [&_[role=slider]]:border-2 [&_[role=slider]]:border-white/60 [&_[role=slider]]:shadow-lg [&_[role=slider]]:backdrop-blur-sm"
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-xs text-white/60">
+              <span>Transparent</span>
+              <span>Opaque</span>
+            </div>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

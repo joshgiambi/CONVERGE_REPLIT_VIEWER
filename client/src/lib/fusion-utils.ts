@@ -1,4 +1,10 @@
 import dicomParser from 'dicom-parser';
+import {
+  cacheCustomImageData,
+  removeCustomImageData,
+  buildFusionImageCacheId,
+  toSuperbeamImageId,
+} from '@/lib/cornerstone3d-adapter';
 import type {
   FusionManifest,
   FusionSecondaryDescriptor,
@@ -24,6 +30,17 @@ export type FuseboxSlice = {
   transformSource?: FuseboxTransformSource;
   registrationId?: string;
   primarySopInstanceUID: string | null;
+  pixelSpacing: [number, number] | null;
+  imageOrientationPatient: number[] | null;
+  imagePositionPatient: number[] | null;
+  windowCenter: number | null;
+  windowWidth: number | null;
+  rescaleSlope: number;
+  rescaleIntercept: number;
+  sliceLocation: number | null;
+  frameOfReferenceUID: string | null;
+  cornerstoneCacheId?: string;
+  cornerstoneImageId?: string;
 };
 
 export type FuseboxImageData = {
@@ -36,6 +53,9 @@ type SecondaryCacheEntry = {
   slices: Map<string, Promise<FuseboxSlice>>;
   status: FusionManifestStatus | 'idle' | 'loading';
   error?: string;
+  primarySeriesId: number;
+  instanceIndexBySop: Map<string, number>;
+  imageCacheIds: Map<string, string>;
 };
 
 type ManifestCacheEntry = {
@@ -102,6 +122,19 @@ function parseWindowValues(value: string | null | undefined): number[] | null {
   return tokens.length ? tokens : null;
 }
 
+function buildInstanceIndexBySop(descriptor: FusionSecondaryDescriptor): Map<string, number> {
+  const map = new Map<string, number>();
+  descriptor.instances.forEach((inst, index) => {
+    if (inst?.sopInstanceUID) {
+      map.set(inst.sopInstanceUID, index);
+    }
+    if (inst?.primarySopInstanceUID) {
+      map.set(inst.primarySopInstanceUID, index);
+    }
+  });
+  return map;
+}
+
 function createSliceFromDicom(
   arrayBuffer: ArrayBuffer,
   descriptor: FusionSecondaryDescriptor,
@@ -120,6 +153,14 @@ function createSliceFromDicom(
   const pixelRepresentation = dataSet.uint16?.('x00280103') ?? 0;
   const slope = Number(dataSet.string?.('x00281053') ?? '1') || 1;
   const intercept = Number(dataSet.string?.('x00281052') ?? '0') || 0;
+
+  const datasetWindowCenter = parseWindowValues(dataSet.string?.('x00281050') ?? null);
+  const datasetWindowWidth = parseWindowValues(dataSet.string?.('x00281051') ?? null);
+  const datasetPixelSpacing = parseWindowValues(dataSet.string?.('x00280030') ?? null);
+  const datasetImagePosition = parseWindowValues(dataSet.string?.('x00200032') ?? null);
+  const datasetImageOrientation = parseWindowValues(dataSet.string?.('x00200037') ?? null);
+  const datasetSliceLocation = Number(dataSet.string?.('x00201041') ?? 'NaN');
+  const datasetFrameOfReference = dataSet.string?.('x00200052') ?? null;
 
   const pixelElement = dataSet.elements?.['x7fe00010'];
   if (!pixelElement) {
@@ -188,6 +229,43 @@ function createSliceFromDicom(
     ? Math.max(0, instance.instanceNumber - 1)
     : 0;
 
+  const windowCenterValues = instance.windowCenter
+    ?? datasetWindowCenter
+    ?? descriptor.windowCenter
+    ?? null;
+  const windowWidthValues = instance.windowWidth
+    ?? datasetWindowWidth
+    ?? descriptor.windowWidth
+    ?? null;
+
+  const windowCenter = Array.isArray(windowCenterValues) && windowCenterValues.length
+    ? Number(windowCenterValues[0])
+    : null;
+  const windowWidth = Array.isArray(windowWidthValues) && windowWidthValues.length
+    ? Number(windowWidthValues[0])
+    : null;
+
+  const pixelSpacing = instance.pixelSpacing
+    ?? (Array.isArray(datasetPixelSpacing) && datasetPixelSpacing.length >= 2
+      ? [datasetPixelSpacing[0], datasetPixelSpacing[1]] as [number, number]
+      : descriptor.pixelSpacing ?? null);
+
+  const imagePositionPatient = instance.imagePositionPatient
+    ?? (Array.isArray(datasetImagePosition) && datasetImagePosition.length >= 3
+      ? [datasetImagePosition[0], datasetImagePosition[1], datasetImagePosition[2]] as [number, number, number]
+      : descriptor.imagePositionPatientFirst ?? null);
+
+  const imageOrientationPatient = instance.imageOrientationPatient
+    ?? (Array.isArray(datasetImageOrientation) && datasetImageOrientation.length >= 6
+      ? datasetImageOrientation.slice(0, 6) as number[]
+      : descriptor.imageOrientationPatient ?? null);
+
+  const sliceLocation = Number.isFinite(instance.sliceLocation)
+    ? instance.sliceLocation
+    : (Number.isFinite(datasetSliceLocation) ? datasetSliceLocation : null);
+
+  const frameOfReferenceUID = descriptor.frameOfReferenceUID ?? datasetFrameOfReference ?? null;
+
   return {
     width: cols,
     height: rows,
@@ -200,12 +278,22 @@ function createSliceFromDicom(
     transformSource: 'helper-cache',
     registrationId: descriptor.registrationId ?? undefined,
     primarySopInstanceUID: instance.primarySopInstanceUID ?? null,
+    pixelSpacing,
+    imageOrientationPatient,
+    imagePositionPatient,
+    windowCenter,
+    windowWidth,
+    rescaleSlope: slope,
+    rescaleIntercept: intercept,
+    sliceLocation,
+    frameOfReferenceUID,
   };
 }
 
 async function loadSlice(
   cache: SecondaryCacheEntry,
   instance: FusionInstanceDescriptor,
+  preferredIndex?: number,
 ): Promise<FuseboxSlice> {
   const cached = cache.slices.get(instance.sopInstanceUID);
   if (cached) return cached;
@@ -218,7 +306,53 @@ async function loadSlice(
       throw new Error(`Failed to load fused image ${instance.sopInstanceUID} (${response.status} ${response.statusText})`);
     }
     const arrayBuffer = await response.arrayBuffer();
-    return createSliceFromDicom(arrayBuffer, cache.descriptor, instance);
+    const slice = createSliceFromDicom(arrayBuffer, cache.descriptor, instance);
+
+    const instanceIndexFromMap = cache.instanceIndexBySop.get(instance.sopInstanceUID);
+    const sliceIndex = typeof instanceIndexFromMap === 'number'
+      ? instanceIndexFromMap
+      : (typeof preferredIndex === 'number' && Number.isFinite(preferredIndex)
+        ? preferredIndex
+        : slice.sliceIndex);
+
+    const cacheId = buildFusionImageCacheId(
+      cache.primarySeriesId,
+      cache.descriptor.secondarySeriesId,
+      sliceIndex,
+    );
+
+    const imageId = toSuperbeamImageId(cacheId);
+
+    cacheCustomImageData(cacheId, {
+      data: slice.data,
+      width: slice.width,
+      height: slice.height,
+      minPixelValue: slice.min,
+      maxPixelValue: slice.max,
+      metadata: {
+        windowCenter: slice.windowCenter,
+        windowWidth: slice.windowWidth,
+        pixelSpacing: slice.pixelSpacing,
+        imagePositionPatient: slice.imagePositionPatient,
+        imageOrientationPatient: slice.imageOrientationPatient,
+        rescaleIntercept: slice.rescaleIntercept,
+        rescaleSlope: slice.rescaleSlope,
+        frameOfReferenceUID: slice.frameOfReferenceUID,
+        sliceLocation: slice.sliceLocation,
+        modality: slice.secondaryModality,
+      },
+    });
+
+    cache.imageCacheIds.set(instance.sopInstanceUID, cacheId);
+    if (instance.primarySopInstanceUID) {
+      cache.imageCacheIds.set(instance.primarySopInstanceUID, cacheId);
+    }
+
+    return {
+      ...slice,
+      cornerstoneCacheId: cacheId,
+      cornerstoneImageId: imageId,
+    };
   })();
 
   cache.slices.set(instance.sopInstanceUID, promise);
@@ -227,16 +361,53 @@ async function loadSlice(
 
 function updateSecondaryCache(entry: ManifestCacheEntry, descriptor: FusionSecondaryDescriptor) {
   const existing = entry.secondaries.get(descriptor.secondarySeriesId);
+  const instanceIndexBySop = buildInstanceIndexBySop(descriptor);
   if (existing) {
     existing.descriptor = descriptor;
+    existing.primarySeriesId = entry.manifest.primarySeriesId;
+    existing.instanceIndexBySop = instanceIndexBySop;
     if (descriptor.status === 'error') existing.error = descriptor.error;
     if (descriptor.status === 'ready' && existing.status !== 'loading') existing.status = 'idle';
+
+    // Drop stale slice promises that no longer exist in the manifest
+    for (const sop of Array.from(existing.slices.keys())) {
+      if (!instanceIndexBySop.has(sop)) {
+        existing.slices.delete(sop);
+      }
+    }
+
+    // Retain cached Cornerstone data for slices still present; evict stale entries
+    const retainedCacheIds = new Set<string>();
+    const updatedImageCacheIds = new Map<string, string>();
+    descriptor.instances.forEach((inst) => {
+      const cacheId = existing.imageCacheIds.get(inst.sopInstanceUID)
+        ?? (inst.primarySopInstanceUID ? existing.imageCacheIds.get(inst.primarySopInstanceUID) : undefined);
+      if (cacheId) {
+        retainedCacheIds.add(cacheId);
+        updatedImageCacheIds.set(inst.sopInstanceUID, cacheId);
+        if (inst.primarySopInstanceUID) {
+          updatedImageCacheIds.set(inst.primarySopInstanceUID, cacheId);
+        }
+      }
+    });
+
+    const previousCacheIds = new Set(existing.imageCacheIds.values());
+    for (const cacheId of previousCacheIds) {
+      if (!retainedCacheIds.has(cacheId)) {
+        removeCustomImageData(cacheId);
+      }
+    }
+
+    existing.imageCacheIds = updatedImageCacheIds;
   } else {
     entry.secondaries.set(descriptor.secondarySeriesId, {
       descriptor,
       slices: new Map(),
       status: descriptor.status === 'ready' ? 'idle' : descriptor.status,
       error: descriptor.error,
+      primarySeriesId: entry.manifest.primarySeriesId,
+      instanceIndexBySop,
+      imageCacheIds: new Map(),
     });
   }
 }
@@ -292,8 +463,8 @@ export async function preloadFusionSecondary(
     const total = instances.length;
     let completed = 0;
     await Promise.all(
-      instances.map(async (instance) => {
-        await loadSlice(cache, instance);
+      instances.map(async (instance, index) => {
+        await loadSlice(cache, instance, index);
         completed += 1;
         onProgress?.({ completed, total });
       }),
@@ -381,6 +552,88 @@ export async function getFusedSliceSmart(
   }
   if (!target) throw new Error('Fusion instance not found');
   return loadSlice(cache, target);
+}
+
+export async function ensureFusionCornerstoneImageIds(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+): Promise<string[] | null> {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) return null;
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) return null;
+  if (cache.status === 'error') return null;
+
+  const { descriptor, imageCacheIds } = cache;
+
+  const missingInstances: Array<{ instance: FusionInstanceDescriptor; index: number }> = [];
+  descriptor.instances.forEach((instance, index) => {
+    const cacheId = imageCacheIds.get(instance.sopInstanceUID)
+      ?? (instance.primarySopInstanceUID ? imageCacheIds.get(instance.primarySopInstanceUID) : undefined);
+    if (!cacheId) {
+      missingInstances.push({ instance, index });
+    }
+  });
+
+  if (missingInstances.length) {
+    try {
+      await Promise.all(
+        missingInstances.map(({ instance, index }) => loadSlice(cache, instance, index).catch((error) => {
+          console.warn('Fusion: failed to prepare Cornerstone slice', {
+            primarySeriesId,
+            secondarySeriesId,
+            sopInstanceUID: instance.sopInstanceUID,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        })),
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  const imageIds: string[] = [];
+  for (const instance of descriptor.instances) {
+    const cacheId = imageCacheIds.get(instance.sopInstanceUID)
+      ?? (instance.primarySopInstanceUID ? imageCacheIds.get(instance.primarySopInstanceUID) : undefined);
+    if (!cacheId) {
+      return null;
+    }
+    imageIds.push(toSuperbeamImageId(cacheId));
+  }
+
+  return imageIds;
+}
+
+export function getFusionCornerstoneImageIdForSop(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  sopInstanceUID: string,
+): string | null {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) return null;
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) return null;
+  const cacheId = cache.imageCacheIds.get(sopInstanceUID);
+  if (cacheId) return toSuperbeamImageId(cacheId);
+  return null;
+}
+
+export function getFusionStackIndexForSop(
+  primarySeriesId: number,
+  secondarySeriesId: number,
+  sopInstanceUID: string,
+): number | null {
+  const entry = manifestCache.get(primarySeriesId);
+  if (!entry) return null;
+  const cache = entry.secondaries.get(secondarySeriesId);
+  if (!cache) return null;
+  const index = cache.instanceIndexBySop.get(sopInstanceUID);
+  if (typeof index === 'number' && Number.isFinite(index)) {
+    return index;
+  }
+  return null;
 }
 
 export function fuseboxSliceToImageData(
@@ -500,10 +753,18 @@ export function clearFusionSlices(primarySeriesId: number, secondarySeriesId?: n
   const entry = manifestCache.get(primarySeriesId);
   if (!entry) return;
   if (typeof secondarySeriesId === 'number' && Number.isFinite(secondarySeriesId)) {
-    entry.secondaries.get(secondarySeriesId)?.slices.clear();
+    const secondaryCache = entry.secondaries.get(secondarySeriesId);
+    if (!secondaryCache) return;
+    secondaryCache.slices.clear();
+    const cacheIds = new Set(secondaryCache.imageCacheIds.values());
+    cacheIds.forEach((cacheId) => removeCustomImageData(cacheId));
+    secondaryCache.imageCacheIds.clear();
     return;
   }
   entry.secondaries.forEach((cache) => {
     cache.slices.clear();
+    const cacheIds = new Set(cache.imageCacheIds.values());
+    cacheIds.forEach((cacheId) => removeCustomImageData(cacheId));
+    cache.imageCacheIds.clear();
   });
 }

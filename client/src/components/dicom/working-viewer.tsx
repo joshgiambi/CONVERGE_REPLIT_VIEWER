@@ -23,27 +23,41 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
+import {
+  getFusedSlice,
+  getFusedSliceSmart,
+  fuseboxSliceToImageData,
+  clearFusionSlices,
+  getFusionManifest,
+  ensureFusionCornerstoneImageIds,
+  getFusionCornerstoneImageIdForSop,
+  getFusionStackIndexForSop,
+} from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
 import { attachDiceDebug } from "@/lib/dice-utils";
-import { 
+import {
   isGPUAccelerationAvailable,
   initializeCornerstone3D,
-  render16BitImageGPU
+  render16BitImageGPU,
+  createHybridViewport,
+  cleanupViewport,
 } from "@/lib/cornerstone3d-adapter";
+import type { HybridViewport } from "@/lib/cornerstone3d-adapter";
 import { log } from '@/lib/log';
 import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import type { RegistrationAssociation, RegistrationTransformCandidate, RegistrationSeriesDetail } from '@/types/fusion';
+import { USE_CORNERSTONE_FUSION } from '@/lib/fusion-flags';
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
 const RT_STRUCTURE_DEBUG = false; // Set to true when specifically debugging RT structures
+const DISABLE_FUSION_CANVAS_FALLBACK = false;
 
 // Typed preview contour interface for consistency
 type PreviewContour = { 
@@ -79,6 +93,16 @@ const matricesEqual = (a: number[] | null, b: number[] | null) => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
     if (Math.abs(a[i] - b[i]) > 1e-6) return false;
+  }
+  return true;
+};
+
+const arraysShallowEqual = (a: string[] | null | undefined, b: string[] | null | undefined) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
   }
   return true;
 };
@@ -188,6 +212,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fusionOverlayRef = useRef<HTMLDivElement | null>(null);
+  const fusionCornerstoneViewportRef = useRef<HybridViewport | null>(null);
+  const fusionCornerstoneStackStateRef = useRef<{ imageIds: string[]; secondaryId: number } | null>(null);
+  const fusionOverlayDimsRef = useRef<{ width: number; height: number } | null>(null);
+  const fusionCornerstoneRequestRef = useRef(0);
+  const fusionRendererRef = useRef<'cornerstone' | 'fallback' | 'none'>('none');
   const [images, setImages] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -254,6 +284,51 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
+  const hideFusionOverlay = useCallback(() => {
+    const element = fusionOverlayRef.current;
+    if (element) {
+      element.style.display = 'none';
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      destroyDicomWorkerManager();
+      cleanupGPUViewports();
+      if (fusionCornerstoneViewportRef.current) {
+        cleanupViewport(fusionCornerstoneViewportRef.current);
+        fusionCornerstoneViewportRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!USE_CORNERSTONE_FUSION) return;
+    const overlayElement = fusionOverlayRef.current;
+    if (!overlayElement) return;
+
+    overlayElement.style.opacity = `${fusionOpacity}`;
+    overlayElement.style.backgroundColor = 'transparent';
+
+    const canvases = overlayElement.querySelectorAll('canvas');
+    canvases.forEach((canvas) => {
+      canvas.style.backgroundColor = 'transparent';
+    });
+
+    if (fusionCornerstoneViewportRef.current?.isCornerstone3D && fusionCornerstoneViewportRef.current.renderingEngineId && fusionCornerstoneViewportRef.current.viewportId) {
+      const cornerstone3D = (window as any).cornerstone3D;
+      const renderingEngine = cornerstone3D?.getRenderingEngine?.(fusionCornerstoneViewportRef.current.renderingEngineId);
+      const viewport = renderingEngine?.getViewport?.(fusionCornerstoneViewportRef.current.viewportId);
+      if (viewport?.setProperties) {
+        try {
+          viewport.setProperties({ background: [0, 0, 0] });
+        } catch (error) {
+          console.warn('Fusion overlay: failed to update viewport background', error);
+        }
+      }
+    }
+
+  }, [fusionOpacity]);
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
     if (!image) return null;
@@ -542,6 +617,168 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   );
 
   useEffect(() => {
+    if (!secondarySeriesId) return;
+    prefetchFusionSlices(currentIndex);
+  }, [secondarySeriesId, selectedRegistrationId, currentIndex, prefetchFusionSlices]);
+
+  useEffect(() => {
+    if (secondarySeriesId) return;
+    fusionPrefetchSetRef.current.clear();
+  }, [secondarySeriesId]);
+
+  useEffect(() => {
+    if (!USE_CORNERSTONE_FUSION) {
+      hideFusionOverlay();
+      return;
+    }
+    if (!secondarySeriesId || fusionOpacity <= 0 || orientation !== 'axial') {
+      hideFusionOverlay();
+    }
+  }, [secondarySeriesId, fusionOpacity, orientation, hideFusionOverlay]);
+
+  const ensureFusionViewport = useCallback(async (): Promise<HybridViewport | null> => {
+    const element = fusionOverlayRef.current;
+    if (!element) return null;
+
+    const existing = fusionCornerstoneViewportRef.current;
+    if (existing && existing.element === element && existing.isCornerstone3D) {
+      return existing;
+    }
+
+    const viewport = await createHybridViewport(element, true);
+    if (!viewport.isCornerstone3D) {
+      return null;
+    }
+
+    fusionCornerstoneViewportRef.current = viewport;
+    fusionCornerstoneStackStateRef.current = null;
+    return viewport;
+  }, []);
+
+  const renderFusionOverlayCornerstone = useCallback(
+    async (
+      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number } | null,
+      currentImage: any,
+    ): Promise<boolean> => {
+      if (!USE_CORNERSTONE_FUSION) return false;
+      if (orientation !== 'axial') return false;
+      if (!secondarySeriesId || fusionOpacity <= 0) return false;
+      if (!transform) return false;
+      if (fusionManifestLoading) return false;
+
+      const overlayElement = fusionOverlayRef.current;
+      if (!overlayElement) return false;
+
+      const fusionImageIds = await ensureFusionCornerstoneImageIds(seriesId, secondarySeriesId);
+      if (!fusionImageIds || fusionImageIds.length === 0) {
+        return false;
+      }
+
+      overlayElement.style.position = 'absolute';
+      overlayElement.style.top = '0px';
+      overlayElement.style.left = '0px';
+      overlayElement.style.pointerEvents = 'none';
+      overlayElement.style.zIndex = '1';
+      overlayElement.style.width = `${transform.imageWidth}px`;
+      overlayElement.style.height = `${transform.imageHeight}px`;
+      overlayElement.style.backgroundColor = 'transparent';
+
+      const requestToken = ++fusionCornerstoneRequestRef.current;
+      const ensureActive = () => requestToken === fusionCornerstoneRequestRef.current;
+
+      const viewport = await ensureFusionViewport();
+      if (!viewport || !viewport.isCornerstone3D) {
+        return false;
+      }
+      if (!ensureActive()) return false;
+
+      const cornerstone3D = (window as any).cornerstone3D;
+      if (!cornerstone3D) {
+        return false;
+      }
+
+      const renderingEngine = viewport.renderingEngineId
+        ? cornerstone3D.getRenderingEngine(viewport.renderingEngineId)
+        : null;
+      if (!renderingEngine) {
+        return false;
+      }
+
+      const stackViewport = viewport.viewportId
+        ? renderingEngine.getViewport(viewport.viewportId)
+        : null;
+      if (!stackViewport) {
+        return false;
+      }
+
+      let targetIndex = getFusionStackIndexForSop(seriesId, secondarySeriesId, currentImage.sopInstanceUID ?? currentImage.SOPInstanceUID ?? '');
+      if (targetIndex == null) {
+        targetIndex = Math.max(0, Math.min(fusionImageIds.length - 1, currentIndex));
+      }
+
+      try {
+        const previousState = fusionCornerstoneStackStateRef.current;
+        if (!previousState || previousState.secondaryId !== secondarySeriesId || !arraysShallowEqual(previousState.imageIds, fusionImageIds)) {
+          await (stackViewport as any).setStack(fusionImageIds, targetIndex);
+          fusionCornerstoneStackStateRef.current = { imageIds: fusionImageIds.slice(), secondaryId: secondarySeriesId };
+        } else {
+          await (stackViewport as any).setImageIdIndex(targetIndex);
+        }
+
+        if (fusionWindowLevel) {
+          const lower = fusionWindowLevel.level - fusionWindowLevel.window / 2;
+          const upper = fusionWindowLevel.level + fusionWindowLevel.window / 2;
+          (stackViewport as any).setProperties({
+            voiRange: { lower, upper },
+            background: [0, 0, 0],
+          });
+        }
+
+        if (!ensureActive()) {
+          return false;
+        }
+
+        const dimsChanged = !fusionOverlayDimsRef.current
+          || fusionOverlayDimsRef.current.width !== transform.imageWidth
+          || fusionOverlayDimsRef.current.height !== transform.imageHeight;
+
+        if (dimsChanged) {
+          fusionOverlayDimsRef.current = { width: transform.imageWidth, height: transform.imageHeight };
+          renderingEngine.resize();
+        }
+
+        overlayElement.style.transformOrigin = 'top left';
+        overlayElement.style.transform = `translate(${transform.offsetX}px, ${transform.offsetY}px) scale(${transform.scale})`;
+        overlayElement.style.display = 'block';
+        overlayElement.style.opacity = `${fusionOpacity}`;
+
+        const glCanvas = overlayElement.querySelector('canvas');
+        if (glCanvas) {
+          glCanvas.style.backgroundColor = 'transparent';
+        }
+
+        renderingEngine.render();
+
+        prefetchFusionSlices(currentIndex);
+        return true;
+      } catch (error) {
+        console.error('🐟 FUSION: Cornerstone overlay error:', error);
+        return false;
+      }
+    }, [
+      USE_CORNERSTONE_FUSION,
+      orientation,
+      secondarySeriesId,
+      fusionOpacity,
+      fusionManifestLoading,
+      ensureFusionViewport,
+      seriesId,
+      currentIndex,
+      fusionWindowLevel,
+      prefetchFusionSlices,
+    ]);
+
+  useEffect(() => {
     const activeSeriesId = seriesId;
     return () => {
       fuseboxCacheRef.current.clear();
@@ -584,6 +821,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         primarySeriesId: seriesId,
         secondarySeriesId,
         primaryFoR: pFoR,
+        renderer: {
+          configuredPipeline: USE_CORNERSTONE_FUSION ? 'cornerstone' : 'fallback-only',
+          activePipeline: fusionRendererRef.current,
+          overlayRequested: Boolean(secondarySeriesId),
+        },
         registrationMatrixLength: registrationMatrix?.length || 0,
         registrationMatrix,
         resolve: lastResolveInfo,
@@ -4269,10 +4511,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       const cacheKey = currentImage.sopInstanceUID;
 
-      // Clear canvas
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
       let imageData;
       
       // Check if this is an MPR reconstructed image (synthetic)
@@ -4316,19 +4554,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.height = 1024;
 
       // Always use CPU rendering for now - GPU integration needs more work
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
+      const ctRenderTransform = render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
-      // Render secondary image overlay for fusion if available
-      if (secondarySeriesId) {
-        // Fusion overlay rendering
-        try {
-          await renderFusionOverlayNew(ctx, currentImage);
-        } catch (fusionError: any) {
-          console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
-          // Continue without fusion rather than failing entire image display
+      let fusionRenderedViaCornerstone = false;
+      if (secondarySeriesId && ctRenderTransform) {
+        const allowCornerstone = USE_CORNERSTONE_FUSION && orientation === 'axial' && !isScrollingRef.current;
+
+        if (allowCornerstone) {
+          try {
+            fusionRenderedViaCornerstone = await renderFusionOverlayCornerstone(ctRenderTransform, currentImage);
+          } catch (fusionError: any) {
+            console.error('🐟 FUSION: Cornerstone overlay failed, falling back:', fusionError);
+            fusionRenderedViaCornerstone = false;
+          }
         }
+
+        if (!fusionRenderedViaCornerstone) {
+          hideFusionOverlay();
+          if (!DISABLE_FUSION_CANVAS_FALLBACK) {
+            try {
+              await renderFusionOverlayNew(ctx, currentImage);
+            } catch (fusionError: any) {
+              console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
+            }
+          }
+        }
+        fusionRendererRef.current = fusionRenderedViaCornerstone
+          ? 'cornerstone'
+          : (DISABLE_FUSION_CANVAS_FALLBACK ? 'none' : 'fallback');
       } else {
+        hideFusionOverlay();
         console.log('🐟 FUSION: No secondarySeriesId in main render');
+        fusionRendererRef.current = 'none';
       }
 
       // Render RT structure overlays if available
@@ -4434,7 +4691,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     pixelArray: Float32Array,
     width: number,
     height: number,
-  ) => {
+  ): { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number } | null => {
     // Get rescale parameters for proper HU conversion
     const { slope, intercept } = getRescaleParams(imageMetadata);
 
@@ -4495,7 +4752,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     const tempCanvas = offscreenCanvasRef.current;
     const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
-    if (!tempCtx) return;
+    if (!tempCtx) return null;
 
     tempCtx.putImageData(imageData, 0, 0);
 
@@ -4513,19 +4770,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
 
-    // Store CT transform for fusion overlay to use the same coordinate system
-    ctTransform.current = {
-      scale: totalScale,
-      offsetX: x,
-      offsetY: y,
-      imageWidth: width,
-      imageHeight: height
-    };
+    // Clear the view just before drawing the updated slice to avoid showing the overlay alone
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+
+    const transform = {
+      scale: totalScale,
+      offsetX: x,
+      offsetY: y,
+      imageWidth: width,
+      imageHeight: height,
+    };
+
+    // Store CT transform for fusion overlay to use the same coordinate system
+    ctTransform.current = transform;
+    return transform;
   };
 
   const render8BitImage = (
@@ -4562,16 +4826,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }, 5000);
     return () => window.clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (!secondarySeriesId) return;
-    prefetchFusionSlices(currentIndex);
-  }, [secondarySeriesId, selectedRegistrationId, currentIndex, prefetchFusionSlices]);
-
-  useEffect(() => {
-    if (secondarySeriesId) return;
-    fusionPrefetchSetRef.current.clear();
-  }, [secondarySeriesId]);
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
@@ -5886,6 +6140,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             }}
           />
 
+          <div
+            ref={fusionOverlayRef}
+            className="pointer-events-none"
+            style={{ position: 'absolute', top: 0, left: 0, display: 'none', zIndex: 1 }}
+          />
+
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "brush" && (
@@ -6167,7 +6427,39 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             <AlertDialogHeader>
               <AlertDialogTitle>Fusion Debug Info</AlertDialogTitle>
             </AlertDialogHeader>
-            <div className="space-y-2">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                <Badge
+                  variant="outline"
+                  className={`${USE_CORNERSTONE_FUSION ? 'bg-emerald-900/40 border-emerald-700/50 text-emerald-200' : 'bg-slate-800/50 border-slate-600/60 text-slate-200'}`}
+                >
+                  Configured: {USE_CORNERSTONE_FUSION ? 'Cornerstone hybrid pipeline' : 'Canvas fallback only'}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={`${
+                    fusionRendererRef.current === 'cornerstone'
+                      ? 'bg-emerald-900/40 border-emerald-700/60 text-emerald-200'
+                      : fusionRendererRef.current === 'fallback'
+                      ? 'bg-amber-900/40 border-amber-700/60 text-amber-200'
+                      : 'bg-slate-800/50 border-slate-600/60 text-slate-200'
+                  }`}
+                >
+                  Active: {
+                    fusionRendererRef.current === 'cornerstone'
+                      ? 'Cornerstone'
+                      : fusionRendererRef.current === 'fallback'
+                      ? 'Canvas fallback'
+                      : 'None'
+                  }
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={`${secondarySeriesId ? 'bg-cyan-900/40 border-cyan-700/50 text-cyan-200' : 'bg-slate-800/50 border-slate-600/60 text-slate-200'}`}
+                >
+                  {secondarySeriesId ? 'Overlay selected' : 'No overlay' }
+                </Badge>
+              </div>
               <p className="text-sm text-gray-300">Copy and paste this back for analysis.</p>
               <textarea
                 readOnly

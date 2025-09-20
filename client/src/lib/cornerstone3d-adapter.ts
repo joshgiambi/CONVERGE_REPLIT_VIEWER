@@ -107,7 +107,67 @@ function registerCustomImageLoader() {
 }
 
 // Store image data temporarily for the loader
-const imageDataCache = new Map<string, any>();
+export interface CustomImageMetadata {
+  windowCenter?: number | number[] | null;
+  windowWidth?: number | number[] | null;
+  pixelSpacing?: [number, number] | null;
+  imagePositionPatient?: number[] | null;
+  imageOrientationPatient?: number[] | null;
+  rescaleIntercept?: number | null;
+  rescaleSlope?: number | null;
+  frameOfReferenceUID?: string | null;
+  sliceLocation?: number | null;
+  spacingBetweenSlices?: number | null;
+  modality?: string | null;
+}
+
+export interface CustomImageCacheEntry {
+  data: Float32Array;
+  width: number;
+  height: number;
+  metadata?: CustomImageMetadata;
+  minPixelValue?: number;
+  maxPixelValue?: number;
+}
+
+const imageDataCache = new Map<string, CustomImageCacheEntry>();
+
+export function ensureCustomImageLoaderRegistered() {
+  try {
+    registerCustomImageLoader();
+  } catch (error) {
+    console.warn('Unable to register custom Cornerstone image loader yet:', error);
+  }
+}
+
+export function cacheCustomImageData(cleanId: string, entry: CustomImageCacheEntry): void {
+  imageDataCache.set(cleanId, entry);
+}
+
+export function getCustomImageData(cleanId: string): CustomImageCacheEntry | undefined {
+  return imageDataCache.get(cleanId);
+}
+
+export function removeCustomImageData(cleanId: string): void {
+  imageDataCache.delete(cleanId);
+}
+
+export function clearCustomImageDataByPrefix(prefix: string): void {
+  for (const key of imageDataCache.keys()) {
+    if (key.startsWith(prefix)) {
+      imageDataCache.delete(key);
+    }
+  }
+}
+
+export function buildFusionImageCacheId(primarySeriesId: number, secondarySeriesId: number, sliceIndex: number): string {
+  const normalizedIndex = sliceIndex.toString().padStart(5, '0');
+  return `fusion-${primarySeriesId}-${secondarySeriesId}-${normalizedIndex}`;
+}
+
+export function toSuperbeamImageId(cacheId: string): string {
+  return cacheId.startsWith('superbeam://') ? cacheId : `superbeam://${cacheId}`;
+}
 
 /**
  * Custom image loader for Float32Array data
@@ -129,32 +189,43 @@ function loadAndCacheImage(imageId: string): any {
         return;
       }
 
-      const { data, width, height, metadata } = cachedData;
+      const { data, width, height, metadata, minPixelValue: cachedMin, maxPixelValue: cachedMax } = cachedData;
       console.log('[Custom Loader] Found cached data:', { width, height, dataLength: data.length, metadata });
       
       // Calculate min/max values safely
-      let minPixel = Infinity;
-      let maxPixel = -Infinity;
-      
-      try {
-        for (let i = 0; i < data.length; i++) {
-          if (data[i] < minPixel) minPixel = data[i];
-          if (data[i] > maxPixel) maxPixel = data[i];
+      let minPixel = Number.isFinite(cachedMin) ? (cachedMin as number) : Infinity;
+      let maxPixel = Number.isFinite(cachedMax) ? (cachedMax as number) : -Infinity;
+
+      if (!Number.isFinite(minPixel) || !Number.isFinite(maxPixel)) {
+        try {
+          for (let i = 0; i < data.length; i++) {
+            const value = data[i];
+            if (value < minPixel) minPixel = value;
+            if (value > maxPixel) maxPixel = value;
+          }
+          console.log('[Custom Loader] Calculated min/max:', minPixel, maxPixel);
+        } catch (err) {
+          console.error('[Custom Loader] Error calculating min/max:', err);
+          minPixel = -1000;
+          maxPixel = 3000;
         }
-        console.log('[Custom Loader] Calculated min/max:', minPixel, maxPixel);
-      } catch (err) {
-        console.error('[Custom Loader] Error calculating min/max:', err);
-        minPixel = -1000;
-        maxPixel = 3000;
       }
       
       // Create an image object compatible with Cornerstone3D
       // Pull common DICOM display/geometry fields from metadata if present
-      const slope = (metadata?.rescaleSlope ?? metadata?.slope ?? 1) as number;
-      const intercept = (metadata?.rescaleIntercept ?? metadata?.intercept ?? 0) as number;
+      const slope = (metadata?.rescaleSlope ?? 1) as number;
+      const intercept = (metadata?.rescaleIntercept ?? 0) as number;
       const px = Array.isArray(metadata?.pixelSpacing) ? metadata.pixelSpacing : undefined;
-      const ipp = metadata?.imagePosition || metadata?.imagePositionPatient;
-      const iop = metadata?.imageOrientation || metadata?.imageOrientationPatient;
+      const ipp = metadata?.imagePositionPatient || (metadata as any)?.imagePosition;
+      const iop = metadata?.imageOrientationPatient || (metadata as any)?.imageOrientation;
+      const windowCenterSource = metadata?.windowCenter;
+      const windowWidthSource = metadata?.windowWidth;
+      const windowCenter = Array.isArray(windowCenterSource)
+        ? windowCenterSource[0]
+        : (windowCenterSource ?? 40);
+      const windowWidth = Array.isArray(windowWidthSource)
+        ? windowWidthSource[0]
+        : (windowWidthSource ?? 300);
 
       const image = {
         imageId,
@@ -164,16 +235,15 @@ function loadAndCacheImage(imageId: string): any {
         width,
         intercept,
         slope,
-        windowCenter: metadata?.windowCenter || 40,
-        windowWidth: metadata?.windowWidth || 300,
+        windowCenter,
+        windowWidth,
         pixelSpacing: px || [1, 1],
         imagePositionPatient: ipp || [0, 0, 0],
         imageOrientationPatient: iop || [1, 0, 0, 0, 1, 0],
         sizeInBytes: data.byteLength,
         getPixelData: () => data,
-        // Calculate min/max without spread operator for large arrays
-        minPixelValue: data.reduce((min, val) => val < min ? val : min, Infinity),
-        maxPixelValue: data.reduce((max, val) => val > max ? val : max, -Infinity),
+        minPixelValue: minPixel,
+        maxPixelValue: maxPixel,
         stats: {
           lastGetPixelDataTime: 0,
         },
@@ -426,8 +496,8 @@ export async function render16BitImageGPU(
         windowCenter: windowLevel.center,
         windowWidth: windowLevel.width,
         pixelSpacing: [1, 1], // Will be updated with actual spacing
-        imagePosition: [0, 0, 0], // Will be updated with actual position
-        imageOrientation: [1, 0, 0, 0, 1, 0], // Will be updated with actual orientation
+        imagePositionPatient: [0, 0, 0], // Will be updated with actual position
+        imageOrientationPatient: [1, 0, 0, 0, 1, 0], // Will be updated with actual orientation
       }
     });
 

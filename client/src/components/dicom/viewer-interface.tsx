@@ -1538,7 +1538,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
         await preloadAllFusionSecondaries(seriesEntry.id, manifest, requestToken);
 
-        // Auto-select a READY secondary once preload completes, gated by the active token
+        // Auto-select a secondary once preload completes, gated by the active token
         if (fusionManifestRequestRef.current === requestToken) {
           try {
             // Prefer secondaries marked 'ready' in the manifest
@@ -1549,7 +1549,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             // Fall back: intersect with currently allowed descriptors if available
             // Note: fusionDescriptorMap is derived via useMemo and may not be updated synchronously here,
             // so prefer manifest readiness as the primary signal.
-            const candidate = readyIds[0] ?? null;
+            let candidate = readyIds[0] ?? null;
+
+            if (candidate == null) {
+              // Some older helper builds never advance the manifest status to "ready" even though slices exist.
+              // In that case, fall back to the first non-error secondary so that the viewer still attempts fusion
+              // via the canvas pipeline while Cornerstone assets finish warming.
+              const fallbackDescriptor = manifest.secondaries.find((sec) => sec.status !== 'error');
+              candidate = fallbackDescriptor?.secondarySeriesId ?? null;
+            }
 
             if (candidate != null) {
               setSecondarySeriesId(candidate);
@@ -1585,10 +1593,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     const candidateSecondaryIds = getCandidateSecondaryIds(selectedSeries.id);
     const manifestMatchesSeries = fusionManifest?.primarySeriesId === selectedSeries.id;
     const manifestIds = manifestMatchesSeries ? new Set(fusionManifest.secondaries.map((sec) => sec.secondarySeriesId)) : null;
-    const hasMissing = manifestIds ? candidateSecondaryIds.some((id) => !manifestIds.has(id)) : candidateSecondaryIds.length > 0;
+    const mergedIds = manifestIds ? Array.from(new Set([...candidateSecondaryIds, ...manifestIds])) : candidateSecondaryIds.slice();
+    const hasMissing = manifestIds ? mergedIds.some((id) => !manifestIds.has(id)) : mergedIds.length > 0;
 
     // Build a stable key for current candidates
-    const candidateKey = candidateSecondaryIds.slice().sort((a, b) => a - b).join(',');
+    const candidateKey = mergedIds.slice().sort((a, b) => a - b).join(',');
     const unchangedCandidates = prevCandidateKeyRef.current === candidateKey;
     const withinCooldown = Date.now() - lastInitAtRef.current < 5000; // 5s cooldown
 
