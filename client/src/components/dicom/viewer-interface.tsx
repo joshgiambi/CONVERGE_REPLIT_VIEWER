@@ -1486,9 +1486,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       try {
         const candidateSecondaryIds = getCandidateSecondaryIds(seriesEntry.id);
+        const initialSecondaryIds = Array.from(new Set(candidateSecondaryIds));
         let manifest = await fetchFusionManifest(seriesEntry.id, {
           preload: true,
-          secondarySeriesIds: candidateSecondaryIds,
+          secondarySeriesIds: initialSecondaryIds,
         });
         if (fusionManifestRequestRef.current !== requestToken) return;
         setFusionManifest(manifest);
@@ -1500,9 +1501,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           return;
         }
 
-        const relevantIds = candidateSecondaryIds.length
-          ? candidateSecondaryIds
-          : manifest.secondaries.map((sec) => sec.secondarySeriesId);
+        const manifestSecondaryIds = manifest.secondaries.map((sec) => sec.secondarySeriesId);
+        const mergedSecondaryIds = Array.from(new Set([...initialSecondaryIds, ...manifestSecondaryIds]));
+        const relevantIds = mergedSecondaryIds.length
+          ? mergedSecondaryIds
+          : manifestSecondaryIds;
         const pending = manifest.secondaries.filter(
           (sec) =>
             relevantIds.includes(sec.secondarySeriesId) &&

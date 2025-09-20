@@ -291,11 +291,13 @@ export async function preloadFusionSecondary(
   try {
     const total = instances.length;
     let completed = 0;
-    for (const instance of instances) {
-      await loadSlice(cache, instance);
-      completed += 1;
-      onProgress?.({ completed, total });
-    }
+    await Promise.all(
+      instances.map(async (instance) => {
+        await loadSlice(cache, instance);
+        completed += 1;
+        onProgress?.({ completed, total });
+      }),
+    );
     cache.status = 'ready';
   } catch (error: any) {
     cache.status = 'error';

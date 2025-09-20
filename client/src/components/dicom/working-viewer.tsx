@@ -821,7 +821,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
+        const baseAlpha = Math.max(0, 1 - fusionOpacity);
+        ctx.globalAlpha = baseAlpha;
         ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
+        ctx.globalAlpha = 1;
 
         // Draw cached fusion overlay with new opacity
         drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
