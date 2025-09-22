@@ -8,7 +8,7 @@ import {
   addTool,
 } from '@cornerstonejs/tools';
 import type { VolumeStackSlice } from './cornerstone3d-adapter';
-import { initializeCornerstone3D, registerVolumeStacks } from './cornerstone3d-adapter';
+import { initializeCornerstone3D, registerVolumeStacks, setCornerstoneMetadata } from './cornerstone3d-adapter';
 
 export interface FusionManagerOptions {
   element: HTMLDivElement;
@@ -23,11 +23,11 @@ export interface FusionManagerOptions {
 export interface FusionManagerHandle {
   renderingEngineId: string;
   viewportId: string;
-  updateSlice: (index: number, fusionImageId?: string | null) => Promise<void>;
+  updateSlice: (index: number) => Promise<void>;
   updateOpacity: (alpha: number) => void;
+  setFusionVisibility: (visible: boolean) => void;
   dispose: () => void;
   isFusionEnabled: boolean;
-  updateFusionImage?: (imageId: string | null) => Promise<void>;
 }
 
 const DEFAULT_RENDERING_ENGINE_ID = 'fusion-rendering-engine';
@@ -91,11 +91,12 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
   const stackViewport = viewport as any;
 
   const ctImageIds = actors.ct.imageIds;
+  const fusionImageIds = actors.fusion?.imageIds || [];
   let currentSliceIndex = 0;
   let currentOpacity = clampOpacity(fusionOpacity);
   let fusionActorEntry: any | null = null;
-  let currentFusionImageId: string | null = null;
   let suppressSliceEvent = false;
+  let fusionStackLoaded = false;
 
   try {
     addTool?.(PanTool);
@@ -166,9 +167,10 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
     const instanceNumber = Number.isFinite(image?.instanceNumber) ? Number(image.instanceNumber) : 1;
     const slope = Number.isFinite(image?.slope) ? Number(image.slope) : Number(image?.rescaleSlope ?? 1);
     const intercept = Number.isFinite(image?.intercept) ? Number(image.intercept) : Number(image?.rescaleIntercept ?? 0);
+    const modules: Record<string, any> = {};
 
     if (!meta.get?.('imagePixelModule', imageId)) {
-      meta.add?.('imagePixelModule', imageId, {
+      modules.imagePixelModule = {
         rows,
         columns,
         samplesPerPixel: 1,
@@ -177,11 +179,11 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
         bitsStored: 32,
         highBit: 31,
         pixelRepresentation: 1,
-      });
+      };
     }
 
     if (!meta.get?.('imagePlaneModule', imageId)) {
-      meta.add?.('imagePlaneModule', imageId, {
+      modules.imagePlaneModule = {
         frameOfReferenceUID,
         rows,
         columns,
@@ -189,27 +191,31 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
         imagePositionPatient: position,
         pixelSpacing,
         sliceThickness: image?.sliceThickness ?? 1,
-      });
+      };
     }
 
     if (!meta.get?.('generalSeriesModule', imageId)) {
-      meta.add?.('generalSeriesModule', imageId, {
+      modules.generalSeriesModule = {
         modality: image?.modality ?? 'PT',
         seriesInstanceUID: frameOfReferenceUID,
-      });
+      };
     }
 
     if (!meta.get?.('generalImageModule', imageId)) {
-      meta.add?.('generalImageModule', imageId, {
+      modules.generalImageModule = {
         instanceNumber,
-      });
+      };
     }
 
     if (!meta.get?.('modalityLutModule', imageId)) {
-      meta.add?.('modalityLutModule', imageId, {
+      modules.modalityLutModule = {
         rescaleSlope: slope ?? 1,
         rescaleIntercept: intercept ?? 0,
-      });
+      };
+    }
+
+    if (Object.keys(modules).length) {
+      setCornerstoneMetadata(imageId, modules);
     }
   };
 
@@ -235,53 +241,78 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
     }
   };
 
-  const addFusionActorForImage = async (imageId: string) => {
-    const image = await loadImage(imageId);
-    ensureImageMetadata(imageId, image ?? undefined);
-    removeFusionActor();
+  const loadFusionStack = async () => {
+    if (!fusionImageIds.length || fusionStackLoaded) return;
 
-    if (typeof stackViewport.addImages === 'function') {
-      stackViewport.addImages([
-        {
+    try {
+      // Pre-load all fusion images and metadata
+      console.log(`Loading fusion stack with ${fusionImageIds.length} images`);
+      for (const imageId of fusionImageIds) {
+        const image = await loadImage(imageId);
+        ensureImageMetadata(imageId, image ?? undefined);
+      }
+
+      // Add entire fusion stack as overlay images
+      if (typeof stackViewport.addImages === 'function') {
+        const fusionImages = fusionImageIds.map(imageId => ({
           imageId,
           actorUID: FUSION_ACTOR_UID,
           visibility: true,
-        },
-      ]);
-      fusionActorEntry = stackViewport.getActor?.(FUSION_ACTOR_UID) ?? null;
-      applyOpacity(fusionActorEntry);
-      renderingEngine.render();
+        }));
+        
+        stackViewport.addImages(fusionImages);
+        fusionActorEntry = stackViewport.getActor?.(FUSION_ACTOR_UID) ?? null;
+        applyOpacity(fusionActorEntry);
+        fusionStackLoaded = true;
+        console.log('Fusion stack loaded successfully');
+        renderingEngine.render();
+      }
+    } catch (error) {
+      console.error('Failed to load fusion stack:', error);
     }
   };
 
-  const setFusionImage = async (imageId: string | null) => {
-    if (!imageId) {
-      currentFusionImageId = null;
-      removeFusionActor();
+  const setFusionVisibility = (visible: boolean) => {
+    if (!fusionActorEntry) return;
+    
+    try {
+      if (fusionActorEntry.actor?.setVisibility) {
+        fusionActorEntry.actor.setVisibility(visible);
+      } else if (fusionActorEntry.setVisibility) {
+        fusionActorEntry.setVisibility(visible);
+      }
       renderingEngine.render();
-      return;
+    } catch (error) {
+      console.warn('Failed to set fusion visibility:', error);
     }
+  };
 
-    if (currentFusionImageId === imageId) {
-      return;
+  const removeFusionStack = () => {
+    if (fusionActorEntry && typeof stackViewport.removeActors === 'function') {
+      try {
+        stackViewport.removeActors([FUSION_ACTOR_UID]);
+      } catch (error) {
+        console.warn('Cornerstone fusion manager: unable to remove fusion actor', error);
+      }
     }
-
-    currentFusionImageId = imageId;
-    await addFusionActorForImage(imageId);
+    fusionActorEntry = null;
+    fusionStackLoaded = false;
   };
 
   await ensureStack();
-  if (actors.fusion?.imageIds?.length) {
-    currentFusionImageId = actors.fusion.imageIds[0];
-    await setFusionImage(currentFusionImageId);
+  
+  // Load fusion stack upfront if available
+  if (fusionImageIds.length > 0) {
+    await loadFusionStack();
   }
 
   const handleStackNewImage = (event: Event) => {
     const detail = (event as CustomEvent<any>).detail;
     const targetIndex = detail?.imageIdIndex ?? detail?.imageIndex ?? currentSliceIndex;
     currentSliceIndex = targetIndex;
-    currentFusionImageId = null;
-    removeFusionActor();
+    
+    // DON'T destroy fusion overlay - it's now a persistent stack
+    // Just notify of slice change
     if (!suppressSliceEvent) {
       onSliceChanged?.(targetIndex);
     }
@@ -295,9 +326,9 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
   element.addEventListener(cornerstone3D.EVENTS.CAMERA_MODIFIED, handleCameraOrVOI);
   element.addEventListener(cornerstone3D.EVENTS.VOI_MODIFIED, handleCameraOrVOI);
 
-  const updateSlice = async (index: number, fusionImageId?: string | null) => {
+  const updateSlice = async (index: number) => {
     const safeIndex = Math.max(0, Math.min(index, ctImageIds.length - 1));
-    if (safeIndex === currentSliceIndex && (fusionImageId ?? null) === currentFusionImageId) {
+    if (safeIndex === currentSliceIndex) {
       return;
     }
 
@@ -308,13 +339,14 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
       } else {
         await stackViewport.setStack(ctImageIds, safeIndex);
       }
+      // Fusion stack automatically follows the primary stack - no manual sync needed
+      renderingEngine.render();
     } catch (error) {
-      console.warn('Cornerstone fusion manager: updateSlice fallback to sync only', error);
+      console.warn('Cornerstone fusion manager: updateSlice failed', error);
     } finally {
       suppressSliceEvent = false;
     }
     currentSliceIndex = safeIndex;
-    await setFusionImage(fusionImageId ?? currentFusionImageId);
   };
 
   const updateOpacity = (alpha: number) => {
@@ -328,9 +360,9 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
     element.removeEventListener(cornerstone3D.EVENTS.STACK_NEW_IMAGE, handleStackNewImage);
     element.removeEventListener(cornerstone3D.EVENTS.CAMERA_MODIFIED, handleCameraOrVOI);
     element.removeEventListener(cornerstone3D.EVENTS.VOI_MODIFIED, handleCameraOrVOI);
-    removeFusionActor();
+    removeFusionStack();
     try {
-      const toolGroup = cornerstone3DTools.ToolGroupManager?.getToolGroup(`${viewportId}-tool-group`);
+      const toolGroup = ToolGroupManager?.getToolGroup(`${viewportId}-tool-group`);
       toolGroup?.removeViewports?.(renderingEngineId, viewportId);
     } catch (error) {
       console.warn('Cornerstone fusion manager: tool group cleanup warning', error);
@@ -350,6 +382,6 @@ export async function synchronizeActors(options: FusionManagerOptions): Promise<
     updateOpacity,
     dispose,
     isFusionEnabled: hasFusion,
-    updateFusionImage: setFusionImage,
+    setFusionVisibility,
   };
 }
