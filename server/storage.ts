@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, mediaPreviews, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type MediaPreview } from "@shared/schema";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, mediaPreviews, fuseboxRuns, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type MediaPreview } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, or } from "drizzle-orm";
 
 // In-memory storage for RT structure modifications
 interface RTStructureModification {
@@ -313,10 +313,42 @@ export class DatabaseStorage implements IStorage {
     await db.delete(patients).where(eq(patients.id, id));
   }
 
-  // Fully delete a patient: images, series, studies, registrations, media, RT data, filesystem
+  // Fully delete a patient: images, series, studies, registrations, media, RT data, filesystem, fusion data
   async deletePatientFully(patientId: number): Promise<void> {
-    // Gather studies
+    console.log(`🗑️ Starting full deletion of patient ${patientId}`);
+    
+    // Get patient info for filesystem cleanup
+    const patient = await this.getPatient(patientId);
+    console.log(`Patient info:`, { id: patient?.id, patientID: patient?.patientID, patientName: patient?.patientName });
+    
+    // Gather studies and all series IDs for cleanup
     const patientStudies = await this.getStudiesByPatient(patientId);
+    const allSeriesIds: number[] = [];
+    
+    for (const st of patientStudies) {
+      const studySeries = await this.getSeriesByStudyId(st.id);
+      allSeriesIds.push(...studySeries.map(s => s.id));
+    }
+    
+    // Clean up fusebox_runs table first (foreign key constraints)
+    try {
+      const { fuseboxRuns } = await import('@shared/schema');
+      const { or } = await import('drizzle-orm');
+      
+      if (allSeriesIds.length > 0) {
+        // Delete fusebox_runs that reference any of this patient's series
+        await db.delete(fuseboxRuns).where(
+          or(
+            ...allSeriesIds.map(seriesId => eq(fuseboxRuns.primarySeriesId, seriesId)),
+            ...allSeriesIds.map(seriesId => eq(fuseboxRuns.secondarySeriesId, seriesId))
+          )
+        );
+        console.log(`🗑️ Cleaned up fusebox_runs for ${allSeriesIds.length} series`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to clean up fusebox_runs:', error);
+    }
+    
     for (const st of patientStudies) {
       // Delete registrations tied to study
       try { await this.deleteRegistrationByStudyId(st.id); } catch {}
@@ -332,18 +364,74 @@ export class DatabaseStorage implements IStorage {
     try { await db.delete(patientTags).where(eq(patientTags.patientId, patientId)); } catch {}
     // Finally delete the patient
     await db.delete(patients).where(eq(patients.id, patientId));
-    // Remove patient folder from storage if present
+    
+    // Clean up patient filesystem data (ENABLED for full cleanup)
     try {
-      const patientFolder = path.join('storage', 'patients');
-      if (fs.existsSync(patientFolder)) {
-        // Best-effort: remove any subfolder that references patientId in path
-        const entries = fs.readdirSync(patientFolder);
-        for (const entry of entries) {
-          const full = path.join(patientFolder, entry);
-          // We cannot reliably map DB id to folder name; keep best-effort cleanup off by default
+      if (patient?.patientID) {
+        const patientFolder = path.join('storage', 'patients', patient.patientID);
+        if (fs.existsSync(patientFolder)) {
+          console.log(`🗑️ Removing patient directory: ${patientFolder}`);
+          // Simple, aggressive removal of entire patient directory
+          fs.rmSync(patientFolder, { recursive: true, force: true });
+          console.log(`✅ Successfully removed patient directory: ${patientFolder}`);
+        } else {
+          console.log(`⚠️ Patient directory not found: ${patientFolder}`);
+        }
+      } else {
+        console.warn(`⚠️ Patient ${patientId} has no patientID for filesystem cleanup`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to remove patient directory:', error);
+    }
+    
+    // Clean up fusion-related temp files and cache
+    try {
+      // Clear fusion manifest cache for this patient's series
+      const { fusionManifestService } = await import('./fusion/manifest-service.ts');
+      for (const study of patientStudies) {
+        const studySeries = await this.getSeriesByStudyId(study.id);
+        for (const series of studySeries) {
+          fusionManifestService.clearCache(series.id);
         }
       }
-    } catch {}
+      
+      // Clean up fusion transform cache
+      const fusionTransformsDir = path.join('tmp', 'fusebox-transforms');
+      if (fs.existsSync(fusionTransformsDir)) {
+        const files = fs.readdirSync(fusionTransformsDir);
+        for (const file of files) {
+          // Remove transform files that reference any of this patient's series
+          for (const study of patientStudies) {
+            const studySeries = await this.getSeriesByStudyId(study.id);
+            for (const series of studySeries) {
+              if (file.includes(`${series.id}_`) || file.includes(`_${series.id}_`)) {
+                try {
+                  fs.unlinkSync(path.join(fusionTransformsDir, file));
+                  console.log(`Removed fusion transform: ${file}`);
+                } catch {}
+              }
+            }
+          }
+        }
+      }
+      
+      // Clean up any remaining fusebox temp directories
+      const tmpDir = 'tmp';
+      if (fs.existsSync(tmpDir)) {
+        const entries = fs.readdirSync(tmpDir);
+        for (const entry of entries) {
+          if (entry.startsWith('fusebox-')) {
+            try {
+              const fullPath = path.join(tmpDir, entry);
+              fs.rmSync(fullPath, { recursive: true, force: true });
+              console.log(`Removed fusebox temp directory: ${entry}`);
+            } catch {}
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to clean up fusion data:', error);
+    }
   }
 
   // Study operations
@@ -588,6 +676,43 @@ export class DatabaseStorage implements IStorage {
         await db.delete(rtStructureSets).where(eq(rtStructureSets.id, (rtSet as any).id));
       }
     } catch {}
+
+    // Clean up fusion data for this series
+    try {
+      // Clear fusion manifest cache
+      const { fusionManifestService } = await import('./fusion/manifest-service.ts');
+      fusionManifestService.clearCache(seriesId);
+      
+      // Clean up fusion transform files that reference this series
+      const fusionTransformsDir = path.join('tmp', 'fusebox-transforms');
+      if (fs.existsSync(fusionTransformsDir)) {
+        const files = fs.readdirSync(fusionTransformsDir);
+        for (const file of files) {
+          if (file.includes(`${seriesId}_`) || file.includes(`_${seriesId}_`)) {
+            try {
+              fs.unlinkSync(path.join(fusionTransformsDir, file));
+              console.log(`Removed fusion transform for series ${seriesId}: ${file}`);
+            } catch {}
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to clean up fusion data for series ${seriesId}:`, error);
+    }
+
+    // Remove fusebox run history referencing this series to satisfy FK constraints
+    try {
+      await db
+        .delete(fuseboxRuns)
+        .where(
+          or(
+            eq(fuseboxRuns.primarySeriesId, seriesId),
+            eq(fuseboxRuns.secondarySeriesId, seriesId),
+          ),
+        );
+    } catch (error) {
+      console.warn(`Failed to delete fusebox runs for series ${seriesId}:`, error);
+    }
 
     // Finally delete the series row
     await db.delete(series).where(eq(series.id, seriesId));

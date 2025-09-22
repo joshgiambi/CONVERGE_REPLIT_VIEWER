@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +100,102 @@ interface DICOMQueryResult {
   numberOfStudyRelatedInstances?: number;
 }
 
+type FusionAssociationStatus = 'ready' | 'pending' | 'missing-secondary' | 'unmapped';
+
+interface SeriesSummary {
+  id: number;
+  studyId: number;
+  seriesInstanceUID: string;
+  seriesDescription: string | null;
+  modality: string | null;
+  seriesNumber: number | null;
+  imageCount: number | null;
+  sliceThickness?: string | null;
+  createdAt: string | null;
+}
+
+interface DerivedFusionDetails {
+  primarySeriesId: number | null;
+  secondarySeriesId: number | null;
+  registrationId: string | null;
+  transformSource: string | null;
+  interpolation: string | null;
+  generatedAt: string | null;
+  manifestPath: string | null;
+  outputDirectory: string | null;
+  markers: string[];
+}
+
+type DerivedSeriesSummary = SeriesSummary & { fusion: DerivedFusionDetails };
+
+type RegistrationSeriesSummary = SeriesSummary & {
+  filePath: string | null;
+  fileExists: boolean;
+  referencedSeriesInstanceUIDs: string[];
+  referencedSeriesIds: number[];
+  parsed: {
+    matrixRowMajor4x4: number[] | null;
+    sourceFrameOfReferenceUid: string | null;
+    targetFrameOfReferenceUid: string | null;
+    notes: string[];
+  } | null;
+};
+
+type FusionAssociationSummary = {
+  studyId: number | null;
+  registrationSeriesId: number | null;
+  registrationFilePath: string | null;
+  registrationId: string | null;
+  primarySeriesId: number | null;
+  secondarySeriesId: number | null;
+  derivedSeriesId: number | null;
+  status: FusionAssociationStatus;
+  reason?: string;
+  markers: string[];
+  transformSource?: string | null;
+  registrationSeries: RegistrationSeriesSummary | null;
+  primarySeries: SeriesSummary | null;
+  secondarySeries: SeriesSummary | null;
+  derivedSeries: DerivedSeriesSummary | null;
+};
+
+type PatientFusionOverviewDebug = {
+  generatedAt: string;
+  fusedDirectories: Array<{ studyId: number; path: string; exists: boolean; contents: string[] }>;
+  missingPaths: Array<{ seriesId: number; path: string }>;
+};
+
+interface PatientFusionOverview {
+  patient: {
+    id: number;
+    patientID: string | null;
+    patientName: string | null;
+    createdAt: string | null;
+  };
+  summary: {
+    totalStudies: number;
+    totalSeries: number;
+    registrationSeries: number;
+    derivedSeries: number;
+  };
+  studies: Array<{
+    id: number;
+    studyInstanceUID: string;
+    studyDescription: string | null;
+    studyDate: string | null;
+    accessionNumber: string | null;
+    modalityCounts: Record<string, number>;
+    series: SeriesSummary[];
+    registrationSeries: RegistrationSeriesSummary[];
+    derivedSeries: DerivedSeriesSummary[];
+    associations: FusionAssociationSummary[];
+  }>;
+  registrationSeries: RegistrationSeriesSummary[];
+  derivedSeries: DerivedSeriesSummary[];
+  associations: FusionAssociationSummary[];
+  debug?: PatientFusionOverviewDebug;
+}
+
 const pacsConnectionSchema = z.object({
   name: z.string().min(1, "Name is required"),
   aeTitle: z.string().min(1, "AE Title is required"),
@@ -128,6 +224,7 @@ export default function PatientManager() {
   const [queryResults, setQueryResults] = useState<DICOMQueryResult[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [activeTab, setActiveTab] = useState("patients");
+  const [fusionPatientId, setFusionPatientId] = useState<number | null>(null);
   
   // New state for favorites and recent patients
   const [favoritePatients, setFavoritePatients] = useState<Set<number>>(new Set());
@@ -287,6 +384,122 @@ export default function PatientManager() {
   const { data: patientTags = [] } = useQuery<any[]>({
     queryKey: ["/api/patient-tags"],
   });
+
+  useEffect(() => {
+    if (fusionPatientId == null && patients.length) {
+      setFusionPatientId(patients[0].id);
+    }
+  }, [fusionPatientId, patients]);
+
+  const fusionOverviewQuery = useQuery<PatientFusionOverview>({
+    queryKey: fusionPatientId ? ["/api/patients", fusionPatientId, "fusion", "overview"] : ["/api/patients", "fusion", "overview", "idle"],
+    queryFn: async () => {
+      if (fusionPatientId == null) throw new Error('No patient selected');
+      const response = await fetch(`/api/patients/${fusionPatientId}/fusion/overview`);
+      if (!response.ok) {
+        throw new Error(`Failed to load fusion overview (${response.status})`);
+      }
+      return (await response.json()) as PatientFusionOverview;
+    },
+    enabled: fusionPatientId != null,
+  });
+
+  const fusionOverview = fusionOverviewQuery.data;
+  const fusionOverviewLoading = fusionOverviewQuery.isLoading;
+  const fusionOverviewFetching = fusionOverviewQuery.isFetching;
+  const fusionStatusStyles: Record<FusionAssociationStatus, { label: string; className: string }> = {
+    ready: { label: 'Ready', className: 'bg-emerald-500/10 border-emerald-400/40 text-emerald-200 border' },
+    pending: { label: 'Pending', className: 'bg-amber-500/10 border-amber-400/40 text-amber-200 border' },
+    'missing-secondary': { label: 'Needs Match', className: 'bg-rose-500/10 border-rose-400/40 text-rose-200 border' },
+    unmapped: { label: 'Unmapped', className: 'bg-slate-500/10 border-slate-400/40 text-slate-200 border' },
+  };
+
+  const runManifestMutation = useMutation({
+    mutationFn: async () => {
+      if (fusionPatientId == null) {
+        throw new Error('Select a patient first');
+      }
+      const response = await fetch(`/api/patients/${fusionPatientId}/fusion/run-manifest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeReady: false }),
+      });
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Manifest run failed (${response.status})`);
+      }
+      return (await response.json()) as { ok: boolean; overview: PatientFusionOverview; runs: any[] };
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Manifest run requested',
+        description: `${data?.runs?.length ?? 0} fusion pair${(data?.runs?.length ?? 0) === 1 ? '' : 's'} queued.`,
+      });
+      fusionOverviewQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Manifest run failed',
+        description: error?.message || 'Unable to trigger manifest run.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const clearFusionMutation = useMutation({
+    mutationFn: async () => {
+      if (fusionPatientId == null) {
+        throw new Error('Select a patient first');
+      }
+      const response = await fetch(`/api/patients/${fusionPatientId}/fusion/clear`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Failed to clear derived data (${response.status})`);
+      }
+      return (await response.json()) as { ok: boolean; overview: PatientFusionOverview };
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Derived series cleared',
+        description: 'Fused series removed and manifest cache reset.',
+      });
+      fusionOverviewQuery.refetch();
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Clear failed',
+        description: error?.message || 'Unable to clear derived data.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleFusionDebugFetch = useCallback(async () => {
+    if (fusionPatientId == null) {
+      toast({ title: 'Select a patient', description: 'Choose a patient to inspect fusion data.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const response = await fetch(`/api/patients/${fusionPatientId}/fusion/overview?debug=true`, { cache: 'no-store' });
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Debug fetch failed (${response.status})`);
+      }
+      const payload = await response.json();
+      console.groupCollapsed(`Fusion debug for patient ${fusionPatientId}`);
+      console.debug(payload);
+      console.groupEnd();
+      toast({ title: 'Debug data ready', description: 'Inspect console for detailed fusion debug output.' });
+    } catch (error: any) {
+      toast({
+        title: 'Debug fetch failed',
+        description: error?.message || 'Unable to load fusion debug data.',
+        variant: 'destructive',
+      });
+    }
+  }, [fusionPatientId, toast]);
 
   // PACS connection form
   const pacsForm = useForm<z.infer<typeof pacsConnectionSchema>>({
@@ -467,7 +680,7 @@ export default function PatientManager() {
     
     for (const patientId of patientIds) {
       try {
-        const response = await fetch(`/api/patients/${patientId}`, {
+        const response = await fetch(`/api/patients/${patientId}?full=true`, {
           method: "DELETE",
         });
         
@@ -700,7 +913,7 @@ export default function PatientManager() {
               {/* Combined Container for Tabs, Search, and Tags */}
               <div className="bg-gray-950/90 backdrop-blur-xl border border-gray-600/70 rounded-2xl shadow-2xl shadow-black/40 p-3 mb-4">
                 {/* Tabs Row */}
-                <TabsList className="grid w-full grid-cols-5 bg-black/40 rounded-xl p-1 mb-4">
+                <TabsList className="grid w-full grid-cols-6 bg-black/40 rounded-xl p-1 mb-4">
                   <TabsTrigger value="patients" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500/20 data-[state=active]:to-purple-500/20 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/10 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                     <User className="h-4 w-4" />
                     Patients
@@ -723,6 +936,10 @@ export default function PatientManager() {
                   <TabsTrigger value="query" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500/20 data-[state=active]:to-purple-500/20 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/10 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                     <Database className="h-4 w-4" />
                     Query
+                  </TabsTrigger>
+                  <TabsTrigger value="fusion" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500/20 data-[state=active]:to-purple-500/20 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/10 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
+                    <Merge className="h-4 w-4" />
+                    Fusion
                   </TabsTrigger>
                   <TabsTrigger value="metadata" className="flex items-center justify-center gap-1.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500/20 data-[state=active]:to-purple-500/20 data-[state=active]:backdrop-blur-xl data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-white/10 text-gray-400 hover:text-gray-200 rounded-lg transition-all duration-200 py-2 px-3 hover:bg-white/5 text-sm font-medium">
                     <FileText className="h-4 w-4" />
@@ -1288,6 +1505,243 @@ export default function PatientManager() {
               </Card>
             </div>
           </TabsContent>
+
+            <TabsContent value="fusion" className="space-y-4 p-4">
+              <Card className="bg-gray-950/90 border border-gray-700/60">
+                <CardHeader className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-semibold">Fusion Manifest Manager</CardTitle>
+                    <CardDescription>
+                      Review registration files, derived fusion outputs, and trigger manifest runs per patient.
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => runManifestMutation.mutate()}
+                      disabled={fusionPatientId == null || runManifestMutation.isPending}
+                    >
+                      {runManifestMutation.isPending ? 'Running…' : 'Run Manifest'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleFusionDebugFetch}
+                      disabled={fusionPatientId == null || fusionOverviewFetching}
+                    >
+                      Debug Data
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => clearFusionMutation.mutate()}
+                      disabled={fusionPatientId == null || clearFusionMutation.isPending}
+                    >
+                      {clearFusionMutation.isPending ? 'Clearing…' : 'Clear Derived'}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="fusion-patient-select">Patient</Label>
+                    <Select
+                      value={fusionPatientId != null ? String(fusionPatientId) : undefined}
+                      onValueChange={(value) => setFusionPatientId(Number(value))}
+                    >
+                      <SelectTrigger id="fusion-patient-select" className="w-full bg-black/40 border border-gray-700/70">
+                        <SelectValue placeholder="Select a patient" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {patients.map((patient) => (
+                          <SelectItem key={patient.id} value={String(patient.id)}>
+                            {(patient.patientName && patient.patientName.trim()) || patient.patientID || `Patient ${patient.id}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {fusionPatientId == null ? (
+                    <p className="text-sm text-gray-400">Choose a patient to inspect fusion data.</p>
+                  ) : fusionOverviewLoading && !fusionOverview ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.64 5.64L4.22 4.22M19.78 19.78l-1.42-1.42M5.64 18.36L4.22 19.78M19.78 4.22l-1.42 1.42" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                      Loading fusion overview…
+                    </div>
+                  ) : fusionOverview ? (
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border border-gray-700/60 bg-black/30 px-4 py-3">
+                        <div className="text-xs uppercase tracking-wide text-gray-400">Studies</div>
+                        <div className="text-xl font-semibold text-white">{fusionOverview.summary.totalStudies}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-700/60 bg-black/30 px-4 py-3">
+                        <div className="text-xs uppercase tracking-wide text-gray-400">Series</div>
+                        <div className="text-xl font-semibold text-white">{fusionOverview.summary.totalSeries}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-700/60 bg-black/30 px-4 py-3">
+                        <div className="text-xs uppercase tracking-wide text-gray-400">Registration Series</div>
+                        <div className="text-xl font-semibold text-white">{fusionOverview.summary.registrationSeries}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-700/60 bg-black/30 px-4 py-3">
+                        <div className="text-xs uppercase tracking-wide text-gray-400">Derived Series</div>
+                        <div className="text-xl font-semibold text-white">{fusionOverview.summary.derivedSeries}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No fusion data found for this patient yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gray-950/90 border border-gray-700/60">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold">Associations</CardTitle>
+                  <CardDescription>
+                    Mapping between primary CT, secondary modalities, registration files, and derived fused series.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {fusionPatientId == null ? (
+                    <p className="text-sm text-gray-400">Select a patient to review fusion associations.</p>
+                  ) : fusionOverviewLoading && !fusionOverview ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.64 5.64L4.22 4.22M19.78 19.78l-1.42-1.42M5.64 18.36L4.22 19.78M19.78 4.22l-1.42 1.42" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                      Loading associations…
+                    </div>
+                  ) : fusionOverview && fusionOverview.associations.length ? (
+                    <div className="overflow-x-auto">
+                      <div className="grid min-w-[720px] grid-cols-6 gap-px rounded-lg border border-gray-800 bg-gray-800/60 text-xs uppercase tracking-wide text-gray-400">
+                        <div className="bg-black/60 px-3 py-2">Status</div>
+                        <div className="bg-black/60 px-3 py-2">Primary</div>
+                        <div className="bg-black/60 px-3 py-2">Secondary</div>
+                        <div className="bg-black/60 px-3 py-2">Registration</div>
+                        <div className="bg-black/60 px-3 py-2">Derived</div>
+                        <div className="bg-black/60 px-3 py-2">Notes</div>
+                      </div>
+                      {fusionOverview.associations.map((assoc, index) => {
+                        const statusStyle = fusionStatusStyles[assoc.status];
+                        const primaryLabel = assoc.primarySeries?.seriesDescription || assoc.primarySeries?.seriesInstanceUID || (assoc.primarySeriesId != null ? `Series #${assoc.primarySeriesId}` : '—');
+                        const secondaryLabel = assoc.secondarySeries?.seriesDescription || assoc.secondarySeries?.seriesInstanceUID || (assoc.secondarySeriesId != null ? `Series #${assoc.secondarySeriesId}` : '—');
+                        const registrationLabel = assoc.registrationSeries?.seriesDescription || assoc.registrationSeries?.seriesInstanceUID || (assoc.registrationSeriesId != null ? `Series #${assoc.registrationSeriesId}` : '—');
+                        const derivedLabel = assoc.derivedSeries?.seriesDescription || (assoc.derivedSeriesId != null ? `Series #${assoc.derivedSeriesId}` : 'Pending');
+                        const markerText = assoc.markers?.length ? assoc.markers.join(', ') : null;
+                        return (
+                          <div key={`${assoc.primarySeriesId}-${assoc.secondarySeriesId}-${assoc.registrationSeriesId}-${index}`} className="grid min-w-[720px] grid-cols-6 gap-px border-b border-gray-800/40 bg-gray-900/60 text-sm">
+                            <div className="bg-black/40 px-3 py-2">
+                              <Badge className={statusStyle.className}>{statusStyle.label}</Badge>
+                            </div>
+                            <div className="bg-black/40 px-3 py-2">
+                              <div className="font-medium text-gray-100">{primaryLabel || '—'}</div>
+                              <div className="text-xs text-gray-500">{assoc.primarySeries?.modality || ''}</div>
+                            </div>
+                            <div className="bg-black/40 px-3 py-2">
+                              <div className="font-medium text-gray-100">{secondaryLabel || '—'}</div>
+                              <div className="text-xs text-gray-500">{assoc.secondarySeries?.modality || ''}</div>
+                            </div>
+                            <div className="bg-black/40 px-3 py-2">
+                              <div className="text-gray-100">{registrationLabel || '—'}</div>
+                              <div className="text-xs text-gray-500 truncate">{assoc.registrationFilePath || '—'}</div>
+                            </div>
+                            <div className="bg-black/40 px-3 py-2">
+                              <div className="text-gray-100">{derivedLabel}</div>
+                              {markerText && <div className="text-xs text-indigo-300">{markerText}</div>}
+                            </div>
+                            <div className="bg-black/40 px-3 py-2 text-xs text-gray-400">
+                              {assoc.reason || assoc.transformSource || '—'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No fusion associations found yet for this patient.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {fusionOverview && fusionOverview.studies.length ? (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {fusionOverview.studies.map((study) => {
+                    const derivedIds = new Set(study.derivedSeries.map((d) => d.id));
+                    const registrationIds = new Set(study.registrationSeries.map((r) => r.id));
+                    const baselineSeries = study.series.filter((series) => !derivedIds.has(series.id) && !registrationIds.has(series.id));
+                    return (
+                      <Card key={study.id} className="bg-gray-950/90 border border-gray-700/60">
+                        <CardHeader>
+                          <CardTitle className="text-base font-semibold">{study.studyDescription || study.studyInstanceUID}</CardTitle>
+                          <CardDescription>
+                            {study.studyDate ? `Date ${study.studyDate}` : 'Study'} • {Object.entries(study.modalityCounts).map(([modality, count]) => `${modality}: ${count}`).join(' · ')}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div>
+                            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-200">Primary / Original Series</h4>
+                            {baselineSeries.length ? (
+                              <ul className="space-y-2 text-sm text-gray-200">
+                                {baselineSeries.map((series) => (
+                                  <li key={series.id} className="rounded border border-gray-800/40 bg-black/30 px-3 py-2">
+                                    <div className="font-medium">{series.seriesDescription || series.seriesInstanceUID}</div>
+                                    <div className="text-xs text-gray-500">Modality {series.modality || '—'} · Images {series.imageCount ?? '—'}</div>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-gray-500">No baseline series recorded.</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-200">Registration Files</h4>
+                            {study.registrationSeries.length ? (
+                              <ul className="space-y-2 text-sm text-gray-200">
+                                {study.registrationSeries.map((series) => (
+                                  <li key={series.id} className="rounded border border-sky-900/40 bg-sky-950/20 px-3 py-2">
+                                    <div className="font-medium">{series.seriesDescription || series.seriesInstanceUID}</div>
+                                    <div className="text-xs text-gray-400 truncate">{series.filePath || 'Missing file'}</div>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-gray-500">No REG files detected for this study.</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-200">Derived Series</h4>
+                            {study.derivedSeries.length ? (
+                              <ul className="space-y-2 text-sm text-gray-200">
+                                {study.derivedSeries.map((series) => (
+                                  <li key={series.id} className="rounded border border-emerald-900/40 bg-emerald-950/20 px-3 py-2">
+                                    <div className="font-medium">{series.seriesDescription || series.seriesInstanceUID}</div>
+                                    <div className="text-xs text-gray-300">Markers: {series.fusion.markers.join(', ')}</div>
+                                    {series.fusion.outputDirectory && (
+                                      <div className="text-xs text-gray-500 truncate">{series.fusion.outputDirectory}</div>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-gray-500">No derived series generated yet.</p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              ) : fusionPatientId != null && !fusionOverviewLoading ? (
+                <Card className="bg-gray-950/90 border border-gray-700/60">
+                  <CardContent className="py-6 text-center text-sm text-gray-400">
+                    No fusion studies available for this patient yet.
+                  </CardContent>
+                </Card>
+              ) : null}
+            </TabsContent>
+
             {/* Metadata Tab */}
             <TabsContent value="metadata" className="space-y-4 p-4">
               <MetadataViewer />
