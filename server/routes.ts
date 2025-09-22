@@ -25,6 +25,7 @@ import {
   type FuseboxLogEmitter,
 } from './fusion/fusebox';
 import { fusionManifestService } from './fusion/manifest-service';
+import { buildPatientFusionOverview, clearPatientFusionDerivedData } from './fusion/patient-fusion-overview.ts';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -1096,13 +1097,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Process series
           for (const [seriesKey, seriesData] of studyData.series) {
+            // Skip fusion artifacts during import
+            const firstMetadata = seriesData.metadata;
+            const seriesDescription = firstMetadata.seriesDescription || '';
+            const isFusionArtifact = seriesDescription.toLowerCase().includes('fused') || 
+                                   seriesData.images[0]?.filePath?.includes('/fused/') ||
+                                   seriesKey?.startsWith('2.25.');
+            
+            if (isFusionArtifact) {
+              console.log(`🚫 Skipping fusion artifact: ${seriesDescription} (${seriesKey})`);
+              continue;
+            }
+            
             const existingSeries = await storage.getSeriesByUID(seriesKey);
             let series;
             
             if (existingSeries) {
               series = existingSeries;
             } else {
-              const firstMetadata = seriesData.metadata;
               series = await storage.createSeries({
                 seriesInstanceUID: seriesKey,
                 studyId: study.id,
@@ -1539,6 +1551,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           for (const [seriesKey, seriesFiles] of series) {
             const seriesMetadata = seriesFiles[0];
             
+            // Skip fusion artifacts during import
+            const seriesDescription = seriesMetadata.seriesDescription || '';
+            const isFusionArtifact = seriesDescription.toLowerCase().includes('fused') || 
+                                   seriesFiles[0]?.filePath?.includes('/fused/') ||
+                                   seriesMetadata.seriesInstanceUID?.startsWith('2.25.');
+            
+            if (isFusionArtifact) {
+              console.log(`🚫 Skipping fusion artifact: ${seriesDescription} (${seriesMetadata.seriesInstanceUID})`);
+              continue;
+            }
+            
             // Create or get series
             let dbSeries = await storage.getSeriesByUID(seriesMetadata.seriesInstanceUID);
             if (!dbSeries) {
@@ -1790,6 +1813,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/patients/:id/fusion/overview", async (req, res) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const overview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json(overview);
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to build patient fusion overview');
+      res.status(500).json({ error: 'Failed to build fusion overview', details: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/patients/:id/fusion/run-manifest", async (req, res) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const includeReady = Boolean(body.includeReady);
+
+      const pairSet = new Map<string, { primary: number; secondary: number }>();
+      const addPair = (primary: unknown, secondary: unknown) => {
+        const p = Number(primary);
+        const s = Number(secondary);
+        if (!Number.isFinite(p) || !Number.isFinite(s)) return;
+        pairSet.set(`${p}:${s}`, { primary: p, secondary: s });
+      };
+
+      const toNumberArray = (value: unknown): number[] => {
+        if (Array.isArray(value)) {
+          return value
+            .map((entry) => Number(entry))
+            .filter((num) => Number.isFinite(num));
+        }
+        if (typeof value === 'string') {
+          return value
+            .split(',')
+            .map((entry) => Number(entry.trim()))
+            .filter((num) => Number.isFinite(num));
+        }
+        return [];
+      };
+
+      const primarySeriesId = Number(body.primarySeriesId);
+      const secondarySeriesIds = toNumberArray(body.secondarySeriesIds);
+      if (Number.isFinite(primarySeriesId) && secondarySeriesIds.length) {
+        secondarySeriesIds.forEach((secondaryId) => addPair(primarySeriesId, secondaryId));
+      }
+
+      if (Array.isArray(body.pairs) && !pairSet.size) {
+        (body.pairs as any[]).forEach((pair) => {
+          if (!pair) return;
+          addPair((pair as any).primarySeriesId ?? (pair as any).primary, (pair as any).secondarySeriesId ?? (pair as any).secondary);
+        });
+      }
+
+      if (!pairSet.size) {
+        const overview = await buildPatientFusionOverview(patientId);
+        overview.associations.forEach((association) => {
+          if (!Number.isFinite(association.primarySeriesId ?? NaN)) return;
+          if (!Number.isFinite(association.secondarySeriesId ?? NaN)) return;
+          if (!includeReady && association.status === 'ready') return;
+          addPair(association.primarySeriesId, association.secondarySeriesId);
+        });
+      }
+
+      if (!pairSet.size) {
+        const refreshed = await buildPatientFusionOverview(patientId, { includeDebug });
+        return res.json({
+          ok: true,
+          runs: [],
+          overview: refreshed,
+          message: 'No fusion associations queued for manifest generation.',
+        });
+      }
+
+      const results: Array<Record<string, unknown>> = [];
+      for (const { primary, secondary } of pairSet.values()) {
+        try {
+          logger.info({ patientId, primary, secondary }, 'Running fusion manifest from patient manager');
+          const manifest = await fusionManifestService.getManifest({
+            primarySeriesId: primary,
+            secondarySeriesIds: [secondary],
+            force: true,
+            preload: true,
+            logger: fuseboxEmit,
+          });
+          const descriptor = manifest.secondaries.find((sec) => sec.secondarySeriesId === secondary);
+          results.push({
+            primarySeriesId: primary,
+            secondarySeriesId: secondary,
+            status: descriptor?.status ?? 'unknown',
+            markers: descriptor?.markers ?? [],
+            generatedAt: descriptor?.generatedAt ?? null,
+            outputDirectory: descriptor?.outputDirectory ?? null,
+            manifestPath: descriptor?.manifestPath ?? null,
+          });
+        } catch (err: any) {
+          logger.error({ err, patientId, primary, secondary }, 'Fusion manifest run failed from patient manager');
+          results.push({
+            primarySeriesId: primary,
+            secondarySeriesId: secondary,
+            status: 'error',
+            error: err?.message || String(err),
+          });
+        }
+      }
+
+      const refreshedOverview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json({ ok: true, runs: results, overview: refreshedOverview });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to run fusion manifest from patient manager');
+      res.status(500).json({ error: 'Failed to run fusion manifest', details: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/patients/:id/fusion/clear", async (req, res) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const cleared = await clearPatientFusionDerivedData(patientId);
+      const overview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json({ ok: true, cleared, overview });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to clear patient fusion derived data');
+      res.status(500).json({ error: 'Failed to clear fusion derived data', details: err?.message || String(err) });
+    }
+  });
+
   app.post("/api/patients", async (req, res) => {
     try {
       const patient = await storage.createPatient(req.body);
@@ -1800,6 +1961,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/patients/:id", async (req, res) => {
+    try {
+      const patientId = parseInt(req.params.id);
+      if ((req.query as any)?.full === 'true') {
+        await (storage as any).deletePatientFully(patientId);
+      } else {
+        await storage.deletePatient(patientId);
+      }
+      res.json({ success: true, message: "Patient deleted successfully" });
+    } catch (error) {
+      console.error('Error deleting patient:', error);
+      res.status(500).json({ message: "Failed to delete patient" });
+    }
+  });
+
+  // Delete a single series and all associated files/images/RT/media
+  app.delete("/api/series/:id", async (req, res) => {
+    try {
+      const seriesId = parseInt(req.params.id);
+      await (storage as any).deleteSeriesFully(seriesId);
+      res.json({ success: true, message: "Series deleted successfully" });
+    } catch (error) {
+      console.error('Error deleting series:', error);
+      res.status(500).json({ message: "Failed to delete series" });
+    }
+  });
+
+  // Delete a patient and all associated data
   app.delete("/api/patients/:id", async (req, res) => {
     try {
       const patientId = parseInt(req.params.id);

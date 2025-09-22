@@ -52,6 +52,7 @@ export interface FusionSecondaryDescriptor {
   outputDirectory: string;
   manifestPath: string;
   instances: FusionInstanceDescriptor[];
+  markers?: string[];
   error?: string;
 }
 

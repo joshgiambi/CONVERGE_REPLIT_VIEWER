@@ -124,6 +124,7 @@ const createSecondaryDescriptor = (
     outputDirectory: overrides.outputDirectory ?? base.outputDirectory ?? '',
     manifestPath: overrides.manifestPath ?? base.manifestPath ?? '',
     instances: overrides.instances ?? base.instances ?? [],
+    markers: overrides.markers ?? base.markers ?? undefined,
     error: overrides.error ?? base.error,
   };
 };
@@ -331,7 +332,36 @@ export class FusionManifestService {
     const primaryMeta = loadDicomMetadata(primaryFirstFile);
     const secondaryMeta = loadDicomMetadata(secondaryFirstFile);
 
-    const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, undefined, logger);
+    const primaryFoR = primaryMeta.frameOfReferenceUID ?? null;
+    const secondaryFoR = secondaryMeta.frameOfReferenceUID ?? null;
+
+    let transformInfo: any | null = null;
+    let transformError: Error | null = null;
+    try {
+      transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, undefined, logger);
+    } catch (err: any) {
+      transformError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    const shareFrameOfReference = primaryFoR && secondaryFoR && primaryFoR === secondaryFoR;
+    if (!transformInfo && shareFrameOfReference) {
+      transformInfo = {
+        matrix: [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        ],
+        transformFile: null,
+        transformSource: 'frame-of-reference',
+        registrationId: `FOR:${primaryFoR}`,
+      };
+    }
+
+    if (!transformInfo) {
+      if (transformError) throw transformError;
+      throw new Error('Registration transform unavailable for series pair');
+    }
     if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
       throw new Error('Registration transform unavailable for series pair');
     }
@@ -368,12 +398,18 @@ export class FusionManifestService {
       }
     }
 
+    const derivedMarkers = ['RESAMPLED_SUPERBEAM'];
+    if (transformInfo.transformSource === 'frame-of-reference') {
+      derivedMarkers.push('FRAME_OF_REFERENCE');
+    }
+
     const metadataPayload = this.buildResampleMetadata({
       primarySeries,
       secondarySeries,
       primaryMeta,
       secondaryMeta,
       transformInfo,
+      markers: derivedMarkers,
     });
 
     await fs.promises.writeFile(metadataPath, JSON.stringify(metadataPayload, null, 2), 'utf-8').catch(() => {});
@@ -405,16 +441,24 @@ export class FusionManifestService {
       const seriesInstanceUID = response.seriesInstanceUID || transformInfo.registrationId || secondarySeries.seriesInstanceUID + '.fused';
       const frameOfReferenceUID = response.frameOfReferenceUID || primaryMeta.frameOfReferenceUID || null;
 
+      let derivedDescription = response.seriesDescription ?? `Fused ${secondarySeries.seriesDescription || secondarySeries.modality}`;
+      if (derivedDescription && !derivedDescription.includes('RESAMPLED_SUPERBEAM')) {
+        derivedDescription = `${derivedDescription} [RESAMPLED_SUPERBEAM]`;
+      }
+
       const fusedSeries = await this.ensureSeriesRecord({
         primarySeries,
         secondarySeries,
         studyId,
         seriesInstanceUID,
         modality: response.modality ?? secondarySeries.modality,
-        description: response.seriesDescription ?? `Fused ${secondarySeries.seriesDescription || secondarySeries.modality}`,
+        description: derivedDescription,
         sliceCount: response.sliceCount,
         transformInfo,
         interpolation,
+        outputDirectory: response.outputDirectory ?? dicomOutputDir,
+        manifestPath: response.manifestPath ?? aggregatedManifestPath,
+        markers: derivedMarkers,
       });
 
       await this.replaceSeriesImages({
@@ -425,6 +469,7 @@ export class FusionManifestService {
         imageOrientationPatient: response.imageOrientationPatient,
         primaryMeta,
         secondaryMeta,
+        markers: derivedMarkers,
       });
 
       const pixelSpacing = Array.isArray(response.pixelSpacing) && response.pixelSpacing.length >= 2
@@ -531,6 +576,7 @@ export class FusionManifestService {
         const mappedPrimarySop = resolvePrimarySopForInstance(inst, idx);
         return toInstanceDescriptor(inst, mappedPrimarySop);
       }),
+      markers: derivedMarkers,
     };
 
       await markFuseboxRunReady({
@@ -559,11 +605,18 @@ export class FusionManifestService {
     primaryMeta: ReturnType<typeof loadDicomMetadata>;
     secondaryMeta: ReturnType<typeof loadDicomMetadata>;
     transformInfo: any;
+    markers?: string[];
   }): any {
-    const { primarySeries, secondarySeries, primaryMeta, secondaryMeta, transformInfo } = input;
+    const { primarySeries, secondarySeries, primaryMeta, secondaryMeta, transformInfo, markers } = input;
 
     const imageType = ['DERIVED', 'SECONDARY', 'FUSED'];
     const derivationDescription = `Resampled ${secondarySeries.seriesDescription || secondarySeries.modality || 'secondary'} into ${primarySeries.seriesDescription || primarySeries.modality || 'primary'} frame of reference`;
+
+    const markerList = Array.isArray(markers) ? markers.filter((entry) => typeof entry === 'string' && entry.length) : [];
+    let derivedSeriesDescription = `Fused ${secondarySeries.seriesDescription ?? secondarySeries.modality ?? 'Secondary'}`;
+    if (!derivedSeriesDescription.includes('RESAMPLED_SUPERBEAM')) {
+      derivedSeriesDescription = `${derivedSeriesDescription} [RESAMPLED_SUPERBEAM]`;
+    }
 
     return {
       patient: {
@@ -610,13 +663,17 @@ export class FusionManifestService {
         PixelRepresentation: secondaryMeta.pixelRepresentation,
       },
       derivedSeries: {
-        SeriesDescription: `Fused ${secondarySeries.seriesDescription ?? secondarySeries.modality ?? 'Secondary'}`,
+        SeriesDescription: derivedSeriesDescription,
         ImageType: imageType,
         DerivationDescription: derivationDescription,
         ReferencedSeriesInstanceUID: primarySeries.seriesInstanceUID,
         RegistrationId: transformInfo.registrationId,
         WindowCenter: secondaryMeta.windowCenter,
         WindowWidth: secondaryMeta.windowWidth,
+        AdditionalTags: {
+          '0020|4000': 'RESAMPLED_SUPERBEAM',
+        },
+        Markers: markerList.length ? markerList : ['RESAMPLED_SUPERBEAM'],
       },
     };
   }
@@ -631,11 +688,60 @@ export class FusionManifestService {
     sliceCount: number;
     transformInfo: any;
     interpolation: InterpolationMode;
+    outputDirectory?: string | null;
+    manifestPath?: string | null;
+    markers?: string[];
   }) {
-    const { primarySeries, secondarySeries, studyId, seriesInstanceUID, modality, description, sliceCount, transformInfo, interpolation } = input;
+    const {
+      primarySeries,
+      secondarySeries,
+      studyId,
+      seriesInstanceUID,
+      modality,
+      description,
+      sliceCount,
+      transformInfo,
+      interpolation,
+      outputDirectory,
+      manifestPath,
+      markers,
+    } = input;
+
+    const normalizeMarkers = (existing: unknown, incoming?: string[]): string[] => {
+      const set = new Set<string>();
+      if (Array.isArray(existing)) {
+        existing.forEach((entry) => {
+          if (typeof entry === 'string' && entry.length) set.add(entry);
+        });
+      }
+      if (Array.isArray(incoming)) {
+        incoming.forEach((entry) => {
+          if (typeof entry === 'string' && entry.length) set.add(entry);
+        });
+      }
+      return Array.from(set);
+    };
+
+    const resolvedMarkers = normalizeMarkers(undefined, markers);
 
     let existing = await storage.getSeriesByUID(seriesInstanceUID);
     if (!existing) {
+      const fusionMetadata = {
+        primarySeriesId: primarySeries.id,
+        secondarySeriesId: secondarySeries.id,
+        registrationId: transformInfo.registrationId ?? null,
+        transformSource: transformInfo.transformSource ?? null,
+        interpolation,
+        generatedAt: new Date().toISOString(),
+        manifestPath: manifestPath ?? null,
+        outputDirectory: outputDirectory ?? null,
+        markers: resolvedMarkers,
+      };
+      const metadataPayload: Record<string, unknown> = {
+        fusion: fusionMetadata,
+      };
+      if (outputDirectory) metadataPayload.localPath = outputDirectory;
+
       existing = await storage.createSeries({
         studyId,
         seriesInstanceUID,
@@ -644,36 +750,40 @@ export class FusionManifestService {
         seriesNumber: (secondarySeries.seriesNumber ?? primarySeries.seriesNumber ?? 9901) + 1000,
         imageCount: sliceCount,
         sliceThickness: secondarySeries.sliceThickness ?? primarySeries.sliceThickness ?? null,
-        metadata: {
-          fusion: {
-            primarySeriesId: primarySeries.id,
-            secondarySeriesId: secondarySeries.id,
-            registrationId: transformInfo.registrationId ?? null,
-            transformSource: transformInfo.transformSource ?? null,
-            interpolation,
-            generatedAt: new Date().toISOString(),
-          },
-        },
+        metadata: metadataPayload,
       });
     } else {
       const existingMetadata = (existing.metadata ?? {}) as Record<string, unknown>;
+      const existingFusion = (existingMetadata?.fusion ?? {}) as Record<string, unknown>;
+      const markerList = normalizeMarkers(existingFusion?.markers, markers);
+      const fusionMetadata = {
+        ...existingFusion,
+        primarySeriesId: primarySeries.id,
+        secondarySeriesId: secondarySeries.id,
+        registrationId: transformInfo.registrationId ?? existingFusion?.registrationId ?? null,
+        transformSource: transformInfo.transformSource ?? existingFusion?.transformSource ?? null,
+        interpolation,
+        generatedAt: new Date().toISOString(),
+        manifestPath: manifestPath ?? existingFusion?.manifestPath ?? null,
+        outputDirectory: outputDirectory ?? existingFusion?.outputDirectory ?? null,
+        markers: markerList,
+      };
+      const updatedMetadata: Record<string, unknown> = {
+        ...existingMetadata,
+        fusion: fusionMetadata,
+      };
+      if (outputDirectory) {
+        updatedMetadata.localPath = outputDirectory;
+      } else if (existingMetadata.localPath) {
+        updatedMetadata.localPath = existingMetadata.localPath;
+      }
       await db
         .update(seriesTable)
         .set({
           seriesDescription: description,
           modality: modality ?? existing.modality,
           imageCount: sliceCount,
-          metadata: {
-            ...existingMetadata,
-            fusion: {
-              primarySeriesId: primarySeries.id,
-              secondarySeriesId: secondarySeries.id,
-              registrationId: transformInfo.registrationId ?? null,
-              transformSource: transformInfo.transformSource ?? null,
-              interpolation,
-              generatedAt: new Date().toISOString(),
-            },
-          },
+          metadata: updatedMetadata,
         })
         .where(eq(seriesTable.id, existing.id));
       const refreshed = await storage.getSeriesById(existing.id);
@@ -691,8 +801,16 @@ export class FusionManifestService {
     imageOrientationPatient: number[] | null;
     primaryMeta: ReturnType<typeof loadDicomMetadata>;
     secondaryMeta: ReturnType<typeof loadDicomMetadata>;
+    markers?: string[];
   }) {
     const { seriesId, instances, frameOfReferenceUID, pixelSpacing, imageOrientationPatient, primaryMeta, secondaryMeta } = input;
+    const markerSet = new Set<string>();
+    if (Array.isArray(input.markers)) {
+      input.markers.forEach((marker) => {
+        if (typeof marker === 'string' && marker.length) markerSet.add(marker);
+      });
+    }
+    const markers = markerSet.size ? Array.from(markerSet) : null;
 
     await db.delete(imagesTable).where(eq(imagesTable.seriesId, seriesId));
 
@@ -720,6 +838,7 @@ export class FusionManifestService {
             primary: primaryMeta.seriesInstanceUID,
             secondary: secondaryMeta.seriesInstanceUID,
           },
+          markers: markers ?? undefined,
         },
       });
     }
@@ -747,6 +866,27 @@ export class FusionManifestService {
       status: 'ready',
       error: undefined,
     });
+  }
+
+  /**
+   * Clear fusion manifest cache for a specific series
+   */
+  clearCache(seriesId?: number): void {
+    if (seriesId) {
+      // Clear cache entries that reference this series as primary
+      const keysToDelete: string[] = [];
+      for (const [key, manifest] of this.cache.entries()) {
+        if (manifest.primarySeriesId === seriesId) {
+          keysToDelete.push(key);
+        }
+      }
+      keysToDelete.forEach(key => this.cache.delete(key));
+      console.log(`Cleared fusion manifest cache for series ${seriesId} (${keysToDelete.length} entries)`);
+    } else {
+      // Clear entire cache
+      this.cache.clear();
+      console.log('Cleared entire fusion manifest cache');
+    }
   }
 }
 

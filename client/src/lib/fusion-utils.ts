@@ -6,6 +6,8 @@ import type {
   FusionManifestStatus,
   FuseboxTransformSource,
 } from '@/types/fusion';
+import type { VolumeStackSlice } from './cornerstone3d-adapter';
+import { cacheStackSlice } from './cornerstone3d-adapter';
 
 export type FusionPreloadProgress = {
   completed: number;
@@ -21,6 +23,13 @@ export type FuseboxSlice = {
   sliceIndex: number;
   secondaryModality: string | null;
   registrationFile: string | null;
+  sopInstanceUID: string;
+  pixelSpacing?: [number, number] | null;
+  imageOrientationPatient?: number[] | null;
+  imagePositionPatient?: [number, number, number] | null;
+  sliceThickness?: number | null;
+  frameOfReferenceUID?: string | null;
+  spacingBetweenSlices?: number | null;
   transformSource?: FuseboxTransformSource;
   registrationId?: string;
   primarySopInstanceUID: string | null;
@@ -45,6 +54,34 @@ type ManifestCacheEntry = {
 
 const manifestCache = new Map<number, ManifestCacheEntry>();
 
+type FusionSliceCachePayload = {
+  stackSlice: VolumeStackSlice;
+  slice: FuseboxSlice;
+  imageId: string;
+};
+
+type FusionSliceListener = (payload: FusionSliceCachePayload) => void;
+
+const fusionSliceListeners = new Set<FusionSliceListener>();
+
+export function onFusionSliceCached(listener: FusionSliceListener): () => void {
+  fusionSliceListeners.add(listener);
+  return () => {
+    fusionSliceListeners.delete(listener);
+  };
+}
+
+function emitFusionSliceCached(payload: FusionSliceCachePayload) {
+  if (!fusionSliceListeners.size) return;
+  fusionSliceListeners.forEach((listener) => {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error('Fusion slice listener failed', error);
+    }
+  });
+}
+
 type TypedArrayConstructor<T extends ArrayBufferView> = {
   new (buffer: ArrayBufferLike, byteOffset?: number, length?: number): T;
   BYTES_PER_ELEMENT: number;
@@ -67,6 +104,25 @@ function createAlignedTypedArray<T extends ArrayBufferView>(
   }
   const copy = source.slice(dataOffset, dataOffset + byteLength);
   return new ctor(copy.buffer, copy.byteOffset, elementLength);
+}
+
+function parseNumberSequence(value: string | null | undefined, expectedLength?: number): number[] | null {
+  if (!value) return null;
+  const tokens = value
+    .split('\\')
+    .map((token) => Number(token.trim()))
+    .filter((token) => Number.isFinite(token));
+  if (!tokens.length) return null;
+  if (typeof expectedLength === 'number' && tokens.length < expectedLength) {
+    return null;
+  }
+  return tokens;
+}
+
+function parsePixelSpacing(value: string | null | undefined): [number, number] | null {
+  const numbers = parseNumberSequence(value, 2);
+  if (!numbers) return null;
+  return [numbers[0], numbers[1]];
 }
 
 function getOrCreateManifestEntry(primarySeriesId: number): ManifestCacheEntry {
@@ -120,6 +176,12 @@ function createSliceFromDicom(
   const pixelRepresentation = dataSet.uint16?.('x00280103') ?? 0;
   const slope = Number(dataSet.string?.('x00281053') ?? '1') || 1;
   const intercept = Number(dataSet.string?.('x00281052') ?? '0') || 0;
+  const pixelSpacing = parsePixelSpacing(dataSet.string?.('x00280030'));
+  const imageOrientation = parseNumberSequence(dataSet.string?.('x00200037'), 6);
+  const imagePosition = parseNumberSequence(dataSet.string?.('x00200032'), 3);
+  const sliceThickness = Number(dataSet.string?.('x00180050') ?? '0');
+  const spacingBetweenSlices = Number(dataSet.string?.('x00180088') ?? '0');
+  const frameOfReferenceUID = dataSet.string?.('x00200052') ?? null;
 
   const pixelElement = dataSet.elements?.['x7fe00010'];
   if (!pixelElement) {
@@ -197,6 +259,13 @@ function createSliceFromDicom(
     sliceIndex,
     secondaryModality: descriptor.secondaryModality,
     registrationFile: null,
+    sopInstanceUID: instance.sopInstanceUID,
+    pixelSpacing: pixelSpacing ?? null,
+    imageOrientationPatient: imageOrientation ?? null,
+    imagePositionPatient: imagePosition ? [imagePosition[0], imagePosition[1], imagePosition[2]] as [number, number, number] : null,
+    sliceThickness: Number.isFinite(sliceThickness) && sliceThickness > 0 ? sliceThickness : null,
+    spacingBetweenSlices: Number.isFinite(spacingBetweenSlices) && spacingBetweenSlices > 0 ? spacingBetweenSlices : null,
+    frameOfReferenceUID,
     transformSource: 'helper-cache',
     registrationId: descriptor.registrationId ?? undefined,
     primarySopInstanceUID: instance.primarySopInstanceUID ?? null,
@@ -218,7 +287,15 @@ async function loadSlice(
       throw new Error(`Failed to load fused image ${instance.sopInstanceUID} (${response.status} ${response.statusText})`);
     }
     const arrayBuffer = await response.arrayBuffer();
-    return createSliceFromDicom(arrayBuffer, cache.descriptor, instance);
+    const slice = createSliceFromDicom(arrayBuffer, cache.descriptor, instance);
+    try {
+      const stackSlice = fuseboxSliceToStackSlice(slice);
+      const imageId = cacheStackSlice('fusion', stackSlice);
+      emitFusionSliceCached({ slice, stackSlice, imageId });
+    } catch (error) {
+      console.warn('Failed to register fused slice with Cornerstone cache', error);
+    }
+    return slice;
   })();
 
   cache.slices.set(instance.sopInstanceUID, promise);
@@ -379,6 +456,36 @@ export async function getFusedSliceSmart(
   }
   if (!target) throw new Error('Fusion instance not found');
   return loadSlice(cache, target);
+}
+
+export function fuseboxSliceToStackSlice(slice: FuseboxSlice): VolumeStackSlice {
+  const spacing: [number, number] =
+    slice.pixelSpacing && slice.pixelSpacing.length === 2
+      ? [slice.pixelSpacing[0], slice.pixelSpacing[1]] as [number, number]
+      : [1, 1];
+
+  const orientation = Array.isArray(slice.imageOrientationPatient) ? [...slice.imageOrientationPatient] : undefined;
+  const position = Array.isArray(slice.imagePositionPatient) && slice.imagePositionPatient.length === 3
+    ? [slice.imagePositionPatient[0], slice.imagePositionPatient[1], slice.imagePositionPatient[2]] as [number, number, number]
+    : undefined;
+
+  return {
+    sopInstanceUID: slice.sopInstanceUID,
+    width: slice.width,
+    height: slice.height,
+    pixelData: slice.data,
+    metadata: {
+      sopInstanceUID: slice.sopInstanceUID,
+      pixelSpacing: spacing,
+      imageOrientationPatient: orientation,
+      imagePositionPatient: position,
+      sliceThickness: slice.sliceThickness ?? undefined,
+      frameOfReferenceUID: slice.frameOfReferenceUID ?? undefined,
+      modality: slice.secondaryModality ?? undefined,
+      minPixelValue: slice.min,
+      maxPixelValue: slice.max,
+    },
+  };
 }
 
 export function fuseboxSliceToImageData(

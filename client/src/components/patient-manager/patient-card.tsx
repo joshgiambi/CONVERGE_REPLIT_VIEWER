@@ -1,15 +1,105 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star, ArrowRight, Link as LinkIcon } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Star, ArrowRight, Link as LinkIcon, CircleDot, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
 import { DicomThumbnail } from './dicom-thumbnail';
 import { useToast } from '@/hooks/use-toast';
-import type { AssociationResponse, RegistrationAssociation } from '@/types/fusion';
+
+type FusionAssociationStatus = 'ready' | 'pending' | 'missing-secondary' | 'unmapped';
+
+interface SeriesSummary {
+  id: number;
+  studyId: number;
+  seriesInstanceUID: string;
+  seriesDescription: string | null;
+  modality: string | null;
+  seriesNumber: number | null;
+  imageCount: number | null;
+  sliceThickness?: string | null;
+  createdAt: string | null;
+}
+
+interface DerivedFusionDetails {
+  primarySeriesId: number | null;
+  secondarySeriesId: number | null;
+  registrationId: string | null;
+  transformSource: string | null;
+  interpolation: string | null;
+  generatedAt: string | null;
+  manifestPath: string | null;
+  outputDirectory: string | null;
+  markers: string[];
+}
+
+type DerivedSeriesSummary = SeriesSummary & { fusion: DerivedFusionDetails };
+
+interface RegistrationSeriesSummary extends SeriesSummary {
+  filePath: string | null;
+  fileExists: boolean;
+  referencedSeriesInstanceUIDs: string[];
+  referencedSeriesIds: number[];
+  parsed: {
+    matrixRowMajor4x4: number[] | null;
+    sourceFrameOfReferenceUid: string | null;
+    targetFrameOfReferenceUid: string | null;
+    notes: string[];
+  } | null;
+  fixedSeriesIds?: number[];
+  movingSeriesIds?: number[];
+}
+
+interface FusionAssociationSummary {
+  studyId: number | null;
+  registrationSeriesId: number | null;
+  registrationFilePath: string | null;
+  registrationId: string | null;
+  primarySeriesId: number | null;
+  secondarySeriesId: number | null;
+  derivedSeriesId: number | null;
+  status: FusionAssociationStatus;
+  reason?: string;
+  markers: string[];
+  transformSource?: string | null;
+  registrationSeries: RegistrationSeriesSummary | null;
+  primarySeries: SeriesSummary | null;
+  secondarySeries: SeriesSummary | null;
+  derivedSeries: DerivedSeriesSummary | null;
+}
+
+interface PatientFusionOverview {
+  patient: {
+    id: number;
+    patientID: string | null;
+    patientName: string | null;
+    createdAt: string | null;
+  };
+  summary: {
+    totalStudies: number;
+    totalSeries: number;
+    registrationSeries: number;
+    derivedSeries: number;
+  };
+  studies: Array<{
+    id: number;
+    studyInstanceUID: string;
+    studyDescription: string | null;
+    studyDate: string | null;
+    accessionNumber: string | null;
+    modalityCounts: Record<string, number>;
+    series: SeriesSummary[];
+    registrationSeries: RegistrationSeriesSummary[];
+    derivedSeries: DerivedSeriesSummary[];
+    associations: FusionAssociationSummary[];
+  }>;
+  registrationSeries: RegistrationSeriesSummary[];
+  derivedSeries: DerivedSeriesSummary[];
+  associations: FusionAssociationSummary[];
+}
 
 interface PatientCardProps {
   patient: any;
@@ -28,13 +118,20 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   const [isExpanded, setIsExpanded] = useState(false);
   const [rtStructures, setRtStructures] = useState<{ [key: number]: any[] }>({});
   const [loadingStructures, setLoadingStructures] = useState<{ [key: number]: boolean }>({});
-  const [associationData, setAssociationData] = useState<AssociationResponse | null>(null);
-  const [loadingAssociations, setLoadingAssociations] = useState(false);
+  const [fusionOverview, setFusionOverview] = useState<PatientFusionOverview | null>(null);
+  const [loadingFusionOverview, setLoadingFusionOverview] = useState(false);
+  const [fusionError, setFusionError] = useState<string | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const hasLoadedRef = useRef(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    setFusionOverview(null);
+    setFusionError(null);
+  }, [patient?.id]);
 
   // Group series by study
   const studiesWithSeries = studies.map(study => ({
@@ -45,11 +142,23 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   // Find RT structure series, image series, and registration series
   const rtStructureSeries = series.filter(s => s.modality === 'RTSTRUCT');
   const imageSeries = series.filter(s => ['CT', 'MR', 'PT'].includes(s.modality));
-  const registrationSeries = series.filter(s => s.modality === 'REG');
-  
-  // Find MRI series that have registrations
-  const ctSeries = imageSeries.filter(s => s.modality === 'CT');
-  const mriSeries = imageSeries.filter(s => s.modality === 'MR');
+  const fusionAssociations = fusionOverview?.associations ?? [];
+  const associationsBySeriesId = useMemo(() => {
+    const map = new Map<number, FusionAssociationSummary[]>();
+    fusionAssociations.forEach((assoc) => {
+      if (assoc.primarySeriesId != null) {
+        const list = map.get(assoc.primarySeriesId) ?? [];
+        list.push(assoc);
+        map.set(assoc.primarySeriesId, list);
+      }
+      if (assoc.secondarySeriesId != null) {
+        const list = map.get(assoc.secondarySeriesId) ?? [];
+        list.push(assoc);
+        map.set(assoc.secondarySeriesId, list);
+      }
+    });
+    return map;
+  }, [fusionAssociations]);
 
   // Load patient tags
   useEffect(() => {
@@ -85,27 +194,27 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
       };
       
       // Load association data
-      const loadAssociationData = async () => {
-        if (patient?.id) {
-          setLoadingAssociations(true);
-          try {
-            const response = await fetch(`/api/registration/associations?patientId=${patient.id}`);
-            if (response.ok) {
-              const data = await response.json();
-              setAssociationData(data);
-            }
-          } catch (err) {
-            console.error('Error loading associations:', err);
-          } finally {
-            setLoadingAssociations(false);
-          }
+      const loadFusionOverview = async () => {
+        if (!patient?.id) return;
+        setLoadingFusionOverview(true);
+        setFusionError(null);
+        try {
+          const response = await fetch(`/api/patients/${patient.id}/fusion/overview`);
+          if (!response.ok) throw new Error(`Failed to load fusion overview (${response.status})`);
+          const data: PatientFusionOverview = await response.json();
+          setFusionOverview(data);
+        } catch (err: any) {
+          console.error('Error loading fusion overview:', err);
+          setFusionError(err?.message || 'Failed to load fusion overview');
+        } finally {
+          setLoadingFusionOverview(false);
         }
       };
-      
+
       loadRTStructures();
-      loadAssociationData();
+      loadFusionOverview();
     }
-  }, [isExpanded]);
+  }, [isExpanded, patient?.id, rtStructureSeries]);
 
   const getModalityColor = (modality: string) => {
     switch (modality) {
@@ -276,17 +385,17 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                   </Badge>
                 )}
                 
-                {associationData?.associations.length && (
+                {fusionOverview && fusionOverview.associations.filter(a => a.studyId === study.id).length > 0 && (
                   <Badge 
                     variant="secondary" 
                     className="bg-orange-900/20 text-orange-400 border-orange-600/50"
                   >
                     <GitBranch className="h-3 w-3 mr-1" />
-                    {associationData.associations.length} Association{associationData.associations.length !== 1 ? 's' : ''}
+                    {fusionOverview.associations.filter(a => a.studyId === study.id).length} Association{fusionOverview.associations.filter(a => a.studyId === study.id).length !== 1 ? 's' : ''}
                   </Badge>
                 )}
                 
-                {associationData?.associations.some(a => a.relationship === 'shared-frame') && (
+                {fusionOverview?.associations.some(a => a.studyId === study.id && a.markers?.includes('FRAME_OF_REFERENCE')) && (
                   <Badge 
                     variant="secondary" 
                     className="bg-blue-900/20 text-blue-400 border-blue-600/50"
@@ -341,13 +450,10 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                     .filter(s => ['CT', 'MR', 'PT', 'RTSTRUCT', 'REG'].includes(s.modality))
                     .sort((a, b) => (a.seriesNumber || 999) - (b.seriesNumber || 999))
                     .map((s) => {
-                      const association = associationData?.associations.find(assoc => 
-                        assoc.siblingSeriesIds.includes(s.id)
-                      );
-                      const isPrimary = association?.targetSeriesId === s.id;
-                      const isCtac = associationData?.ctacSeriesIds.includes(s.id);
-                      const isCoReg = association && association.relationship === 'shared-frame';
-                      const isReg = association && association.relationship === 'registered';
+                      const related = associationsBySeriesId.get(s.id) ?? [];
+                      const isPrimary = related.some(assoc => assoc.primarySeriesId === s.id);
+                      const isCoReg = related.some(assoc => assoc.secondarySeriesId === s.id && assoc.markers?.includes('FRAME_OF_REFERENCE'));
+                      const isReg = related.some(assoc => assoc.secondarySeriesId === s.id && !assoc.markers?.includes('FRAME_OF_REFERENCE'));
 
                       const handleDeleteSeries = async () => {
                         if (!confirm(`Delete series ${s.seriesDescription || s.id}? This removes files and DB rows.`)) return;
@@ -384,7 +490,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                                 {s.seriesDescription || `Series ${s.seriesNumber || '?'}`}
                               </span>
                               {isPrimary && <span className="text-green-400 text-xs">●</span>}
-                              {isCtac && <span className="text-yellow-400 text-xs">⚡</span>}
                               {isCoReg && !isPrimary && <LinkIcon className="h-2.5 w-2.5 text-blue-400" />}
                               {isReg && !isPrimary && <GitBranch className="h-2.5 w-2.5 text-orange-400" />}
                             </div>
@@ -407,145 +512,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
               </div>
             </div>
 
-            {/* Eclipse-Style Fusion Mapping */}
-            {associationData?.associations.length && (
-              <div className="space-y-3">
-                <h4 className="text-sm font-medium text-orange-400 flex items-center gap-2">
-                  <GitBranch className="h-4 w-4" />
-                  Eclipse-Style Fusion Mapping
-                </h4>
-                <div className="space-y-3">
-                  {(() => {
-                    // Group series by associations across all studies
-                    const allSeries = studiesWithSeries.flatMap(study => study.series);
-                    const processedSeriesIds = new Set<number>();
-                    const mappings: Array<{
-                      type: 'association' | 'standalone';
-                      association?: RegistrationAssociation;
-                      series: any[];
-                      rtStructures?: any[];
-                    }> = [];
-
-                    // Process associations
-                    associationData.associations.forEach(assoc => {
-                      const associatedSeries = [
-                        ...(assoc.targetSeriesId ? [allSeries.find(s => s.id === assoc.targetSeriesId)] : []),
-                        ...assoc.sourcesSeriesIds.map(id => allSeries.find(s => s.id === id))
-                      ].filter(Boolean);
-
-                      if (associatedSeries.length > 0) {
-                        // Find RT structures associated with these series
-                        const associatedRTStructures = allSeries.filter(s => 
-                          s.modality === 'RTSTRUCT' && 
-                          associatedSeries.some(imgS => imgS.studyId === s.studyId)
-                        );
-
-                        mappings.push({
-                          type: 'association',
-                          association: assoc,
-                          series: associatedSeries,
-                          rtStructures: associatedRTStructures
-                        });
-                        associatedSeries.forEach(s => processedSeriesIds.add(s.id));
-                      }
-                    });
-
-                    return mappings.map((mapping, idx) => (
-                      <div key={idx} className="bg-gray-800/20 rounded-lg p-3">
-                        {mapping.type === 'association' && (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {/* Co-registered series in dashed box */}
-                              {mapping.association?.relationship === 'shared-frame' && mapping.series.length > 1 ? (
-                                <div className="border-2 border-dashed border-blue-400/50 bg-blue-900/5 rounded-lg p-2 flex items-center gap-2">
-                                  <LinkIcon className="h-3 w-3 text-blue-400 flex-shrink-0" />
-                                  <div className="flex items-center gap-3">
-                                    {mapping.series.map((s) => (
-                                      <div key={s.id} className="flex items-center gap-2">
-                                        <Badge className={`${getModalityColor(s.modality)} text-xs px-1.5 py-0.5`}>
-                                          {s.modality}
-                                        </Badge>
-                                        <span className="text-xs text-gray-200">
-                                          {s.seriesDescription?.substring(0, 15) || `S${s.seriesNumber}`} ({s.id})
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <span className="text-xs text-blue-300 ml-2">Co-registered</span>
-                                </div>
-                              ) : (
-                                // Registration relationship with target in solid box
-                                <div className="flex items-center gap-3 flex-wrap">
-                                  {/* Source series */}
-                                  <div className="flex items-center gap-2">
-                                    {mapping.series.filter(s => s.id !== mapping.association?.targetSeriesId).map(s => (
-                                      <div key={s.id} className="flex items-center gap-2">
-                                        <Badge className={`${getModalityColor(s.modality)} text-xs px-1.5 py-0.5`}>
-                                          {s.modality}
-                                        </Badge>
-                                        <span className="text-xs text-gray-300">
-                                          {s.seriesDescription?.substring(0, 12) || `S${s.seriesNumber}`} ({s.id})
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  
-                                  {/* Connection arrow with REG info */}
-                                  {mapping.association?.regFile && (
-                                    <div className="flex items-center gap-1">
-                                      <div className="w-8 h-px bg-orange-400"></div>
-                                      <ArrowRight className="h-3 w-3 text-orange-400" />
-                                      <span className="text-xs text-orange-300 bg-orange-900/20 px-1 rounded">
-                                        REG: {mapping.association.regFile.split('/').pop()}
-                                      </span>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Target series in solid box */}
-                                  {mapping.association?.targetSeriesId && (() => {
-                                    const target = mapping.series.find(s => s.id === mapping.association?.targetSeriesId);
-                                    return target ? (
-                                      <div className="border-2 border-solid border-green-400/60 bg-green-900/10 rounded-lg p-2 flex items-center gap-2">
-                                        <Badge className={`${getModalityColor(target.modality)} text-xs px-1.5 py-0.5`}>
-                                          {target.modality}
-                                        </Badge>
-                                        <span className="text-xs text-gray-200">
-                                          {target.seriesDescription?.substring(0, 12) || `S${target.seriesNumber}`} ({target.id})
-                                        </span>
-                                        <span className="text-xs text-green-300">Primary</span>
-                                      </div>
-                                    ) : null;
-                                  })()}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* RT Structures attachment */}
-                            {mapping.rtStructures && mapping.rtStructures.length > 0 && (
-                              <div className="ml-4 flex items-center gap-2">
-                                <div className="w-4 h-px bg-green-400"></div>
-                                <div className="flex items-center gap-2">
-                                  <Brain className="h-3 w-3 text-green-400" />
-                                  <span className="text-xs text-green-300">
-                                    {mapping.rtStructures.length} RT Structure{mapping.rtStructures.length !== 1 ? 's' : ''}
-                                  </span>
-                                  {mapping.rtStructures.map(rt => (
-                                    <span key={rt.id} className="text-xs text-gray-400">
-                                      {rt.seriesDescription?.substring(0, 10) || 'Structures'} ({rt.id})
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            )}
-
+            {/* Additional fusion mapping handled via Detailed Fusion Associations */}
             {/* Image Thumbnails */}
             {imageSeries.length > 0 && (
               <div className="space-y-2">
@@ -611,65 +578,88 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
             ))}
 
             {/* Detailed Association Information - Only in Expanded View */}
-            {associationData?.associations.length && (
+            {(loadingFusionOverview || fusionError || (fusionOverview && fusionOverview.associations.length > 0)) && (
               <div className="space-y-3">
                 <h4 className="text-sm font-medium text-orange-400 flex items-center gap-2">
                   <GitBranch className="h-4 w-4" />
                   Detailed Fusion Associations
                 </h4>
-                <div className="space-y-3">
-                  {associationData.associations.map((assoc, idx) => {
-                    const targetSeries = series.find(s => s.id === assoc.targetSeriesId);
-                    const sourceSeries = assoc.sourcesSeriesIds.map(id => series.find(s => s.id === id)).filter(Boolean);
-                    const isRegistered = assoc.relationship === 'registered';
-                    
-                    return (
-                      <div key={idx} className="bg-gray-800/30 rounded-lg p-3 text-xs">
-                        <div className="flex items-start gap-3">
-                          <div className="flex-shrink-0 mt-0.5">
-                            <Badge variant="outline" className={
-                              isRegistered 
-                                ? "text-orange-300 border-orange-500/50" 
-                                : "text-blue-300 border-blue-500/50"
-                            }>
-                              {isRegistered ? 'REG' : 'Co-reg'}
+                {loadingFusionOverview && (
+                  <div className="flex items-center gap-2 text-gray-400 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading fusion associations...
+                  </div>
+                )}
+                {fusionError && (
+                  <div className="flex items-center gap-2 text-amber-400 text-sm">
+                    <AlertTriangle className="h-4 w-4" />
+                    {fusionError}
+                  </div>
+                )}
+                {fusionOverview && fusionOverview.associations.length > 0 && (
+                  <div className="space-y-3">
+                    {fusionOverview.associations.map((assoc, idx) => {
+                      const primary = series.find(s => s.id === assoc.primarySeriesId);
+                      const secondary = series.find(s => s.id === assoc.secondarySeriesId);
+                      const registration = series.find(s => s.id === assoc.registrationSeriesId);
+                      const statusStyles: Record<FusionAssociationStatus, string> = {
+                        ready: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/40',
+                        pending: 'text-amber-300 bg-amber-500/10 border-amber-400/40',
+                        'missing-secondary': 'text-rose-300 bg-rose-500/10 border-rose-400/40',
+                        unmapped: 'text-slate-300 bg-slate-500/10 border-slate-400/40',
+                      };                    
+                      return (
+                        <div key={idx} className="bg-gray-800/30 rounded-lg p-3 text-xs">
+                          <div className="flex items-start gap-3">
+                            <Badge className={`${statusStyles[assoc.status]} border`}>
+                              <CircleDot className="h-3 w-3 mr-1" />
+                              {assoc.status.toUpperCase()}
                             </Badge>
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            {/* Association details */}
-                            <div className="text-gray-300">
-                              <strong>ID {assoc.studyId}</strong> • 
-                              {assoc.regFile && <span className="ml-1 text-orange-300">REG: {assoc.regFile.split('/').pop()}</span>}
-                              {assoc.sourceFoR !== assoc.targetFoR && <span className="ml-1 text-purple-300">Cross-FoR</span>}
-                            </div>
-                            
-                            {/* Series connections */}
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {sourceSeries.map(s => (
-                                <span key={s.id} className="text-gray-400">
-                                  {s.modality}({s.id})
+                            <div className="flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2 text-gray-300">
+                                <span className="font-semibold">Primary:</span>
+                                <span className="text-gray-200">
+                                  {primary ? `${primary.modality ?? '—'} • ${primary.seriesDescription ?? primary.id}` : assoc.primarySeriesId ?? '—'}
                                 </span>
-                              ))}
-                              <ArrowRight className="h-3 w-3 text-gray-500" />
-                              {targetSeries && (
-                                <span className="text-green-300 font-medium">
-                                  {targetSeries.modality}({targetSeries.id}) PRIMARY
+                                <ArrowRight className="h-3 w-3 text-gray-500" />
+                                <span className="font-semibold">Secondary:</span>
+                                <span className="text-gray-200">
+                                  {secondary ? `${secondary.modality ?? '—'} • ${secondary.seriesDescription ?? secondary.id}` : assoc.secondarySeriesId ?? '—'}
                                 </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-gray-400">
+                                <span>Registration:</span>
+                                <span className="text-gray-200">
+                                  {registration ? registration.seriesDescription ?? registration.id : assoc.registrationId ?? '—'}
+                                </span>
+                                {assoc.registrationFilePath && (
+                                  <span className="text-gray-500">
+                                    ({assoc.registrationFilePath.split('/').pop()})
+                                  </span>
+                                )}
+                              </div>
+                              {assoc.reason && (
+                                <div className="text-amber-400 flex items-center gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {assoc.reason}
+                                </div>
+                              )}
+                              {assoc.markers?.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {assoc.markers.map((marker) => (
+                                    <Badge key={marker} variant="outline" className="text-[10px] uppercase tracking-wide border-gray-600 text-gray-300">
+                                      {marker}
+                                    </Badge>
+                                  ))}
+                                </div>
                               )}
                             </div>
-
-                            {/* Transform candidates */}
-                            {isRegistered && assoc.transformCandidates?.length > 0 && (
-                              <div className="text-gray-500">
-                                {assoc.transformCandidates.length} transform candidate{assoc.transformCandidates.length !== 1 ? 's' : ''}
-                              </div>
-                            )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

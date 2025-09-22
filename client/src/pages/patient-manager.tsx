@@ -240,6 +240,12 @@ export default function PatientManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const invalidatePatientData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/studies"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/series"] });
+  }, [queryClient]);
+
   // Toggle favorite status for a patient
   const toggleFavorite = (patientId: number) => {
     setFavoritePatients(prev => {
@@ -435,6 +441,7 @@ export default function PatientManager() {
         title: 'Manifest run requested',
         description: `${data?.runs?.length ?? 0} fusion pair${(data?.runs?.length ?? 0) === 1 ? '' : 's'} queued.`,
       });
+      invalidatePatientData();
       fusionOverviewQuery.refetch();
     },
     onError: (error: any) => {
@@ -465,6 +472,7 @@ export default function PatientManager() {
         title: 'Derived series cleared',
         description: 'Fused series removed and manifest cache reset.',
       });
+      invalidatePatientData();
       fusionOverviewQuery.refetch();
     },
     onError: (error: any) => {

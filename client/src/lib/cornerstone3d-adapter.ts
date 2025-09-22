@@ -6,7 +6,7 @@
  */
 
 import * as cornerstone3D from '@cornerstonejs/core';
-import * as cornerstone3DTools from '@cornerstonejs/tools';
+import { metaData as cornerstoneMetaData } from '@cornerstonejs/core';
 import { init as initCore3D } from '@cornerstonejs/core';
 import { init as initTools3D } from '@cornerstonejs/tools';
 
@@ -17,6 +17,32 @@ export const ENABLE_CORNERSTONE3D = true; // Enabled for GPU acceleration
 let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 let imageLoaderRegistered = false;
+
+type CachedImageMetadata = {
+  sopInstanceUID: string;
+  pixelSpacing?: [number, number];
+  imageOrientationPatient?: number[];
+  imagePositionPatient?: number[];
+  sliceThickness?: number;
+  frameOfReferenceUID?: string;
+  windowCenter?: number;
+  windowWidth?: number;
+  rescaleSlope?: number;
+  rescaleIntercept?: number;
+  modality?: string;
+  minPixelValue?: number;
+  maxPixelValue?: number;
+  instanceNumber?: number;
+};
+
+type CachedImageEntry = {
+  id: string;
+  sopInstanceUID: string;
+  width: number;
+  height: number;
+  data: Float32Array;
+  metadata?: CachedImageMetadata;
+};
 
 /**
  * Check if GPU acceleration is available
@@ -107,54 +133,244 @@ function registerCustomImageLoader() {
 }
 
 // Store image data temporarily for the loader
-const imageDataCache = new Map<string, any>();
+const imageDataCache = new Map<string, CachedImageEntry>();
+
+function normalizeImageId(imageId: string): string {
+  return imageId.startsWith('superbeam://') ? imageId.slice('superbeam://'.length) : imageId;
+}
+
+function cacheImageData(imageId: string, entry: CachedImageEntry) {
+  imageDataCache.set(imageId, entry);
+  const normalizedId = normalizeImageId(imageId);
+  if (normalizedId !== imageId) {
+    imageDataCache.set(normalizedId, entry);
+  }
+  if (entry.sopInstanceUID) {
+    imageDataCache.set(entry.sopInstanceUID, entry);
+  }
+}
+
+function getCachedImage(imageId: string): CachedImageEntry | undefined {
+  return imageDataCache.get(imageId) ?? imageDataCache.get(normalizeImageId(imageId));
+}
+
+function calculateMinMax(data: Float32Array): { min: number; max: number } {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < data.length; i += 1) {
+    const value = data[i];
+    if (Number.isNaN(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: -1000, max: 3000 };
+  }
+
+  if (min === max) {
+    return { min: min - 1, max: max + 1 };
+  }
+
+  return { min, max };
+}
+
+export interface VolumeStackSlice {
+  sopInstanceUID: string;
+  width: number;
+  height: number;
+  pixelData: Float32Array;
+  metadata?: Partial<CachedImageMetadata>;
+}
+
+export interface RegisterVolumeStacksOptions {
+  renderingEngineId: string;
+  viewportId: string;
+  ctSlices: VolumeStackSlice[];
+  fusionSlices?: VolumeStackSlice[];
+}
+
+export interface RegisteredVolumeActors {
+  ct: {
+    actorId: string;
+    imageIds: string[];
+  };
+  fusion?: {
+    actorId: string;
+    imageIds: string[];
+  } | null;
+}
+
+export interface RegisterVolumeStacksResult {
+  renderingEngine: any;
+  viewport: any;
+  actors: RegisteredVolumeActors;
+}
+
+export function cacheStackSlice(prefix: 'ct' | 'fusion', slice: VolumeStackSlice): string {
+  const imageId = `superbeam://${prefix}/${slice.sopInstanceUID}`;
+  const baseMetadata: CachedImageMetadata = {
+    sopInstanceUID: slice.sopInstanceUID,
+    ...(slice.metadata ?? {}),
+  };
+
+  if (!Number.isFinite(baseMetadata.minPixelValue) || !Number.isFinite(baseMetadata.maxPixelValue)) {
+    const range = calculateMinMax(slice.pixelData);
+    baseMetadata.minPixelValue = baseMetadata.minPixelValue ?? range.min;
+    baseMetadata.maxPixelValue = baseMetadata.maxPixelValue ?? range.max;
+  }
+
+  cacheImageData(imageId, {
+    id: imageId,
+    sopInstanceUID: slice.sopInstanceUID,
+    width: slice.width,
+    height: slice.height,
+    data: slice.pixelData,
+    metadata: baseMetadata,
+  });
+
+  registerSliceMetadata(imageId, slice, baseMetadata, prefix);
+
+  return imageId;
+}
+
+function registerSliceMetadata(
+  imageId: string,
+  slice: VolumeStackSlice,
+  metadata: CachedImageMetadata,
+  prefix: 'ct' | 'fusion'
+) {
+  const rows = slice.height;
+  const columns = slice.width;
+  const pixelSpacing = metadata.pixelSpacing ?? [1, 1];
+  const imageOrientationPatient = metadata.imageOrientationPatient ?? [1, 0, 0, 0, 1, 0];
+  const imagePositionPatient = metadata.imagePositionPatient ?? [0, 0, 0];
+  const frameOfReferenceUID = metadata.frameOfReferenceUID ?? `superbeam-${prefix}-for`;
+  const sliceThickness = metadata.sliceThickness ?? 1;
+  const instanceNumberCandidate = (metadata as any).instanceNumber;
+  const instanceNumber = Number.isFinite(instanceNumberCandidate)
+    ? Number(instanceNumberCandidate)
+    : 1;
+  const modality = metadata.modality ?? (prefix === 'ct' ? 'CT' : 'PT');
+
+  cornerstoneMetaData.add('generalSeriesModule', imageId, {
+    modality,
+    seriesInstanceUID: frameOfReferenceUID,
+  });
+
+  cornerstoneMetaData.add('generalImageModule', imageId, {
+    instanceNumber,
+  });
+
+  cornerstoneMetaData.add('imagePlaneModule', imageId, {
+    frameOfReferenceUID,
+    rows,
+    columns,
+    imageOrientationPatient,
+    imagePositionPatient,
+    pixelSpacing,
+    sliceThickness,
+  });
+
+  cornerstoneMetaData.add('imagePixelModule', imageId, {
+    rows,
+    columns,
+    samplesPerPixel: 1,
+    photometricInterpretation: 'MONOCHROME2',
+    bitsAllocated: 32,
+    bitsStored: 32,
+    highBit: 31,
+    pixelRepresentation: 1,
+  });
+
+  cornerstoneMetaData.add('modalityLutModule', imageId, {
+    rescaleSlope: metadata.rescaleSlope ?? 1,
+    rescaleIntercept: metadata.rescaleIntercept ?? 0,
+  });
+}
+
+function cacheSlices(imageIds: string[], slices: VolumeStackSlice[], prefix: 'ct' | 'fusion') {
+  slices.forEach((slice) => {
+    const imageId = cacheStackSlice(prefix, slice);
+    imageIds.push(imageId);
+  });
+}
+
+export function registerVolumeStacks(options: RegisterVolumeStacksOptions): RegisterVolumeStacksResult {
+  if (!imageLoaderRegistered) {
+    registerCustomImageLoader();
+  }
+
+  const { renderingEngineId, viewportId, ctSlices, fusionSlices } = options;
+
+  const renderingEngine = cornerstone3D.getRenderingEngine(renderingEngineId);
+  if (!renderingEngine) {
+    throw new Error(`Rendering engine ${renderingEngineId} not found`);
+  }
+
+  const viewport = renderingEngine.getViewport(viewportId);
+  if (!viewport) {
+    throw new Error(`Viewport ${viewportId} not found on rendering engine ${renderingEngineId}`);
+  }
+
+  const ctImageIds: string[] = [];
+  cacheSlices(ctImageIds, ctSlices, 'ct');
+
+  const fusionImageIds: string[] = [];
+  cacheSlices(fusionImageIds, fusionSlices ?? [], 'fusion');
+
+  return {
+    renderingEngine,
+    viewport,
+    actors: {
+      ct: {
+        actorId: 'ct-stack',
+        imageIds: ctImageIds,
+      },
+      fusion: fusionImageIds.length
+        ? {
+            actorId: 'fusion-stack',
+            imageIds: fusionImageIds,
+          }
+        : null,
+    },
+  };
+}
 
 /**
  * Custom image loader for Float32Array data
  */
 function loadAndCacheImage(imageId: string): any {
   console.log('[Custom Loader] loadAndCacheImage called with:', imageId);
-  
-  // Return an object with a promise property as expected by Cornerstone3D
+
   const promise = new Promise((resolve, reject) => {
     try {
-      const cleanId = imageId.replace('superbeam://', '');
-      console.log('[Custom Loader] Looking for cached data with ID:', cleanId);
-      
-      const cachedData = imageDataCache.get(cleanId);
-      
+      const cachedData = getCachedImage(imageId);
+
       if (!cachedData) {
-        console.error('[Custom Loader] No cached data found for:', cleanId);
+        console.error('[Custom Loader] No cached data found for:', imageId);
         reject(new Error(`Image data not found for ${imageId}`));
         return;
       }
 
       const { data, width, height, metadata } = cachedData;
-      console.log('[Custom Loader] Found cached data:', { width, height, dataLength: data.length, metadata });
-      
-      // Calculate min/max values safely
-      let minPixel = Infinity;
-      let maxPixel = -Infinity;
-      
-      try {
-        for (let i = 0; i < data.length; i++) {
-          if (data[i] < minPixel) minPixel = data[i];
-          if (data[i] > maxPixel) maxPixel = data[i];
-        }
-        console.log('[Custom Loader] Calculated min/max:', minPixel, maxPixel);
-      } catch (err) {
-        console.error('[Custom Loader] Error calculating min/max:', err);
-        minPixel = -1000;
-        maxPixel = 3000;
+      const normalizedMetadata = metadata ?? { sopInstanceUID: cachedData.sopInstanceUID };
+
+      const slope = normalizedMetadata.rescaleSlope ?? (normalizedMetadata as any).slope ?? 1;
+      const intercept = normalizedMetadata.rescaleIntercept ?? (normalizedMetadata as any).intercept ?? 0;
+      const pixelSpacing = Array.isArray(normalizedMetadata.pixelSpacing) && normalizedMetadata.pixelSpacing.length === 2
+        ? normalizedMetadata.pixelSpacing as [number, number]
+        : ([1, 1] as [number, number]);
+      const imagePosition = normalizedMetadata.imagePositionPatient ?? (normalizedMetadata as any).imagePosition ?? [0, 0, 0];
+      const imageOrientation = normalizedMetadata.imageOrientationPatient ?? (normalizedMetadata as any).imageOrientation ?? [1, 0, 0, 0, 1, 0];
+
+      let minPixel = normalizedMetadata.minPixelValue;
+      let maxPixel = normalizedMetadata.maxPixelValue;
+      if (!Number.isFinite(minPixel) || !Number.isFinite(maxPixel)) {
+        const range = calculateMinMax(data);
+        minPixel = range.min;
+        maxPixel = range.max;
       }
-      
-      // Create an image object compatible with Cornerstone3D
-      // Pull common DICOM display/geometry fields from metadata if present
-      const slope = (metadata?.rescaleSlope ?? metadata?.slope ?? 1) as number;
-      const intercept = (metadata?.rescaleIntercept ?? metadata?.intercept ?? 0) as number;
-      const px = Array.isArray(metadata?.pixelSpacing) ? metadata.pixelSpacing : undefined;
-      const ipp = metadata?.imagePosition || metadata?.imagePositionPatient;
-      const iop = metadata?.imageOrientation || metadata?.imageOrientationPatient;
 
       const image = {
         imageId,
@@ -164,24 +380,26 @@ function loadAndCacheImage(imageId: string): any {
         width,
         intercept,
         slope,
-        windowCenter: metadata?.windowCenter || 40,
-        windowWidth: metadata?.windowWidth || 300,
-        pixelSpacing: px || [1, 1],
-        imagePositionPatient: ipp || [0, 0, 0],
-        imageOrientationPatient: iop || [1, 0, 0, 0, 1, 0],
+        windowCenter: normalizedMetadata.windowCenter ?? 40,
+        windowWidth: normalizedMetadata.windowWidth ?? 300,
+        pixelSpacing,
+        imagePositionPatient: imagePosition,
+        imageOrientationPatient: imageOrientation,
+        sliceThickness: normalizedMetadata.sliceThickness,
+        frameOfReferenceUID: normalizedMetadata.frameOfReferenceUID,
         sizeInBytes: data.byteLength,
         getPixelData: () => data,
-        // Calculate min/max without spread operator for large arrays
-        minPixelValue: data.reduce((min, val) => val < min ? val : min, Infinity),
-        maxPixelValue: data.reduce((max, val) => val > max ? val : max, -Infinity),
+        minPixelValue: minPixel,
+        maxPixelValue: maxPixel,
         stats: {
           lastGetPixelDataTime: 0,
         },
         decodeTimeInMS: 0,
         floatPixelData: data,
         color: false,
-        columnPixelSpacing: (px?.[1] ?? px?.[0] ?? 1),
-        rowPixelSpacing: (px?.[0] ?? px?.[1] ?? 1),
+        columnPixelSpacing: pixelSpacing[1],
+        rowPixelSpacing: pixelSpacing[0],
+        modality: normalizedMetadata.modality,
       };
 
       console.log('[Custom Loader] Created image object with size:', image.width, 'x', image.height);
@@ -191,10 +409,8 @@ function loadAndCacheImage(imageId: string): any {
       reject(error);
     }
   });
-  
-  const result = { promise };
-  console.log('[Custom Loader] Returning result object:', result);
-  return result;
+
+  return { promise };
 }
 
 /**
@@ -418,17 +634,21 @@ export async function render16BitImageGPU(
     const imageId = `superbeam://${imageData.sopInstanceUID}`;
     
     // Store image data in cache for our custom loader
-    imageDataCache.set(imageData.sopInstanceUID, {
-      data: imageData.data,
+    const cachedId = `superbeam://ct/${imageData.sopInstanceUID}`;
+    cacheImageData(cachedId, {
+      id: cachedId,
+      sopInstanceUID: imageData.sopInstanceUID,
       width: imageData.width,
       height: imageData.height,
+      data: imageData.data,
       metadata: {
+        sopInstanceUID: imageData.sopInstanceUID,
         windowCenter: windowLevel.center,
         windowWidth: windowLevel.width,
-        pixelSpacing: [1, 1], // Will be updated with actual spacing
-        imagePosition: [0, 0, 0], // Will be updated with actual position
-        imageOrientation: [1, 0, 0, 0, 1, 0], // Will be updated with actual orientation
-      }
+        pixelSpacing: [1, 1],
+        imagePositionPatient: [0, 0, 0],
+        imageOrientationPatient: [1, 0, 0, 0, 1, 0],
+      },
     });
 
     // Load the image through Cornerstone3D
@@ -546,7 +766,6 @@ export async function render16BitImageGPU(
         stack: error instanceof Error ? error.stack : undefined,
         viewportId,
         imageId,
-        cs3dElementExists: !!cs3dElement,
         canvasDimensions: { width: canvas.width, height: canvas.height }
       });
       

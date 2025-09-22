@@ -23,7 +23,7 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
+import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest, onFusionSliceCached } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
@@ -31,11 +31,11 @@ import { undoRedoManager } from "@/lib/undo-system";
 import { attachDiceDebug } from "@/lib/dice-utils";
 import { 
   isGPUAccelerationAvailable,
-  initializeCornerstone3D,
-  render16BitImageGPU
+  cacheStackSlice,
+  type VolumeStackSlice,
 } from "@/lib/cornerstone3d-adapter";
 import { log } from '@/lib/log';
-import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from "@/lib/gpu-viewport-manager";
+import { synchronizeActors, type FusionManagerHandle } from '@/lib/cornerstone-fusion-manager';
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -205,12 +205,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [previewContours, setPreviewContours] = useState<PreviewContour[]>([]);
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
-  const [dicomPixelData, setDicomPixelData] = useState<any>(null);
-  
   // GPU acceleration state for hybrid rendering
   const [isGPUMode, setIsGPUMode] = useState(false);
   const [gpuCheckComplete, setGpuCheckComplete] = useState(false);
-  const [cornerstone3DInitialized, setCornerstone3DInitialized] = useState(false);
+  const [isGPUViewportActive, setIsGPUViewportActive] = useState(false);
+  const [ctMetadataVersion, setCtMetadataVersion] = useState(0);
+  const [cacheVersion, setCacheVersion] = useState(0);
   const [prefetchProgress, setPrefetchProgress] = useState({ loaded: 0, total: 0 });
   // Blob tools dialog state
   const [blobDialogOpen, setBlobDialogOpen] = useState(false);
@@ -243,6 +243,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
   const fusionIssueRef = useRef<string | null>(null);
   const missingMatrixLogRef = useRef(false);
+  const gpuContainerRef = useRef<HTMLDivElement>(null);
+  const fusionManagerRef = useRef<FusionManagerHandle | null>(null);
+  const fusionSliceListenerRef = useRef<(() => void) | null>(null);
+  const ctMetadataRef = useRef<Map<string, {
+    index: number;
+    pixelSpacing?: [number, number];
+    imagePositionPatient?: [number, number, number];
+    imageOrientationPatient?: number[];
+    sliceThickness?: number | null;
+  }>>(new Map());
+  const ctStackSlicesRef = useRef<Map<string, VolumeStackSlice>>(new Map());
+  const pendingCtCacheRef = useRef<Map<string, { data: Float32Array; width: number; height: number; min?: number; max?: number; metadata?: any }>>(new Map());
+  const fusionSlicesRef = useRef<Map<string, { imageId: string; slice: FuseboxSlice }>>(new Map());
   const fuseboxCacheRef = useRef<Map<string, {
     canvas: HTMLCanvasElement;
     slice: FuseboxSlice;
@@ -278,6 +291,107 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
     return null;
   }, []);
+
+  const parseDICOMNumberArray = (value: any, expectedLength?: number): number[] | null => {
+    if (value == null) return null;
+    let numbers: number[] | null = null;
+    if (Array.isArray(value)) {
+      const arr = value.map((item) => Number(item)).filter((num) => Number.isFinite(num));
+      numbers = arr.length ? arr : null;
+    } else if (typeof value === 'string') {
+      const arr = value
+        .split('\\')
+        .map((token) => Number(token.trim()))
+        .filter((num) => Number.isFinite(num));
+      numbers = arr.length ? arr : null;
+    }
+
+    if (!numbers) return null;
+    if (typeof expectedLength === 'number' && numbers.length < expectedLength) {
+      return null;
+    }
+    return numbers;
+  };
+
+  const resolvePixelSpacing = (value: any): [number, number] | undefined => {
+    const arr = parseDICOMNumberArray(value, 2);
+    if (arr && arr.length >= 2) {
+      return [arr[0], arr[1]];
+    }
+    return undefined;
+  };
+
+  const resolveImagePositionPatient = (value: any): [number, number, number] | undefined => {
+    const arr = parseDICOMNumberArray(value, 3);
+    if (arr && arr.length >= 3) {
+      return [arr[0], arr[1], arr[2]];
+    }
+    return undefined;
+  };
+
+  const resolveImageOrientationPatient = (value: any): number[] | undefined => {
+    const arr = parseDICOMNumberArray(value, 6);
+    if (arr && arr.length >= 6) {
+      return arr.slice(0, 6);
+    }
+    return undefined;
+  };
+
+  const ensureCtStackSlice = useCallback((sopInstanceUID: string, cacheEntry: any) => {
+    if (!isGPUMode) {
+      return;
+    }
+
+    if (!cacheEntry?.data || !cacheEntry.width || !cacheEntry.height) {
+      return;
+    }
+
+    if (ctStackSlicesRef.current.has(sopInstanceUID)) {
+      return;
+    }
+
+    const metadata = ctMetadataRef.current.get(sopInstanceUID);
+    if (!metadata) {
+      pendingCtCacheRef.current.set(sopInstanceUID, cacheEntry);
+      return;
+    }
+
+    const pixelSpacing = metadata.pixelSpacing
+      ?? resolvePixelSpacing(cacheEntry.metadata?.pixelSpacing);
+    const imagePositionPatient = metadata.imagePositionPatient
+      ?? resolveImagePositionPatient(cacheEntry.metadata?.imagePosition);
+    const imageOrientationPatient = metadata.imageOrientationPatient
+      ?? resolveImageOrientationPatient(cacheEntry.metadata?.imageOrientation);
+
+    const slice: VolumeStackSlice = {
+      sopInstanceUID,
+      width: cacheEntry.width,
+      height: cacheEntry.height,
+      pixelData: cacheEntry.data,
+      metadata: {
+        sopInstanceUID,
+        pixelSpacing,
+        imagePositionPatient,
+        imageOrientationPatient,
+        sliceThickness: metadata.sliceThickness ?? undefined,
+        minPixelValue: cacheEntry.min ?? cacheEntry.metadata?.min ?? undefined,
+        maxPixelValue: cacheEntry.max ?? cacheEntry.metadata?.max ?? undefined,
+      },
+    };
+
+    cacheStackSlice('ct', slice);
+    ctStackSlicesRef.current.set(sopInstanceUID, slice);
+    pendingCtCacheRef.current.delete(sopInstanceUID);
+  }, [isGPUMode]);
+
+  const storeImageInCache = useCallback((sopInstanceUID: string, imageData: any) => {
+    if (!imageData) return;
+    imageCacheRef.current.set(sopInstanceUID, imageData);
+    if (isGPUMode) {
+      ensureCtStackSlice(sopInstanceUID, imageData);
+    }
+    setCacheVersion((prev) => prev + 1);
+  }, [ensureCtStackSlice, isGPUMode]);
 
   const registrationOptions = useMemo<RegistrationOption[]>(() => {
     if (secondarySeriesId == null) {
@@ -545,6 +659,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const activeSeriesId = seriesId;
     return () => {
       fuseboxCacheRef.current.clear();
+      fusionSlicesRef.current.clear();
       clearFusionSlices(activeSeriesId);
     };
   }, [seriesId]);
@@ -617,6 +732,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const handleRegistrationSelect = useCallback((registrationId: string | null) => {
     setSelectedRegistrationId(registrationId);
     fuseboxCacheRef.current.clear();
+    fusionSlicesRef.current.clear();
     clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
     scheduleRenderRef.current?.();
@@ -3283,6 +3399,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
+    fusionSlicesRef.current.clear();
     clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
     scheduleRender();
@@ -3310,6 +3427,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
 
     fuseboxCacheRef.current.clear();
+    fusionSlicesRef.current.clear();
     clearFusionSlices(seriesId);
     loadMetadata();
 
@@ -3419,13 +3537,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const batchResponse = await fetch(`/api/series/${seriesId}/batch-metadata`, { signal });
         if (batchResponse.ok) {
           const batchMetadata = await batchResponse.json();
-          
+
           // Create lookup map for faster matching
           const metadataMap = new Map();
           batchMetadata.forEach((meta: any) => {
             metadataMap.set(meta.sopInstanceUID, meta);
           });
-          
+
           // Merge batch metadata with series images
           imagesWithMetadata = seriesImages.map((img: any) => {
             const metadata = metadataMap.get(img.sopInstanceUID);
@@ -3435,6 +3553,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 parsedSliceLocation: metadata.parsedSliceLocation,
                 parsedZPosition: metadata.parsedZPosition,
                 parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+                imagePosition: metadata.imagePosition ?? img.imagePosition ?? null,
+                imageOrientation: metadata.imageOrientation ?? img.imageOrientation ?? null,
+                pixelSpacing: metadata.pixelSpacing ?? img.pixelSpacing ?? null,
               };
             } else {
               return {
@@ -3442,6 +3563,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 parsedSliceLocation: null,
                 parsedZPosition: null,
                 parsedInstanceNumber: img.instanceNumber,
+                imagePosition: img.imagePosition ?? null,
+                imageOrientation: img.imageOrientation ?? null,
+                pixelSpacing: img.pixelSpacing ?? null,
               };
             }
           });
@@ -3467,6 +3591,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 parsedSliceLocation: metadata.parsedSliceLocation,
                 parsedZPosition: metadata.parsedZPosition,
                 parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+                imagePosition: metadata.imagePosition ?? img.imagePosition ?? null,
+                imageOrientation: metadata.imageOrientation ?? img.imageOrientation ?? null,
+                pixelSpacing: metadata.pixelSpacing ?? img.pixelSpacing ?? null,
               };
             } catch (error) {
               console.warn(`Failed to parse DICOM metadata for ${img.fileName}:`, error);
@@ -3475,6 +3602,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 parsedSliceLocation: null,
                 parsedZPosition: null,
                 parsedInstanceNumber: img.instanceNumber,
+                imagePosition: img.imagePosition ?? null,
+                imageOrientation: img.imageOrientation ?? null,
+                pixelSpacing: img.pixelSpacing ?? null,
               };
             }
           }),
@@ -3509,6 +3639,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       setImages(sortedImages);
       setCurrentIndex(0);
+
+      ctStackSlicesRef.current.clear();
+      pendingCtCacheRef.current.clear();
+      fusionSlicesRef.current.clear();
+      if (fusionManagerRef.current) {
+        fusionManagerRef.current.dispose();
+        fusionManagerRef.current = null;
+        setIsGPUViewportActive(false);
+      }
+
+      const ctMetadataMap = new Map<string, {
+        index: number;
+        pixelSpacing?: [number, number];
+        imagePositionPatient?: [number, number, number];
+        imageOrientationPatient?: number[];
+        sliceThickness?: number | null;
+      }>();
+      sortedImages.forEach((img: any, idx: number) => {
+        const pixelSpacing = resolvePixelSpacing(img.pixelSpacing ?? img.metadata?.pixelSpacing);
+        const imagePositionPatient = resolveImagePositionPatient(img.imagePosition ?? img.metadata?.imagePosition);
+        const imageOrientationPatient = resolveImageOrientationPatient(img.imageOrientation ?? img.metadata?.imageOrientation);
+        const sliceThicknessValue = Number(img.sliceThickness ?? img.metadata?.sliceThickness);
+        ctMetadataMap.set(img.sopInstanceUID, {
+          index: idx,
+          pixelSpacing,
+          imagePositionPatient,
+          imageOrientationPatient,
+          sliceThickness: Number.isFinite(sliceThicknessValue) ? sliceThicknessValue : null,
+        });
+      });
+      ctMetadataRef.current = ctMetadataMap;
+      setCtMetadataVersion((prev) => prev + 1);
       
       // Cache the sorted images
       if (imageCache?.current) {
@@ -3582,7 +3744,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const imageData = await parseDicomImage(arrayBuffer);
     
     if (imageData) {
-      imageCacheRef.current.set(sopInstanceUID, imageData);
+      storeImageInCache(sopInstanceUID, imageData);
     }
     
     return imageData;
@@ -3630,7 +3792,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           const imageData = await parseDicomImage(bytes.buffer);
           if (imageData) {
-            imageCacheRef.current.set(uid, imageData);
+            storeImageInCache(uid, imageData);
             results.set(uid, imageData);
           }
         }
@@ -4240,61 +4402,87 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   };
 
   const displayCurrentImage = async () => {
-    if (!canvasRef.current || images.length === 0) return;
+    if (images.length === 0) return;
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const useGPUViewport = orientation === 'axial' && isGPUViewportActive && !!fusionManagerRef.current;
+    let canvas: HTMLCanvasElement | null = null;
+    let ctx: CanvasRenderingContext2D | null = null;
 
     try {
       // Get the appropriate slice based on orientation
       let currentImage;
+      let safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
       if (orientation === 'axial') {
-        // Ensure currentIndex is valid
-        const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
         currentImage = images[safeIndex];
       } else {
-        // For sagittal/coronal, use MPR reconstruction
         const mprSlice = await getMPRSlice(orientation, currentIndex);
         currentImage = mprSlice;
       }
-      
+
       if (!currentImage) {
         console.error("No image available for orientation:", orientation);
         setError("Unable to display image. Please try refreshing.");
         return;
       }
+
+      if (orientation !== 'axial') {
+        safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
+      }
+
       const cacheKey = currentImage.sopInstanceUID;
+
+      if (useGPUViewport && orientation === 'axial') {
+        let imageData = imageCacheRef.current.get(cacheKey);
+        if (!imageData || !imageData.data) {
+          const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
+          if (reloadedImageData) {
+            imageData = reloadedImageData;
+          }
+        }
+
+        if (imageData) {
+          ensureCtStackSlice(cacheKey, imageData);
+        }
+
+        if (secondarySeriesId && fusionOpacity > 0) {
+          await renderFusionOverlayNew(null, currentImage);
+        }
+
+        const fusionEntry = fusionSlicesRef.current.get(cacheKey);
+        if (fusionManagerRef.current) {
+          await fusionManagerRef.current.updateSlice(safeIndex, fusionEntry?.imageId ?? null);
+        }
+
+        return;
+      }
+
+      canvas = canvasRef.current;
+      if (!canvas) return;
+      ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
       // Clear canvas
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       let imageData;
-      
+
       // Check if this is an MPR reconstructed image (synthetic)
       if (orientation !== 'axial' && currentImage.pixelData) {
-        // For MPR slices, use the reconstructed pixel data directly
         imageData = {
           width: currentImage.columns || currentImage.width || 512,
           height: currentImage.rows || currentImage.height || 512,
-          data: currentImage.pixelData
+          data: currentImage.pixelData,
         };
       } else {
-        // For axial slices, use the cache
         imageData = imageCacheRef.current.get(cacheKey);
 
         if (!imageData || !imageData.data) {
-          // Try to reload the image if it's not in cache
-          console.warn(
-            "Image not in cache, attempting to reload:",
-            cacheKey,
-          );
-          
+          console.warn("Image not in cache, attempting to reload:", cacheKey);
+
           try {
-            // Use single fetch/parse function to avoid double fetching
             const reloadedImageData = await fetchAndParseImage(currentImage.sopInstanceUID);
-            
+
             if (reloadedImageData) {
               imageData = reloadedImageData;
               console.log("Successfully reloaded image:", cacheKey);
@@ -4412,17 +4600,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } catch (error: any) {
       console.error("Error displaying image:", error);
       console.error("Error details:", error.message, error.stack);
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "red";
-      ctx.font = "16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(
-        "Error loading DICOM",
-        canvas.width / 2,
-        canvas.height / 2 - 10,
-      );
-      ctx.fillText(error.message || "Unknown error", canvas.width / 2, canvas.height / 2 + 10);
+      if (ctx && canvas) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "red";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          "Error loading DICOM",
+          canvas.width / 2,
+          canvas.height / 2 - 10,
+        );
+        ctx.fillText(error.message || "Unknown error", canvas.width / 2, canvas.height / 2 + 10);
+      }
     }
   };
 
@@ -4570,7 +4760,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionPrefetchSetRef.current.clear();
   }, [secondarySeriesId]);
 
-  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D | null, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
     const ensureActive = () => requestToken === fusionRequestTokenRef.current;
 
@@ -4609,7 +4799,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     const transform = ctTransform.current;
-    if (!transform) {
+    if (!transform && ctx) {
       return;
     }
 
@@ -4705,7 +4895,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     setFuseboxTransformSource(source);
     fusionIssueRef.current = null;
 
-    drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
+    if (ctx && transform) {
+      drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
+    }
     prefetchFusionSlices(currentIndex);
   };
 
@@ -5184,6 +5376,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     displayCurrentImageRef.current = displayCurrentImage;
   });
 
+  useEffect(() => {
+    if (!isGPUMode) return;
+    pendingCtCacheRef.current.forEach((entry, sop) => {
+      ensureCtStackSlice(sop, entry);
+      if (ctStackSlicesRef.current.has(sop)) {
+        pendingCtCacheRef.current.delete(sop);
+      }
+    });
+  }, [isGPUMode, ctMetadataVersion, ensureCtStackSlice]);
+
+  useEffect(() => {
+    if (!isGPUMode) return;
+    images.forEach((img) => {
+      const cached = imageCacheRef.current.get(img.sopInstanceUID);
+      if (cached) {
+        ensureCtStackSlice(img.sopInstanceUID, cached);
+      }
+    });
+  }, [isGPUMode, images, ensureCtStackSlice, ctMetadataVersion, cacheVersion]);
+
   // Watch for crosshair position changes and update MPR views
   useEffect(() => {
     if (orientation === 'axial' && images.length > 0 && sagittalCanvasRef.current && coronalCanvasRef.current) {
@@ -5215,6 +5427,108 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       updateMPRViews();
     }
   }, [crosshairPos, orientation, images.length, props.windowLevel]);
+
+  useEffect(() => {
+    if (fusionSliceListenerRef.current) {
+      fusionSliceListenerRef.current();
+      fusionSliceListenerRef.current = null;
+    }
+
+    fusionSliceListenerRef.current = onFusionSliceCached(({ slice, imageId }) => {
+      const primaryKey = slice.primarySopInstanceUID ?? slice.sopInstanceUID;
+      fusionSlicesRef.current.set(primaryKey, { imageId, slice });
+
+      if (isGPUViewportActive && fusionManagerRef.current) {
+        const currentImage = images[currentIndex];
+        if (currentImage && currentImage.sopInstanceUID === primaryKey) {
+          void fusionManagerRef.current.updateFusionImage?.(imageId);
+        }
+      }
+    });
+
+    return () => {
+      if (fusionSliceListenerRef.current) {
+        fusionSliceListenerRef.current();
+        fusionSliceListenerRef.current = null;
+      }
+    };
+  }, [currentIndex, images, isGPUViewportActive]);
+
+  useEffect(() => {
+    if (isGPUMode && orientation === 'axial') {
+      return;
+    }
+    if (fusionManagerRef.current) {
+      fusionManagerRef.current.dispose();
+      fusionManagerRef.current = null;
+    }
+    setIsGPUViewportActive(false);
+  }, [isGPUMode, orientation]);
+
+  useEffect(() => () => {
+    if (fusionManagerRef.current) {
+      fusionManagerRef.current.dispose();
+      fusionManagerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isGPUMode || orientation !== 'axial') return;
+    if (fusionManagerRef.current) return;
+    if (!gpuContainerRef.current) return;
+
+    const orderedCtSlices: VolumeStackSlice[] = [];
+    for (const image of images) {
+      const slice = ctStackSlicesRef.current.get(image.sopInstanceUID);
+      if (!slice) {
+        return;
+      }
+      orderedCtSlices.push(slice);
+    }
+    if (!orderedCtSlices.length) return;
+
+    let cancelled = false;
+
+    const setupViewport = async () => {
+      try {
+        const manager = await synchronizeActors({
+          element: gpuContainerRef.current as HTMLDivElement,
+          ctSlices: orderedCtSlices,
+          fusionOpacity,
+          onSliceChanged: (index) => {
+            setCurrentIndex((prev) => (prev === index ? prev : index));
+          },
+        });
+
+        if (cancelled) {
+          manager.dispose();
+          return;
+        }
+
+        fusionManagerRef.current = manager;
+        setIsGPUViewportActive(true);
+      } catch (error) {
+        console.error('Failed to initialize Cornerstone fusion manager:', error);
+        setIsGPUViewportActive(false);
+      }
+    };
+
+    void setupViewport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isGPUMode, orientation, images, fusionOpacity, ctMetadataVersion, cacheVersion]);
+
+  useEffect(() => {
+    if (!fusionManagerRef.current) return;
+    fusionManagerRef.current.updateOpacity?.(fusionOpacity);
+  }, [fusionOpacity]);
+
+  useEffect(() => {
+    if (!isGPUViewportActive) return;
+    void displayCurrentImage();
+  }, [isGPUViewportActive]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Check if any drawing tool or measurement tool is active - if so, skip pan functionality
@@ -5853,6 +6167,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
         <div className="relative w-full h-full flex items-center justify-center">
+          <div
+            ref={gpuContainerRef}
+            className="absolute inset-0"
+            style={{
+              display: isGPUViewportActive && orientation === 'axial' ? 'block' : 'none',
+            }}
+          />
           <canvas
             ref={canvasRef}
             width={1280}
@@ -5880,6 +6201,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
+              display: isGPUViewportActive && orientation === 'axial' ? 'none' : 'block',
             }}
           />
 

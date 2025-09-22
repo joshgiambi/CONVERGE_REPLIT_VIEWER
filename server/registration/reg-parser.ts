@@ -16,6 +16,8 @@ export interface ParsedRegistration {
     targetFoR?: string;
     referenced?: string[];
   }>;
+  fixedSeriesInstanceUids?: string[];
+  movingSeriesInstanceUids?: string[];
 }
 
 function invert3x3(m: number[][]): number[][] | null {
@@ -185,6 +187,93 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     if (!unique.includes(key)) { unique.push(key); uniqueCands.push(c); }
   }
 
+  // Map referenced SOP Instance UIDs back to series UIDs (from Referenced Series Sequence)
+  const sopToSeriesUid = new Map<string, string>();
+  try {
+    const refSeriesSeq = (dataSet as any).elements?.['x00081115'];
+    if (refSeriesSeq?.items?.length) {
+      refSeriesSeq.items.forEach((seriesItem: any) => {
+        const seriesDs = seriesItem?.dataSet;
+        if (!seriesDs) return;
+        const seriesUid = seriesDs.string?.('x0020000e');
+        if (!seriesUid) return;
+        const refInstanceSeq = seriesDs.elements?.['x0008114a'];
+        refInstanceSeq?.items?.forEach((instItem: any) => {
+          const sopUid = instItem?.dataSet?.string?.('x00081155');
+          if (sopUid) sopToSeriesUid.set(sopUid, seriesUid);
+        });
+      });
+    }
+  } catch (err) {
+    notes.push('failed_to_map_referenced_series');
+  }
+
+  const fixedSeriesSet = new Set<string>();
+  const movingSeriesSet = new Set<string>();
+
+  try {
+    const regSeq = (dataSet as any).elements?.['x00700308'];
+    if (regSeq?.items?.length) {
+      regSeq.items.forEach((regItem: any) => {
+        const regDs = regItem?.dataSet;
+        if (!regDs) return;
+
+        const frameUid = regDs.string?.('x00200052') || regDs.FrameOfReferenceUID || null;
+
+        const referencedSeriesUids = new Set<string>();
+        const refImageSeq = regDs.elements?.['x00081140'];
+        refImageSeq?.items?.forEach((imgItem: any) => {
+          const sopUid = imgItem?.dataSet?.string?.('x00081155');
+          const seriesUid = sopUid ? sopToSeriesUid.get(sopUid) : undefined;
+          if (seriesUid) referencedSeriesUids.add(seriesUid);
+        });
+
+        let hasNonIdentityMatrix = false;
+        let explicitIdentityCode = false;
+        const matrixRegSeq = regDs.elements?.['x00700309'];
+        matrixRegSeq?.items?.forEach((matrixRegItem: any) => {
+          const matrixRegDataSet = matrixRegItem?.dataSet;
+          if (!matrixRegDataSet) return;
+
+          const regTypeSeq = matrixRegDataSet.elements?.['x0070030d'];
+          regTypeSeq?.items?.forEach((typeItem: any) => {
+            const typeDs = typeItem?.dataSet;
+            if (!typeDs) return;
+            const codeValue = typeDs.string?.('x00080100') ?? '';
+            const codeMeaning = typeDs.string?.('x00080104') ?? '';
+            if (codeValue === '125021' || /identity/i.test(codeMeaning ?? '')) {
+              explicitIdentityCode = true;
+            }
+          });
+
+        const matrixSeq = matrixRegDataSet.elements?.['x0070030a'];
+        matrixSeq?.items?.forEach((matrixItem: any) => {
+          const matrixDataSet = matrixItem?.dataSet;
+          if (!matrixDataSet) return;
+          const fdEl = matrixDataSet.elements?.['x0070030c'];
+          const matrixValues = fdEl ? tryParseFD16(matrixDataSet, fdEl) : tryParseDS16(matrixDataSet.string?.('x300600c6'));
+          if (matrixValues && !isIdentity4x4(matrixValues)) {
+            hasNonIdentityMatrix = true;
+          }
+        });
+        });
+
+        let isIdentityItem = !hasNonIdentityMatrix && explicitIdentityCode;
+        if (!explicitIdentityCode && !hasNonIdentityMatrix && referencedSeriesUids.size > 0) {
+          isIdentityItem = true;
+        }
+
+        if (isIdentityItem && frameUid && !targetFoR) targetFoR = frameUid;
+        if (!isIdentityItem && frameUid && !sourceFoR) sourceFoR = frameUid;
+
+        const targetSet = isIdentityItem ? fixedSeriesSet : movingSeriesSet;
+        referencedSeriesUids.forEach((uid) => targetSet.add(uid));
+      });
+    }
+  } catch (err) {
+    notes.push('failed_to_classify_series_roles');
+  }
+
   // Prefer the last matrix that is non-identity; DO NOT project – return raw as-is
   let selected: number[] | null = null;
   let selectedRaw: number[] | null = null;
@@ -210,5 +299,7 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     referencedSeriesInstanceUids: referencedSeries.length ? Array.from(new Set(referencedSeries)) : undefined,
     notes,
     candidates: uniqueCands,
+    fixedSeriesInstanceUids: fixedSeriesSet.size ? Array.from(fixedSeriesSet.values()) : undefined,
+    movingSeriesInstanceUids: movingSeriesSet.size ? Array.from(movingSeriesSet.values()) : undefined,
   };
 }
