@@ -1158,7 +1158,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(src, transform.offsetX, transform.offsetY, transform.imageWidth * transform.scale, transform.imageHeight * transform.scale);
 
-        if (overlayTarget && !isGPUViewportActive) {
+        // Always draw overlay on canvas (even when GPU viewport is active)
+        if (overlayTarget) {
           drawFusionOverlay(overlayTarget, cached.canvas, transform, cached.slice);
         }
 
@@ -4667,9 +4668,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           await renderFusionOverlayNew(null, currentImage);
         }
 
+        // Use canvas-based overlay for fusion to enable per-pixel transparency in GPU mode
+        // Disable Cornerstone3D fusion actor by passing null for fusion image
         const fusionEntry = fusionSlicesRef.current.get(cacheKey);
         if (fusionManagerRef.current) {
-          await fusionManagerRef.current.updateSlice(safeIndex, fusionEntry?.imageId ?? null);
+          await fusionManagerRef.current.updateSlice(safeIndex, null);
         }
 
         return;
@@ -6453,6 +6456,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             className="absolute inset-0"
             style={{
               display: isGPUViewportActive && orientation === 'axial' ? 'block' : 'none',
+              zIndex: 0,
             }}
           />
           <canvas
@@ -6492,7 +6496,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             height={1280}
             className="max-w-full max-h-full object-contain rounded absolute top-0 left-0 pointer-events-none"
             style={{
-              display: isGPUViewportActive && orientation === 'axial' ? 'none' : 'block',
+              // Always show overlay above GPU viewport as well
+              display: 'block',
+              zIndex: 5,
               opacity: normalizedFusionOpacity,
             }}
           />
