@@ -498,17 +498,38 @@ export function fuseboxSliceToImageData(
   const source = slice.data;
   const windowWidth = windowLevel?.window ?? slice.max - slice.min;
   const windowLevelVal = windowLevel?.level ?? (slice.min + slice.max) / 2;
-  const min = windowLevel?.window
-    ? windowLevelVal - windowWidth / 2
-    : slice.min;
-  const max = windowLevel?.window
-    ? windowLevelVal + windowWidth / 2
-    : slice.max;
-  const range = Math.max(1e-6, max - min);
   const mode = (modality || '').toUpperCase();
   const isPET = mode === 'PT' || mode === 'PET';
   const isCT = mode === 'CT';
+
+  // Prefer explicit window/level; for CT default to standard if none provided
+  const effectiveWindow = (isCT && (!Number.isFinite(windowWidth) || !Number.isFinite(windowLevelVal)))
+    ? 400
+    : windowWidth;
+  const effectiveLevel = (isCT && (!Number.isFinite(windowWidth) || !Number.isFinite(windowLevelVal)))
+    ? 40
+    : windowLevelVal;
+
+  const min = Number.isFinite(effectiveWindow)
+    ? (effectiveLevel - (effectiveWindow as number) / 2)
+    : slice.min;
+  const max = Number.isFinite(effectiveWindow)
+    ? (effectiveLevel + (effectiveWindow as number) / 2)
+    : slice.max;
+  const range = Math.max(1e-6, max - min);
   let hasSignal = false;
+
+  // Treat very-low signal as transparent and ramp alpha in smoothly just above it
+  // This fades out gray padding/borders from resampling or background
+  // Be conservative for CT to avoid visual thresholding artifacts
+  const alphaCutoff = isCT ? 0.0 : 0.03; // fully transparent below this normalized level
+  const alphaRampEnd = isCT ? 0.02 : 0.12; // fully opaque at/above this normalized level
+  const computeAlpha = (n: number) => {
+    if (n <= alphaCutoff) return 0;
+    if (n >= alphaRampEnd) return 255;
+    const w = (n - alphaCutoff) / Math.max(1e-6, (alphaRampEnd - alphaCutoff));
+    return Math.round(Math.max(0, Math.min(1, w)) * 255);
+  };
 
   const applyFdg = (n: number) => {
     const stops = [
@@ -547,9 +568,9 @@ export function fuseboxSliceToImageData(
       buffer[offset] = value;
       buffer[offset + 1] = value;
       buffer[offset + 2] = value;
-      // Transparent if at background; opaque otherwise
-      buffer[offset + 3] = normalized <= 0 ? 0 : 255;
-      if (!hasSignal && normalized > 0) {
+      // Transparent/soft near background, opaque with signal
+      buffer[offset + 3] = computeAlpha(normalized);
+      if (!hasSignal && buffer[offset + 3] > 0) {
         hasSignal = true;
       }
     }
@@ -573,10 +594,10 @@ export function fuseboxSliceToImageData(
       buffer[offset] = value;
       buffer[offset + 1] = value;
       buffer[offset + 2] = value;
-      buffer[offset + 3] = 255;
+      buffer[offset + 3] = computeAlpha(normalized);
     }
 
-    if (!hasSignal && Math.abs(source[i] - min) > 1e-6) {
+    if (!hasSignal && buffer[offset + 3] > 0) {
       hasSignal = true;
     }
   }

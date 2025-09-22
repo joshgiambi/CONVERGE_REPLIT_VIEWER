@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink, Bug, Loader2, AlertTriangle } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
+import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
 import { useToast } from '@/hooks/use-toast';
 
 interface SeriesSelectorProps {
@@ -47,6 +48,7 @@ interface SeriesSelectorProps {
   fusionStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
   fusionCandidatesByPrimary?: Map<number, number[]>;
   fusionSiblingMap?: Map<number, Map<'PET' | 'MR', Map<number, number[]>>>;
+  fusionManifest?: FusionManifest | null;
 }
 
 export function SeriesSelector({
@@ -82,6 +84,7 @@ export function SeriesSelector({
   fusionStatuses,
   fusionCandidatesByPrimary,
   fusionSiblingMap,
+  fusionManifest,
 }: SeriesSelectorProps) {
   
   // Debug logging removed for performance
@@ -118,6 +121,48 @@ export function SeriesSelector({
   const [newStructureColor, setNewStructureColor] = useState('#FF0000');
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
   const { toast } = useToast();
+
+  const manifestPrimaryId = fusionManifest?.primarySeriesId ?? null;
+  const manifestSecondaries = useMemo<FusionSecondaryDescriptor[]>(() => {
+    if (!fusionManifest?.secondaries?.length) return [];
+    return fusionManifest.secondaries;
+  }, [fusionManifest]);
+
+  const manifestSecondaryIdSet = useMemo(() => {
+    const set = new Set<number>();
+    manifestSecondaries.forEach((descriptor) => {
+      const id = descriptor.secondarySeriesId;
+      if (typeof id === 'number' && Number.isFinite(id)) {
+        set.add(id);
+      }
+    });
+    return set;
+  }, [manifestSecondaries]);
+
+  const manifestDescriptorMap = useMemo(() => {
+    const map = new Map<number, FusionSecondaryDescriptor>();
+    manifestSecondaries.forEach((descriptor) => {
+      map.set(descriptor.secondarySeriesId, descriptor);
+    });
+    return map;
+  }, [manifestSecondaries]);
+
+  const isConeBeamSeries = useCallback((entry: DICOMSeries | null | undefined) => {
+    if (!entry) return false;
+    const metadata = (entry as any)?.metadata ?? {};
+    const manufacturerRaw = metadata.manufacturer
+      ?? metadata.Manufacturer
+      ?? (entry as any)?.Manufacturer
+      ?? (entry as any)?.manufacturer;
+    if (typeof manufacturerRaw === 'string' && /VARIAN|ELEKTA/i.test(manufacturerRaw)) {
+      return true;
+    }
+    const desc = (entry.seriesDescription || '').toLowerCase();
+    if (desc.includes('cbct') || desc.includes('cone beam')) {
+      return true;
+    }
+    return false;
+  }, []);
 
   const seriesById = useMemo(() => {
     const map = new Map<number, DICOMSeries>();
@@ -740,44 +785,55 @@ export function SeriesSelector({
                     const mrSeries = series.filter(s => modalityOf(s) === 'MR');
                     const ptSeries = series.filter(s => ['PT', 'PET', 'NM'].includes(modalityOf(s)));
                     const regSeries = series.filter(s => modalityOf(s) === 'REG');
-                    const otherSeries = series.filter(s => !['CT', 'MR', 'PT', 'PET', 'NM', 'REG', 'RTSTRUCT'].includes(modalityOf(s)));
+                    const otherSeries = series.filter((s) => {
+                          if (manifestSecondaryIdSet.has(s.id)) return false;
+                          return !['CT', 'MR', 'PT', 'PET', 'NM', 'REG', 'RTSTRUCT'].includes(modalityOf(s));
+                    });
 
                     // Helper: choose a single Planning CT as the parent (if any CT exists)
                     const choosePlanningCT = () => {
                       const allCTSeries = series.filter(s => modalityOf(s) === 'CT');
                       if (allCTSeries.length === 0) return null;
 
+                      const nonConeBeam = allCTSeries.filter((entry) => !isConeBeamSeries(entry));
+
+                      const findById = (pool: DICOMSeries[], id: number | null) => {
+                        if (id == null) return null;
+                        return pool.find((entry) => entry.id === id) ?? null;
+                      };
+
+                      if (manifestPrimaryId != null) {
+                        const manifestNonCbct = findById(nonConeBeam, manifestPrimaryId);
+                        if (manifestNonCbct) return manifestNonCbct;
+                        const manifestAny = findById(allCTSeries, manifestPrimaryId);
+                        if (manifestAny) return manifestAny;
+                      }
+
+                      const candidatePool = nonConeBeam.length ? nonConeBeam : allCTSeries;
+
                       // Gather signals
-                      const assocArrays = regAssociations ? Object.values(regAssociations) : [];
-                      const assocIdsFlat: number[] = assocArrays.flat();
                       const regPrimaryIds = new Set<number>(
-                        regAssociations ? Object.keys(regAssociations).map(k => Number(k)).filter(n => Number.isFinite(n)) : []
+                        regAssociations ? Object.keys(regAssociations).map(k => Number(k)).filter(Number.isFinite) : []
                       );
                       const planningCTIds = new Set<number>((rtSeries || [])
                         .map((r: any) => Number(r?.referencedSeriesId))
-                        .filter((id: number) => Number.isFinite(id))
+                        .filter(Number.isFinite)
                       );
                       const ptStudyIdsAll = new Set<number>(ptSeries.map(s => s.studyId));
 
-                      // Score CTs with weighted criteria
-                      const scoreCT = (ct: any) => {
+                      const scoreCT = (ct: DICOMSeries) => {
                         let score = 0;
-                        // Strong signal: referenced by RTSTRUCT
                         if (planningCTIds.has(ct.id)) score += 1000;
-                        // Strong signal: is a REG primary
                         if (regPrimaryIds.has(ct.id)) score += 500 + (regAssociations?.[ct.id]?.length || 0) * 5;
-                        // Prefer non-PET study CTs
                         if (!ptStudyIdsAll.has(ct.studyId)) score += 100;
-                        // Avoid CTACs if provided by server
                         if (regCtacSeriesIds?.includes?.(ct.id)) score -= 200;
-                        // Prefer larger image counts
                         score += Math.min(200, (ct.imageCount || 0));
+                        if (isConeBeamSeries(ct)) score -= 1000;
                         return score;
                       };
 
-                      // Pick best by score
-                      const sorted = [...allCTSeries].sort((a, b) => scoreCT(b) - scoreCT(a));
-                      return sorted[0] || null;
+                      const sorted = [...candidatePool].sort((a, b) => scoreCT(b) - scoreCT(a));
+                      return sorted[0] ?? candidatePool[0] ?? null;
                     };
 
                     const mainCT = choosePlanningCT();
@@ -794,6 +850,14 @@ export function SeriesSelector({
                         {primarySeries.map((seriesItem) => {
                           const candidateIds = getCandidatesForPrimary(seriesItem.id);
                           const candidateSet = new Set<number>(candidateIds);
+                          if (manifestPrimaryId === seriesItem.id) {
+                            manifestSecondaries.forEach((descriptor) => {
+                              const secondaryId = descriptor.secondarySeriesId;
+                              if (typeof secondaryId === 'number' && Number.isFinite(secondaryId)) {
+                                candidateSet.add(secondaryId);
+                              }
+                            });
+                          }
                           const candidateSetWithPrimary = new Set<number>(candidateSet);
                           candidateSetWithPrimary.add(seriesItem.id);
 
@@ -843,7 +907,7 @@ export function SeriesSelector({
                             });
                           }
 
-                          const fusionReadyMr = Array.from(new Map([...mrAssoc, ...additionalMrAssoc].map((entry) => [entry.id, entry])).values());
+                          let fusionReadyMr = Array.from(new Map([...mrAssoc, ...additionalMrAssoc].map((entry) => [entry.id, entry])).values());
 
                           const ctCandidatesForPet = series.filter(
                             (s) => modalityOf(s) === 'CT' && candidateSetWithPrimary.has(s.id),
@@ -851,12 +915,37 @@ export function SeriesSelector({
 
                           const hasExplicitPetCandidates = Boolean(petMapForPrimary && petMapForPrimary.size);
 
-                          const registeredCtAssoc = series.filter((s) => {
+                          let registeredCtAssoc = series.filter((s) => {
                             if (modalityOf(s) !== 'CT') return false;
                             if (!candidateSet.has(s.id)) return false;
                             if (ctIdsLinkedToPet.has(s.id)) return false;
                             return true;
                           });
+                          const manifestSecondariesForPrimary = manifestPrimaryId === seriesItem.id ? manifestSecondaries : [];
+                          if (manifestSecondariesForPrimary.length) {
+                            const orderMap = new Map<number, number>();
+                            manifestSecondariesForPrimary.forEach((descriptor, index) => {
+                              orderMap.set(descriptor.secondarySeriesId, index);
+                            });
+                            const sortByManifest = (list: DICOMSeries[]) => {
+                              return [...list].sort((a, b) => {
+                                const idxA = orderMap.get(a.id);
+                                const idxB = orderMap.get(b.id);
+                                const normA = idxA != null ? idxA : Number.MAX_SAFE_INTEGER;
+                                const normB = idxB != null ? idxB : Number.MAX_SAFE_INTEGER;
+                                if (normA !== normB) return normA - normB;
+                                return (a.seriesDescription || '').localeCompare(b.seriesDescription || '');
+                              });
+                            };
+
+                            registeredCtAssoc = sortByManifest(registeredCtAssoc);
+                            fusionReadyMr = sortByManifest(fusionReadyMr);
+                            ptAssoc = sortByManifest(ptAssoc);
+                          }
+
+                          const coneBeamAssoc = registeredCtAssoc.filter((ct) => isConeBeamSeries(ct));
+                          const standardCtAssoc = registeredCtAssoc.filter((ct) => !isConeBeamSeries(ct));
+
                           return (
                             <div key={seriesItem.id}>
                             <div
@@ -902,17 +991,20 @@ export function SeriesSelector({
                             <div className="ml-4 mt-2 space-y-1">
                               {/* Registered CT secondaries (REG-derived only; PET/CT CTs are shown under PET) */}
                               {(() => {
-                                if (registeredCtAssoc.length === 0) return null;
+                                if (standardCtAssoc.length === 0) return null;
                                 return (
                                   <div className="space-y-1 border-l-2 border-blue-500/30 pl-3">
                                     <div className="text-xs text-blue-300 mb-1">Registered CT</div>
-                                    {registeredCtAssoc.map((ctS) => {
+                                    {standardCtAssoc.map((ctS) => {
+                                      const descriptor = manifestDescriptorMap.get(ctS.id);
                                       const loadingState = secondaryLoadingStates?.get(ctS.id);
                                       const fusionStatus = fusionStatuses?.get(ctS.id);
                                       const isLoading = Boolean(loadingState?.isLoading || fusionStatus?.status === 'loading');
                                       const isReady = fusionStatus?.status === 'ready';
                                       const hasError = fusionStatus?.status === 'error';
                                       const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
+                                      const modalityLabel = (descriptor?.secondaryModality || ctS.modality || 'CT').toUpperCase();
+                                      const label = descriptor?.secondarySeriesDescription || formatSeriesLabel(ctS);
                                       const statusLabel = hasError
                                         ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
                                         : isLoading
@@ -941,9 +1033,9 @@ export function SeriesSelector({
                                           )}
                                           <div className="relative z-10 flex items-center justify-between">
                                             <div className="flex items-center space-x-2 flex-1">
-                                              <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs font-semibold">CT</Badge>
+                                              <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs font-semibold">{modalityLabel}</Badge>
                                               <span className="truncate text-xs">
-                                                {formatSeriesLabel(ctS)} ({ctS.imageCount} images)
+                                                {label} ({ctS.imageCount} images)
                                               </span>
                                             </div>
                                             {onSecondarySeriesSelect && (
@@ -955,6 +1047,85 @@ export function SeriesSelector({
                                                   e.stopPropagation();
                                                   if (!buttonDisabled) {
                                                     onSecondarySeriesSelect(ctS.id);
+                                                  }
+                                                }}
+                                                title={statusLabel}
+                                                disabled={buttonDisabled}
+                                              >
+                                                {isLoading ? (
+                                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
+                                                ) : hasError ? (
+                                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                                                ) : (
+                                                  <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                )}
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+
+                              {(() => {
+                                if (coneBeamAssoc.length === 0) return null;
+                                return (
+                                  <div className="space-y-1 border-l-2 border-amber-500/30 pl-3">
+                                    <div className="text-xs text-amber-300 mb-1">Cone Beam CT</div>
+                                    {coneBeamAssoc.map((cbct) => {
+                                      const descriptor = manifestDescriptorMap.get(cbct.id);
+                                      const loadingState = secondaryLoadingStates?.get(cbct.id);
+                                      const fusionStatus = fusionStatuses?.get(cbct.id);
+                                      const isLoading = Boolean(loadingState?.isLoading || fusionStatus?.status === 'loading');
+                                      const isReady = fusionStatus?.status === 'ready';
+                                      const hasError = fusionStatus?.status === 'error';
+                                      const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
+                                      const modalityLabel = (descriptor?.secondaryModality || cbct.modality || 'CT').toUpperCase();
+                                      const label = descriptor?.secondarySeriesDescription || formatSeriesLabel(cbct);
+                                      const statusLabel = hasError
+                                        ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
+                                        : isLoading
+                                          ? `Preparing overlay${progress ? ` (${Math.round(progress)}%)` : ''}`
+                                          : isReady
+                                            ? 'Activate fusion overlay'
+                                            : 'Fusion overlay unavailable';
+                                      const buttonDisabled = !isReady;
+
+                                      return (
+                                        <div
+                                          key={cbct.id}
+                                          className={`relative overflow-hidden w-full p-2 text-left text-xs rounded-lg transition-all border ${
+                                            secondarySeriesId === cbct.id
+                                              ? 'bg-amber-500/30 border-amber-400 shadow-lg shadow-amber-500/20'
+                                              : hasError
+                                                ? 'bg-amber-900/20 border-amber-500/40'
+                                                : 'bg-amber-600/10 border-amber-500/30 hover:bg-amber-600/20'
+                                          }`}
+                                        >
+                                          {isLoading && (
+                                            <div
+                                              className="absolute inset-0 bg-gradient-to-r from-amber-500/30 to-amber-400/10 transition-all duration-300"
+                                              style={{ width: `${progress}%` }}
+                                            />
+                                          )}
+                                          <div className="relative z-10 flex items-center justify-between">
+                                            <div className="flex items-center space-x-2 flex-1">
+                                              <Badge variant="outline" className="border-amber-500 text-amber-400 text-xs font-semibold">{modalityLabel}</Badge>
+                                              <span className="truncate text-xs">
+                                                {label} ({cbct.imageCount} images)
+                                              </span>
+                                            </div>
+                                            {onSecondarySeriesSelect && (
+                                              <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className={`h-6 w-6 ${buttonDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-green-700/30'}`}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  if (!buttonDisabled) {
+                                                    onSecondarySeriesSelect(cbct.id);
                                                   }
                                                 }}
                                                 title={statusLabel}
@@ -1022,6 +1193,7 @@ export function SeriesSelector({
                                    
                                    {/* MR Series that can be fused */}
                                    {fusionReadyMr.map((mrS) => {
+                                     const descriptor = manifestDescriptorMap.get(mrS.id);
                                      const loadingState = secondaryLoadingStates?.get(mrS.id);
                                      const isCurrentlyLoading = currentlyLoadingSecondary === mrS.id;
                                      const progress = Math.max(0, Math.min(100, loadingState?.progress ?? 0));
@@ -1029,6 +1201,8 @@ export function SeriesSelector({
                                      const isReady = fusionStatus?.status === 'ready';
                                      const hasError = fusionStatus?.status === 'error';
                                      const isLoading = Boolean(loadingState?.isLoading || isCurrentlyLoading || fusionStatus?.status === 'loading');
+                                     const modalityLabel = (descriptor?.secondaryModality || mrS.modality || 'MR').toUpperCase();
+                                     const label = descriptor?.secondarySeriesDescription || formatSeriesLabel(mrS);
                                      const statusLabel = hasError
                                        ? `Fusion failed${fusionStatus?.error ? `: ${fusionStatus.error}` : ''}`
                                        : isLoading
@@ -1066,13 +1240,13 @@ export function SeriesSelector({
                                          />
                                        )}
                                        
-                                         <div className="relative z-10 flex items-center justify-between">
-                                           <div className="flex items-center space-x-2 flex-1">
+                                           <div className="relative z-10 flex items-center justify-between">
+                                             <div className="flex items-center space-x-2 flex-1">
                                              <Badge variant="outline" className="border-purple-500 text-purple-400 text-xs font-semibold">
-                                               MR
+                                               {modalityLabel}
                                              </Badge>
                                              <span className="truncate text-xs">
-                                               {formatSeriesLabel(mrS)} ({mrS.imageCount} images)
+                                               {label} ({mrS.imageCount} images)
                                              </span>
                                            </div>
                                            <div className="flex items-center gap-1">
@@ -1240,6 +1414,9 @@ export function SeriesSelector({
                                          : isReady
                                            ? 'Enable PET fusion'
                                            : 'Fusion overlay unavailable';
+                                    const descriptor = manifestDescriptorMap.get(ptS.id);
+                                    const modalityLabel = (descriptor?.secondaryModality || ptS.modality || 'PT').toUpperCase();
+                                    const label = descriptor?.secondarySeriesDescription || formatSeriesLabel(ptS);
 
                                        const petCard = (
                                        <div
@@ -1272,8 +1449,8 @@ export function SeriesSelector({
                                          
                                          <div className="relative z-10 flex items-center justify-between">
                                            <div className="flex items-center space-x-2 flex-1">
-                                             <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">PT</Badge>
-                                           <span className="truncate text-xs">{formatSeriesLabel(ptS)} ({ptS.imageCount} images)</span>
+                                             <Badge variant="outline" className="border-yellow-500 text-yellow-400 text-xs font-semibold">{modalityLabel}</Badge>
+                                           <span className="truncate text-xs">{label} ({ptS.imageCount} images)</span>
                                            </div>
                                            <div className="flex items-center gap-1">
                                              <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-yellow-700/30"

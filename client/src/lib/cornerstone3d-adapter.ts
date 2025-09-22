@@ -9,6 +9,7 @@ import * as cornerstone3D from '@cornerstonejs/core';
 import { metaData as cornerstoneMetaData } from '@cornerstonejs/core';
 import { init as initCore3D } from '@cornerstonejs/core';
 import { init as initTools3D } from '@cornerstonejs/tools';
+import * as cornerstone3DTools from '@cornerstonejs/tools';
 
 // Feature flag to control migration phases
 export const ENABLE_CORNERSTONE3D = true; // Enabled for GPU acceleration
@@ -17,6 +18,35 @@ export const ENABLE_CORNERSTONE3D = true; // Enabled for GPU acceleration
 let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 let imageLoaderRegistered = false;
+let metadataProviderRegistered = false;
+
+type MetadataStoreEntry = Record<string, any>;
+const metadataStore = new Map<string, MetadataStoreEntry>();
+
+function mergeMetadataModules(imageId: string, modules: Partial<MetadataStoreEntry>) {
+  ensureMetadataProvider();
+  const entry = metadataStore.get(imageId) ?? {};
+  Object.entries(modules).forEach(([moduleKey, moduleValue]) => {
+    if (moduleValue !== undefined) {
+      entry[moduleKey] = moduleValue;
+    }
+  });
+  metadataStore.set(imageId, entry);
+}
+
+export function setCornerstoneMetadata(imageId: string, modules: Partial<MetadataStoreEntry>) {
+  mergeMetadataModules(imageId, modules);
+}
+
+function ensureMetadataProvider() {
+  if (metadataProviderRegistered) return;
+  cornerstoneMetaData.addProvider((type: string, imageId: string) => {
+    const entry = metadataStore.get(imageId);
+    if (!entry) return undefined;
+    return entry[type];
+  }, 10);
+  metadataProviderRegistered = true;
+}
 
 type CachedImageMetadata = {
   sopInstanceUID: string;
@@ -240,6 +270,8 @@ function registerSliceMetadata(
   metadata: CachedImageMetadata,
   prefix: 'ct' | 'fusion'
 ) {
+  ensureMetadataProvider();
+
   const rows = slice.height;
   const columns = slice.width;
   const pixelSpacing = metadata.pixelSpacing ?? [1, 1];
@@ -253,39 +285,37 @@ function registerSliceMetadata(
     : 1;
   const modality = metadata.modality ?? (prefix === 'ct' ? 'CT' : 'PT');
 
-  cornerstoneMetaData.add('generalSeriesModule', imageId, {
-    modality,
-    seriesInstanceUID: frameOfReferenceUID,
-  });
-
-  cornerstoneMetaData.add('generalImageModule', imageId, {
-    instanceNumber,
-  });
-
-  cornerstoneMetaData.add('imagePlaneModule', imageId, {
-    frameOfReferenceUID,
-    rows,
-    columns,
-    imageOrientationPatient,
-    imagePositionPatient,
-    pixelSpacing,
-    sliceThickness,
-  });
-
-  cornerstoneMetaData.add('imagePixelModule', imageId, {
-    rows,
-    columns,
-    samplesPerPixel: 1,
-    photometricInterpretation: 'MONOCHROME2',
-    bitsAllocated: 32,
-    bitsStored: 32,
-    highBit: 31,
-    pixelRepresentation: 1,
-  });
-
-  cornerstoneMetaData.add('modalityLutModule', imageId, {
-    rescaleSlope: metadata.rescaleSlope ?? 1,
-    rescaleIntercept: metadata.rescaleIntercept ?? 0,
+  mergeMetadataModules(imageId, {
+    generalSeriesModule: {
+      modality,
+      seriesInstanceUID: frameOfReferenceUID,
+    },
+    generalImageModule: {
+      instanceNumber,
+    },
+    imagePlaneModule: {
+      frameOfReferenceUID,
+      rows,
+      columns,
+      imageOrientationPatient,
+      imagePositionPatient,
+      pixelSpacing,
+      sliceThickness,
+    },
+    imagePixelModule: {
+      rows,
+      columns,
+      samplesPerPixel: 1,
+      photometricInterpretation: 'MONOCHROME2',
+      bitsAllocated: 32,
+      bitsStored: 32,
+      highBit: 31,
+      pixelRepresentation: 1,
+    },
+    modalityLutModule: {
+      rescaleSlope: metadata.rescaleSlope ?? 1,
+      rescaleIntercept: metadata.rescaleIntercept ?? 0,
+    },
   });
 }
 

@@ -206,6 +206,11 @@ class VolumeRenderer {
       this.container = containerElement;
       console.log('🚀 Volume Renderer: Starting setup with container:', containerElement.tagName);
 
+      // Ensure container can position absolute children reliably
+      if (getComputedStyle(containerElement).position === 'static') {
+        containerElement.style.position = 'relative';
+      }
+
       // Create primary viewport
       const primaryViewportId = 'primary-volume-viewport';
       const primaryElement = this.createViewportElement(primaryViewportId, containerElement);
@@ -262,6 +267,33 @@ class VolumeRenderer {
         fusionElement.style.left = '0';
         fusionElement.style.pointerEvents = 'none';
         fusionElement.style.opacity = '0.5';
+        fusionElement.style.zIndex = '10';
+
+        // Keep cameras in sync so pan/zoom align
+        const cs3d: any = (window as any).cornerstone3D;
+        const syncFusionCamera = () => {
+          try {
+            if (!this.primaryViewport || !this.fusionViewport) return;
+            const camera = this.primaryViewport.getCamera?.();
+            if (camera) {
+              this.fusionViewport.setCamera?.({ ...camera });
+              this.renderingEngine.render();
+            }
+          } catch {}
+        };
+
+        // Initial camera sync
+        syncFusionCamera();
+
+        // Listen for camera changes on primary
+        const cameraEvt = cs3d?.EVENTS?.CAMERA_MODIFIED;
+        if (cameraEvt && primaryElement && primaryElement.addEventListener) {
+          const handler = () => syncFusionCamera();
+          primaryElement.addEventListener(cameraEvt, handler);
+
+          // Store handler for cleanup by attaching to element dataset
+          (primaryElement as any).__fusionCameraHandler = handler;
+        }
       }
 
       // Initial render
@@ -404,6 +436,15 @@ class VolumeRenderer {
 
       // Remove DOM elements created by createViewportElement
       if (this.container) {
+        // Detach camera sync listener if present
+        const primaryElement = this.container.querySelector('#primary-volume-viewport') as any;
+        const cs3d: any = (window as any).cornerstone3D;
+        const cameraEvt = cs3d?.EVENTS?.CAMERA_MODIFIED;
+        if (primaryElement && cameraEvt && primaryElement.__fusionCameraHandler) {
+          try { primaryElement.removeEventListener(cameraEvt, primaryElement.__fusionCameraHandler); } catch {}
+          try { delete primaryElement.__fusionCameraHandler; } catch {}
+        }
+
         const primaryElement = this.container.querySelector('#primary-volume-viewport');
         if (primaryElement && primaryElement.parentNode) {
           primaryElement.parentNode.removeChild(primaryElement);

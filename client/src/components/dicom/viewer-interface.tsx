@@ -82,8 +82,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
   const fusionManifestRequestRef = useRef(0);
   const [manifestActionStatus, setManifestActionStatus] = useState<string | null>(null);
+  const [associationsReady, setAssociationsReady] = useState(false);
   const [fusionDebugSnapshot, setFusionDebugSnapshot] = useState<string | null>(null);
-  
+  const manifestInitRequestedRef = useRef(false);
+  const autoPrimarySelectedRef = useRef(false);
+  const [fallbackPrimarySeries, setFallbackPrimarySeries] = useState<DICOMSeries | null>(null);
+  const [associationPrimarySeries, setAssociationPrimarySeries] = useState<DICOMSeries | null>(null);
+  const manifestPrimedPatientsRef = useRef<Set<number>>(new Set());
+  const manifestPrimingTasksRef = useRef<Map<number, Promise<void>>>(new Map());
+
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
   
@@ -240,6 +247,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [regCtacIds, setRegCtacIds] = useState<number[]>([]);
   useEffect(() => {
     const loadAssociations = async () => {
+      setAssociationsReady(false);
+      setAssociationPrimarySeries(null);
       try {
         // Patient ID will be resolved later using more sophisticated logic
         if (!seriesData || !Array.isArray(seriesData) || seriesData.length === 0) return;
@@ -591,8 +600,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         setRegistrationRelationshipMap(associationMap);
         setRegCtacIds(Array.from(ctacUnion));
 
-        // Auto-select best primary candidate if nothing selected yet
-        if (!selectedSeries && Object.keys(mapping).length > 0) {
+        // Determine best primary candidate from associations
+        if (Object.keys(mapping).length > 0) {
           const ptStudyIds = new Set<number>((seriesData as any[])
             .filter(s => (s.modality || '').toUpperCase() === 'PT')
             .map(s => s.studyId));
@@ -609,49 +618,28 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             return true;
           });
           const chosenId = preferred ?? primaryIds[0];
-          const chosen = (seriesData as any[]).find(s => s.id === chosenId);
-          if (chosen) await handleSeriesSelect(chosen);
+          const chosen = (seriesData as any[]).find(s => s.id === chosenId) ?? null;
+          if (chosen) {
+            setAssociationPrimarySeries(chosen);
+          }
         }
+        setAssociationsReady(true);
       } catch {
-        // Silent fail; UI falls back to heuristic
+        // Silent fail; allow fallback heuristics
+        setAssociationsReady(true);
       }
     };
     loadAssociations();
   }, [studyData?.patient?.id, seriesData]);
 
   useEffect(() => {
-    if (seriesData && Array.isArray(seriesData)) {
-      setSeries(seriesData);
-      setVisibleSeries(seriesData.filter((entry) => !shouldHideSeries(entry)));
-      
-      // Auto-select planning CT if no series is selected yet
-      if (!selectedSeries && seriesData.length > 0) {
-        // Use the same planning CT selection logic as in series-selector.tsx
-        const ctSeries = seriesData.filter((s) => s.modality === 'CT' && !shouldHideSeries(s));
-        
-        if (ctSeries.length > 0) {
-          // Score CT series to find the best planning CT
-          const scoreCT = (ct: any) => {
-            let score = 0;
-            // Prefer larger image counts (indicates comprehensive scan)
-            score += Math.min(200, (ct.imageCount || 0));
-            // Prefer series with certain keywords in description
-            const desc = (ct.seriesDescription || '').toLowerCase();
-            if (desc.includes('planning') || desc.includes('plan')) score += 100;
-            if (desc.includes('ctac')) score -= 200; // Avoid CTAC
-            return score;
-          };
-
-          // Pick best CT by score
-          const bestCT = [...ctSeries].sort((a, b) => scoreCT(b) - scoreCT(a))[0];
-          if (bestCT) {
-            console.log(`🎯 Auto-selecting planning CT: ${bestCT.seriesDescription} (ID: ${bestCT.id})`);
-            handleSeriesSelect(bestCT);
-          }
-        }
-      }
-    }
-  }, [seriesData, selectedSeries, shouldHideSeries]);
+    manifestInitRequestedRef.current = false;
+    autoPrimarySelectedRef.current = false;
+    setFallbackPrimarySeries(null);
+    setAssociationPrimarySeries(null);
+    setAssociationsReady(false);
+    setManifestActionStatus(null);
+  }, [studyData?.patient?.id]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -1036,6 +1024,64 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     return map;
   }, [visibleSeries]);
 
+  const getNumericPatientId = useCallback((): number | null => {
+    const patientRecord = studyData?.patient;
+    if (patientRecord && Number.isFinite(patientRecord.id)) {
+      return Number(patientRecord.id);
+    }
+    if (Array.isArray(studyData?.studies)) {
+      for (const study of studyData.studies) {
+        if (study && Number.isFinite(study.patientId)) {
+          return Number(study.patientId);
+        }
+      }
+    }
+    return null;
+  }, [studyData]);
+
+  const runManifestForPatient = useCallback(async (patientId: number): Promise<void> => {
+    if (!Number.isFinite(patientId)) return;
+
+    if (manifestPrimedPatientsRef.current.has(patientId)) {
+      const existingTask = manifestPrimingTasksRef.current.get(patientId);
+      if (existingTask) {
+        await existingTask.catch(() => undefined);
+      }
+      return;
+    }
+
+    const inFlight = manifestPrimingTasksRef.current.get(patientId);
+    if (inFlight) {
+      await inFlight.catch(() => undefined);
+      return;
+    }
+
+    const task = (async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}/fusion/run-manifest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ includeReady: false }),
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(detail || `Manifest run failed (${response.status})`);
+        }
+        manifestPrimedPatientsRef.current.add(patientId);
+      } finally {
+        manifestPrimingTasksRef.current.delete(patientId);
+      }
+    })();
+
+    manifestPrimingTasksRef.current.set(patientId, task);
+    try {
+      await task;
+    } catch (error) {
+      console.error('Fusion manifest prime failed', error);
+      throw error;
+    }
+  }, []);
+
   const getCandidateSecondaryIds = useCallback(
     (primarySeriesId: number): number[] => {
       const normalizeSeriesId = (value: unknown): number | null => {
@@ -1144,8 +1190,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       if (!Number.isFinite(parsedId)) return;
       map.set(parsedId, getCandidateSecondaryIds(parsedId));
     });
+    if (fusionManifest?.primarySeriesId && fusionManifest.secondaries?.length) {
+      map.set(
+        fusionManifest.primarySeriesId,
+        fusionManifest.secondaries
+          .map((secondary) => secondary.secondarySeriesId)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id)),
+      );
+    }
     return map;
-  }, [series, getCandidateSecondaryIds]);
+  }, [series, getCandidateSecondaryIds, fusionManifest]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !import.meta.env.DEV) return;
@@ -1158,6 +1212,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     if (typeof window === 'undefined' || !import.meta.env.DEV) return;
     (window as any).__currentFusionManifest = fusionManifest;
   }, [fusionManifest]);
+
+  useEffect(() => {
+    if (!manifestInitRequestedRef.current) return;
+    if (fusionManifestLoading) {
+      setManifestActionStatus((prev) => prev ?? 'Preparing fusion cache…');
+    } else if (fusionManifest && manifestActionStatus === 'Preparing fusion cache…') {
+      setManifestActionStatus(null);
+    }
+  }, [fusionManifestLoading, fusionManifest, manifestActionStatus]);
 
   const fusionSiblingMap = useMemo(() => {
     const normalizeSeriesIdLocal = (value: unknown): number | null => {
@@ -1423,7 +1486,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const pollFusionManifestUntilReady = useCallback(
     async (
       primarySeriesId: number,
-      requestedSecondaryIds: number[],
+      candidateSecondaryIds: number[],
       requestToken: number,
       attempt: number = 0,
     ): Promise<FusionManifest | null> => {
@@ -1443,19 +1506,19 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       try {
         const refreshed = await fetchFusionManifest(primarySeriesId, {
           preload: true,
-          secondarySeriesIds: requestedSecondaryIds,
+          secondarySeriesIds: candidateSecondaryIds,
           force: true,
         });
         if (fusionManifestRequestRef.current !== requestToken) return null;
         setFusionManifest(refreshed);
-        const relevantIds = requestedSecondaryIds.length ? new Set(requestedSecondaryIds) : null;
+        const relevantIds = candidateSecondaryIds.length ? new Set(candidateSecondaryIds) : null;
         const pending = refreshed.secondaries.filter((sec) => {
           if (sec.status === 'ready' || sec.status === 'error') return false;
           if (relevantIds && !relevantIds.has(sec.secondarySeriesId)) return false;
           return true;
         });
         if (pending.length) {
-          return pollFusionManifestUntilReady(primarySeriesId, requestedSecondaryIds, requestToken, attempt + 1);
+          return pollFusionManifestUntilReady(primarySeriesId, candidateSecondaryIds, requestToken, attempt + 1);
         }
         return refreshed;
       } catch (error) {
@@ -1480,15 +1543,30 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         return;
       }
 
-      resetFusionState({ clearCache: true, primarySeriesId: seriesEntry.id });
-      setFusionManifestLoading(true);
+      const cachedManifest = getFusionManifest(seriesEntry.id);
+      resetFusionState({ clearCache: !cachedManifest, primarySeriesId: seriesEntry.id });
       setFusionManifestError(null);
 
+      if (cachedManifest && fusionManifestRequestRef.current === requestToken) {
+        setFusionManifest(cachedManifest);
+      }
+
+      setFusionManifestLoading(true);
+
       try {
+        const patientId = getNumericPatientId();
         const candidateSecondaryIds = getCandidateSecondaryIds(seriesEntry.id);
+        if (!cachedManifest && patientId != null) {
+          try {
+            await runManifestForPatient(patientId);
+          } catch (error) {
+            console.error('Fusion manifest pre-run failed', error);
+          }
+        }
         let manifest = await fetchFusionManifest(seriesEntry.id, {
           preload: true,
           secondarySeriesIds: candidateSecondaryIds,
+          force: !cachedManifest,
         });
         if (fusionManifestRequestRef.current !== requestToken) return;
         setFusionManifest(manifest);
@@ -1566,8 +1644,60 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       }
     },
-    [getCandidateSecondaryIds, pollFusionManifestUntilReady, preloadAllFusionSecondaries, resetFusionState],
+    [
+      getCandidateSecondaryIds,
+      getNumericPatientId,
+      pollFusionManifestUntilReady,
+      preloadAllFusionSecondaries,
+      resetFusionState,
+      runManifestForPatient,
+    ],
   );
+
+  const maybeStartInitialManifest = useCallback(() => {
+    if (manifestInitRequestedRef.current) return false;
+    if (!associationsReady) return false;
+    const candidate = associationPrimarySeries ?? fallbackPrimarySeries;
+    if (!candidate) return false;
+
+    manifestInitRequestedRef.current = true;
+    setManifestActionStatus('Preparing fusion cache…');
+    initializeFusionForSeries(candidate).catch((error) => {
+      console.error('Initial fusion manifest initialization failed', error);
+      setManifestActionStatus(`Fusion manifest failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return true;
+  }, [associationsReady, associationPrimarySeries, fallbackPrimarySeries, initializeFusionForSeries]);
+
+  useEffect(() => {
+    maybeStartInitialManifest();
+  }, [associationsReady, maybeStartInitialManifest]);
+
+  useEffect(() => {
+    if (!seriesData || !Array.isArray(seriesData)) return;
+    setSeries(seriesData);
+    setVisibleSeries(seriesData.filter((entry) => !shouldHideSeries(entry)));
+
+    if (!selectedSeries && seriesData.length > 0) {
+      const ctSeries = seriesData.filter((s) => s.modality === 'CT' && !shouldHideSeries(s));
+      if (ctSeries.length > 0) {
+        const scoreCT = (ct: any) => {
+          let score = 0;
+          score += Math.min(200, (ct.imageCount || 0));
+          const desc = (ct.seriesDescription || '').toLowerCase();
+          if (desc.includes('planning') || desc.includes('plan')) score += 100;
+          if (desc.includes('ctac')) score -= 200;
+          return score;
+        };
+
+        const bestCT = [...ctSeries].sort((a, b) => scoreCT(b) - scoreCT(a))[0] ?? null;
+        setFallbackPrimarySeries(bestCT ?? null);
+        if (bestCT && associationsReady) {
+          maybeStartInitialManifest();
+        }
+      }
+    }
+  }, [seriesData, selectedSeries, shouldHideSeries, associationsReady, maybeStartInitialManifest]);
 
   // Prevent manifest init deathloops by gating on candidate set changes and a short cooldown
   const prevCandidateKeyRef = useRef<string | null>(null);
@@ -1600,6 +1730,37 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       initializeFusionForSeries(selectedSeries);
     }
   }, [getCandidateSecondaryIds, regAssociations, selectedSeries, fusionManifest, fusionManifestLoading, initializeFusionForSeries]);
+
+  useEffect(() => {
+    if (!fusionManifest || !fusionManifest.primarySeriesId) return;
+    if (autoPrimarySelectedRef.current) return;
+
+    const primaryId = fusionManifest.primarySeriesId;
+    const primaryEntry = series.find((entry) => Number(entry.id) === Number(primaryId));
+    if (!primaryEntry) return;
+
+    autoPrimarySelectedRef.current = true;
+    console.log(`🎯 Manifest-selected planning CT ${primaryEntry.seriesDescription || primaryEntry.id} (ID: ${primaryEntry.id})`);
+    handleSeriesSelect(primaryEntry).catch((error) => {
+      console.warn('Failed to load manifest-selected primary series', error);
+    });
+  }, [fusionManifest, series, handleSeriesSelect]);
+
+  useEffect(() => {
+    if (!manifestInitRequestedRef.current) return;
+    if (fusionManifest || fusionManifestLoading) return;
+    if (!fusionManifestError) return;
+    if (autoPrimarySelectedRef.current) return;
+
+    const fallback = fallbackPrimarySeries;
+    if (fallback) {
+      autoPrimarySelectedRef.current = true;
+      console.warn('Fusion manifest failed; falling back to heuristic primary selection');
+      handleSeriesSelect(fallback).catch((error) => {
+        console.warn('Failed to load fallback primary series', error);
+      });
+    }
+  }, [fusionManifest, fusionManifestError, fusionManifestLoading, fallbackPrimarySeries, handleSeriesSelect]);
 
   const handleContourUpdate = (payload: any) => {
     console.log('Contour update received:', payload);
@@ -1886,6 +2047,16 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     );
   }
 
+  if (fusionManifestLoading && !selectedSeries) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center gap-3 text-slate-200">
+        <div className="w-10 h-10 border border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        <div className="text-sm font-medium text-cyan-200">Preparing fusion cache…</div>
+        <div className="text-xs text-slate-400">Please wait while the manifest is generated.</div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
@@ -1980,6 +2151,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             fusionStatuses={fusionSecondaryStatuses}
             fusionCandidatesByPrimary={fusionCandidatesByPrimary}
             fusionSiblingMap={fusionSiblingMap}
+            fusionManifest={fusionManifest}
           />
         </div>
 

@@ -147,6 +147,30 @@ interface WorkingViewerProps {
   fusionManifestPrimarySeriesId?: number | null;
 }
 
+type CTTransformState = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  imageWidth: number;
+  imageHeight: number;
+  pixelSpacing: {
+    row: number;
+    col: number;
+  };
+};
+
+const DEFAULT_CT_TRANSFORM: CTTransformState = {
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  imageWidth: 1,
+  imageHeight: 1,
+  pixelSpacing: {
+    row: 1,
+    col: 1,
+  },
+};
+
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
   const {
     seriesId,
@@ -186,6 +210,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionManifestPrimarySeriesId = null,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const rtOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -228,6 +254,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
+  const normalizedFusionOpacity = secondarySeriesId
+    ? Math.min(1, Math.max(0, Number.isFinite(fusionOpacity) ? fusionOpacity : 0))
+    : 0;
+  // Couple primary opacity to fusion for CPU path blending (GPU path uses actor opacity)
+  const primaryCanvasOpacity = secondarySeriesId ? Math.max(0, 1 - normalizedFusionOpacity) : 1;
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
@@ -263,10 +294,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     hasSignal: boolean;
   }>>(new Map());
   // CT transform for fusion coordinate system alignment
-  const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
+  const ctTransform = useRef<CTTransformState | null>(null);
   const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
+  const lastNormalizedFusionOpacityRef = useRef(normalizedFusionOpacity);
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
     if (!image) return null;
@@ -512,35 +544,191 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [],
   );
 
+  const clearOverlayCanvas = useCallback(() => {
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const overlayCtx = overlayCanvas.getContext('2d');
+    overlayCtx?.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }, []);
+
+  const clearRTOverlayCanvas = useCallback(() => {
+    const rtCanvas = rtOverlayCanvasRef.current;
+    if (!rtCanvas) return;
+    const rtCtx = rtCanvas.getContext('2d');
+    rtCtx?.clearRect(0, 0, rtCanvas.width, rtCanvas.height);
+  }, []);
+
+  // Keep overlay canvas visually aligned with the primary canvas (CSS box alignment)
+  const syncOverlayCanvasPosition = useCallback(() => {
+    try {
+      const baseCanvas = canvasRef.current;
+      const overlayCanvas = overlayCanvasRef.current;
+      const rtCanvas = rtOverlayCanvasRef.current;
+      if (!baseCanvas || !overlayCanvas) return;
+
+      const parent = baseCanvas.parentElement as HTMLElement | null;
+      if (!parent) return;
+
+      // Position overlay exactly over the rendered box of the base canvas
+      const baseRect = baseCanvas.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      overlayCanvas.style.position = 'absolute';
+      overlayCanvas.style.pointerEvents = 'none';
+      overlayCanvas.style.top = `${baseRect.top - parentRect.top}px`;
+      overlayCanvas.style.left = `${baseRect.left - parentRect.left}px`;
+
+      // Match CSS size so "object-contain" scaling does not desync the overlay
+      const computed = window.getComputedStyle(baseCanvas);
+      overlayCanvas.style.width = computed.width;
+      overlayCanvas.style.height = computed.height;
+
+      // Sync RT overlay canvas as well
+      if (rtCanvas) {
+        rtCanvas.style.position = 'absolute';
+        rtCanvas.style.pointerEvents = 'none';
+        rtCanvas.style.top = `${baseRect.top - parentRect.top}px`;
+        rtCanvas.style.left = `${baseRect.left - parentRect.left}px`;
+        rtCanvas.style.width = computed.width;
+        rtCanvas.style.height = computed.height;
+      }
+
+      // Ensure parent can stack absolutely-positioned children
+      if (getComputedStyle(parent).position === 'static') {
+        parent.style.position = 'relative';
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    // Initial sync
+    syncOverlayCanvasPosition();
+
+    // Observe size changes of the canvas and its parent (layout, sidebar resize, etc.)
+    const baseCanvas = canvasRef.current;
+    const parent = baseCanvas?.parentElement ?? null;
+    let ro: ResizeObserver | null = null;
+    if (baseCanvas && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => syncOverlayCanvasPosition());
+      ro.observe(baseCanvas);
+      if (parent) ro.observe(parent);
+    }
+
+    // Window resize may also change flex layout
+    const onWinResize = () => syncOverlayCanvasPosition();
+    window.addEventListener('resize', onWinResize);
+
+    return () => {
+      window.removeEventListener('resize', onWinResize);
+      if (ro) {
+        try { ro.disconnect(); } catch {}
+      }
+    };
+  }, [syncOverlayCanvasPosition]);
+
   const drawFusionOverlay = useCallback(
     (
-      ctx: CanvasRenderingContext2D,
-      overlayCanvas: HTMLCanvasElement,
-      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number },
-      alpha: number,
+      targetCanvas: HTMLCanvasElement,
+      overlayBuffer: HTMLCanvasElement,
+      transform: CTTransformState,
+      slice?: { pixelSpacing?: [number, number] | null; imagePositionPatient?: number[] | null; imageOrientationPatient?: number[] | null },
+      primaryImage?: { imagePositionPatient?: number[] | null; imageOrientationPatient?: number[] | null },
+      registrationMatrixArg?: number[] | null,
     ) => {
-      if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
-      const targetWidth = transform.imageWidth * transform.scale;
-      const targetHeight = transform.imageHeight * transform.scale;
-      if (targetWidth === 0 || targetHeight === 0) return;
+      if (!targetCanvas || !overlayBuffer || overlayBuffer.width === 0 || overlayBuffer.height === 0) return;
 
-      const widthScale = targetWidth / overlayCanvas.width;
-      const heightScale = targetHeight / overlayCanvas.height;
+      const ctx = targetCanvas.getContext('2d');
+      if (!ctx) return;
+
+      const baseCanvas = canvasRef.current;
+      if (baseCanvas) {
+        if (targetCanvas.width !== baseCanvas.width) {
+          targetCanvas.width = baseCanvas.width;
+        }
+        if (targetCanvas.height !== baseCanvas.height) {
+          targetCanvas.height = baseCanvas.height;
+        }
+      }
+
+      ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+
+      const baseRowSpacing = transform.pixelSpacing?.row ?? 1;
+      const baseColSpacing = transform.pixelSpacing?.col ?? 1;
+      if (!Number.isFinite(baseRowSpacing) || !Number.isFinite(baseColSpacing) || baseRowSpacing <= 0 || baseColSpacing <= 0) {
+        return;
+      }
+
+      const sliceRowSpacing = slice?.pixelSpacing?.[0];
+      const sliceColSpacing = slice?.pixelSpacing?.[1];
+      const hasRowSpacing = typeof sliceRowSpacing === 'number' && Number.isFinite(sliceRowSpacing) && sliceRowSpacing > 0;
+      const hasColSpacing = typeof sliceColSpacing === 'number' && Number.isFinite(sliceColSpacing) && sliceColSpacing > 0;
+      const effectiveRowSpacing = hasRowSpacing ? (sliceRowSpacing as number) : baseRowSpacing;
+      const effectiveColSpacing = hasColSpacing ? (sliceColSpacing as number) : baseColSpacing;
+
+      const widthScale = transform.scale * (effectiveColSpacing / baseColSpacing);
+      const heightScale = transform.scale * (effectiveRowSpacing / baseRowSpacing);
+      if (!Number.isFinite(widthScale) || !Number.isFinite(heightScale) || widthScale <= 0 || heightScale <= 0) {
+        return;
+      }
+
+      const drawWidth = overlayBuffer.width * widthScale;
+      const drawHeight = overlayBuffer.height * heightScale;
+      if (!Number.isFinite(drawWidth) || !Number.isFinite(drawHeight) || drawWidth <= 0 || drawHeight <= 0) {
+        return;
+      }
+
+      // Compute patient-space delta between overlay slice origin and primary image origin
+      // then project onto primary row/col axes to get canvas offset in pixels
+      let deltaCanvasX = 0;
+      let deltaCanvasY = 0;
+      try {
+        const priPos = Array.isArray(primaryImage?.imagePositionPatient) && primaryImage!.imagePositionPatient!.length >= 3
+          ? primaryImage!.imagePositionPatient as number[]
+          : null;
+        const ovPosRaw = Array.isArray(slice?.imagePositionPatient) && slice!.imagePositionPatient!.length >= 3
+          ? (slice!.imagePositionPatient as number[]).slice()
+          : null;
+        const priOri = Array.isArray(primaryImage?.imageOrientationPatient) && primaryImage!.imageOrientationPatient!.length >= 6
+          ? primaryImage!.imageOrientationPatient as number[]
+          : [1, 0, 0, 0, 1, 0];
+
+        if (priPos && ovPosRaw && priOri) {
+          // Optionally transform overlay position using registration matrix (secondary->primary)
+          const M = Array.isArray(registrationMatrixArg) && registrationMatrixArg.length === 16 ? registrationMatrixArg : null;
+          const ovPos = ovPosRaw.slice(0, 3);
+          let ovT = ovPos;
+          if (M) {
+            const x = ovPos[0], y = ovPos[1], z = ovPos[2];
+            ovT = [
+              M[0] * x + M[1] * y + M[2] * z + M[3],
+              M[4] * x + M[5] * y + M[6] * z + M[7],
+              M[8] * x + M[9] * y + M[10] * z + M[11],
+            ];
+          }
+          const d = [ovT[0] - priPos[0], ovT[1] - priPos[1], ovT[2] - priPos[2]];
+          const colDir = [priOri[0], priOri[1], priOri[2]];
+          const rowDir = [priOri[3], priOri[4], priOri[5]];
+          const dot = (a: number[], b: number[]) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+          const deltaColMm = dot(d, colDir);
+          const deltaRowMm = dot(d, rowDir);
+          deltaCanvasX = (deltaColMm / baseColSpacing) * transform.scale;
+          deltaCanvasY = (deltaRowMm / baseRowSpacing) * transform.scale;
+        }
+      } catch {}
 
       ctx.save();
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = 1;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(
-        overlayCanvas,
+        overlayBuffer,
         0,
         0,
-        overlayCanvas.width,
-        overlayCanvas.height,
-        transform.offsetX,
-        transform.offsetY,
-        overlayCanvas.width * widthScale,
-        overlayCanvas.height * heightScale,
+        overlayBuffer.width,
+        overlayBuffer.height,
+        transform.offsetX + deltaCanvasX,
+        transform.offsetY + deltaCanvasY,
+        drawWidth,
+        drawHeight,
       );
       ctx.restore();
     },
@@ -891,13 +1079,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         fusionRenderDebounceRef.current = setTimeout(() => {
           isScrollingRef.current = false;
           // Re-render with full quality fusion after scrolling stops
-          if (fusionOpacity > 0 && secondarySeriesId) {
+          if (normalizedFusionOpacity > 0 && secondarySeriesId) {
             scheduleRender();
           }
         }, 100);
       });
     }
-  }, [fusionOpacity, secondarySeriesId]);
+  }, [normalizedFusionOpacity, secondarySeriesId]);
 
   useEffect(() => {
     scheduleRenderRef.current = scheduleRender;
@@ -908,14 +1096,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [scheduleRender]);
 
-  // When fusion opacity changes, redraw base CT from offscreen + cached overlay only (no full CT re-render)
+  // Maintain CT/overlay redraws for crosshairs, RT overlays, and cached fusion slices without repainting on opacity changes
   useEffect(() => {
     try {
-      if (!canvasRef.current) return;
-      if (!secondarySeriesId) return;
+      const previousOpacity = lastNormalizedFusionOpacityRef.current;
+      const opacityChanged = previousOpacity !== normalizedFusionOpacity;
+      lastNormalizedFusionOpacityRef.current = normalizedFusionOpacity;
+
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        if (opacityChanged && normalizedFusionOpacity === 0) {
+          clearOverlayCanvas();
+        }
+        return;
+      }
+
+      if (!secondarySeriesId) {
+        if (opacityChanged) {
+          clearOverlayCanvas();
+        }
+        return;
+      }
+
       const currentImage = images[currentIndex];
       if (!currentImage) return;
-      const canvas = canvasRef.current;
+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
@@ -925,30 +1130,43 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         selectedRegistrationId ?? null,
       );
       const cached = fuseboxCacheRef.current.get(cacheKey);
-      const t = ctTransform.current;
+      const transform = ctTransform.current;
       const src = offscreenCanvasRef.current;
+      const overlayTarget = overlayCanvasRef.current;
 
-      if (cached && t && src) {
-        if (!cached.hasSignal) {
-          fusionIssueRef.current = 'empty-fusebox-slice';
+      if (opacityChanged) {
+        if (normalizedFusionOpacity === 0) {
+          clearOverlayCanvas();
           return;
         }
-        // Redraw CT from offscreen canvas with existing transform
+        if (previousOpacity !== 0) {
+          // Visual opacity handled via CSS; avoid extra redraw when overlay already present
+          return;
+        }
+        // If we reached here, overlay transitioned from hidden to visible; continue to redraw
+      }
+
+      if (cached && transform && src) {
+        if (!cached.hasSignal) {
+          fusionIssueRef.current = 'empty-fusebox-slice';
+          clearOverlayCanvas();
+          return;
+        }
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
+        ctx.drawImage(src, transform.offsetX, transform.offsetY, transform.imageWidth * transform.scale, transform.imageHeight * transform.scale);
 
-        // Draw cached fusion overlay with new opacity
-        drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
+        if (overlayTarget && !isGPUViewportActive) {
+          drawFusionOverlay(overlayTarget, cached.canvas, transform, cached.slice);
+        }
 
-        // Redraw RT structures on top
         try {
           const imageWithMetadata = { ...currentImage, imageMetadata };
           renderRTStructures(ctx, canvas, imageWithMetadata);
         } catch {}
 
-        // Redraw crosshairs if axial
         try {
           if (orientation === 'axial') {
             const imageWidth = currentImage.columns || currentImage.width || 512;
@@ -981,28 +1199,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
         } catch {}
       } else {
-        // Fallback to scheduled render if no cache/base available
         scheduleRender();
       }
     } catch {
-      // Ignore errors and let scheduled render handle it
       scheduleRender();
     }
   }, [
     buildFuseboxCacheKey,
-    drawFusionOverlay,
-    fusionOpacity,
-    secondarySeriesId,
-    selectedRegistrationId,
-    currentIndex,
-    images,
-    scheduleRender,
-    imageMetadata,
-    orientation,
+    clearOverlayCanvas,
     crosshairPos,
+    currentIndex,
+    drawFusionOverlay,
+    imageMetadata,
+    images,
+    isGPUViewportActive,
+    normalizedFusionOpacity,
+    orientation,
     panX,
     panY,
+    scheduleRender,
+    secondarySeriesId,
+    selectedRegistrationId,
     zoom,
+    renderRTStructures,
   ]);
   
   // Abort controller for series changes
@@ -4444,7 +4663,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           ensureCtStackSlice(cacheKey, imageData);
         }
 
-        if (secondarySeriesId && fusionOpacity > 0) {
+        if (secondarySeriesId && normalizedFusionOpacity > 0) {
           await renderFusionOverlayNew(null, currentImage);
         }
 
@@ -4460,6 +4679,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (!canvas) return;
       ctx = canvas.getContext("2d");
       if (!ctx) return;
+
+      const overlayCanvas = overlayCanvasRef.current;
+      if (overlayCanvas) {
+        if (overlayCanvas.width !== canvas.width) {
+          overlayCanvas.width = canvas.width;
+        }
+        if (overlayCanvas.height !== canvas.height) {
+          overlayCanvas.height = canvas.height;
+        }
+      }
 
       // Clear canvas
       ctx.fillStyle = "black";
@@ -4700,13 +4929,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const x = (canvasWidth - scaledWidth) / 2 + panX;
     const y = (canvasHeight - scaledHeight) / 2 + panY;
 
-    // Store CT transform for fusion overlay to use the same coordinate system
+    // Store CT transform, including spacing, for fusion overlay alignment
+    const spacingSource = imageMetadata
+      ?? images[currentIndex]?.imageMetadata
+      ?? images[currentIndex]
+      ?? {};
+    const { row: rowSpacing, col: colSpacing } = getSpacing(spacingSource);
     ctTransform.current = {
       scale: totalScale,
       offsetX: x,
       offsetY: y,
       imageWidth: width,
-      imageHeight: height
+      imageHeight: height,
+      pixelSpacing: {
+        row: Number.isFinite(rowSpacing) && rowSpacing > 0 ? rowSpacing : 1,
+        col: Number.isFinite(colSpacing) && colSpacing > 0 ? colSpacing : 1,
+      },
     };
 
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
@@ -4758,14 +4996,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     if (secondarySeriesId) return;
     fusionPrefetchSetRef.current.clear();
+    clearOverlayCanvas();
   }, [secondarySeriesId]);
+
+  useEffect(() => {
+    if (isGPUViewportActive && orientation === 'axial') {
+      clearOverlayCanvas();
+    }
+  }, [isGPUViewportActive, orientation, clearOverlayCanvas]);
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D | null, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
     const ensureActive = () => requestToken === fusionRequestTokenRef.current;
 
-    if (!secondarySeriesId || fusionOpacity === 0) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+    const overlayTarget = overlayCanvasRef.current;
+
+    if (!secondarySeriesId || normalizedFusionOpacity === 0) {
+      if (ensureActive()) {
+        setFuseboxTransformSource(null);
+        clearOverlayCanvas();
+      }
       return;
     }
 
@@ -4774,6 +5024,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (ensureActive()) {
         fusionIssueRef.current = 'manifest-not-ready';
         setFuseboxTransformSource(null);
+        clearOverlayCanvas();
       }
       return;
     }
@@ -4787,6 +5038,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (ensureActive()) {
         fusionIssueRef.current = 'manifest-not-ready';
         setFuseboxTransformSource(null);
+        clearOverlayCanvas();
       }
       return;
     }
@@ -4794,12 +5046,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
 
     if (!primaryImage?.sopInstanceUID) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+      if (ensureActive()) {
+        setFuseboxTransformSource(null);
+        clearOverlayCanvas();
+      }
       return;
     }
 
     const transform = ctTransform.current;
-    if (!transform && ctx) {
+    if (!transform && !isGPUViewportActive) {
+      clearOverlayCanvas();
       return;
     }
 
@@ -4854,6 +5110,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           if (ensureActive()) {
             fusionIssueRef.current = 'overlay-canvas-error';
             setFuseboxTransformSource(null);
+            clearOverlayCanvas();
           }
           return;
         }
@@ -4871,13 +5128,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';
           setFuseboxTransformSource(null);
+          clearOverlayCanvas();
         }
         return;
       }
     }
 
     if (!cached) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+      if (ensureActive()) {
+        setFuseboxTransformSource(null);
+        clearOverlayCanvas();
+      }
       return;
     }
 
@@ -4885,6 +5146,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (ensureActive()) {
         fusionIssueRef.current = 'empty-fusebox-slice';
         setFuseboxTransformSource(cached.slice.transformSource ?? null);
+        clearOverlayCanvas();
       }
       return;
     }
@@ -4895,8 +5157,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     setFuseboxTransformSource(source);
     fusionIssueRef.current = null;
 
-    if (ctx && transform) {
-      drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
+    if (overlayTarget && transform && !isGPUViewportActive) {
+      const primaryImageOrMeta: any = images[currentIndex] || {};
+      const primPos = primaryImageOrMeta.imagePositionPatient || primaryImageOrMeta.parsedImagePosition || null;
+      const primOri = primaryImageOrMeta.imageOrientationPatient || primaryImageOrMeta.parsedImageOrientation || null;
+      drawFusionOverlay(
+        overlayTarget,
+        cached.canvas,
+        transform,
+        cached.slice as any,
+        { imagePositionPatient: primPos, imageOrientationPatient: primOri } as any,
+        Array.isArray(registrationMatrix) && registrationMatrix.length === 16 ? registrationMatrix : null,
+      );
     }
     prefetchFusionSlices(currentIndex);
   };
@@ -4915,7 +5187,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     // Apply CT transform to match the rendered canvas
     // Always get fresh ctTransform value to avoid stale closure
-    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    const transform = ctTransform.current ?? DEFAULT_CT_TRANSFORM;
     const canvasX = (pixelX * transform.scale) + transform.offsetX;
     const canvasY = (pixelY * transform.scale) + transform.offsetY;
     
@@ -4930,7 +5202,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     
     // Apply inverse CT transform to get raw pixel coordinates
     // Always get fresh ctTransform value to avoid stale closure
-    const transform = ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 };
+    const transform = ctTransform.current ?? DEFAULT_CT_TRANSFORM;
     const pixelX = (canvasX - transform.offsetX) / transform.scale;
     const pixelY = (canvasY - transform.offsetY) / transform.scale;
     
@@ -4941,11 +5213,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return [worldX, worldY];
   }, [imageMetadata]); // Re-create when imageMetadata changes
 
-  const renderRTStructures = (
+  function renderRTStructures(
     ctx: CanvasRenderingContext2D,
     canvas: HTMLCanvasElement,
     currentImage: any,
-  ) => {
+  ) {
     const structuresRef = localRTStructures || externalRTStructures;
     if (!structuresRef || !currentImage) return;
 
@@ -5141,7 +5413,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     // Restore context state
     ctx.restore();
-  };
+  }
 
   const drawContour = (
     ctx: CanvasRenderingContext2D,
@@ -5494,7 +5766,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const manager = await synchronizeActors({
           element: gpuContainerRef.current as HTMLDivElement,
           ctSlices: orderedCtSlices,
-          fusionOpacity,
+          fusionOpacity: normalizedFusionOpacity,
           onSliceChanged: (index) => {
             setCurrentIndex((prev) => (prev === index ? prev : index));
           },
@@ -5507,6 +5779,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         fusionManagerRef.current = manager;
         setIsGPUViewportActive(true);
+
+        // Ensure the GPU container is properly stacked
+        const container = gpuContainerRef.current as HTMLDivElement | null;
+        if (container) {
+          if (getComputedStyle(container).position === 'static') {
+            container.style.position = 'relative';
+          }
+          container.style.zIndex = '0';
+        }
       } catch (error) {
         console.error('Failed to initialize Cornerstone fusion manager:', error);
         setIsGPUViewportActive(false);
@@ -5518,12 +5799,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => {
       cancelled = true;
     };
-  }, [isGPUMode, orientation, images, fusionOpacity, ctMetadataVersion, cacheVersion]);
+  }, [isGPUMode, orientation, images, normalizedFusionOpacity, ctMetadataVersion, cacheVersion]);
 
   useEffect(() => {
     if (!fusionManagerRef.current) return;
-    fusionManagerRef.current.updateOpacity?.(fusionOpacity);
-  }, [fusionOpacity]);
+    fusionManagerRef.current.updateOpacity?.(normalizedFusionOpacity);
+  }, [normalizedFusionOpacity]);
 
   useEffect(() => {
     if (!isGPUViewportActive) return;
@@ -6056,7 +6337,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                     ? 'text-blue-300'
                     : 'text-purple-300'
                 }>
-                  ({Math.round(fusionOpacity * 100)}%)
+                  ({Math.round(normalizedFusionOpacity * 100)}%)
                 </span>
                 <Button size="sm" variant="ghost" className="h-5 px-2 ml-2 text-[10px] hover:bg-gray-700/40"
                   onClick={(e) => { e.stopPropagation(); setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
@@ -6202,6 +6483,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               imageRendering: "auto",
               userSelect: "none",
               display: isGPUViewportActive && orientation === 'axial' ? 'none' : 'block',
+              opacity: primaryCanvasOpacity,
+            }}
+          />
+          <canvas
+            ref={overlayCanvasRef}
+            width={1280}
+            height={1280}
+            className="max-w-full max-h-full object-contain rounded absolute top-0 left-0 pointer-events-none"
+            style={{
+              display: isGPUViewportActive && orientation === 'axial' ? 'none' : 'block',
+              opacity: normalizedFusionOpacity,
             }}
           />
 
