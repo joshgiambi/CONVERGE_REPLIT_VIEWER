@@ -39,6 +39,7 @@ import { log } from '@/lib/log';
 import { synchronizeActors, type FusionManagerHandle } from '@/lib/cornerstone-fusion-manager';
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
+import { deriveSlicePosition, getSliceTolerance } from "@/lib/dicom/slice";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import type { RegistrationAssociation, RegistrationTransformCandidate, RegistrationSeriesDetail } from '@/types/fusion';
 
@@ -5225,42 +5226,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const structuresRef = localRTStructures || externalRTStructures;
     if (!structuresRef || !currentImage) return;
 
-    // FIXED: Get current slice position from actual DICOM metadata with fallbacks
-    let currentSlicePosition: number = currentIndex + 1; // Default fallback
-
-    // Priority 1: Use parsed slice location from DICOM (check for null/undefined)
-    if (
-      currentImage.parsedSliceLocation !== undefined &&
-      currentImage.parsedSliceLocation !== null
-    ) {
-      currentSlicePosition = currentImage.parsedSliceLocation;
-    }
-    // Priority 2: Use parsed Z position from DICOM (check for null/undefined)
-    else if (
-      currentImage.parsedZPosition !== undefined &&
-      currentImage.parsedZPosition !== null
-    ) {
-      currentSlicePosition = currentImage.parsedZPosition;
-    }
-    // Priority 3: Extract from image metadata directly
-    else if (currentImage.imageMetadata && currentImage.imageMetadata.sliceLocation !== undefined) {
-      const parsed = parseFloat(currentImage.imageMetadata.sliceLocation);
-      if (!isNaN(parsed)) {
-        currentSlicePosition = parsed;
-      }
-    }
-    // Priority 4: Extract Z from image position
-    else if (currentImage.imageMetadata && currentImage.imageMetadata.imagePosition) {
-      const imagePos = typeof currentImage.imageMetadata.imagePosition === 'string'
-        ? currentImage.imageMetadata.imagePosition.split("\\")
-        : currentImage.imageMetadata.imagePosition;
-      if (imagePos && imagePos.length >= 3) {
-        const parsed = parseFloat(imagePos[2]);
-        if (!isNaN(parsed)) {
-          currentSlicePosition = parsed;
-        }
-      }
-    }
+    const currentSlicePosition: number = deriveSlicePosition(currentImage, currentIndex);
 
     // Note: currentSlicePosition already has a fallback initialization, no need for additional check
 
@@ -5336,14 +5302,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
 
       // Determine an effective slice tolerance based on metadata to prevent flicker
-      const metaTol = (() => {
-        const meta = currentImage?.imageMetadata;
-        if (!meta) return SLICE_TOL_MM;
-        const sbs = parseFloat(meta.spacingBetweenSlices ?? '');
-        const sth = parseFloat(meta.sliceThickness ?? '');
-        const zCand = Number.isFinite(sbs) ? sbs * 0.45 : (Number.isFinite(sth) ? sth * 0.45 : 0);
-        return Math.max(SLICE_TOL_MM, zCand || 0);
-      })();
+      const metaTol = getSliceTolerance(currentImage?.imageMetadata, SLICE_TOL_MM);
 
       structure.contours.forEach((contour: any) => {
         // Debug: Log what contours are being considered for drawing
