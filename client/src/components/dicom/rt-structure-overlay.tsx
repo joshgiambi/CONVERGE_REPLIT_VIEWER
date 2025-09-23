@@ -148,7 +148,7 @@ export function RTStructureOverlay({
 
   // Render RT structure overlays on canvas
   useEffect(() => {
-    if (!canvasRef.current || !rtStructures || !currentSlicePosition) return;
+    if (!canvasRef.current || !rtStructures) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -192,8 +192,8 @@ function renderRTStructures(
   // The RT structure positions should directly match the CT image positions
   // No transformation needed - just use the actual Z positions from the contours
   
-  // Use exact integer comparison to completely prevent ghost contours
-  const toleranceMicrons = 100; // 0.1mm in micrometers for integer comparison
+  // Use exact integer comparison to prevent ghost contours, but allow 0 slice
+  const toleranceMicrons = 100; // 0.1mm
   
   // Check if rtStructures has the expected structure
   if (!rtStructures?.structures) {
@@ -221,7 +221,7 @@ function renderRTStructures(
     
     structure.contours.forEach(contour => {
       // Check if this contour is on the current slice using exact integer comparison
-      const sliceZ = contour.slicePosition;
+      const sliceZ = Number(contour.slicePosition) || 0;
       const contourSliceMicrons = Math.round(sliceZ * 1000);
       
       // Only draw if on exactly the same slice (with tiny tolerance for rounding)
@@ -273,10 +273,10 @@ function drawContour(
 ) {
   if (contour.points.length < 6) return;
 
-  // Use authentic DICOM metadata values
-  const imagePositionPatient: [number, number, number] = [-300, -300, 35];
-  const pixelSpacing: [number, number] = [1.171875, 1.171875];
-  const dicomImageWidth = 512; // Standard DICOM matrix size
+  // Use safe defaults; actual metadata should be provided by parent viewer
+  const imagePositionPatient: [number, number, number] = [-300, -300, 0];
+  const pixelSpacing: [number, number] = [1, 1];
+  const dicomImageWidth = 512;
   const dicomImageHeight = 512;
 
   // Apply global contour width and opacity settings

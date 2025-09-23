@@ -29,6 +29,7 @@ import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
 import { attachDiceDebug } from "@/lib/dice-utils";
+import { drawRTContour } from "@/lib/rt";
 import { 
   isGPUAccelerationAvailable,
   cacheStackSlice,
@@ -5311,18 +5312,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const isSelectedStructure = selectedStructures?.has(structure.roiNumber) || false;
       
       // Debug visibility map - only when specifically debugging RT structures
-      if (RT_STRUCTURE_DEBUG) {
-        console.log(`🔍 Structure ${structure.structureName} (${structure.roiNumber}) visibility:`, {
-          isVisible,
-          visibilityMapHasKey: structureVisibility.has(structure.roiNumber),
-          allStructuresVisible,
-          willShow: isSelectedForEdit || isSelectedStructure || 
-                   (allStructuresVisible ? isVisible !== false : isVisible === true),
-          isSelectedForEdit,
-          isSelectedStructure,
-          selectedStructuresSet: selectedStructures ? Array.from(selectedStructures) : []
-        });
-      }
+      
 
       // Priority 1: Always show if selected (checkbox) or being edited
       if (isSelectedForEdit || isSelectedStructure) {
@@ -5361,11 +5351,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           contour.slicePosition - currentSlicePosition,
         );
         if (positionDiff <= metaTol) {
-          if (RT_STRUCTURE_DEBUG) {
-            console.log(
-              `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
-            );
-          }
+          
           drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
         }
       });
@@ -5391,14 +5377,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const positionDiff = Math.abs(contour.slicePosition - currentSlicePosition);
           
           // Show preview only on the current slice to avoid layered jagged lines
-          if (positionDiff <= SLICE_TOL_MM) {
+      if (positionDiff <= SLICE_TOL_MM) {
             drawContour(ctx, { points: contour.points, isPreview: true }, canvas.width, canvas.height, currentImage, animationTime);
             renderedPreviewCount++;
             
-            // Log when we're showing preview on current slice vs other slices
-            if (positionDiff <= SLICE_TOL_MM) {
-              console.log(`🔹 🎯 Showing preview on CURRENT slice ${currentSlicePosition.toFixed(1)} (diff: ${positionDiff.toFixed(1)}mm)`);
-            }
+            
           }
         } else {
           // Fallback for old format (array of points) - always show
@@ -5407,7 +5390,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       });
       
-      console.log(`🔹 🌐 Rendered ${renderedPreviewCount} preview contours for 3D visualization (current slice: ${currentSlicePosition.toFixed(1)})`);
+      
       
       // Reset line dash for other elements
       ctx.setLineDash([]);
@@ -5426,110 +5409,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     currentImage: any,
     animationTime?: number,
   ) => {
-    if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
-
-    ctx.beginPath();
-
-    // Get image metadata from current image
-    const imgMetadata = currentImage?.imageMetadata;
-    if (!imgMetadata) {
-      console.warn("No image metadata available for contour drawing");
-      return;
-    }
-    
-    // Debug logging disabled unless DEBUG is true
-    if (DEBUG && contour.points.length >= 6) {
-      console.log('Drawing contour with metadata:', {
-        imagePosition: imgMetadata.imagePosition,
-        pixelSpacing: imgMetadata.pixelSpacing,
-        firstWorldPoint: [contour.points[0], contour.points[1], contour.points[2]],
-        canvasSize: [canvasWidth, canvasHeight],
-        zoom: zoom,
-        pan: [panX, panY]
+    try {
+      drawRTContour({
+        ctx,
+        canvasWidth,
+        canvasHeight,
+        image: { imageMetadata: currentImage?.imageMetadata ?? null },
+        zoom,
+        panX,
+        panY,
+        contour,
+        animationTime,
       });
+    } catch {
+      // If module resolution fails for some reason, safely no-op
     }
-
-    // Parse DICOM metadata
-    const imagePosition = imgMetadata.imagePosition
-      ?.split("\\")
-      .map(Number) || [-300, -300, 0];
-    const pixelSpacing = imgMetadata.pixelSpacing
-      ?.split("\\")
-      .map(Number) || [1.171875, 1.171875];
-
-    // Image dimensions
-    const imageWidth = 512;
-    const imageHeight = 512;
-
-    // Calculate scale with zoom factor
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    // For a 512x512 image in 1024x1024 canvas, baseScale = 2
-    
-    // Apply zoom factor to base scale
-    const totalScale = baseScale * zoom;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
-    
-    // Center the image on canvas with pan offset (same as render16BitImage)
-    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
-
-    // Set up animated dashed line for predicted contours
-    if (contour.isPredicted && animationTime !== undefined) {
-      const dashLength = 8;
-      const gapLength = 6;
-      const animationSpeed = 0.002; // Adjust for speed
-      const offset = (animationTime * animationSpeed) % (dashLength + gapLength);
-      ctx.setLineDash([dashLength, gapLength]);
-      ctx.lineDashOffset = -offset;
-    } else {
-      // Solid line for confirmed contours
-      ctx.setLineDash([]);
-      ctx.lineDashOffset = 0;
-    }
-
-    // Convert DICOM world coordinates to canvas coordinates
-    for (let i = 0; i < contour.points.length; i += 3) {
-      const worldX = contour.points[i]; // DICOM X coordinate
-      const worldY = contour.points[i + 1]; // DICOM Y coordinate
-
-      // Convert world coordinates to pixel coordinates
-      // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-      const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
-      const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
-      
-      // Apply the same transformation as the image
-      const canvasX = imageX + (pixelX * totalScale);
-      const canvasY = imageY + (pixelY * totalScale);
-
-      if (i === 0) {
-        ctx.moveTo(canvasX, canvasY);
-      } else {
-        ctx.lineTo(canvasX, canvasY);
-      }
-    }
-
-    // Close the contour
-    ctx.closePath();
-
-    // Fill only for confirmed contours; skip fill for previews
-    // Also use reduced opacity for predictions
-    if (contour.isPreview) {
-      // No fill for preview to match thin dashed outline spec
-    } else if (contour.isPredicted) {
-      const originalAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
-      ctx.fill();
-      ctx.globalAlpha = originalAlpha;
-    } else {
-      ctx.fill();
-    }
-    
-    ctx.stroke();
-
-    // Reset line dash for subsequent drawing operations
-    ctx.setLineDash([]);
-    ctx.lineDashOffset = 0;
   };
 
   const loadDicomParser = (): Promise<void> => {
@@ -5551,7 +5445,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const goToPrevious = () => {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0 && prevIndex < images.length) {
-      console.log(`📍 Navigate: ${currentIndex} → ${prevIndex}`);
+      
       setCurrentIndex(prevIndex);
     }
   };
@@ -5570,7 +5464,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Add protection against unexpected navigation
     const nextIndex = currentIndex + 1;
     if (nextIndex < maxSlices && nextIndex >= 0) {
-      console.log(`📍 Navigate: ${currentIndex} → ${nextIndex} (max: ${maxSlices})`);
+      
       setCurrentIndex(nextIndex);
     }
   };

@@ -8,6 +8,7 @@ import Viewer from "@/pages/viewer";
 import PatientManager from "@/pages/patient-manager";
 import FusionTestPage from "@/pages/fusion-test";
 import NotFound from "@/pages/not-found";
+import MasterDebug from "@/components/global/MasterDebug";
 
 function Router() {
   return (
@@ -28,6 +29,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <MasterDebug placement="top-right" />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>

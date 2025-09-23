@@ -1804,26 +1804,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const triggerFusionDebug = useCallback(() => {
-    try {
-      workingViewerRef.current?.openFusionDebug?.('manual');
-    } catch (error) {
-      console.warn('Unable to open fusion debug panel', error);
-    }
-  }, []);
-
-  const captureFusionDebug = useCallback(() => {
-    try {
-      const payload = (window as any)?.__fusion;
-      if (!payload) {
-        setFusionDebugSnapshot('window.__fusion is empty');
-        return;
-      }
-      setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
-    } catch (error: any) {
-      setFusionDebugSnapshot(`Failed to read window.__fusion: ${error?.message || String(error)}`);
-    }
-  }, []);
+  const triggerFusionDebug = useCallback(() => {}, []);
+  const captureFusionDebug = useCallback(() => {}, []);
 
   const handleRebuildManifest = useCallback(async () => {
     if (!selectedSeries) {
@@ -2051,7 +2033,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-3 text-slate-200">
         <div className="w-10 h-10 border border-cyan-400 border-t-transparent rounded-full animate-spin" />
-        <div className="text-sm font-medium text-cyan-200">Preparing fusion cache…</div>
+        <div className="text-sm font-medium text-cyan-200">Loading…</div>
         <div className="text-xs text-slate-400">Please wait while the manifest is generated.</div>
       </div>
     );
@@ -2059,39 +2041,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   return (
     <>
-      <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
-        <div className="flex flex-col gap-0.5 pr-2">
-          <span className="font-semibold text-slate-100">Fusion Debug</span>
-          <span>Primary: {selectedSeries ? `${selectedSeries.id}` : '—'}</span>
-          <span>Secondary: {secondarySeriesId ?? '—'}</span>
-          <span>Status: {manifestActionStatus ?? 'idle'}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={handleRebuildManifest}>
-            Rebuild Manifest
-          </Button>
-          <Button size="sm" variant="secondary" onClick={captureFusionDebug}>
-            Capture Debug
-          </Button>
-          <Button size="sm" variant="secondary" onClick={triggerFusionDebug}>
-            Open Viewer Debug
-          </Button>
-        </div>
-      </div>
-
-      {fusionDebugSnapshot && (
-        <div className="fixed top-20 right-4 z-40 max-h-80 w-[420px] overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-950/95 p-3 text-[11px] text-slate-200 shadow-xl shadow-black/50 backdrop-blur">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-semibold">Captured Debug Snapshot</span>
-            <Button size="sm" variant="ghost" onClick={() => setFusionDebugSnapshot(null)}>
-              Dismiss
-            </Button>
-          </div>
-          <pre className="max-h-64 whitespace-pre-wrap break-all text-[10px] leading-snug">
-            {fusionDebugSnapshot}
-          </pre>
-        </div>
-      )}
+      
 
       <div className="animate-in fade-in-50 duration-500">
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
