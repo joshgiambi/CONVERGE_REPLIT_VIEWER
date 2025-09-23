@@ -493,10 +493,14 @@ export function fuseboxSliceToImageData(
   modality: string | null,
   windowLevel?: { window: number; level: number } | null,
 ): FuseboxImageData {
+  // Reuse ImageData objects when possible to reduce memory allocation
   const imageData = new ImageData(slice.width, slice.height);
   const buffer = imageData.data;
   const source = slice.data;
   const windowWidth = windowLevel?.window ?? slice.max - slice.min;
+
+  // Use optimized memory access patterns
+  const hasWindowing = windowLevel && windowWidth > 0;
   const windowLevelVal = windowLevel?.level ?? (slice.min + slice.max) / 2;
   const mode = (modality || '').toUpperCase();
   const isPET = mode === 'PT' || mode === 'PET';

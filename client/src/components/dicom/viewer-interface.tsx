@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
@@ -21,6 +20,10 @@ import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
 import { fetchFusionManifest, preloadFusionSecondary, getFusionManifest, clearFusionCaches } from '@/lib/fusion-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
+import { useFusionState } from '@/lib/useFusionState';
+import { useRTStructureState } from '@/lib/useRTStructureState';
+import { useSeriesState } from '@/lib/useSeriesState';
+import { useViewerState } from '@/lib/useViewerState';
 
 // TypeScript declaration for cornerstone
 declare global {
@@ -38,78 +41,21 @@ interface ViewerInterfaceProps {
 }
 
 export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings, onLoadedRTSeriesChange }: ViewerInterfaceProps) {
-  const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
-  const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
-  const [error, setError] = useState<any>(null);
-  const [series, setSeries] = useState<DICOMSeries[]>([]);
-  const [visibleSeries, setVisibleSeries] = useState<DICOMSeries[]>([]);
-  const [regAssociations, setRegAssociations] = useState<Record<number, number[]>>({});
-  const [registrationRelationshipMap, setRegistrationRelationshipMap] = useState<Map<number, RegistrationAssociation[]>>(new Map());
-  // Single-view mode only; MPR uses floating windows inside WorkingViewer
-  const [activeToolMode, setActiveToolMode] = useState<'pan' | 'crosshairs' | 'measure'>('pan'); // Default to pan mode
-  
-  // Shared image cache to prevent reloading when switching modes
-  const imageCache = useRef<Map<string, { images: any[], metadata: any }>>(new Map());
-  
-  const [rtStructures, setRTStructures] = useState<any>(null);
-  const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
-  const [selectedStructures, setSelectedStructures] = useState<Set<number>>(new Set());
-  const [selectedStructureColors, setSelectedStructureColors] = useState<string[]>([]);
-  const [selectedForEdit, setSelectedForEdit] = useState<number | null>(null);
-  const [isContourEditMode, setIsContourEditMode] = useState(false);
-  const [brushToolState, setBrushToolState] = useState({
-    tool: null as string | null,
-    brushSize: 3,
-    isActive: false,
-    predictionEnabled: false
-  });
-  const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
-  const [autoZoomLevel, setAutoZoomLevel] = useState<number | undefined>(undefined);
-  const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
-  const workingViewerRef = useRef<any>(null);
-  const [imageMetadata, setImageMetadata] = useState<any>(null);
-  
-  // Fusion state
-  const [showFusionPanel, setShowFusionPanel] = useState(false);
-  const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
-  const [fusionOpacity, setFusionOpacity] = useState(0.5);
-  // Secondary loading states for visual feedback
-  const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
-  const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
-  const [fusionManifest, setFusionManifest] = useState<FusionManifest | null>(null);
-  const [fusionManifestError, setFusionManifestError] = useState<string | null>(null);
-  const [fusionManifestLoading, setFusionManifestLoading] = useState(false);
-  const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
-  const fusionManifestRequestRef = useRef(0);
-  const [manifestActionStatus, setManifestActionStatus] = useState<string | null>(null);
-  const [associationsReady, setAssociationsReady] = useState(false);
-  const [fusionDebugSnapshot, setFusionDebugSnapshot] = useState<string | null>(null);
-  const manifestInitRequestedRef = useRef(false);
-  const autoPrimarySelectedRef = useRef(false);
-  const [fallbackPrimarySeries, setFallbackPrimarySeries] = useState<DICOMSeries | null>(null);
-  const [associationPrimarySeries, setAssociationPrimarySeries] = useState<DICOMSeries | null>(null);
-  const manifestPrimedPatientsRef = useRef<Set<number>>(new Set());
-  const manifestPrimingTasksRef = useRef<Map<number, Promise<void>>>(new Map());
-
-  // All structures visibility state for syncing between RT button and hide all button
-  const [allStructuresVisible, setAllStructuresVisible] = useState(true);
-  
-  // Track loaded RT series for selection state
-  const [loadedRTSeriesId, setLoadedRTSeriesId] = useState<number | null>(null);
-  
-  // MPR visibility state
-  const [mprVisible, setMprVisible] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  // Use custom hooks for state management
+  const seriesState = useSeriesState(studyData);
+  const viewerState = useViewerState();
+  const fusionState = useFusionState();
+  const rtStructureState = useRTStructureState(studyData?.patient?.id, onLoadedRTSeriesChange);
   
   // Watch for secondary series changes to show/hide fusion panel
   useEffect(() => {
-    if (secondarySeriesId !== null) {
+    if (fusionState.secondarySeriesId !== null) {
       log.debug('Secondary series selected, showing fusion panel', 'viewer-interface');
-      setShowFusionPanel(true);
+      fusionState.setShowFusionPanel(true);
     }
-  }, [secondarySeriesId]);
+  }, [fusionState.secondarySeriesId]);
   
-  // Boolean operations state
+  // Additional toolbar states
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
   const [showLocalizationTool, setShowLocalizationTool] = useState(true);
@@ -119,139 +65,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Clear RT structures when patient changes
   useEffect(() => {
     log.debug(`Patient changed, clearing RT structures. Patient ID: ${studyData?.patient?.id}`,'viewer-interface');
-    setRTStructures(null);
-    setStructureVisibility(new Map());
-    setSelectedStructures(new Set());
-    setSelectedForEdit(null);
-    setSelectedStructureColors([]);
-    setIsContourEditMode(false);
-    setLoadedRTSeriesId(null);  // Clear loaded RT series ID
-    }, [studyData?.patient?.id]);
+    rtStructureState.resetRTStructureState();
+  }, [studyData?.patient?.id, rtStructureState.resetRTStructureState]);
 
-  // Notify parent when loaded RT series changes
-  useEffect(() => {
-    if (onLoadedRTSeriesChange) {
-      onLoadedRTSeriesChange(loadedRTSeriesId);
-    }
-  }, [loadedRTSeriesId, onLoadedRTSeriesChange]);
 
-  // Automatically enter contour edit mode when a structure is selected for editing
-  useEffect(() => {
-    if (selectedForEdit && rtStructures) {
-      setIsContourEditMode(true);
-    } else {
-      setIsContourEditMode(false);
-    }
-  }, [selectedForEdit, rtStructures]);
-
-  // Fetch series data for all studies
-  const DERIVED_DESCRIPTION_KEYWORDS = useMemo(
-    () => [
-      'resampled',
-      're-sampled',
-      'fused',
-      'fusion',
-      'helper cache',
-      'helper-cache',
-      'fusion manifest',
-      'qa fusion',
-      'qcfx',
-      'qgfx',
-      'manifest overlay',
-      'resample cache',
-    ],
-    [],
-  );
-
-  const DERIVED_UID_MARKERS = useMemo(
-    () => ['.fused', '.fusion', '.resampled', '.resample', '_fused', '_fusion', '_resamp', '-fused', '-fusion'],
-    [],
-  );
-
-  const shouldHideSeries = useCallback(
-    (entry: any): boolean => {
-      if (!entry) return true;
-      const modality = (entry.modality || '').toUpperCase();
-
-      if (['RTSTRUCT', 'RT', 'REG'].includes(modality)) {
-        return false;
-      }
-
-      if (['DERIVED', 'SECONDARY', 'OT'].includes(modality)) {
-        return true;
-      }
-
-      const metadata = (entry?.metadata ?? {}) as Record<string, any>;
-      const description = (entry.seriesDescription || '').toLowerCase();
-      const uid = (entry.seriesInstanceUID || '').toLowerCase();
-
-      const derivedByKeywords = DERIVED_DESCRIPTION_KEYWORDS.some((keyword) => description.includes(keyword));
-      const derivedByUid = DERIVED_UID_MARKERS.some((marker) => uid.includes(marker));
-      const flaggedFusion = Boolean(metadata?.fusion);
-      const fusionCandidateModality = ['PT', 'PET', 'MR', 'NM'].includes(modality);
-
-      if (flaggedFusion && !fusionCandidateModality) {
-        return true;
-      }
-
-      if ((derivedByKeywords || derivedByUid) && !fusionCandidateModality) {
-        // Hide derived CT/resampled overlays, but keep PET/MR secondaries available.
-        return true;
-      }
-
-      return false;
-    },
-    [DERIVED_DESCRIPTION_KEYWORDS, DERIVED_UID_MARKERS],
-  );
-
-  const { data: seriesData, isLoading } = useQuery({
-    queryKey: ['/api/studies', studyData.studies?.map((s: any) => s.id), 'series'],
-    queryFn: async () => {
-      if (!studyData.studies || studyData.studies.length === 0) throw new Error('No studies');
-      
-      // Fetch series for all studies and combine them
-      const allSeries = [] as any[];
-      for (const study of studyData.studies) {
-        const response = await fetch(`/api/studies/${study.id}/series`);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch series for study ${study.id}: ${response.statusText}`);
-        }
-        const series = await response.json();
-        const extractFoR = (input: unknown): string | null => {
-          if (typeof input === 'string') {
-            const trimmed = input.trim();
-            return trimmed.length ? trimmed : null;
-          }
-          return null;
-        };
-        // Add study info to each series for reference
-        allSeries.push(
-          ...series.map((s: any) => {
-            const foFromRoot = extractFoR(s?.frameOfReferenceUID ?? s?.frame_of_reference_uid);
-            const foFromMetadata = extractFoR(s?.metadata?.frameOfReferenceUID ?? s?.metadata?.FrameOfReferenceUID ?? s?.metadata?.frame_of_reference_uid);
-            return {
-              ...s,
-              studyId: study.id,
-              studyDate: study.studyDate,
-              frameOfReferenceUID: foFromRoot ?? foFromMetadata ?? null,
-            };
-          }),
-        );
-      }
-      return allSeries;
-    },
-    enabled: !!studyData.studies?.length,
-  });
 
   // Fetch REG associations for this patient and build primary->secondary mapping by series IDs
   const [regCtacIds, setRegCtacIds] = useState<number[]>([]);
   useEffect(() => {
     const loadAssociations = async () => {
-      setAssociationsReady(false);
-      setAssociationPrimarySeries(null);
+      fusionState.setAssociationsReady(false);
+      fusionState.setAssociationPrimarySeries(null);
       try {
         // Patient ID will be resolved later using more sophisticated logic
-        if (!seriesData || !Array.isArray(seriesData) || seriesData.length === 0) return;
+        if (!seriesState.series || !Array.isArray(seriesState.series) || seriesState.series.length === 0) return;
 
         const ensureString = (value: unknown): string | null => {
           if (typeof value !== 'string') return null;
