@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
@@ -2059,27 +2060,29 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   return (
     <>
-      <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
-        <div className="flex flex-col gap-0.5 pr-2">
-          <span className="font-semibold text-slate-100">Fusion Debug</span>
-          <span>Primary: {selectedSeries ? `${selectedSeries.id}` : '—'}</span>
-          <span>Secondary: {secondarySeriesId ?? '—'}</span>
-          <span>Status: {manifestActionStatus ?? 'idle'}</span>
+      {import.meta.env.DEV && (
+        <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
+          <div className="flex flex-col gap-0.5 pr-2">
+            <span className="font-semibold text-slate-100">Fusion Debug</span>
+            <span>Primary: {selectedSeries ? `${selectedSeries.id}` : '—'}</span>
+            <span>Secondary: {secondarySeriesId ?? '—'}</span>
+            <span>Status: {manifestActionStatus ?? 'idle'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={handleRebuildManifest}>
+              Rebuild Manifest
+            </Button>
+            <Button size="sm" variant="secondary" onClick={captureFusionDebug}>
+              Capture Debug
+            </Button>
+            <Button size="sm" variant="secondary" onClick={triggerFusionDebug}>
+              Open Viewer Debug
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={handleRebuildManifest}>
-            Rebuild Manifest
-          </Button>
-          <Button size="sm" variant="secondary" onClick={captureFusionDebug}>
-            Capture Debug
-          </Button>
-          <Button size="sm" variant="secondary" onClick={triggerFusionDebug}>
-            Open Viewer Debug
-          </Button>
-        </div>
-      </div>
+      )}
 
-      {fusionDebugSnapshot && (
+      {import.meta.env.DEV && fusionDebugSnapshot && (
         <div className="fixed top-20 right-4 z-40 max-h-80 w-[420px] overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-950/95 p-3 text-[11px] text-slate-200 shadow-xl shadow-black/50 backdrop-blur">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold">Captured Debug Snapshot</span>

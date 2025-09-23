@@ -10,7 +10,6 @@ import polygonClipping from 'polygon-clipping';
 import { db } from "./db";
 import { images as imagesTable, patientTags } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 import { logger } from './logger';
@@ -2938,7 +2937,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Generate GIF preview for a series
+  // Generate GIF preview for a series (minimal placeholder implementation; heavy GIF generation removed)
   app.get("/api/series/:id/gif", async (req, res) => {
     try {
       const seriesId = parseInt(req.params.id);
@@ -2960,66 +2959,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Content-Length', minimalGif.length.toString());
       return res.send(minimalGif);
       
-      const series = await storage.getSeries(seriesId);
-      
-      if (!series) {
-        return res.status(404).json({ message: "Series not found" });
-      }
-      
-      // Check if GIF already exists in cache
-      const gifCachePath = path.join('uploads', 'gif-cache', `series-${seriesId}.gif`);
-      const gifCacheDir = path.dirname(gifCachePath);
-      
-      // Create cache directory if it doesn't exist
-      if (!fs.existsSync(gifCacheDir)) {
-        fs.mkdirSync(gifCacheDir, { recursive: true });
-      }
-      
-      // If cached GIF exists and is newer than 24 hours, serve it
-      if (fs.existsSync(gifCachePath)) {
-        const stats = fs.statSync(gifCachePath);
-        const ageInHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
-        
-        if (ageInHours < 24) {
-          console.log(`Serving cached GIF for series ${seriesId}`);
-          const gifBuffer = fs.readFileSync(gifCachePath);
-          res.setHeader('Content-Type', 'image/gif');
-          res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
-          res.setHeader('Content-Length', gifBuffer.length.toString());
-          return res.send(gifBuffer);
-        }
-      }
-      
-      // Generate new GIF
-      console.log(`Generating GIF for series ${seriesId}...`);
-      let gifBuffer;
-      
-      try {
-        gifBuffer = await generateSeriesGIF(seriesId, storage);
-      } catch (error) {
-        console.error('GIF generation failed, using minimal GIF:', error);
-        // Use a minimal 1x1 GIF as fallback
-        gifBuffer = Buffer.from([
-          0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // GIF89a
-          0x01, 0x00, 0x01, 0x00, // 1x1 pixel
-          0x80, 0x00, 0x00, // Global color table
-          0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, // Black and white
-          0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, // Graphics control
-          0x2C, 0x00, 0x00, 0x00, 0x00, // Image descriptor
-          0x01, 0x00, 0x01, 0x00, 0x00,
-          0x02, 0x02, 0x44, 0x01, 0x00, // Image data
-          0x3B // Trailer
-        ]);
-      }
-      
-      // Save to cache
-      fs.writeFileSync(gifCachePath, gifBuffer);
-      
-      // Send response
-      res.setHeader('Content-Type', 'image/gif');
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 hours
-      res.setHeader('Content-Length', gifBuffer.length.toString());
-      res.send(gifBuffer);
+      // Heavy GIF generation was removed to drop native build deps.
+      // For now we return the minimal GIF above and avoid server-side canvas.
+      return;
       
     } catch (error) {
       console.error('Error generating GIF:', error);
