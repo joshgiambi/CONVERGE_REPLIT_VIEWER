@@ -24,6 +24,15 @@ interface FusionTestSlice {
   blend: SlicePayload;
 }
 
+interface DebugEvent {
+  id: number;
+  timestamp: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  source: string;
+  message: string;
+  context?: Record<string, unknown>;
+}
+
 const decodeBase64ToFloat32 = (encoded: string): Float32Array => {
   const binary = atob(encoded);
   const bytes = new Uint8Array(binary.length);
@@ -193,7 +202,7 @@ const FusionTestPage = () => {
   } | null>(null);
   const [debugInfo, setDebugInfo] = useState<any | null>(null);
   const [transformDetails, setTransformDetails] = useState<any | null>(null);
-  const [helperLogs, setHelperLogs] = useState<any[]>([]);
+  const [helperLogs, setHelperLogs] = useState<DebugEvent[]>([]);
   const [isInspecting, setIsInspecting] = useState(false);
 
   const patientRecord = useMemo(() => {
@@ -510,13 +519,14 @@ const FusionTestPage = () => {
               className="h-7 px-3 text-xs"
               onClick={async () => {
                 try {
-                  const response = await fetch('/api/fusebox/logs');
+                  const params = new URLSearchParams({ source: 'fusebox', limit: '200' });
+                  const response = await fetch(`/api/debug/events?${params.toString()}`);
                   if (!response.ok) {
                     const text = await response.text();
                     throw new Error(text || 'Failed to load logs');
                   }
                   const data = await response.json();
-                  setHelperLogs(data.logs || []);
+                  setHelperLogs(data.events || data.logs || []);
                 } catch (error: any) {
                   toast({ title: 'Log fetch failed', description: error?.message || 'Unknown error', variant: 'destructive' });
                 }

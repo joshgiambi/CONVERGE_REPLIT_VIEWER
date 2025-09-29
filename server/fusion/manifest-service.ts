@@ -12,6 +12,7 @@ import { FuseboxVolumeResampler, type VolumeResampleRequest, type InterpolationM
 import { collectSeriesFiles, resolveFuseboxTransform, sortImagesByInstance } from './fusebox.ts';
 import { markFuseboxRunFailed, markFuseboxRunReady, markFuseboxRunStarted } from './fusebox-run-store.ts';
 import type { FuseboxLogEmitter } from './fusebox.ts';
+import { recordDebugEvent, type DebugEventLevel } from '../debug/debug-hub.ts';
 
 interface ManifestRequestOptions {
   primarySeriesId: number;
@@ -31,6 +32,21 @@ interface SeriesInfo {
 
 const DEFAULT_INTERPOLATION: InterpolationMode = 'linear';
 const CURRENT_MANIFEST_VERSION = 2;
+
+const MANIFEST_DEBUG_SOURCE = 'fusion-manifest';
+
+const manifestDebug = (level: DebugEventLevel, message: string, context: Record<string, unknown>) => {
+  try {
+    recordDebugEvent({
+      level,
+      source: MANIFEST_DEBUG_SOURCE,
+      message,
+      context,
+    });
+  } catch {
+    // Never allow debugging instrumentation to interfere with manifest generation.
+  }
+};
 
 const resolvePatientInfo = async (primarySeriesId: number): Promise<SeriesInfo> => {
   const primarySeries = await storage.getSeriesById(primarySeriesId);
@@ -141,16 +157,43 @@ export class FusionManifestService {
     const { primarySeriesId, secondarySeriesIds = [], force = false } = options;
     const cacheKey = this.cacheKey(primarySeriesId);
 
+    manifestDebug(force ? 'info' : 'debug', 'Manifest request received', {
+      primarySeriesId,
+      secondarySeriesIds,
+      force,
+      interpolation: options.interpolation ?? null,
+      preload: options.preload ?? null,
+    });
+
     if (!force && this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey)!;
       const requestedSet = new Set(secondarySeriesIds);
       const hasAllSecondaries = secondarySeriesIds.length === 0 || cached.secondaries.some(sec => requestedSet.has(sec.secondarySeriesId));
-      if (hasAllSecondaries) return cached;
+      if (hasAllSecondaries) {
+        manifestDebug('info', 'Manifest served from cache', {
+          primarySeriesId,
+          cachedSecondaries: cached.secondaries.length,
+          secondarySeriesIds,
+        });
+        return cached;
+      }
     }
 
     if (!force && this.pending.has(cacheKey)) {
+      manifestDebug('debug', 'Awaiting in-flight manifest build', {
+        primarySeriesId,
+        secondarySeriesIds,
+      });
       return this.pending.get(cacheKey)!;
     }
+
+    manifestDebug('info', 'Building manifest', {
+      primarySeriesId,
+      secondarySeriesIds,
+      force,
+      interpolation: options.interpolation ?? null,
+      preload: options.preload ?? null,
+    });
 
     const promise = this.buildManifest(options).finally(() => {
       this.pending.delete(cacheKey);
@@ -158,6 +201,11 @@ export class FusionManifestService {
     this.pending.set(cacheKey, promise);
     const manifest = await promise;
     this.cache.set(cacheKey, manifest);
+    manifestDebug('info', 'Manifest ready', {
+      primarySeriesId,
+      secondarySeries: manifest.secondaries.length,
+      readySecondaries: manifest.secondaries.filter((sec) => sec.status === 'ready').length,
+    });
     return manifest;
   }
 
@@ -363,6 +411,13 @@ export class FusionManifestService {
             rows: descriptor.rows ?? null,
             columns: descriptor.columns ?? null,
           });
+          manifestDebug('info', 'Reused cached fusion secondary', {
+            primarySeriesId,
+            secondarySeriesId,
+            registrationId,
+            manifestPath: descriptor.manifestPath || aggregatedManifestPath,
+            outputDirectory: descriptor.outputDirectory,
+          });
           return descriptor;
         }
       }
@@ -391,6 +446,13 @@ export class FusionManifestService {
     };
 
     await markFuseboxRunStarted(baseRunContext);
+    manifestDebug('debug', 'Launching fusebox resample', {
+      primarySeriesId,
+      secondarySeriesId,
+      registrationId,
+      interpolation,
+      outputDirectory: pairRoot,
+    });
 
     let response: VolumeResampleResponse | null = null;
 
@@ -542,11 +604,27 @@ export class FusionManifestService {
         columns: descriptor.columns ?? null,
       });
 
+      manifestDebug('info', 'Generated fusion secondary', {
+        primarySeriesId,
+        secondarySeriesId,
+        registrationId,
+        outputDirectory: descriptor.outputDirectory,
+        sliceCount: descriptor.sliceCount,
+        modality: descriptor.secondaryModality,
+        transformSource: transformInfo.transformSource ?? null,
+      });
+
       return descriptor;
     } catch (err: any) {
       const message = err?.message || String(err);
       await markFuseboxRunFailed({
         ...baseRunContext,
+        error: message,
+      });
+      manifestDebug('warn', 'Fusion secondary generation failed', {
+        primarySeriesId,
+        secondarySeriesId,
+        registrationId,
         error: message,
       });
       throw err;

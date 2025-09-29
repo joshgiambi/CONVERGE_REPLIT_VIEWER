@@ -15,6 +15,12 @@ import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
 import { logger } from './logger';
 import {
+  getDebugEvents,
+  getLatestEventId,
+  recordDebugEvent,
+  type DebugEventLevel,
+} from './debug/debug-hub.ts';
+import {
   resolveFuseboxTransform,
   runFuseboxResample,
   runFuseboxInspectTransform,
@@ -183,31 +189,27 @@ function invertMatrix4x4RowMajor(matrix: number[]): number[] | null {
   return inv;
 }
 
-const fuseboxLogBuffer: string[] = [];
-const FUSEBOX_LOG_CAP = 300;
-
-const appendFuseboxLog = (level: string, message: string, data?: Record<string, unknown>) => {
-  const entry = JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-    ...(data || {}),
-  });
-  fuseboxLogBuffer.push(entry);
-  if (fuseboxLogBuffer.length > FUSEBOX_LOG_CAP) {
-    fuseboxLogBuffer.splice(0, fuseboxLogBuffer.length - FUSEBOX_LOG_CAP);
-  }
-};
+const FUSEBOX_DEBUG_SOURCE = 'fusebox';
 
 const fuseboxEmit: FuseboxLogEmitter = (level, message, data = {}) => {
-  appendFuseboxLog(level, message, data);
+  try {
+    recordDebugEvent({
+      level: level as DebugEventLevel,
+      source: FUSEBOX_DEBUG_SOURCE,
+      message,
+      context: { event: 'fusebox.helper', ...data },
+    });
+  } catch {
+    // Capture errors must never break helper logging.
+  }
+
   const payload = `${message} ${JSON.stringify({ event: 'fusebox.helper', ...data })}`;
   if (level === 'debug') {
-    logger.debug(payload);
+    logger.debug(payload, FUSEBOX_DEBUG_SOURCE);
   } else if (level === 'info') {
-    logger.info(payload);
+    logger.info(payload, FUSEBOX_DEBUG_SOURCE);
   } else {
-    logger.warn(payload);
+    logger.warn(payload, FUSEBOX_DEBUG_SOURCE);
   }
 };
 
@@ -3566,19 +3568,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/fusebox/logs", (_req: Request, res: Response) => {
+  app.get("/api/debug/events", (req: Request, res: Response) => {
     try {
-      const logs = fuseboxLogBuffer.slice(-FUSEBOX_LOG_CAP).map((entry) => {
-        try {
-          return JSON.parse(entry);
-        } catch {
-          return { raw: entry };
-        }
+      const toStringArray = (value: unknown): string[] => {
+        if (Array.isArray(value)) return value.map((entry) => String(entry)).map((entry) => entry.trim()).filter(Boolean);
+        if (typeof value === 'string') return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+        return [];
+      };
+      const toLevelArray = (value: unknown): DebugEventLevel[] => {
+        return toStringArray(value).filter((entry): entry is DebugEventLevel => ['debug', 'info', 'warn', 'error'].includes(entry));
+      };
+
+      const sources = toStringArray(req.query.source ?? req.query.sources);
+      const levels = toLevelArray(req.query.level ?? req.query.levels);
+      const since = Number(req.query.sinceId ?? req.query.cursor);
+      const limit = Number(req.query.limit ?? 200);
+
+      const events = getDebugEvents({
+        source: sources.length ? sources : undefined,
+        levels: levels.length ? levels : undefined,
+        sinceId: Number.isFinite(since) ? since : undefined,
+        limit: Number.isFinite(limit) ? limit : 200,
       });
+      const cursor = events.length ? events[events.length - 1].id : getLatestEventId();
+
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ logs });
+      res.json({ events, cursor });
     } catch (err: any) {
-      logger.error(`Fusebox log retrieval failed: ${err?.message || String(err)}`);
+      logger.error(`Debug event retrieval failed: ${err?.message || String(err)}`, 'debug-events');
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get("/api/fusebox/logs", (req: Request, res: Response) => {
+    try {
+      const since = Number(req.query.sinceId ?? req.query.cursor);
+      const limit = Number(req.query.limit ?? 200);
+
+      const logs = getDebugEvents({
+        source: FUSEBOX_DEBUG_SOURCE,
+        sinceId: Number.isFinite(since) ? since : undefined,
+        limit: Number.isFinite(limit) ? limit : 200,
+      });
+      const cursor = logs.length ? logs[logs.length - 1].id : getLatestEventId();
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ logs, cursor });
+    } catch (err: any) {
+      logger.error(`Fusebox log retrieval failed: ${err?.message || String(err)}`, FUSEBOX_DEBUG_SOURCE);
       res.status(500).json({ error: err?.message || String(err) });
     }
   });
