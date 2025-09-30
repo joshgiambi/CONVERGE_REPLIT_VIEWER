@@ -566,7 +566,12 @@ export class FusionManifestService {
         if (coords.every((component) => Number.isFinite(component))) return coords;
       }
       if (typeof value === 'string') {
-        const parts = value.split('\\').map((part) => Number(part.trim()));
+        // Handle both single backslash and double-escaped backslash formats
+        // Examples: "-249.5\-448.5\594.1" or "-249.5\\-448.5\\594.1"
+        let cleaned = value.trim();
+        // Replace double backslashes with single for splitting
+        cleaned = cleaned.replace(/\\\\/g, '\\');
+        const parts = cleaned.split('\\').map((part) => Number(part.trim()));
         if (parts.length >= 3 && parts.every((component) => Number.isFinite(component))) {
           return [parts[0], parts[1], parts[2]];
         }

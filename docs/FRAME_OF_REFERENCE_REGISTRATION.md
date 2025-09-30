@@ -292,3 +292,5 @@ If you have existing PET↔CT data that wasn't processed with FoR-only registrat
 - Registration method is marked as `DICOM-REG-FoR` to distinguish from standard `DICOM-REG`
 - The system creates bidirectional relationships (all matching source×target combinations)
 - Primary/secondary determination uses image count heuristic (larger = planning CT)
+
+

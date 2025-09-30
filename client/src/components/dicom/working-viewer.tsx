@@ -587,16 +587,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [seriesId]);
 
   // Aggressive prefetch when secondary series is selected
+  // Use a ref to track the latest prefetch function to avoid recreating the effect
+  const prefetchFusionSlicesRef = useRef(prefetchFusionSlices);
+  useEffect(() => {
+    prefetchFusionSlicesRef.current = prefetchFusionSlices;
+  });
+
   useEffect(() => {
     if (!secondarySeriesId || !images.length || currentIndex < 0) return;
 
     // Immediately prefetch visible slice and surrounding slices
     const timer = setTimeout(() => {
-      prefetchFusionSlices(currentIndex);
+      prefetchFusionSlicesRef.current(currentIndex);
     }, 50); // Small delay to let manifest settle
 
     return () => clearTimeout(timer);
-  }, [secondarySeriesId, currentIndex, images.length, prefetchFusionSlices]);
+  }, [secondarySeriesId, currentIndex, images.length]); // Removed prefetchFusionSlices from deps to prevent infinite loop
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -674,8 +680,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const openFusionDebug = useCallback((reason: string) => {
     fusionIssueRef.current = reason;
     const txt = compileFusionDebug();
-    setFusionDebugText(txt);
-    setShowFusionDebug(true);
+    // Debug UI removed - log to console instead
+    console.log('🔍 Fusion Debug:', reason, '\n', txt);
   }, [compileFusionDebug]);
 
   const openRegDetails = useCallback(async () => {
@@ -3348,8 +3354,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fuseboxCacheRef.current.clear();
     clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
-    scheduleRender();
-  }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender, seriesId]);
+    // NOTE: Removed selectedRegistrationId from deps to prevent infinite loop
+    // selectedRegistrationId is set BY renderFusionOverlayNew, so including it creates circular dependency
+    // Cache should only clear when external registration changes (matrix/secondary/series), not when
+    // the fusion rendering discovers which registration to use
+  }, [registrationMatrix, secondarySeriesId, seriesId]);
 
   useEffect(() => {
     if (!secondarySeriesId) {
@@ -3396,6 +3405,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
+      console.log(`🔄 INDEX CHANGED: currentIndex=${currentIndex} sopUID=${images[currentIndex]?.sopInstanceUID?.slice(-10)} fusion=${secondarySeriesId ? 'ON' : 'OFF'}`);
       // Immediate rendering for smooth scrolling - this is critical for DICOM viewer performance
       scheduleRender();
       
@@ -4316,6 +4326,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Ensure currentIndex is valid
         const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
         currentImage = images[safeIndex];
+        console.log(`🎨 DISPLAY IMAGE: index=${safeIndex} sopUID=${currentImage?.sopInstanceUID?.slice(-10)} fusion=${secondarySeriesId ? 'ON' : 'OFF'}`);
       } else {
         // For sagittal/coronal, use MPR reconstruction
         const mprSlice = await getMPRSlice(orientation, currentIndex);
@@ -4379,14 +4390,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
+      // NOTE: Run fusion rendering asynchronously to avoid blocking primary CT display
       if (secondarySeriesId) {
-        // Fusion overlay rendering
-        try {
-          await renderFusionOverlayNew(ctx, currentImage);
-        } catch (fusionError: any) {
+        // Fusion overlay rendering - don't await so primary CT renders immediately
+        renderFusionOverlayNew(ctx, currentImage).catch((fusionError: any) => {
           console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
           // Continue without fusion rather than failing entire image display
-        }
+        });
       } else {
         console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
@@ -4623,10 +4633,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (!secondarySeriesId) return;
-    prefetchFusionSlices(currentIndex);
-  }, [secondarySeriesId, selectedRegistrationId, currentIndex, prefetchFusionSlices]);
+  // REMOVED: This was causing infinite loops - prefetching is now handled
+  // automatically by the ref-based useEffect earlier in the component
 
   useEffect(() => {
     if (secondarySeriesId) return;
@@ -5161,8 +5169,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const goToPrevious = () => {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0 && prevIndex < images.length) {
-      console.log(`📍 Navigate: ${currentIndex} → ${prevIndex}`);
+      console.log(`📍 Navigate PREVIOUS: ${currentIndex} → ${prevIndex} (fusion=${secondarySeriesId ? 'ON' : 'OFF'})`);
       setCurrentIndex(prevIndex);
+    } else {
+      console.log(`📍 Navigate PREVIOUS BLOCKED: already at ${currentIndex}`);
     }
   };
 
@@ -5180,8 +5190,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Add protection against unexpected navigation
     const nextIndex = currentIndex + 1;
     if (nextIndex < maxSlices && nextIndex >= 0) {
-      console.log(`📍 Navigate: ${currentIndex} → ${nextIndex} (max: ${maxSlices})`);
+      console.log(`📍 Navigate NEXT: ${currentIndex} → ${nextIndex} (max: ${maxSlices}, fusion=${secondarySeriesId ? 'ON' : 'OFF'})`);
       setCurrentIndex(nextIndex);
+    } else {
+      console.log(`📍 Navigate NEXT BLOCKED: at ${currentIndex}, max=${maxSlices}`);
     }
   };
 
@@ -5418,6 +5430,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     e.preventDefault();
     e.stopPropagation();
 
+    // Visual debug indicator
+    if (secondarySeriesId) {
+      const indicator = document.createElement('div');
+      indicator.textContent = `🖱️ WHEEL EVENT RECEIVED! Delta: ${e.deltaY}`;
+      indicator.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,0,0,0.9); color: white; padding: 20px; border-radius: 10px; z-index: 99999; font-size: 24px; font-weight: bold;';
+      document.body.appendChild(indicator);
+      setTimeout(() => indicator.remove(), 500);
+    }
+
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -5425,7 +5446,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`🔍 Zoom: ${e.deltaY > 0 ? 'out' : 'in'} (factor: ${zoomFactor})`);
     } else {
       // Regular scroll for slice navigation
-      console.log(`🖱️ Scroll: deltaY=${e.deltaY} currentIndex=${currentIndex}`);
+      console.log(`🖱️ SCROLL EVENT: deltaY=${e.deltaY} currentIndex=${currentIndex} fusion=${secondarySeriesId ? 'YES' : 'NO'} opacity=${fusionOpacity}`);
       if (e.deltaY > 0) {
         goToNext();
       } else {

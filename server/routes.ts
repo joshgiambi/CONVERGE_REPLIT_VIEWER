@@ -1099,12 +1099,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const px = Array.isArray(metadata.pixelSpacing) ? metadata.pixelSpacing : null;
               const pixelSpacingStr = px && px.length >= 2 ? `${px[0]}\\${px[1]}` : null;
               const imagePositionArr = (metadata.imagePositionPatient || metadata.imagePosition);
-              const imagePositionStr = Array.isArray(imagePositionArr) && imagePositionArr.length >= 3
-                ? `${imagePositionArr[0]}\\${imagePositionArr[1]}\\${imagePositionArr[2]}`
+              // Store as numeric array (JSON) instead of backslash string to avoid parsePosition bugs
+              const imagePositionValue = Array.isArray(imagePositionArr) && imagePositionArr.length >= 3
+                ? JSON.stringify([imagePositionArr[0], imagePositionArr[1], imagePositionArr[2]])
                 : (typeof imagePositionArr === 'string' ? imagePositionArr : null);
               const imageOrientationArr = (metadata.imageOrientationPatient || metadata.imageOrientation);
-              const imageOrientationStr = Array.isArray(imageOrientationArr) && imageOrientationArr.length >= 6
-                ? `${imageOrientationArr[0]}\\${imageOrientationArr[1]}\\${imageOrientationArr[2]}\\${imageOrientationArr[3]}\\${imageOrientationArr[4]}\\${imageOrientationArr[5]}`
+              const imageOrientationValue = Array.isArray(imageOrientationArr) && imageOrientationArr.length >= 6
+                ? JSON.stringify([imageOrientationArr[0], imageOrientationArr[1], imageOrientationArr[2], imageOrientationArr[3], imageOrientationArr[4], imageOrientationArr[5]])
                 : (typeof imageOrientationArr === 'string' ? imageOrientationArr : null);
 
               await storage.createImage({
@@ -1114,8 +1115,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 filePath: permanentPath,
                 fileName: file.originalname,
                 fileSize: file.size,
-                imagePosition: imagePositionStr || null,
-                imageOrientation: imageOrientationStr || null,
+                imagePosition: imagePositionValue || null,
+                imageOrientation: imageOrientationValue || null,
                 pixelSpacing: pixelSpacingStr,
                 sliceLocation: metadata.sliceLocation ? String(metadata.sliceLocation) : null,
                 windowCenter: metadata.windowCenter ? String(metadata.windowCenter) : null,
@@ -2379,9 +2380,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Backfill missing MRI geometry (IPP/IOP/PixelSpacing) from on-disk DICOM if needed
       const backfilled: any[] = [];
       for (const img of images) {
-        const needsIPP = !img.imagePosition || (Array.isArray(img.imagePosition) && img.imagePosition.length < 3);
-        const needsIOP = !img.imageOrientation || (Array.isArray(img.imageOrientation) && img.imageOrientation.length < 6);
-        const needsPS = !img.pixelSpacing || (Array.isArray(img.pixelSpacing) && img.pixelSpacing.length < 2);
+        // Detect legacy backslash strings and normalize them to JSON arrays
+        const isLegacyIPP = typeof img.imagePosition === 'string' && img.imagePosition.includes('\\');
+        const isLegacyIOP = typeof img.imageOrientation === 'string' && img.imageOrientation.includes('\\');
+        const isLegacyPS = typeof img.pixelSpacing === 'string' && img.pixelSpacing.includes('\\');
+        const needsIPP = !img.imagePosition || (Array.isArray(img.imagePosition) && img.imagePosition.length < 3) || isLegacyIPP;
+        const needsIOP = !img.imageOrientation || (Array.isArray(img.imageOrientation) && img.imageOrientation.length < 6) || isLegacyIOP;
+        const needsPS = !img.pixelSpacing || (Array.isArray(img.pixelSpacing) && img.pixelSpacing.length < 2) || isLegacyPS;
         const canRead = typeof img.filePath === 'string' && fs.existsSync(img.filePath);
         if ((needsIPP || needsIOP || needsPS) && canRead) {
           try {
@@ -2398,9 +2403,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (ps && ps.length >= 2) newMeta.pixelSpacing = ps;
             if (forUid) newMeta.frameOfReferenceUID = forUid;
             await storage.updateImageGeometry(img.id, {
-              imagePosition: (ipp && ipp.length >= 3) ? `${ipp[0]}\\${ipp[1]}\\${ipp[2]}` : img.imagePosition || null,
-              imageOrientation: (iop && iop.length >= 6) ? `${iop[0]}\\${iop[1]}\\${iop[2]}\\${iop[3]}\\${iop[4]}\\${iop[5]}` : img.imageOrientation || null,
-              pixelSpacing: (ps && ps.length >= 2) ? `${ps[0]}\\${ps[1]}` : img.pixelSpacing || null,
+              imagePosition: (ipp && ipp.length >= 3) ? [ipp[0], ipp[1], ipp[2]] : img.imagePosition || null,
+              imageOrientation: (iop && iop.length >= 6) ? [iop[0], iop[1], iop[2], iop[3], iop[4], iop[5]] : img.imageOrientation || null,
+              pixelSpacing: (ps && ps.length >= 2) ? [ps[0], ps[1]] : img.pixelSpacing || null,
               metadata: newMeta,
             });
             backfilled.push(img.id);

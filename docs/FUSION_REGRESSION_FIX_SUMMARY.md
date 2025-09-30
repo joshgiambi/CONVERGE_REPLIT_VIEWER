@@ -254,3 +254,5 @@ Implementation completed: 2025-01-30
 - Existing explicit series-based registrations continue to work
 - FoR-only registrations complement existing relationship types
 - Test harness harmonization ensures production parity
+
+

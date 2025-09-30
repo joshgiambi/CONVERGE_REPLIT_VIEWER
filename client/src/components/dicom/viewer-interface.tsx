@@ -1491,9 +1491,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       try {
         const candidateSecondaryIds = getCandidateSecondaryIds(seriesEntry.id);
+        // Always force-refresh manifests to ensure they reflect latest parsePosition fixes
         let manifest = await fetchFusionManifest(seriesEntry.id, {
           preload: true,
           secondarySeriesIds: candidateSecondaryIds,
+          force: true,
         });
         if (fusionManifestRequestRef.current !== requestToken) return;
         setFusionManifest(manifest);
