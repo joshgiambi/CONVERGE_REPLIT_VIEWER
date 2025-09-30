@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import { Pool as PgPool } from 'pg';
 import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
 import ws from "ws";
-import * as schema from "@shared/schema";
+import * as schema from "../shared/schema.ts";
 
 if (!process.env.DATABASE_URL) {
   throw new Error(

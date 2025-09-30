@@ -114,6 +114,7 @@ export function DICOMUploader() {
   const [processingFileId, setProcessingFileId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
   // Helper function to update step status
   const updateStepStatus = (step: UploadStep, status: 'pending' | 'active' | 'complete' | 'error', detail?: string) => {
@@ -126,8 +127,34 @@ export function DICOMUploader() {
     }
   };
 
-  // Poll for session status (not using useCallback to avoid dependency issues)
-  const pollSessionStatus = async (sessionId: string) => {
+  // Check for unprocessed files
+  const checkUnprocessedFiles = useCallback(async () => {
+    try {
+      const response = await fetch('/api/unprocessed-files');
+      if (response.ok) {
+        const data = await response.json();
+        setUnprocessedFiles(data.files || []);
+      }
+    } catch (error) {
+      console.error('Error checking unprocessed files:', error);
+    }
+  }, []);
+
+  // Check for triage sessions
+  const checkTriageSessions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/triage-sessions');
+      if (response.ok) {
+        const data = await response.json();
+        setTriageSessions(data.sessions || []);
+      }
+    } catch (error) {
+      console.error('Error checking triage sessions:', error);
+    }
+  }, []);
+
+  // Poll for session status
+  const pollSessionStatus = useCallback(async (sessionId: string) => {
     console.log('Polling session status for:', sessionId);
     try {
       const response = await fetch(`/api/parse-dicom-session/${sessionId}`);
@@ -153,15 +180,28 @@ export function DICOMUploader() {
       
       // If complete, check for triage session and load it directly
       if (session.status === 'complete' && session.result) {
-        setParseResult(session.result);
+        // Clear parse result to avoid showing it alongside triage sessions
+        setParseResult(null);
+        setParseSession(null);
         setIsUploading(false);
         setProcessingFileId(null);
+        setProcessingMessage('');
         localStorage.removeItem('currentParseSessionId');
         localStorage.removeItem('uploadActive');
-        
+
         // Auto-refresh both unprocessed files and triage sessions
-        checkUnprocessedFiles();
-        checkTriageSessions();
+        await checkUnprocessedFiles();
+        await checkTriageSessions();
+
+        // Show success toast - using try/catch to avoid crashes if toast fails
+        try {
+          toast({
+            title: "Parsing complete",
+            description: `Ready to import ${session.result?.patientPreviews?.length || 1} patient(s)`,
+          });
+        } catch (e) {
+          console.error('Toast error:', e);
+        }
       } else if (session.status === 'error') {
         setError(session.error || 'Parsing failed');
         setIsUploading(false);
@@ -179,9 +219,10 @@ export function DICOMUploader() {
       localStorage.removeItem('currentParseSessionId');
       localStorage.removeItem('uploadActive');
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - all functions used are stable or captured in closure
 
-  // Check for existing session and unprocessed files on mount
+  // Check for existing session and unprocessed files on mount - runs ONCE
   useEffect(() => {
     const sessionId = localStorage.getItem('currentParseSessionId');
     console.log('Checking for existing session on mount:', sessionId);
@@ -190,47 +231,27 @@ export function DICOMUploader() {
       setIsUploading(true);
       pollSessionStatus(sessionId);
     }
-    
+
     // Check for unprocessed files and triage sessions immediately
     checkUnprocessedFiles();
     checkTriageSessions();
-    
-    // Poll for both unprocessed files and triage sessions every 3 seconds
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run on mount
+
+  // Separate effect for polling triage sessions
+  useEffect(() => {
+    if (isUploading) return; // Don't poll while actively uploading
+
+    // Poll for triage sessions to catch background completions
     const interval = setInterval(() => {
-      checkUnprocessedFiles();
       checkTriageSessions();
-    }, 3000);
-    
+    }, 5000); // Poll every 5 seconds when idle
+
     return () => clearInterval(interval);
-  }, []); // Empty dependency array - only run on mount
-  
-  const checkUnprocessedFiles = async () => {
-    try {
-      const response = await fetch('/api/unprocessed-files');
-      if (response.ok) {
-        const data = await response.json();
-        setUnprocessedFiles(data.files || []);
-      }
-    } catch (error) {
-      console.error('Error checking unprocessed files:', error);
-    }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUploading]); // Only depend on isUploading flag
 
-  const checkTriageSessions = async () => {
-    try {
-      const response = await fetch('/api/triage-sessions');
-      if (response.ok) {
-        const data = await response.json();
-        setTriageSessions(data.sessions || []);
-      }
-    } catch (error) {
-      console.error('Error checking triage sessions:', error);
-    }
-  };
-
-
-
-  const onDrop = async (acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
     console.log(`Selected ${acceptedFiles.length} files for upload`);
@@ -291,10 +312,8 @@ export function DICOMUploader() {
       setIsUploading(false);
       localStorage.removeItem('uploadActive');
     }
-  };
+  }, [pollSessionStatus]);
 
-  const { toast } = useToast();
-  
   const handleImportToDatabase = async () => {
     if (!parseResult) return;
 
@@ -823,8 +842,8 @@ export function DICOMUploader() {
         </Card>
       )}
 
-      {/* Ready to Import - Triage Sessions (Only show when no current parseResult to avoid confusion) */}
-      {triageSessions.length > 0 && !isUploading && !parseResult && (
+      {/* Ready to Import - Triage Sessions - Show when sessions exist and not actively uploading */}
+      {triageSessions.length > 0 && !isUploading && (
         <Card className="border-amber-500/40 bg-gradient-to-br from-amber-900/20 to-orange-900/20 backdrop-blur-xl shadow-2xl">
           <CardHeader>
             <CardTitle className="text-amber-300 flex items-center gap-3">
@@ -1105,15 +1124,34 @@ export function DICOMUploader() {
             
             <div className="flex gap-4 justify-center">
               <Button
-                onClick={() => setLocation('/')}
+                onClick={() => {
+                  // Clear import success state
+                  setImportSuccess(null);
+                  setParseResult(null);
+                  setError(null);
+
+                  // Navigate to patient manager and trigger tab switch
+                  setLocation('/');
+
+                  // Trigger a storage event to switch to patients tab
+                  window.dispatchEvent(new CustomEvent('switchToTab', { detail: 'patients' }));
+
+                  // Invalidate queries to refresh patient list
+                  queryClient.invalidateQueries({ queryKey: ['/api/patients'] });
+                }}
                 className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-emerald-500/25 transform hover:scale-105 transition-all duration-200"
                 size="lg"
               >
-                Go to Patient Manager
+                View Patients
               </Button>
-              
+
               <Button
-                onClick={() => setImportSuccess(null)}
+                onClick={() => {
+                  setImportSuccess(null);
+                  setParseResult(null);
+                  setError(null);
+                  checkTriageSessions();
+                }}
                 variant="outline"
                 className="border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/20 px-6 py-3 rounded-xl"
                 size="lg"

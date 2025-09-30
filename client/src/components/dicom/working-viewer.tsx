@@ -235,8 +235,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string | null>(null);
   const [registrationAssociationsForPrimary, setRegistrationAssociationsForPrimary] = useState<RegistrationAssociation[]>([]);
   // Fusion debug support
-  const [showFusionDebug, setShowFusionDebug] = useState(false);
-  const [fusionDebugText, setFusionDebugText] = useState('');
   const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const [showRegDetails, setShowRegDetails] = useState(false);
   const [regDetailsText, setRegDetailsText] = useState('');
@@ -253,6 +251,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
   const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
+  const fusionAbortControllerRef = useRef<AbortController | null>(null);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
@@ -467,8 +466,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [convertSliceToCanvas, secondaryModality]);
 
-  const FUSION_CACHE_MAX_AGE_MS = 45000;
-  const FUSION_PREFETCH_RADIUS = 3;
+  // Aggressive caching for smooth rapid scrolling
+  const FUSION_CACHE_MAX_AGE_MS = 300000; // 5 minutes (increased from 45s)
+  const FUSION_PREFETCH_RADIUS = 15; // 15 slices ahead/behind (increased from 3)
+  const FUSION_PARALLEL_FETCH_LIMIT = 6; // Fetch up to 6 slices in parallel
 
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
@@ -484,6 +485,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const registrationId = selectedRegistrationId ?? null;
 
+      // Collect slices to prefetch (prioritize by distance from current slice)
+      const fetchQueue: Array<{ index: number; distance: number; image: any }> = [];
+
       for (let offset = -FUSION_PREFETCH_RADIUS; offset <= FUSION_PREFETCH_RADIUS; offset += 1) {
         const targetIndex = centerIndex + offset;
         if (targetIndex < 0 || targetIndex >= images.length) continue;
@@ -493,39 +497,71 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const key = buildFuseboxCacheKey(sop, secondarySeriesId, registrationId);
         if (fuseboxCacheRef.current.has(key) || fusionPrefetchSetRef.current.has(key)) continue;
 
-        fusionPrefetchSetRef.current.add(key);
-        const instNumber = Number(targetImage.instanceNumber ?? targetImage.metadata?.instanceNumber ?? NaN);
-        const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : targetIndex;
-        const preferredPosition = parseImagePosition(targetImage);
-        getFusedSlice(seriesId, secondarySeriesId, sop)
-          .catch((error) => {
-            if (error instanceof Error && error.message.includes('not found in manifest')) {
-              return getFusedSliceSmart(
-                seriesId,
-                secondarySeriesId,
-                sop,
-                Number.isFinite(instNumber) ? instNumber : null,
-                preferredIndex,
-                preferredPosition,
-              );
-            }
-            throw error;
-          })
-          .then((slice) => {
-            const prepared = convertSliceToCanvas(slice, secondaryModality);
-            if (prepared) {
-              fuseboxCacheRef.current.set(key, { ...prepared, timestamp: Date.now() });
-            }
-          })
-          .catch((error) => {
-            if (import.meta.env.DEV) {
-              console.warn('Fusion prefetch failed', error);
-            }
-          })
-          .finally(() => {
-            fusionPrefetchSetRef.current.delete(key);
-          });
+        fetchQueue.push({
+          index: targetIndex,
+          distance: Math.abs(offset),
+          image: targetImage
+        });
       }
+
+      // Sort by distance (closest slices first for smooth scrolling)
+      fetchQueue.sort((a, b) => a.distance - b.distance);
+
+      // Batch fetch with concurrency limit
+      const fetchBatch = async () => {
+        const batch = fetchQueue.splice(0, FUSION_PARALLEL_FETCH_LIMIT);
+        if (!batch.length) return;
+
+        await Promise.allSettled(
+          batch.map(async ({ image }) => {
+            const sop = image.sopInstanceUID;
+            const key = buildFuseboxCacheKey(sop, secondarySeriesId, registrationId);
+            fusionPrefetchSetRef.current.add(key);
+
+            try {
+              const instNumber = Number(image.instanceNumber ?? image.metadata?.instanceNumber ?? NaN);
+              const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : centerIndex;
+              const preferredPosition = parseImagePosition(image);
+
+              let slice;
+              try {
+                slice = await getFusedSlice(seriesId, secondarySeriesId, sop);
+              } catch (error) {
+                if (error instanceof Error && error.message.includes('not found in manifest')) {
+                  slice = await getFusedSliceSmart(
+                    seriesId,
+                    secondarySeriesId,
+                    sop,
+                    Number.isFinite(instNumber) ? instNumber : null,
+                    preferredIndex,
+                    preferredPosition,
+                  );
+                } else {
+                  throw error;
+                }
+              }
+
+              const prepared = convertSliceToCanvas(slice, secondaryModality);
+              if (prepared) {
+                fuseboxCacheRef.current.set(key, { ...prepared, timestamp: Date.now() });
+              }
+            } catch (error) {
+              if (import.meta.env.DEV) {
+                console.warn('Fusion prefetch failed for', sop, error);
+              }
+            } finally {
+              fusionPrefetchSetRef.current.delete(key);
+            }
+          })
+        );
+
+        // Continue fetching remaining batches
+        if (fetchQueue.length > 0) {
+          await fetchBatch();
+        }
+      };
+
+      fetchBatch();
     },
     [
       buildFuseboxCacheKey,
@@ -538,6 +574,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       fusionManifestLoading,
       fusionSecondaryStatuses,
       fusionManifestPrimarySeriesId,
+      parseImagePosition,
     ],
   );
 
@@ -548,6 +585,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       clearFusionSlices(activeSeriesId);
     };
   }, [seriesId]);
+
+  // Aggressive prefetch when secondary series is selected
+  useEffect(() => {
+    if (!secondarySeriesId || !images.length || currentIndex < 0) return;
+
+    // Immediately prefetch visible slice and surrounding slices
+    const timer = setTimeout(() => {
+      prefetchFusionSlices(currentIndex);
+    }, 50); // Small delay to let manifest settle
+
+    return () => clearTimeout(timer);
+  }, [secondarySeriesId, currentIndex, images.length, prefetchFusionSlices]);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -770,15 +819,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           await displayCurrentImageRef.current();
         }
         lastRenderTimeRef.current = performance.now();
-        
+
         // Debounce fusion rendering for smoother scrolling
+        // Only re-render if we were actively scrolling (prevents contour popping)
         fusionRenderDebounceRef.current = setTimeout(() => {
+          const wasScrolling = isScrollingRef.current;
           isScrollingRef.current = false;
-          // Re-render with full quality fusion after scrolling stops
-          if (fusionOpacity > 0 && secondarySeriesId) {
-            scheduleRender();
+          // Re-render with full quality fusion only if we were scrolling AND fusion is active
+          // This prevents unnecessary re-renders that cause contours to pop
+          if (wasScrolling && fusionOpacity > 0 && secondarySeriesId && !needsRenderRef.current) {
+            needsRenderRef.current = true;
+            if (displayCurrentImageRef.current) {
+              displayCurrentImageRef.current();
+            }
           }
-        }, 100);
+        }, 200); // Increased from 100ms to 200ms for better stability
       });
     }
   }, [fusionOpacity, secondarySeriesId]);
@@ -887,8 +942,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     panX,
     panY,
     zoom,
+    // RT structure dependencies - critical for preventing contour flickering during opacity changes
+    rtStructures,
+    structureVisibility,
+    selectedForEdit,
+    previewContours,
+    contourSettings,
+    allStructuresVisible,
+    selectedStructures,
   ]);
-  
+
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
   
@@ -4572,7 +4635,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
-    const ensureActive = () => requestToken === fusionRequestTokenRef.current;
+
+    // Abort any previous fusion fetch to prevent race conditions during fast switching
+    if (fusionAbortControllerRef.current) {
+      fusionAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    fusionAbortControllerRef.current = abortController;
+
+    const ensureActive = () => {
+      const isActive = requestToken === fusionRequestTokenRef.current;
+      if (!isActive) {
+        abortController.abort(); // Abort if this request is no longer active
+      }
+      return isActive;
+    };
 
     if (!secondarySeriesId || fusionOpacity === 0) {
       if (ensureActive()) setFuseboxTransformSource(null);
@@ -5736,19 +5813,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 }`} />
                 {secondaryModality === 'PT' ? 'PT' : secondaryModality === 'CT' ? 'CT' : 'MR'} Fusion
                 <span className={
-                  secondaryModality === 'PT' 
-                    ? 'text-yellow-300' 
+                  secondaryModality === 'PT'
+                    ? 'text-yellow-300'
                     : secondaryModality === 'CT'
                     ? 'text-blue-300'
                     : 'text-purple-300'
                 }>
                   ({Math.round(fusionOpacity * 100)}%)
                 </span>
-                <Button size="sm" variant="ghost" className="h-5 px-2 ml-2 text-[10px] hover:bg-gray-700/40"
-                  onClick={(e) => { e.stopPropagation(); setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-                  title="Show fusion debug info">
-                  Debug
-                </Button>
               </Badge>
             )}
           </div>
@@ -5756,11 +5828,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           <div className="flex items-center space-x-2">
             {rtStructures && (
               <div className="flex items-center gap-1 px-2 py-1 bg-gray-800/50 rounded-lg">
-                <Badge 
+                <Badge
                   variant={showStructures ? "default" : "secondary"}
                   className={`${
-                    showStructures 
-                      ? 'bg-green-600/80 text-white border-green-500/50' 
+                    showStructures
+                      ? 'bg-green-600/80 text-white border-green-500/50'
                       : 'bg-gray-700/50 text-gray-300'
                   }`}
                 >
@@ -5771,15 +5843,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 </span>
               </div>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2 text-xs hover:bg-gray-700/40"
-              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-              title="Open Fusion Debug"
-            >
-              Fusion Debug
-            </Button>
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -6158,26 +6221,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Fusion Debug Aid */}
-        <AlertDialog open={showFusionDebug} onOpenChange={(open) => setShowFusionDebug(open)}>
-          <AlertDialogContent className="max-w-2xl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Fusion Debug Info</AlertDialogTitle>
-            </AlertDialogHeader>
-            <div className="space-y-2">
-              <p className="text-sm text-gray-300">Copy and paste this back for analysis.</p>
-              <textarea
-                readOnly
-                value={fusionDebugText}
-                className="w-full h-64 p-2 text-xs bg-black/60 border border-gray-600 rounded-md text-gray-200 font-mono"
-              />
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Close</AlertDialogCancel>
-              <AlertDialogAction onClick={() => { try { navigator.clipboard.writeText(fusionDebugText); } catch {} }}>Copy</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
 
         {/* REG Details popup */}
         <AlertDialog open={showRegDetails} onOpenChange={(open) => setShowRegDetails(open)}>

@@ -5,9 +5,9 @@ import ffmpegPath from '@ffmpeg-installer/ffmpeg';
 import fs from 'fs/promises';
 import path from 'path';
 import { db } from './db';
-import { mediaPreviews, images, series } from '@shared/schema';
+import { mediaPreviews, images, series } from '../shared/schema';
 import { eq, and, isNull } from 'drizzle-orm';
-import type { MediaPreview, DicomImage } from '@shared/schema';
+import type { MediaPreview, DicomImage } from '../shared/schema';
 
 ffmpeg.setFfmpegPath(ffmpegPath.path);
 

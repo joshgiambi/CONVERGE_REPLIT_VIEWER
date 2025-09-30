@@ -32,20 +32,57 @@ This viewer toolkit blends a React/Vite client with an Express + Vite middleware
 - Full-volume resampling is handled by `FuseboxVolumeResampler`, calling `scripts/fusebox_resample_volume.py` through the Python runner.
 - Use the Fusion Test page (`client/src/pages/fusion-test.tsx`) to request manifest-backed slices, inspect transforms, and read helper logs.
 
-## Centralised Debug Feed
-- All server-side logging (via `server/logger.ts`), Fusebox helper emissions, and manifest lifecycle events stream into an in-memory hub (`server/debug/debug-hub.ts`).
-- Fetch everything or filter by source with `/api/debug/events`:
+### Fusion Manifest Gotchas (read this before debugging PET/CT)
+- **Frame-of-Reference only registrations**: Many PET planning exports ship REG series where the transform references only the source/target Frame Of Reference UIDs, not the Series Instance UIDs. `parseDicomRegistrationFromFile` captures those FoRs, but `series_registration_relationships` will not have a row unless we synthesise one. When the manifest guards requested IDs through `seriesSelectionService`, anything missing from that table is silently dropped. If PET fusion vanishes, inspect the REG (`scripts/analyze-reg-file.ts`) and expect to seed a FoR-based relationship.
+- **Manifest filtering behaviour**: `FusionManifestService.getManifest` now cross-checks requested `secondarySeriesIds` against `seriesSelectionService.getFusionCandidatesForSeries`. If the selector fails to recognise the pair (e.g. FoR-only PET link), the manifest throws the request away and reuses whatever was cached. Watch for debug events like `Requested secondary series are not valid fusion candidates` and don’t assume your ID was honoured.
+- **Transform resolution**: `resolveFuseboxTransform` currently keeps the raw matrix but drops the FoR metadata. When you rely on FoR-only registries, make sure your changes carry that metadata forward so fusebox can validate the match. If you see `No registration transform produced a helper output`, it usually means the transform candidates didn’t match the series you asked for.
+- **Fusion test harness vs viewer**: The `Fusion Test` page still calls `/api/fusebox/test-slices`, bypassing the manifest filter/caching. Production viewers go through `fetchFusionManifest` and `preloadFusionSecondary`. Harmonise the harness (or at least remember the difference) when validating fixes.
+- **Debugging workflow**:
+  - `curl "/api/fusion/manifest?primarySeriesId=<CT>&secondarySeriesIds=<PET>"` – verify the manifest includes your secondary and a `ready` status.
+  - `curl "/api/debug/events?source=fusion-manifest&limit=50"` – look for cache hits, filter warnings, or transform failures.
+  - `scripts/analyze-reg-file.ts --file <REG.dcm> --patientRoot storage/patients` – confirm the REG links the FoRs you expect.
+  - When in doubt, temporarily disable the candidate filter to narrow down whether the selector or transform resolver is at fault.
+
+## Centralised Debug Feed & Logging
+- **All server-side logging** is centralized through `server/logger.ts`, which provides `debug()`, `info()`, `warn()`, and `error()` methods.
+- Each log call accepts an optional `source` parameter to tag the origin (e.g., 'fusebox', 'fusion-manifest', 'server').
+- Logs are automatically captured by `server/debug/debug-hub.ts` and stored in memory for inspection.
+- Fetch everything or filter by source/level with `/api/debug/events`:
   ```bash
   curl "http://localhost:3000/api/debug/events?source=fusebox&limit=50"
   curl "http://localhost:3000/api/debug/events?source=fusion-manifest&level=info"
+  curl "http://localhost:3000/api/debug/events?source=server&level=error"
   ```
 - Legacy `/api/fusebox/logs` now proxies to the same feed for backwards compatibility.
 - The fusion test UI already refreshes from `/api/debug/events?source=fusebox`.
+- **Usage**: Import and use `logger` from `server/logger.ts`:
+  ```typescript
+  import { logger } from './logger.ts';
+  logger.info('Processing started', 'my-service');
+  logger.error('Failed to process', 'my-service');
+  ```
+- See `docs/LOGGING_SYSTEM.md` for complete documentation on logging patterns and migration strategy.
 
 ## Data Loading & Storage
-- DICOM files live under `storage/patients/<PATIENT>/<STUDY>/<SERIES>/*.dcm`.
-- Import script: `node populate-from-storage.js` scans storage and creates patients/studies/series/images in Postgres.
+- DICOM files are uploaded through the web UI upload portal at `/api/upload`.
+- Uploaded files are stored under `storage/patients/<PATIENT_ID>/<STUDY_UID>/<SERIES_UID>/*.dcm`.
+- All patient/study/series/image metadata is extracted during upload and stored in PostgreSQL.
 - Generated Fusebox volumes + manifests are written beneath `tmp/fusebox-*`; resampler metadata is cached per series pair.
+- **Note**: Demo data endpoints (`/api/populate-demo`, `/api/create-test-data`) have been removed. Use the upload portal for all data ingestion.
+
+## Patient & Series Deletion
+- `DELETE /api/patients/:id?full=true` triggers full cascade deletion via `storage.deletePatientFully()`.
+- Deletion order ensures foreign key constraints are respected:
+  1. RT structure sets (contours → structures → sets)
+  2. Frame of reference groups
+  3. Fusion schema tables (planning designations, registration relationships, fusion capabilities)
+  4. Fusebox runs
+  5. Series (via `deleteSeriesFully()` which handles images, media, and filesystem cleanup)
+  6. Studies
+  7. Patient tags
+  8. Patient record
+- Filesystem cleanup removes patient directories from `storage/patients/` and fusion artifacts from `tmp/fusebox-*`.
+- **Note**: The fusion schema migration (`migrations/20250202_add_fusion_schema.sql`) added tables that must be cleaned up during deletion.
 
 ## Useful Commands
 - `npm run dev` – Starts server without enforcing ITK helper (falls back to matrix fusion).

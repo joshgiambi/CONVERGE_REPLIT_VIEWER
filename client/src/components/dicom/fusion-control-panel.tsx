@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Layers, Loader2, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
+import { Layers, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FusionSecondaryDescriptor } from '@/types/fusion';
 
@@ -16,7 +16,6 @@ interface FusionControlPanelProps {
   secondaryStatuses: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
   manifestLoading?: boolean;
   manifestError?: string | null;
-  onOpenDebug?: () => void;
   minimized?: boolean;
   onToggleMinimized?: (minimized: boolean) => void;
   windowLevel?: { window: number; level: number } | null;
@@ -32,7 +31,6 @@ export function FusionControlPanel({
   secondaryStatuses,
   manifestLoading,
   manifestError,
-  onOpenDebug,
   minimized = false,
   onToggleMinimized,
   windowLevel,
@@ -148,11 +146,6 @@ export function FusionControlPanel({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {onOpenDebug && (
-              <Button variant="ghost" size="icon" onClick={onOpenDebug} className="h-8 w-8 text-amber-300 hover:text-amber-200">
-                <AlertTriangle className="h-4 w-4" />
-              </Button>
-            )}
             <Button variant="ghost" size="icon" onClick={() => onToggleMinimized?.(true)} className="h-8 w-8 text-slate-200">
               <Minimize2 className="h-4 w-4" />
             </Button>

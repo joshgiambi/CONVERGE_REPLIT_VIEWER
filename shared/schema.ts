@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, jsonb, boolean, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, jsonb, boolean, doublePrecision, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 import { z } from "zod";
@@ -50,9 +50,26 @@ export const series = pgTable("series", {
   seriesNumber: integer("series_number"),
   imageCount: integer("image_count").default(0),
   sliceThickness: text("slice_thickness"),
+  sliceThicknessMm: doublePrecision("slice_thickness_mm"),
+  spacingBetweenSlicesMm: doublePrecision("spacing_between_slices_mm"),
+  frameOfReferenceUid: text("frame_of_reference_uid"),
+  acquisitionDateTime: timestamp("acquisition_datetime"),
+  rows: integer("rows"),
+  columns: integer("columns"),
+  pixelSpacing: jsonb("pixel_spacing"),
+  imageOrientationPatient: jsonb("image_orientation_patient"),
+  imagePositionPatientFirst: jsonb("image_position_patient_first"),
+  imagePositionPatientLast: jsonb("image_position_patient_last"),
+  isDerived: boolean("is_derived").default(false),
+  derivedFromSeriesId: integer("derived_from_series_id").references(() => series.id),
+  derivationDescription: text("derivation_description"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  frameOfReferenceIdx: index("series_frame_of_reference_idx").on(table.frameOfReferenceUid),
+  studyModalityIdx: index("series_study_modality_idx").on(table.studyId, table.modality),
+  derivedFromIdx: index("series_derived_from_idx").on(table.derivedFromSeriesId),
+}));
 
 export const images = pgTable("images", {
   id: serial("id").primaryKey(),
@@ -68,9 +85,13 @@ export const images = pgTable("images", {
   sliceLocation: text("slice_location"),
   windowCenter: text("window_center"),
   windowWidth: text("window_width"),
+  frameOfReferenceUid: text("frame_of_reference_uid"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  seriesInstanceIdx: index("images_series_instance_idx").on(table.seriesId, table.instanceNumber),
+  imageForIdx: index("images_frame_of_reference_idx").on(table.frameOfReferenceUid),
+}));
 
 // Media preview storage for thumbnails and movies
 export const mediaPreviews = pgTable("media_previews", {
@@ -113,42 +134,16 @@ export const imagesRelations = relations(images, ({ one }) => ({
   }),
 }));
 
-export const insertPatientSchema = createInsertSchema(patients).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertStudySchema = createInsertSchema(studies).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertSeriesSchema = createInsertSchema(series).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertImageSchema = createInsertSchema(images).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertMediaPreviewSchema = createInsertSchema(mediaPreviews).omit({
-  id: true,
-  createdAt: true,
-  processedAt: true,
-});
-
 export type Patient = typeof patients.$inferSelect;
 export type Study = typeof studies.$inferSelect;
 export type Series = typeof series.$inferSelect;
 export type DicomImage = typeof images.$inferSelect;
 export type MediaPreview = typeof mediaPreviews.$inferSelect;
-export type InsertPatient = z.infer<typeof insertPatientSchema>;
-export type InsertStudy = z.infer<typeof insertStudySchema>;
-export type InsertSeries = z.infer<typeof insertSeriesSchema>;
-export type InsertImage = z.infer<typeof insertImageSchema>;
-export type InsertMediaPreview = z.infer<typeof insertMediaPreviewSchema>;
+export type InsertPatient = typeof patients.$inferInsert;
+export type InsertStudy = typeof studies.$inferInsert;
+export type InsertSeries = typeof series.$inferInsert;
+export type InsertImage = typeof images.$inferInsert;
+export type InsertMediaPreview = typeof mediaPreviews.$inferInsert;
 
 // DICOM Network Configuration
 export const pacsConnections = pgTable("pacs_connections", {
@@ -181,20 +176,10 @@ export const networkQueries = pgTable("network_queries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertPacsConnectionSchema = createInsertSchema(pacsConnections).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertNetworkQuerySchema = createInsertSchema(networkQueries).omit({
-  id: true,
-  createdAt: true,
-});
-
 export type PacsConnection = typeof pacsConnections.$inferSelect;
 export type NetworkQuery = typeof networkQueries.$inferSelect;
-export type InsertPacsConnection = z.infer<typeof insertPacsConnectionSchema>;
-export type InsertNetworkQuery = z.infer<typeof insertNetworkQuerySchema>;
+export type InsertPacsConnection = typeof pacsConnections.$inferInsert;
+export type InsertNetworkQuery = typeof networkQueries.$inferInsert;
 
 // Registration table for DICOM registration transformation matrices
 export const registrations = pgTable("registrations", {
@@ -277,51 +262,23 @@ export const rtStructureHistory = pgTable("rt_structure_history", {
 });
 
 // Type definitions for RT structures
-export const insertRTStructureSetSchema = createInsertSchema(rtStructureSets).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type InsertRTStructureSet = z.infer<typeof insertRTStructureSetSchema>;
+export type InsertRTStructureSet = typeof rtStructureSets.$inferInsert;
 export type RTStructureSet = typeof rtStructureSets.$inferSelect;
 
-export const insertRTStructureSchema = createInsertSchema(rtStructures).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertRTStructure = z.infer<typeof insertRTStructureSchema>;
+export type InsertRTStructure = typeof rtStructures.$inferInsert;
 export type RTStructure = typeof rtStructures.$inferSelect;
 
-export const insertRTStructureContourSchema = createInsertSchema(rtStructureContours).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertRTStructureContour = z.infer<typeof insertRTStructureContourSchema>;
+export type InsertRTStructureContour = typeof rtStructureContours.$inferInsert;
 export type RTStructureContour = typeof rtStructureContours.$inferSelect;
 
-export const insertRTStructureHistorySchema = createInsertSchema(rtStructureHistory).omit({
-  id: true,
-  timestamp: true,
-});
-export type InsertRTStructureHistory = z.infer<typeof insertRTStructureHistorySchema>;
+export type InsertRTStructureHistory = typeof rtStructureHistory.$inferInsert;
 export type RTStructureHistory = typeof rtStructureHistory.$inferSelect;
 
-export const insertRegistrationSchema = createInsertSchema(registrations).omit({
-  id: true,
-  createdAt: true,
-});
-
 export type Registration = typeof registrations.$inferSelect;
-export type InsertRegistration = z.infer<typeof insertRegistrationSchema>;
-
-export const insertFuseboxRunSchema = createInsertSchema(fuseboxRuns).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export type InsertRegistration = typeof registrations.$inferInsert;
 
 export type FuseboxRun = typeof fuseboxRuns.$inferSelect;
-export type InsertFuseboxRun = z.infer<typeof insertFuseboxRunSchema>;
+export type InsertFuseboxRun = typeof fuseboxRuns.$inferInsert;
 
 // V2 Professional Contour System - Medical Grade Types
 export interface Point {
@@ -375,24 +332,28 @@ export interface StructureData {
 }
 
 // Medical slicing modes
-export enum SlicingMode {
-  I = 'I', // Sagittal
-  J = 'J', // Coronal  
-  K = 'K'  // Axial
-}
+export const SlicingMode = {
+  I: 'I', // Sagittal
+  J: 'J', // Coronal  
+  K: 'K'  // Axial
+} as const;
 
 // Brush operation types
-export enum BrushOperation {
-  ADDITIVE = 'ADDITIVE',
-  SUBTRACTIVE = 'SUBTRACTIVE'
-}
+export const BrushOperation = {
+  ADDITIVE: 'ADDITIVE',
+  SUBTRACTIVE: 'SUBTRACTIVE'
+} as const;
 
 // Commit status tracking
-export enum CommitStatus {
-  SOURCE = 'SOURCE',
-  COMMITTED = 'COMMITTED',
-  STAGED = 'STAGED'
-}
+export const CommitStatus = {
+  SOURCE: 'SOURCE',
+  COMMITTED: 'COMMITTED',
+  STAGED: 'STAGED'
+} as const;
+
+export type SlicingMode = typeof SlicingMode[keyof typeof SlicingMode];
+export type BrushOperation = typeof BrushOperation[keyof typeof BrushOperation];
+export type CommitStatus = typeof CommitStatus[keyof typeof CommitStatus];
 
 // Professional DICOM metadata structure
 export interface DICOMImageMetadata {
@@ -417,10 +378,79 @@ export const patientTags = pgTable("patient_tags", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertPatientTagSchema = createInsertSchema(patientTags).omit({
-  id: true,
-  createdAt: true,
-});
-
 export type PatientTag = typeof patientTags.$inferSelect;
-export type InsertPatientTag = z.infer<typeof insertPatientTagSchema>;
+export type InsertPatientTag = typeof patientTags.$inferInsert;
+
+// New fusion relationship tables
+export const frameOfReferenceGroups = pgTable("frame_of_reference_groups", {
+  id: serial("id").primaryKey(),
+  frameOfReferenceUid: text("frame_of_reference_uid").notNull().unique(),
+  studyId: integer("study_id").references(() => studies.id),
+  coordinateSystemDescription: text("coordinate_system_description"),
+  spatialResolutionMm: doublePrecision("spatial_resolution_mm"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  frameOfReferenceUidIdx: uniqueIndex("for_groups_uid_idx").on(table.frameOfReferenceUid),
+}));
+
+export const seriesRegistrationRelationships = pgTable("series_registration_relationships", {
+  id: serial("id").primaryKey(),
+  primarySeriesId: integer("primary_series_id").references(() => series.id).notNull(),
+  secondarySeriesId: integer("secondary_series_id").references(() => series.id).notNull(),
+  registrationId: integer("registration_id").references(() => registrations.id),
+  registrationFilePath: text("registration_file_path"),
+  transformMatrix: jsonb("transform_matrix"),
+  inverseTransformMatrix: jsonb("inverse_transform_matrix"),
+  transformHash: text("transform_hash"),
+  relationshipType: text("relationship_type").notNull(),
+  confidenceScore: doublePrecision("confidence_score"),
+  registrationMethod: text("registration_method"),
+  geometricValidationPassed: boolean("geometric_validation_passed").default(false),
+  validationMetrics: jsonb("validation_metrics"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  seriesRegPairIdx: uniqueIndex("series_reg_relationship_pair_idx").on(table.primarySeriesId, table.secondarySeriesId),
+  seriesRegPrimaryIdx: index("series_reg_primary_idx").on(table.primarySeriesId),
+  seriesRegSecondaryIdx: index("series_reg_secondary_idx").on(table.secondarySeriesId),
+}));
+
+export const planningSeriesDesignations = pgTable("planning_series_designations", {
+  id: serial("id").primaryKey(),
+  studyId: integer("study_id").references(() => studies.id).notNull(),
+  seriesId: integer("series_id").references(() => series.id).notNull(),
+  designationType: text("designation_type").notNull(),
+  confidenceScore: doublePrecision("confidence_score"),
+  designationReason: jsonb("designation_reason"),
+  algorithmVersion: text("algorithm_version").default("1.0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  planningDesignationUnique: uniqueIndex("planning_designation_study_type_idx").on(table.studyId, table.designationType),
+}));
+
+export const seriesFusionCapabilities = pgTable("series_fusion_capabilities", {
+  id: serial("id").primaryKey(),
+  primarySeriesId: integer("primary_series_id").references(() => series.id).notNull(),
+  secondarySeriesId: integer("secondary_series_id").references(() => series.id).notNull(),
+  canFuse: boolean("can_fuse").notNull(),
+  fusionMethod: text("fusion_method"),
+  confidenceScore: doublePrecision("confidence_score"),
+  validationStatus: text("validation_status"),
+  validationNotes: text("validation_notes"),
+  lastValidated: timestamp("last_validated").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  fusionCapabilityPairIdx: uniqueIndex("fusion_capability_pair_idx").on(table.primarySeriesId, table.secondarySeriesId),
+  fusionPrimaryIdx: index("fusion_capability_primary_idx").on(table.primarySeriesId),
+}));
+
+export type FrameOfReferenceGroup = typeof frameOfReferenceGroups.$inferSelect;
+export type InsertFrameOfReferenceGroup = typeof frameOfReferenceGroups.$inferInsert;
+export type SeriesRegistrationRelationship = typeof seriesRegistrationRelationships.$inferSelect;
+export type InsertSeriesRegistrationRelationship = typeof seriesRegistrationRelationships.$inferInsert;
+export type PlanningSeriesDesignation = typeof planningSeriesDesignations.$inferSelect;
+export type InsertPlanningSeriesDesignation = typeof planningSeriesDesignations.$inferInsert;
+export type SeriesFusionCapability = typeof seriesFusionCapabilities.$inferSelect;
+export type InsertSeriesFusionCapability = typeof seriesFusionCapabilities.$inferInsert;

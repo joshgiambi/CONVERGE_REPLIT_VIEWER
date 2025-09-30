@@ -3,11 +3,12 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star, ArrowRight, Link as LinkIcon } from 'lucide-react';
+import { Calendar, FileStack, Brain, Eye, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Edit, Tag, Star, ArrowRight, Link as LinkIcon, Database } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'wouter';
 import { MetadataEditDialog } from './metadata-edit-dialog';
 import { DicomThumbnail } from './dicom-thumbnail';
+import { FusionDebugDialog } from '@/components/dicom/fusion-debug-dialog';
 import { useToast } from '@/hooks/use-toast';
 import type { AssociationResponse, RegistrationAssociation } from '@/types/fusion';
 
@@ -31,6 +32,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   const [associationData, setAssociationData] = useState<AssociationResponse | null>(null);
   const [loadingAssociations, setLoadingAssociations] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showFusionDebug, setShowFusionDebug] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -225,6 +227,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 variant="ghost"
                 onClick={onToggleFavorite}
                 className={`h-8 w-8 p-0 transition-colors ${isFavorite ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-400 hover:text-white'}`}
+                title="Toggle favorite"
               >
                 <Star className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
               </Button>
@@ -232,8 +235,18 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
             <Button
               size="sm"
               variant="ghost"
+              onClick={() => setShowFusionDebug(true)}
+              className="h-8 w-8 p-0 text-cyan-400 hover:text-cyan-300"
+              title="View fusion debug information"
+            >
+              <Database className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => setShowEditDialog(true)}
               className="h-8 w-8 p-0"
+              title="Edit metadata"
             >
               <Edit className="h-4 w-4" />
             </Button>
@@ -741,6 +754,13 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
             onUpdate();
           }
         }}
+      />
+
+      <FusionDebugDialog
+        open={showFusionDebug}
+        onOpenChange={setShowFusionDebug}
+        studyId={studies[0]?.id}
+        patientId={patient.id}
       />
     </Card>
   );

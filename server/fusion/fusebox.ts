@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'child_process';
 import dicomParser from 'dicom-parser';
 import { storage } from '../storage.ts';
 
-export type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache' | 'helper-regenerated' | 'matrix-fallback' | 'matrix-validated';
+export type FuseboxTransformSource = 'matrix' | 'helper-generated' | 'helper-cache' | 'helper-regenerated' | 'matrix-fallback' | 'matrix-validated' | 'frame-of-reference';
 
 export type FuseboxTransformInfo = {
   matrix?: number[];
@@ -12,6 +12,9 @@ export type FuseboxTransformInfo = {
   transformFile?: string;
   transformSource?: FuseboxTransformSource;
   registrationId?: string;
+  sourceFrameOfReferenceUid?: string | null;
+  targetFrameOfReferenceUid?: string | null;
+  referencedSeriesInstanceUids?: string[];
 };
 
 export type FuseboxLogLevel = 'debug' | 'info' | 'warn';
@@ -321,7 +324,16 @@ export async function resolveFuseboxTransform(
     return patient?.patientID ?? null;
   })());
 
-  const candidates: Array<{ regFile: string; studyId: number; matrix?: number[]; transformSource?: FuseboxTransformSource; registrationId?: string }> = [];
+  const candidates: Array<{ 
+    regFile: string; 
+    studyId: number; 
+    matrix?: number[]; 
+    transformSource?: FuseboxTransformSource; 
+    registrationId?: string;
+    sourceFrameOfReferenceUid?: string | null;
+    targetFrameOfReferenceUid?: string | null;
+    referencedSeriesInstanceUids?: string[];
+  }> = [];
 
   const regFiles = patientDbId != null
     ? await findAllRegFilesForPatient(patientDbId)
@@ -340,6 +352,9 @@ export async function resolveFuseboxTransform(
         studyId: reg.studyId,
         matrix: parsed.matrixRowMajor4x4.slice(),
         transformSource: 'matrix',
+        sourceFrameOfReferenceUid: parsed.sourceFrameOfReferenceUid,
+        targetFrameOfReferenceUid: parsed.targetFrameOfReferenceUid,
+        referencedSeriesInstanceUids: parsed.referencedSeriesInstanceUids,
       });
     }
     if (parsed.candidates?.length) {
@@ -351,6 +366,9 @@ export async function resolveFuseboxTransform(
             matrix: candidate.matrix.slice(),
             transformSource: 'matrix',
             registrationId: `${path.basename(reg.filePath)}#${index}`,
+            sourceFrameOfReferenceUid: parsed.sourceFrameOfReferenceUid,
+            targetFrameOfReferenceUid: parsed.targetFrameOfReferenceUid,
+            referencedSeriesInstanceUids: parsed.referencedSeriesInstanceUids,
           });
         }
       });
@@ -363,15 +381,58 @@ export async function resolveFuseboxTransform(
   for (const cand of candidates) {
     const candidateId = cand.registrationId || `matrix-${path.basename(cand.regFile)}`;
     if (registrationId && registrationId !== candidateId) continue;
+    
+    // Match candidate FoR UIDs against primary/secondary FoR
+    // Only apply this filter if we have FoR data on both sides
+    if (primaryFoR && secondaryFoR && cand.sourceFrameOfReferenceUid && cand.targetFrameOfReferenceUid) {
+      const forwardMatch = 
+        (cand.sourceFrameOfReferenceUid === secondaryFoR && cand.targetFrameOfReferenceUid === primaryFoR);
+      const reverseMatch = 
+        (cand.sourceFrameOfReferenceUid === primaryFoR && cand.targetFrameOfReferenceUid === secondaryFoR);
+      
+      if (!forwardMatch && !reverseMatch) {
+        logger?.(`🔍 Skipping REG candidate ${candidateId}: FoR mismatch (source=${cand.sourceFrameOfReferenceUid?.slice(-8)}, target=${cand.targetFrameOfReferenceUid?.slice(-8)}) vs (primary=${primaryFoR?.slice(-8)}, secondary=${secondaryFoR?.slice(-8)})`);
+        continue;
+      }
+      logger?.(`✅ REG candidate ${candidateId} FoR match: ${forwardMatch ? 'forward' : 'reverse'}`);
+      
+      // Emit debug event for FoR-based transform selection
+      const { recordDebugEvent } = await import('../debug/debug-hub.ts');
+      recordDebugEvent({
+        level: 'info',
+        source: 'frame-of-reference',
+        message: 'FoR-based transform selected',
+        context: {
+          primarySeriesId,
+          secondarySeriesId,
+          candidateId,
+          sourceFrameOfReferenceUid: cand.sourceFrameOfReferenceUid,
+          targetFrameOfReferenceUid: cand.targetFrameOfReferenceUid,
+          primaryFoR,
+          secondaryFoR,
+          matchDirection: forwardMatch ? 'forward' : 'reverse',
+        },
+      });
+    }
+    
     const info: FuseboxTransformInfo = {
       matrix: cand.matrix ? cand.matrix.slice() : undefined,
       filePath: cand.regFile,
       transformSource: cand.transformSource,
       registrationId: candidateId,
+      sourceFrameOfReferenceUid: cand.sourceFrameOfReferenceUid,
+      targetFrameOfReferenceUid: cand.targetFrameOfReferenceUid,
+      referencedSeriesInstanceUids: cand.referencedSeriesInstanceUids,
     };
     try {
       const maybe = await maybeAttachHelperOutput(info, cand.regFile, candidateId, primaryFoR, secondaryFoR, logger, primarySeriesId, secondarySeriesId);
-      if (maybe?.transformFile) return maybe;
+      if (maybe?.transformFile) {
+        // Preserve FoR metadata through helper processing
+        maybe.sourceFrameOfReferenceUid = cand.sourceFrameOfReferenceUid;
+        maybe.targetFrameOfReferenceUid = cand.targetFrameOfReferenceUid;
+        maybe.referencedSeriesInstanceUids = cand.referencedSeriesInstanceUids;
+        return maybe;
+      }
       if (!fallbackMatrix) fallbackMatrix = maybe ?? info;
       else if (maybe && maybe.transformSource === 'matrix-validated') fallbackMatrix = maybe;
     } catch (err: any) {

@@ -84,7 +84,30 @@ export function SeriesSelector({
   fusionSiblingMap,
 }: SeriesSelectorProps) {
   
-  // Debug logging removed for performance
+  // Debug series and fusion candidates
+  useEffect(() => {
+    console.log('📋 SeriesSelector series:', {
+      total: series.length,
+      byModality: series.reduce((acc, s) => {
+        const mod = (s.modality || 'UNKNOWN').toUpperCase();
+        acc[mod] = (acc[mod] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+      seriesIds: series.map(s => ({ id: s.id, modality: s.modality, desc: s.seriesDescription })),
+    });
+  }, [series]);
+
+  useEffect(() => {
+    if (fusionCandidatesByPrimary && selectedSeries) {
+      const candidates = fusionCandidatesByPrimary.get(selectedSeries.id);
+      console.log('🎯 SeriesSelector fusion candidates:', {
+        selectedSeriesId: selectedSeries.id,
+        candidates: candidates,
+        totalPrimaryKeys: Array.from(fusionCandidatesByPrimary.keys()),
+      });
+    }
+  }, [fusionCandidatesByPrimary, selectedSeries]);
+
   const [rtSeries, setRTSeries] = useState<any[]>([]);
   const [selectedRTSeries, setSelectedRTSeries] = useState<any>(null);
   const [structureVisibility, setStructureVisibility] = useState<Map<number, boolean>>(new Map());
@@ -301,7 +324,13 @@ export function SeriesSelector({
           }
           const deduped = Array.from(unique.values());
           setRTSeries(deduped);
-          console.log(`✅ Loaded RT series for studies: ${studyIdsToLoad.join(',')}`);
+          console.log(`✅ Loaded ${deduped.length} RT series for studies: ${studyIdsToLoad.join(',')}`);
+          console.log('RT Series Details:', deduped.map(rt => ({
+            id: rt.id,
+            desc: rt.seriesDescription,
+            referencedSeriesId: rt.referencedSeriesId,
+            referencedSeriesUID: rt.referencedSeriesUID,
+          })));
         }
       } catch (error) {
         if (!isCancelled) {
@@ -328,59 +357,145 @@ export function SeriesSelector({
     }
   }, [rtStructures]);
 
-  // Auto-select most recent RT structure set and sync with loadedRTSeriesId
+  // Auto-select RT structure set that references the selected primary series
   useEffect(() => {
-    if (rtSeries.length > 0) {
-      // If loadedRTSeriesId is provided, prioritize that
-      if (loadedRTSeriesId) {
-        const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
-        if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
-          console.log('Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
-          setSelectedRTSeries(loadedSeries);
-        }
-      } 
-      // Otherwise, auto-select the most recent RT structure set
-      else if (!selectedRTSeries) {
-        const mostRecentRT = rtSeries.reduce((latest, current) => {
-          // Prefer by series date/time first, then by series number
-          const latestDate = latest.seriesDate || latest.createdAt || '';
-          const currentDate = current.seriesDate || current.createdAt || '';
-          
-          if (currentDate > latestDate) return current;
-          if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
-          return latest;
-        });
-        
-        console.log(`🎯 Auto-selecting most recent RT structure set: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
-        handleRTSeriesSelect(mostRecentRT);
+    console.log('🔄 RT Selection Effect triggered:', {
+      rtSeriesCount: rtSeries.length,
+      selectedSeriesId: selectedSeries?.id,
+      selectedRTSeriesId: selectedRTSeries?.id,
+      loadedRTSeriesId: loadedRTSeriesId,
+    });
+
+    if (rtSeries.length === 0 || !selectedSeries) {
+      console.log('⏭️ Skipping RT selection - no RT series or no selected series');
+      return;
+    }
+
+    // If loadedRTSeriesId is provided, prioritize that
+    if (loadedRTSeriesId) {
+      const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
+      if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
+        console.log('📌 Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
+        setSelectedRTSeries(loadedSeries);
+        return; // IMPORTANT: Return early to prevent auto-selection from running
       }
     }
-  }, [loadedRTSeriesId, rtSeries, selectedRTSeries]);
+
+    // Only auto-select if no RT series is currently selected
+    if (selectedRTSeries) {
+      console.log('⏭️ Skipping auto-selection - RT series already selected:', selectedRTSeries.id);
+      return;
+    }
+
+    // Filter RT structures that reference the current primary series
+    const referencingRTStructures = rtSeries.filter(rt => {
+      const matches = rt.referencedSeriesId === selectedSeries.id ||
+                     rt.referencedSeriesUID === selectedSeries.seriesInstanceUID;
+      console.log(`  RT ${rt.id} (${rt.seriesDescription}): referencedSeriesId=${rt.referencedSeriesId}, matches=${matches}`);
+      return matches;
+    });
+
+    if (referencingRTStructures.length > 0) {
+      // Among those that reference the primary, select the most recent
+      const mostRecentRT = referencingRTStructures.reduce((latest, current) => {
+        const latestDate = latest.seriesDate || latest.createdAt || '';
+        const currentDate = current.seriesDate || current.createdAt || '';
+
+        if (currentDate > latestDate) return current;
+        if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
+        return latest;
+      });
+
+      console.log(`🎯 Auto-selecting RT structure that references primary series ${selectedSeries.id}: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
+      handleRTSeriesSelect(mostRecentRT);
+    } else {
+      // No RT structures reference the primary series - select most recent overall
+      console.log(`⚠️ No RT structures reference primary series ${selectedSeries.id}`);
+      console.log('Available RT structures:', rtSeries.map(rt => ({
+        id: rt.id,
+        desc: rt.seriesDescription,
+        referencedSeriesId: rt.referencedSeriesId,
+        referencedSeriesUID: rt.referencedSeriesUID,
+      })));
+
+      const mostRecentRT = rtSeries.reduce((latest, current) => {
+        const latestDate = latest.seriesDate || latest.createdAt || '';
+        const currentDate = current.seriesDate || current.createdAt || '';
+
+        if (currentDate > latestDate) return current;
+        if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
+        return latest;
+      });
+
+      console.log(`⚠️ Falling back to most recent RT: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
+      handleRTSeriesSelect(mostRecentRT);
+    }
+  }, [loadedRTSeriesId, rtSeries, selectedRTSeries, selectedSeries]);
+
+  const loadingRTRef = useRef<number | null>(null);
 
   async function handleRTSeriesSelect(rtSeries: any) {
+    console.log('🔧 handleRTSeriesSelect called:', {
+      rtSeriesId: rtSeries.id,
+      description: rtSeries.seriesDescription,
+      hasOnRTStructureLoad: !!onRTStructureLoad,
+      currentlyLoading: loadingRTRef.current,
+    });
+
+    // Prevent multiple simultaneous loads of the same RT series
+    if (loadingRTRef.current === rtSeries.id) {
+      console.log('⏭️ Already loading RT series', rtSeries.id, '- skipping duplicate call');
+      return;
+    }
+
+    loadingRTRef.current = rtSeries.id;
+
     try {
       setSelectedRTSeries(rtSeries);
-      
+
       // Auto-expand structures accordion section when an RT structure set is selected
       setAccordionValues(prev => {
         if (!prev.includes('structures')) {
+          console.log('📂 Expanding structures accordion');
           return [...prev, 'structures'];
         }
         return prev;
       });
-      
+
       // Load RT structure contours
+      console.log(`📡 Fetching RT contours from /api/rt-structures/${rtSeries.id}/contours`);
       const response = await fetch(`/api/rt-structures/${rtSeries.id}/contours`);
+
+      console.log(`📥 RT contours response status: ${response.status}`);
+
       if (response.ok) {
         const rtStructData = await response.json();
+        console.log('✅ RT contours loaded:', {
+          structureCount: rtStructData?.structures?.length || 0,
+          hasOnRTStructureLoad: !!onRTStructureLoad,
+        });
+
         if (onRTStructureLoad) {
+          console.log('📤 Calling onRTStructureLoad callback');
           onRTStructureLoad(rtStructData);
+        } else {
+          console.warn('⚠️ onRTStructureLoad callback is not defined!');
         }
       } else {
-        console.error('Failed to fetch RT contours:', response.status);
+        const errorText = await response.text();
+        console.error('❌ Failed to fetch RT contours:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
       }
     } catch (error) {
-      console.error('Error loading RT structure contours:', error);
+      console.error('💥 Error loading RT structure contours:', error);
+    } finally {
+      // Clear loading flag after completion
+      if (loadingRTRef.current === rtSeries.id) {
+        loadingRTRef.current = null;
+      }
     }
   }
 

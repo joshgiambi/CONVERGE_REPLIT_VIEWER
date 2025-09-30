@@ -103,17 +103,18 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
   let sourceFoR: string | undefined;
   let targetFoR: string | undefined;
   const referencedSeries: string[] = [];
+  const forUidsFromRegSeq: string[] = [];
 
   try {
     const regSeq = (dataSet as any).elements?.['x00700308'];
     if (regSeq?.items?.length) {
       for (const regItem of regSeq.items) {
         const ds = regItem.dataSet;
-        // Try Spatial Registration (0070,0308...) and RT Frame-of-Reference tags (3006,00C0/00C2)
-        const s1 = ds?.string?.('x300600c2') || ds?.string?.('x30060062') || ds?.string?.('x00200052');
-        const t1 = ds?.string?.('x300600c0') || ds?.string?.('x30060061') || ds?.string?.('x00200052');
-        if (!sourceFoR && typeof s1 === 'string') sourceFoR = s1;
-        if (!targetFoR && typeof t1 === 'string') targetFoR = t1;
+        // Collect FoR UIDs from each Registration Sequence item
+        // Try RT tags first, then fall back to standard FoR UID tag
+        const forUid = ds?.string?.('x300600c2') || ds?.string?.('x300600c0') || ds?.string?.('x00200052');
+        if (forUid && !forUidsFromRegSeq.includes(forUid)) forUidsFromRegSeq.push(forUid);
+        
         const refSeriesAtLevel = ds?.string?.('x0020000e');
         if (refSeriesAtLevel) referencedSeries.push(refSeriesAtLevel);
 
@@ -121,10 +122,6 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
         if (mrs?.items?.length) {
           for (const mi of mrs.items) {
             const mds = mi.dataSet;
-            const s2 = mds?.string?.('x300600c2') || mds?.string?.('x30060062') || mds?.string?.('x00200052');
-            const t2 = mds?.string?.('x300600c0') || mds?.string?.('x30060061') || mds?.string?.('x00200052');
-            if (!sourceFoR && typeof s2 === 'string') sourceFoR = s2;
-            if (!targetFoR && typeof t2 === 'string') targetFoR = t2;
             const nestedRef = mds?.string?.('x0020000e');
             if (nestedRef) referencedSeries.push(nestedRef);
 
@@ -134,14 +131,24 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
                 const fdEl = mItem.dataSet?.elements?.['x0070030c'];
                 const fdVals = fdEl ? tryParseFD16(mItem.dataSet, fdEl) : null;
                 if (fdVals && fdVals.length === 16) {
-                  candidates.push({ matrix: fdVals, sourceFoR: s2 || sourceFoR, targetFoR: t2 || targetFoR, referenced: [nestedRef].filter(Boolean) as string[] });
+                  candidates.push({ matrix: fdVals, referenced: [nestedRef].filter(Boolean) as string[] });
                 }
                 const dsVals = tryParseDS16(mItem.dataSet?.string?.('x300600c6'));
-                if (dsVals) candidates.push({ matrix: dsVals, sourceFoR: s2 || sourceFoR, targetFoR: t2 || targetFoR, referenced: [nestedRef].filter(Boolean) as string[] });
+                if (dsVals) candidates.push({ matrix: dsVals, referenced: [nestedRef].filter(Boolean) as string[] });
               }
             }
           }
         }
+      }
+      
+      // Assign source and target FoR from collected UIDs
+      // Typically: first item = source FoR, second item = target FoR
+      if (forUidsFromRegSeq.length >= 2) {
+        sourceFoR = forUidsFromRegSeq[0];
+        targetFoR = forUidsFromRegSeq[1];
+      } else if (forUidsFromRegSeq.length === 1) {
+        // Same-FoR registration (e.g., deformable within same space)
+        sourceFoR = targetFoR = forUidsFromRegSeq[0];
       }
     }
   } catch (e) {
@@ -153,11 +160,7 @@ export function parseDicomRegistrationFromFile(filePath: string): ParsedRegistra
     const visit = (ds: any) => {
       if (!ds) return;
       try {
-        const s = ds.string?.('x300600c2') || ds.string?.('x30060062') || ds.string?.('x00200052');
-        const t = ds.string?.('x300600c0') || ds.string?.('x30060061') || ds.string?.('x00200052');
         const rid = ds.string?.('x0020000e');
-        if (!sourceFoR && typeof s === 'string') sourceFoR = s;
-        if (!targetFoR && typeof t === 'string') targetFoR = t;
         if (rid) referencedSeries.push(rid);
       } catch {}
       const elements = ds.elements || {};

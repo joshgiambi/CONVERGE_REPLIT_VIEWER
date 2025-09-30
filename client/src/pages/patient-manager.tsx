@@ -100,7 +100,7 @@ interface DICOMQueryResult {
   numberOfStudyRelatedInstances?: number;
 }
 
-type FusionAssociationStatus = 'ready' | 'pending' | 'missing-secondary' | 'unmapped';
+type FusionAssociationStatus = 'ready' | 'pending' | 'missing-secondary' | 'unmapped' | 'excluded';
 
 interface SeriesSummary {
   id: number;
@@ -239,6 +239,18 @@ export default function PatientManager() {
   const hasActiveParsingSession = useParsingSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Listen for tab switch events from upload component
+  useEffect(() => {
+    const handleTabSwitch = (event: CustomEvent) => {
+      if (event.detail && typeof event.detail === 'string') {
+        setActiveTab(event.detail);
+      }
+    };
+
+    window.addEventListener('switchToTab', handleTabSwitch as EventListener);
+    return () => window.removeEventListener('switchToTab', handleTabSwitch as EventListener);
+  }, []);
 
   // Toggle favorite status for a patient
   const toggleFavorite = (patientId: number) => {
@@ -412,6 +424,7 @@ export default function PatientManager() {
     pending: { label: 'Pending', className: 'bg-amber-500/10 border-amber-400/40 text-amber-200 border' },
     'missing-secondary': { label: 'Needs Match', className: 'bg-rose-500/10 border-rose-400/40 text-rose-200 border' },
     unmapped: { label: 'Unmapped', className: 'bg-slate-500/10 border-slate-400/40 text-slate-200 border' },
+    excluded: { label: 'Excluded', className: 'bg-red-500/10 border-red-400/40 text-red-300 border' },
   };
 
   const runManifestMutation = useMutation({

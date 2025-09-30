@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, mediaPreviews, fuseboxRuns, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type MediaPreview } from "@shared/schema";
-import { db } from "./db";
+import { studies, series, images, patients, pacsConnections, patientTags, registrations, rtStructureSets, rtStructures, rtStructureContours, rtStructureHistory, mediaPreviews, fuseboxRuns, type Study, type Series, type DicomImage, type Patient, type PacsConnection, type PatientTag, type Registration, type InsertStudy, type InsertSeries, type InsertImage, type InsertPatient, type InsertPacsConnection, type InsertPatientTag, type InsertRegistration, type RTStructureSet, type InsertRTStructureSet, type RTStructure, type InsertRTStructure, type RTStructureContour, type InsertRTStructureContour, type RTStructureHistory, type InsertRTStructureHistory, type MediaPreview } from "../shared/schema.ts";
+import { db } from "./db.ts";
 import { eq, desc, or } from "drizzle-orm";
 
 // In-memory storage for RT structure modifications
@@ -39,6 +39,7 @@ export interface IStorage {
   getRTStructuresForStudy(studyId: number): Promise<Series[]>;
   getAllSeries(): Promise<Series[]>;
   deleteSeriesFully(seriesId: number): Promise<void>;
+  updateSeriesMetadata(seriesId: number, metadata: Partial<InsertSeries>): Promise<Series>;
 
   // Image operations
   createImage(image: InsertImage): Promise<DicomImage>;
@@ -189,11 +190,34 @@ export class MemStorage {
       seriesNumber: insertSeries.seriesNumber || null,
       imageCount: insertSeries.imageCount || 0,
       sliceThickness: insertSeries.sliceThickness || null,
+      sliceThicknessMm: insertSeries.sliceThicknessMm ?? null,
+      spacingBetweenSlicesMm: insertSeries.spacingBetweenSlicesMm ?? null,
+      frameOfReferenceUid: insertSeries.frameOfReferenceUid ?? null,
+      acquisitionDateTime: insertSeries.acquisitionDateTime ?? null,
+      rows: insertSeries.rows ?? null,
+      columns: insertSeries.columns ?? null,
+      pixelSpacing: insertSeries.pixelSpacing ?? null,
+      imageOrientationPatient: insertSeries.imageOrientationPatient ?? null,
+      imagePositionPatientFirst: insertSeries.imagePositionPatientFirst ?? null,
+      imagePositionPatientLast: insertSeries.imagePositionPatientLast ?? null,
+      isDerived: insertSeries.isDerived ?? false,
+      derivedFromSeriesId: insertSeries.derivedFromSeriesId ?? null,
+      derivationDescription: insertSeries.derivationDescription ?? null,
       metadata: insertSeries.metadata || {},
       createdAt: new Date(),
-    };
+    } as Series;
     this.series.set(id, seriesData);
     return seriesData;
+  }
+
+  async updateSeriesMetadata(seriesId: number, metadata: Partial<InsertSeries>): Promise<Series> {
+    const existing = this.series.get(seriesId);
+    if (!existing) {
+      throw new Error(`Series ${seriesId} not found`);
+    }
+    const updated = { ...existing, ...metadata };
+    this.series.set(seriesId, updated as Series);
+    return updated as Series;
   }
 
   async getSeries(id: number): Promise<Series | undefined> {
@@ -228,9 +252,10 @@ export class MemStorage {
       sliceLocation: insertImage.sliceLocation || null,
       windowCenter: insertImage.windowCenter || null,
       windowWidth: insertImage.windowWidth || null,
+      frameOfReferenceUid: (insertImage as any).frameOfReferenceUid ?? null,
       metadata: insertImage.metadata || {},
       createdAt: new Date(),
-    };
+    } as DicomImage;
     this.images.set(id, image);
     return image;
   }
@@ -332,7 +357,7 @@ export class DatabaseStorage implements IStorage {
     
     // Clean up fusebox_runs table first (foreign key constraints)
     try {
-      const { fuseboxRuns } = await import('@shared/schema');
+      const { fuseboxRuns } = await import('../shared/schema.ts');
       const { or } = await import('drizzle-orm');
       
       if (allSeriesIds.length > 0) {
@@ -352,6 +377,36 @@ export class DatabaseStorage implements IStorage {
     for (const st of patientStudies) {
       // Delete registrations tied to study
       try { await this.deleteRegistrationByStudyId(st.id); } catch {}
+
+      // Delete RT structure sets that reference this study (must be before series deletion)
+      try {
+        const rtSets = await db.select().from(rtStructureSets).where(eq(rtStructureSets.studyId, st.id));
+        for (const rtSet of rtSets) {
+          // Delete RT structure history first
+          await db.delete(rtStructureHistory).where(eq(rtStructureHistory.rtStructureSetId, rtSet.id));
+
+          // Delete contours
+          const structs = await db.select().from(rtStructures).where(eq(rtStructures.rtStructureSetId, rtSet.id));
+          for (const s of structs) {
+            await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, s.id));
+          }
+
+          // Delete structures then set
+          await db.delete(rtStructures).where(eq(rtStructures.rtStructureSetId, rtSet.id));
+          await db.delete(rtStructureSets).where(eq(rtStructureSets.id, rtSet.id));
+        }
+      } catch (error) {
+        console.warn(`Failed to clean up RT structure sets for study ${st.id}:`, error);
+      }
+
+      // Delete frame_of_reference_groups tied to this study
+      try {
+        const { frameOfReferenceGroups } = await import('../shared/schema.ts');
+        await db.delete(frameOfReferenceGroups).where(eq(frameOfReferenceGroups.studyId, st.id));
+      } catch (error) {
+        console.warn(`Failed to delete frame_of_reference_groups for study ${st.id}:`, error);
+      }
+
       // Gather series for study
       const studySeries = await this.getSeriesByStudyId(st.id);
       for (const ser of studySeries) {
@@ -486,6 +541,18 @@ export class DatabaseStorage implements IStorage {
       .values(insertSeries)
       .returning();
     return seriesData;
+  }
+
+  async updateSeriesMetadata(seriesId: number, metadata: Partial<InsertSeries>): Promise<Series> {
+    const [updated] = await db
+      .update(series)
+      .set(metadata)
+      .where(eq(series.id, seriesId))
+      .returning();
+    if (!updated) {
+      throw new Error(`Series ${seriesId} not found`);
+    }
+    return updated;
   }
 
   async getSeries(id: number): Promise<Series | undefined> {
@@ -664,18 +731,26 @@ export class DatabaseStorage implements IStorage {
       }
     } catch {}
 
-    // Delete RT structure sets referencing this series
+    // Delete RT structure sets referencing this series (both seriesId and referencedSeriesId)
     try {
-      const [rtSet] = await db.select().from(rtStructureSets).where(eq(rtStructureSets.seriesId, seriesId));
-      if (rtSet) {
-        const structs = await db.select().from(rtStructures).where(eq(rtStructures.rtStructureSetId, (rtSet as any).id));
+      const rtSets = await db.select().from(rtStructureSets).where(
+        or(
+          eq(rtStructureSets.seriesId, seriesId),
+          eq(rtStructureSets.referencedSeriesId, seriesId)
+        )
+      );
+
+      for (const rtSet of rtSets) {
+        const structs = await db.select().from(rtStructures).where(eq(rtStructures.rtStructureSetId, rtSet.id));
         for (const s of structs) {
-          await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, (s as any).id));
+          await db.delete(rtStructureContours).where(eq(rtStructureContours.rtStructureId, s.id));
         }
-        await db.delete(rtStructures).where(eq(rtStructures.rtStructureSetId, (rtSet as any).id));
-        await db.delete(rtStructureSets).where(eq(rtStructureSets.id, (rtSet as any).id));
+        await db.delete(rtStructures).where(eq(rtStructures.rtStructureSetId, rtSet.id));
+        await db.delete(rtStructureSets).where(eq(rtStructureSets.id, rtSet.id));
       }
-    } catch {}
+    } catch (error) {
+      console.warn(`Failed to delete RT structure sets for series ${seriesId}:`, error);
+    }
 
     // Clean up fusion data for this series
     try {
@@ -712,6 +787,32 @@ export class DatabaseStorage implements IStorage {
         );
     } catch (error) {
       console.warn(`Failed to delete fusebox runs for series ${seriesId}:`, error);
+    }
+
+    // Delete fusion schema relationships for this series
+    try {
+      const { planningSeriesDesignations, seriesRegistrationRelationships, seriesFusionCapabilities } = await import('../shared/schema.ts');
+
+      // Delete planning series designations
+      await db.delete(planningSeriesDesignations).where(eq(planningSeriesDesignations.seriesId, seriesId));
+
+      // Delete registration relationships (both as primary and secondary)
+      await db.delete(seriesRegistrationRelationships).where(
+        or(
+          eq(seriesRegistrationRelationships.primarySeriesId, seriesId),
+          eq(seriesRegistrationRelationships.secondarySeriesId, seriesId),
+        ),
+      );
+
+      // Delete fusion capabilities
+      await db.delete(seriesFusionCapabilities).where(
+        or(
+          eq(seriesFusionCapabilities.primarySeriesId, seriesId),
+          eq(seriesFusionCapabilities.secondarySeriesId, seriesId),
+        ),
+      );
+    } catch (error) {
+      console.warn(`Failed to delete fusion schema relationships for series ${seriesId}:`, error);
     }
 
     // Finally delete the series row

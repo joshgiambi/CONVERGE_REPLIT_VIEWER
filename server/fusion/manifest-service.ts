@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { storage } from '../storage.ts';
 import { db } from '../db.ts';
-import { images as imagesTable, series as seriesTable } from '@shared/schema';
+import { images as imagesTable, series as seriesTable, type InsertSeries } from '../../shared/schema.ts';
 import { eq } from 'drizzle-orm';
 import { logger } from '../logger.ts';
 import { fusionManifestPath, fusionDicomPath, fusionMetadataPath, ensureFusionDirectories, fusionPairRoot } from './path-utils.ts';
@@ -12,6 +12,7 @@ import { FuseboxVolumeResampler, type VolumeResampleRequest, type InterpolationM
 import { collectSeriesFiles, resolveFuseboxTransform, sortImagesByInstance } from './fusebox.ts';
 import { markFuseboxRunFailed, markFuseboxRunReady, markFuseboxRunStarted } from './fusebox-run-store.ts';
 import type { FuseboxLogEmitter } from './fusebox.ts';
+import { seriesSelectionService } from '../services/series-selection-service.ts';
 import { recordDebugEvent, type DebugEventLevel } from '../debug/debug-hub.ts';
 
 interface ManifestRequestOptions {
@@ -153,6 +154,12 @@ export class FusionManifestService {
     return String(primarySeriesId);
   }
 
+  clearCache(primarySeriesId: number): void {
+    const key = this.cacheKey(primarySeriesId);
+    this.cache.delete(key);
+    this.pending.delete(key);
+  }
+
   async getManifest(options: ManifestRequestOptions): Promise<FusionManifest> {
     const { primarySeriesId, secondarySeriesIds = [], force = false } = options;
     const cacheKey = this.cacheKey(primarySeriesId);
@@ -219,6 +226,41 @@ export class FusionManifestService {
     if (!primarySeries) throw new Error(`Primary series ${primarySeriesId} not found`);
 
     const { studyId, studyInstanceUID, patientId, patientDicomId } = await resolvePatientInfo(primarySeriesId);
+
+    const candidateDescriptors = await seriesSelectionService.getFusionCandidatesForSeries(primarySeriesId);
+    const candidateIds = new Set(candidateDescriptors.map((descriptor) => descriptor.seriesId));
+
+    const requestedSecondaries = secondarySeriesIds.length
+      ? secondarySeriesIds
+      : candidateDescriptors.map((descriptor) => descriptor.seriesId);
+
+    // When explicit secondarySeriesIds are provided, allow them through even if not in candidates
+    // This allows the fusion test harness and manual tooling to bypass automatic selection
+    const explicitlyRequested = secondarySeriesIds.length > 0;
+    const filteredSecondaryIds = explicitlyRequested 
+      ? requestedSecondaries  // Allow explicitly requested IDs
+      : requestedSecondaries.filter((id) => candidateIds.has(id));  // Auto-select only candidates
+    
+    if (explicitlyRequested && requestedSecondaries.length > 0) {
+      const notInCandidates = requestedSecondaries.filter((id) => !candidateIds.has(id));
+      if (notInCandidates.length > 0) {
+        manifestDebug('warn', 'Requested secondary series are not in automatic fusion candidates (allowing anyway)', {
+          primarySeriesId,
+          requestedSecondaries,
+          notInCandidates,
+          availableCandidateIds: Array.from(candidateIds),
+        });
+      }
+    } else if (requestedSecondaries.length > 0 && filteredSecondaryIds.length === 0) {
+      manifestDebug('warn', 'Requested secondary series are not valid fusion candidates', {
+        primarySeriesId,
+        requestedSecondaries,
+        availableCandidateIds: Array.from(candidateIds),
+      });
+    }
+
+    const effectiveSecondaryIds = filteredSecondaryIds;
+
     const manifestPath = fusionManifestPath({
       patientId: patientDicomId ?? String(patientId ?? 'unknown'),
       studyInstanceUID,
@@ -256,8 +298,8 @@ export class FusionManifestService {
     manifest.settings = { interpolation, preload };
 
     const secondarySource = existingManifest ?? null;
-    const secondaryIdsToProcess = secondarySeriesIds.length
-      ? secondarySeriesIds
+    const secondaryIdsToProcess = effectiveSecondaryIds.length
+      ? effectiveSecondaryIds
       : (secondarySource?.secondaries.map(sec => sec.secondarySeriesId) ?? []);
 
     const updatedSecondaries: FusionSecondaryDescriptor[] = [];
@@ -722,6 +764,16 @@ export class FusionManifestService {
         seriesNumber: (secondarySeries.seriesNumber ?? primarySeries.seriesNumber ?? 9901) + 1000,
         imageCount: sliceCount,
         sliceThickness: secondarySeries.sliceThickness ?? primarySeries.sliceThickness ?? null,
+        sliceThicknessMm: secondarySeries.sliceThicknessMm ?? primarySeries.sliceThicknessMm ?? null,
+        spacingBetweenSlicesMm: secondarySeries.spacingBetweenSlicesMm ?? primarySeries.spacingBetweenSlicesMm ?? null,
+        frameOfReferenceUid: primarySeries.frameOfReferenceUid ?? null,
+        pixelSpacing: secondarySeries.pixelSpacing ?? primarySeries.pixelSpacing ?? null,
+        imageOrientationPatient: secondarySeries.imageOrientationPatient ?? primarySeries.imageOrientationPatient ?? null,
+        imagePositionPatientFirst: secondarySeries.imagePositionPatientFirst ?? primarySeries.imagePositionPatientFirst ?? null,
+        imagePositionPatientLast: secondarySeries.imagePositionPatientLast ?? primarySeries.imagePositionPatientLast ?? null,
+        isDerived: true,
+        derivedFromSeriesId: primarySeries.id,
+        derivationDescription: 'Fusion manifest derived series',
         metadata: {
           fusion: {
             primarySeriesId: primarySeries.id,
@@ -732,7 +784,7 @@ export class FusionManifestService {
             generatedAt: new Date().toISOString(),
           },
         },
-      });
+      } as InsertSeries);
     } else {
       const existingMetadata = (existing.metadata ?? {}) as Record<string, unknown>;
       await db
@@ -779,7 +831,7 @@ export class FusionManifestService {
       const fileSize = stats.size;
       const imageOrientation = imageOrientationPatient ?? primaryMeta.imageOrientationPatient ?? null;
 
-      await storage.createImage({
+      await db.insert(imagesTable).values({
         seriesId,
         sopInstanceUID: instance.sopInstanceUID,
         instanceNumber: instance.instanceNumber,
@@ -792,8 +844,8 @@ export class FusionManifestService {
         sliceLocation: instance.sliceLocation != null ? String(instance.sliceLocation) : null,
         windowCenter: instance.windowCenter ? instance.windowCenter.join('\\') : null,
         windowWidth: instance.windowWidth ? instance.windowWidth.join('\\') : null,
+        frameOfReferenceUid: frameOfReferenceUID,
         metadata: {
-          frameOfReferenceUID,
           source: {
             primary: primaryMeta.seriesInstanceUID,
             secondary: secondaryMeta.seriesInstanceUID,

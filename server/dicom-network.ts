@@ -1,5 +1,5 @@
 // DICOM networking service with mock implementation for development
-import { PacsConnection, NetworkQuery } from '@shared/schema';
+import { PacsConnection, NetworkQuery } from '../shared/schema';
 
 export interface DICOMQueryResult {
   patientName?: string;

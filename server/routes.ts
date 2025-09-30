@@ -8,8 +8,8 @@ import dicomParser from 'dicom-parser';
 import { RTStructureParser } from './rt-structure-parser';
 import polygonClipping from 'polygon-clipping';
 import { db } from "./db";
-import { images as imagesTable, patientTags } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { images as imagesTable, patientTags, series, seriesRegistrationRelationships } from "../shared/schema.ts";
+import { eq, or, inArray } from "drizzle-orm";
 import { generateSeriesGIF } from './gif-generator';
 import yauzl from 'yauzl';
 import { patientStorage } from './patient-storage';
@@ -30,7 +30,10 @@ import {
   fuseboxHelperMetrics,
   type FuseboxLogEmitter,
 } from './fusion/fusebox';
+import { seriesSelectionService } from './services/series-selection-service';
+import { processSeriesRegistrationRelationships, processPatientRegistrationRelationships } from './services/registration-relationship-service';
 import { fusionManifestService } from './fusion/manifest-service';
+import { buildPatientFusionOverview, clearPatientFusionDerivedData } from './fusion/patient-fusion-overview';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -93,6 +96,24 @@ function lineSegmentsIntersect(p1: number[], p2: number[], p3: number[], p4: num
   
   return d1 * d2 < 0 && d3 * d4 < 0;
 }
+
+const parseMaybeNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeNumericArray = (value: unknown): number[] | null => {
+  if (Array.isArray(value)) {
+    const nums = value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry));
+    return nums.length ? nums : null;
+  }
+  if (typeof value === 'string') {
+    const parts = value.split(/[\\, ]+/).map((part) => Number(part.trim())).filter((entry) => Number.isFinite(entry));
+    return parts.length ? parts : null;
+  }
+  return null;
+};
 
 type MinimalImageMeta = {
   frameOfReference?: string | null;
@@ -517,277 +538,6 @@ function generateUID(): string {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
-  // Create demo data
-  app.post("/api/create-test-data", async (req, res) => {
-    try {
-      // Create basic demo patient if none exist
-      const patients = await storage.getAllPatients();
-      if (patients.length === 0) {
-        const demoPatient = await storage.createPatient({
-          patientID: 'DEMO001',
-          patientName: 'Demo^Patient',
-          patientSex: 'M',
-          patientAge: '45',
-          dateOfBirth: '19780315'
-        });
-
-        const demoStudy = await storage.createStudy({
-          studyInstanceUID: generateUID(),
-          patientId: demoPatient.id,
-          patientName: 'Demo^Patient',
-          patientID: 'DEMO001',
-          studyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-          studyDescription: 'Demo CT Study',
-          accessionNumber: 'DEMO001',
-          modality: 'CT',
-          numberOfSeries: 1,
-          numberOfImages: 5,
-          isDemo: true,
-        });
-
-        const demoSeries = await storage.createSeries({
-          studyId: demoStudy.id,
-          seriesInstanceUID: generateUID(),
-          seriesDescription: 'Demo CT Series',
-          modality: 'CT',
-          seriesNumber: 1,
-          imageCount: 5,
-          sliceThickness: '5.0',
-          metadata: { type: 'demo' },
-        });
-
-        // Create placeholder images
-        for (let i = 1; i <= 5; i++) {
-          await storage.createImage({
-            seriesId: demoSeries.id,
-            sopInstanceUID: `${generateUID()}.${i}`,
-            instanceNumber: i,
-            filePath: `/demo/image_${i}.dcm`,
-            fileName: `demo_image_${i}.dcm`,
-            fileSize: 1024000,
-            metadata: { demo: true },
-          });
-        }
-
-        console.log('Demo data created');
-      }
-      
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error creating demo data:', error);
-      res.status(500).json({ message: "Failed to create demo data" });
-    }
-  });
-
-  // Populate HN-ATLAS demo data
-  app.post("/api/populate-demo", async (req, res) => {
-    try {
-      await createHNAtlasDemo();
-      res.json({ 
-        success: true, 
-        message: "Demo data already exists or has been created",
-        patients: (await storage.getAllPatients()).length,
-        studies: (await storage.getAllStudies()).length
-      });
-    } catch (error) {
-      console.error('Error populating demo:', error);
-      res.status(500).json({ message: "Failed to create demo data" });
-    }
-  });
-
-  async function createHNAtlasDemo() {
-    try {
-      // Check if HN-ATLAS patient already exists
-      try {
-        const hnPatient = await storage.getPatientByID('HN-ATLAS-84');
-        if (hnPatient) {
-          console.log('HN-ATLAS patient already exists');
-          return;
-        }
-      } catch (error) {
-        // Patient doesn't exist, create new one
-      }
-
-      // Create HN-ATLAS patient
-      const hnPatient = await storage.createPatient({
-        patientID: 'HN-ATLAS-84',
-        patientName: 'HN-ATLAS^84',
-        patientSex: 'M',
-        patientAge: '62',
-        dateOfBirth: '19620315'
-      });
-
-      const hnDatasetPath = 'attached_assets/HN-ATLAS-84/HN-ATLAS-84';
-      const contrastPath = path.join(hnDatasetPath, 'DICOM_CONTRAST');
-      const mimPath = path.join(hnDatasetPath, 'MIM');
-
-      if (!fs.existsSync(contrastPath)) {
-        console.log('HN-ATLAS dataset not found');
-        return;
-      }
-
-      // Parse the DICOM_CONTRAST folder for CT images - use ALL available slices
-      const contrastFiles = fs.readdirSync(contrastPath)
-        .filter(f => f.endsWith('.dcm'))
-        .sort();
-
-      if (contrastFiles.length === 0) {
-        console.log('No DICOM files found in HN-ATLAS contrast folder');
-        return;
-      }
-
-      // Create CT study
-      const ctStudy = await storage.createStudy({
-        studyInstanceUID: generateUID(),
-        patientId: hnPatient.id,
-        patientName: 'HN-ATLAS^84',
-        patientID: 'HN-ATLAS-84',
-        studyDate: '20200615',
-        studyDescription: 'Head & Neck CT with Contrast',
-        accessionNumber: 'HN84_CT_001',
-        modality: 'CT',
-        numberOfSeries: 1,
-        numberOfImages: contrastFiles.length,
-        isDemo: true,
-      });
-
-      // Create CT series
-      const ctSeries = await storage.createSeries({
-        studyId: ctStudy.id,
-        seriesInstanceUID: generateUID(),
-        seriesDescription: 'CT Head Neck with Contrast',
-        modality: 'CT',
-        seriesNumber: 1,
-        imageCount: contrastFiles.length,
-        sliceThickness: '3.0',
-        metadata: { 
-          source: 'HN-ATLAS-84',
-          anatomy: 'Head & Neck',
-          contrast: 'IV Contrast Enhanced'
-        },
-      });
-
-      // Copy and process ALL CT images
-      const hnDemoDir = 'uploads/hn-atlas-demo';
-      if (!fs.existsSync(hnDemoDir)) {
-        fs.mkdirSync(hnDemoDir, { recursive: true });
-      }
-
-      const ctImages = [];
-      for (let i = 0; i < contrastFiles.length; i++) {
-        const fileName = contrastFiles[i];
-        const sourcePath = path.join(contrastPath, fileName);
-        const demoPath = path.join(hnDemoDir, fileName);
-        
-        // Copy file to demo directory
-        fs.copyFileSync(sourcePath, demoPath);
-        const fileStats = fs.statSync(demoPath);
-        
-        // Extract instance number from filename
-        const instanceMatch = fileName.match(/\.(\d+)\.dcm$/);
-        const instanceNumber = instanceMatch ? parseInt(instanceMatch[1]) : i + 1;
-        
-        const image = await storage.createImage({
-          seriesId: ctSeries.id,
-          sopInstanceUID: generateUID(),
-          instanceNumber: instanceNumber,
-          filePath: demoPath,
-          fileName: fileName,
-          fileSize: fileStats.size,
-          imagePosition: null,
-          imageOrientation: null,
-          pixelSpacing: '0.488\\0.488',
-          sliceLocation: `${instanceNumber * 3.0}`,
-          windowCenter: '50',
-          windowWidth: '350',
-          metadata: {
-            source: 'HN-ATLAS-84',
-            anatomy: 'Head & Neck',
-            contrast: true
-          },
-        });
-        ctImages.push(image);
-      }
-
-      await storage.updateSeriesImageCount(ctSeries.id, ctImages.length);
-
-      // Check for RT Structure Set
-      if (fs.existsSync(mimPath)) {
-        const rtFiles = fs.readdirSync(mimPath).filter(f => f.endsWith('.dcm'));
-        
-        if (rtFiles.length > 0) {
-          // Create RT Structure Study
-          const rtStudy = await storage.createStudy({
-            studyInstanceUID: generateUID(),
-            patientId: hnPatient.id,
-            patientName: 'HN-ATLAS^84',
-            patientID: 'HN-ATLAS-84',
-            studyDate: '20200615',
-            studyDescription: 'RT Structure Set - Organ Contours',
-            accessionNumber: 'HN84_RT_001',
-            modality: 'RTSTRUCT',
-            numberOfSeries: 1,
-            numberOfImages: rtFiles.length,
-            isDemo: true,
-          });
-
-          // Create RT series
-          const rtSeries = await storage.createSeries({
-            studyId: rtStudy.id,
-            seriesInstanceUID: generateUID(),
-            seriesDescription: 'RT Structure Set - Head & Neck Organs',
-            modality: 'RTSTRUCT',
-            seriesNumber: 1,
-            imageCount: rtFiles.length,
-            sliceThickness: '3.0',
-            metadata: { 
-              source: 'HN-ATLAS-84',
-              structureType: 'Organ Contours',
-              organsSructures: ['Brainstem', 'Spinal Cord', 'Parotid Glands', 'Mandible']
-            },
-          });
-
-          // Process RT Structure files
-          for (let i = 0; i < rtFiles.length; i++) {
-            const fileName = rtFiles[i];
-            const sourcePath = path.join(mimPath, fileName);
-            const demoPath = path.join(hnDemoDir, `rt_${fileName}`);
-            
-            fs.copyFileSync(sourcePath, demoPath);
-            const fileStats = fs.statSync(demoPath);
-            
-            await storage.createImage({
-              seriesId: rtSeries.id,
-              sopInstanceUID: generateUID(),
-              instanceNumber: i + 1,
-              filePath: demoPath,
-              fileName: `rt_${fileName}`,
-              fileSize: fileStats.size,
-              imagePosition: null,
-              imageOrientation: null,
-              pixelSpacing: null,
-              sliceLocation: null,
-              windowCenter: null,
-              windowWidth: null,
-              metadata: {
-                source: 'HN-ATLAS-84',
-                structureType: 'RT Structure Set'
-              },
-            });
-          }
-
-          await storage.updateSeriesImageCount(rtSeries.id, rtFiles.length);
-          await storage.updateStudyCounts(rtStudy.id, 1, rtFiles.length);
-        }
-      }
-
-      await storage.updateStudyCounts(ctStudy.id, 1, ctImages.length);
-      console.log(`Created HN-ATLAS-84 demo patient with ${ctImages.length} CT images`);
-      
-    } catch (error) {
-      console.error('Error creating HN-ATLAS demo:', error);
-    }
-  }
   
   // Serve DICOM files
   app.get("/api/images/:sopInstanceUID", async (req, res) => {
@@ -1101,18 +851,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const existingSeries = await storage.getSeriesByUID(seriesKey);
             let series;
             
+            const firstMetadata = seriesData.metadata;
+            
+            // Debug: Check what we're getting for Frame of Reference UID
+            if (isDev && seriesData.images.length > 0) {
+              logger.debug(`Series ${seriesKey}: frameOfReferenceUID = ${JSON.stringify(firstMetadata.frameOfReferenceUID)}`, 'upload');
+            }
+            
+            const seriesMetadata = {
+              seriesInstanceUID: seriesKey,
+              studyId: study.id,
+              seriesNumber: firstMetadata.seriesNumber,
+              seriesDescription: firstMetadata.seriesDescription,
+              modality: firstMetadata.modality,
+              imageCount: seriesData.images.length,
+              sliceThicknessMm: parseMaybeNumber(firstMetadata.sliceThickness),
+              spacingBetweenSlicesMm: parseMaybeNumber(firstMetadata.spacingBetweenSlices),
+              frameOfReferenceUid: firstMetadata.frameOfReferenceUID,
+              acquisitionDateTime: firstMetadata.acquisitionDateTime ? new Date(firstMetadata.acquisitionDateTime) : null,
+              rows: firstMetadata.rows,
+              columns: firstMetadata.columns,
+              pixelSpacing: normalizeNumericArray(firstMetadata.pixelSpacing),
+              imageOrientationPatient: normalizeNumericArray(firstMetadata.imageOrientationPatient),
+              imagePositionPatientFirst: normalizeNumericArray(firstMetadata.imagePositionPatient),
+              imagePositionPatientLast: normalizeNumericArray(firstMetadata.imagePositionPatient),
+            };
+            
             if (existingSeries) {
-              series = existingSeries;
+              // Update existing series with fresh metadata from re-upload
+              series = await storage.updateSeriesMetadata(existingSeries.id, seriesMetadata);
+              if (isDev) logger.debug(`Updated existing series ${series.id} with fresh metadata`, 'upload');
             } else {
-              const firstMetadata = seriesData.metadata;
-              series = await storage.createSeries({
-                seriesInstanceUID: seriesKey,
-                studyId: study.id,
-                seriesNumber: firstMetadata.seriesNumber,
-                seriesDescription: firstMetadata.seriesDescription,
-                modality: firstMetadata.modality,
-                imageCount: seriesData.images.length
-              });
+              series = await storage.createSeries(seriesMetadata);
+              logger.info({ seriesId: series.id, modality: series.modality }, 'Created new series during upload');
+              
+              // NOTE: Registration relationships are now processed in a batch at the end of upload
+              // to avoid timing issues where REG series are processed before CT/MR series exist
             }
 
             // Process images
@@ -1136,6 +910,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   rescaleSlope: imageMetadata.rescaleSlope,
                   fileName: imageMetadata.filename,
                   filePath: imageMetadata.filePath || imageMetadata.filename, // Use filePath if available
+                  frameOfReferenceUid: imageMetadata.frameOfReferenceUID,
                   metadata: { frameOfReferenceUID: imageMetadata.frameOfReferenceUID }
                 });
               }
@@ -1144,6 +919,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         uploadedPatients.push(patient);
+      }
+
+      // CRITICAL: Process registration relationships for ALL uploaded series
+      // This must happen AFTER all series are in the database to avoid timing issues
+      logger.info({ patientCount: uploadedPatients.length }, 'Processing registration relationships for all uploaded patients');
+      
+      for (const patient of uploadedPatients) {
+        try {
+          const relationshipsCreated = await processPatientRegistrationRelationships(patient.id);
+          if (relationshipsCreated > 0) {
+            logger.info({ patientId: patient.id, relationshipsCreated }, 'Created registration relationships for uploaded patient');
+          }
+        } catch (err) {
+          logger.error({ error: err?.message || String(err), patientId: patient.id }, 'Failed to process patient registration relationships after upload');
+        }
       }
 
       res.json({
@@ -1276,8 +1066,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 seriesNumber: 1,
                 imageCount: seriesFiles.length,
                 sliceThickness: '1.0',
+                sliceThicknessMm: parseMaybeNumber(firstFile.metadata.sliceThickness),
+                spacingBetweenSlicesMm: parseMaybeNumber(firstFile.metadata.spacingBetweenSlices),
+                frameOfReferenceUid: firstFile.metadata.frameOfReferenceUID,
+                acquisitionDateTime: firstFile.metadata.acquisitionDateTime ? new Date(firstFile.metadata.acquisitionDateTime) : null,
+                rows: firstFile.metadata.rows,
+                columns: firstFile.metadata.columns,
+                pixelSpacing: normalizeNumericArray(firstFile.metadata.pixelSpacing),
+                imageOrientationPatient: normalizeNumericArray(firstFile.metadata.imageOrientationPatient),
+                imagePositionPatientFirst: normalizeNumericArray(firstFile.metadata.imagePositionPatient),
+                imagePositionPatientLast: normalizeNumericArray(seriesFiles.at(-1)?.metadata?.imagePositionPatient ?? firstFile.metadata.imagePositionPatient),
                 metadata: { uploaded: true },
               });
+              
+              // NOTE: Registration relationships are now processed in a batch at the end of upload
+              // to avoid timing issues where REG series are processed before CT/MR series exist
             }
 
             // Process each image in the series
@@ -1317,6 +1120,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 sliceLocation: metadata.sliceLocation ? String(metadata.sliceLocation) : null,
                 windowCenter: metadata.windowCenter ? String(metadata.windowCenter) : null,
                 windowWidth: metadata.windowWidth ? String(metadata.windowWidth) : null,
+                 frameOfReferenceUid: metadata.frameOfReferenceUID ?? null,
                 rescaleIntercept: metadata.rescaleIntercept ? String(metadata.rescaleIntercept) : null as any,
                 rescaleSlope: metadata.rescaleSlope ? String(metadata.rescaleSlope) : null as any,
                 metadata: { uploaded: true },
@@ -1338,6 +1142,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('Upload processing completed:', results);
+      
+      // CRITICAL: Process registration relationships for ALL uploaded patients
+      // This must happen AFTER all series are in the database to avoid timing issues
+      logger.info({ patientCount: results.length }, 'Processing registration relationships for all uploaded patients');
+      
+      for (const result of results) {
+        if (result.patient?.id) {
+          try {
+            const relationshipsCreated = await processPatientRegistrationRelationships(result.patient.id);
+            if (relationshipsCreated > 0) {
+              logger.info({ patientId: result.patient.id, relationshipsCreated }, 'Created registration relationships for uploaded patient');
+            }
+          } catch (err) {
+            logger.error({ error: err?.message || String(err), patientId: result.patient.id }, 'Failed to process patient registration relationships after upload');
+          }
+        }
+      }
+      
       res.json({ 
         success: true, 
         message: `Successfully uploaded ${files.length} DICOM files`,
@@ -1543,24 +1365,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             
             // Create or get series
             let dbSeries = await storage.getSeriesByUID(seriesMetadata.seriesInstanceUID);
+            
+            const seriesData = {
+              studyId: dbStudy.id,
+              seriesInstanceUID: seriesMetadata.seriesInstanceUID || generateUID(),
+              seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
+              seriesDescription: seriesMetadata.seriesDescription || '',
+              modality: seriesMetadata.modality || 'OT',
+              imageCount: seriesFiles.length,
+              sliceThickness: seriesMetadata.sliceThickness || null,
+              frameOfReferenceUid: seriesMetadata.frameOfReferenceUID || null,
+              pixelSpacing: seriesMetadata.pixelSpacing || null,
+              imageOrientationPatient: seriesMetadata.imageOrientationPatient || null,
+              imagePositionPatientFirst: seriesMetadata.imagePositionPatient || null,
+              rows: seriesMetadata.rows ? parseInt(seriesMetadata.rows) : null,
+              columns: seriesMetadata.columns ? parseInt(seriesMetadata.columns) : null,
+              metadata: { 
+                bodyPartExamined: seriesMetadata.bodyPartExamined || '',
+                protocolName: seriesMetadata.protocolName || '',
+                manufacturer: seriesMetadata.manufacturer || '',
+                manufacturerModelName: seriesMetadata.manufacturerModelName || ''
+              }
+            };
+            
             if (!dbSeries) {
               console.log(`Creating new series: ${seriesMetadata.seriesInstanceUID} (${seriesFiles.length} images)`);
               try {
-                dbSeries = await storage.createSeries({
-                  studyId: dbStudy.id,
-                  seriesInstanceUID: seriesMetadata.seriesInstanceUID || generateUID(),
-                  seriesNumber: parseInt(seriesMetadata.seriesNumber) || 0,
-                  seriesDescription: seriesMetadata.seriesDescription || '',
-                  modality: seriesMetadata.modality || 'OT',
-                  imageCount: seriesFiles.length,
-                  sliceThickness: seriesMetadata.sliceThickness || null,
-                  metadata: { 
-                    bodyPartExamined: seriesMetadata.bodyPartExamined || '',
-                    protocolName: seriesMetadata.protocolName || '',
-                    manufacturer: seriesMetadata.manufacturer || '',
-                    manufacturerModelName: seriesMetadata.manufacturerModelName || ''
-                  }
-                });
+                dbSeries = await storage.createSeries(seriesData);
                 console.log(`Successfully created series with ID: ${dbSeries.id}`);
               } catch (error) {
                 console.error(`ERROR creating series:`, error);
@@ -1572,7 +1403,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 throw error;
               }
             } else {
-              console.log(`Series already exists with ID: ${dbSeries.id}`);
+              console.log(`Series already exists with ID: ${dbSeries.id}, updating metadata...`);
+              try {
+                dbSeries = await storage.updateSeriesMetadata(dbSeries.id, seriesData);
+                console.log(`Updated series ${dbSeries.id} with fresh metadata`);
+              } catch (error) {
+                console.error(`ERROR updating series:`, error);
+              }
             }
 
             // Create images for each file (skip duplicates)
@@ -1675,6 +1512,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`Upload directory preserved at: uploads/${triageSession.uploadSessionId}`);
       }
 
+      // CRITICAL: Process registration relationships for ALL imported patients
+      // This must happen AFTER all series are in the database to avoid timing issues
+      logger.info({ patientCount: results.length }, 'Processing registration relationships for all imported patients');
+      
+      for (const result of results) {
+        if (result.patient?.id) {
+          try {
+            const relationshipsCreated = await processPatientRegistrationRelationships(result.patient.id);
+            if (relationshipsCreated > 0) {
+              logger.info({ patientId: result.patient.id, relationshipsCreated }, 'Created registration relationships for imported patient');
+            }
+          } catch (err) {
+            logger.error({ error: err?.message || String(err), patientId: result.patient.id }, 'Failed to process patient registration relationships after import');
+          }
+        }
+      }
+
       res.json({ 
         success: true, 
         message: `Successfully imported ${data.length} DICOM files from triage`,
@@ -1690,6 +1544,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Patient routes
   app.get("/api/patients", async (req, res) => {
     try {
+      console.log('🔍 DEBUG: Patients route called, DATABASE_URL exists:', !!process.env.DATABASE_URL);
       const patients = await storage.getAllPatients();
       
       // Enhance each patient with their studies and series
@@ -2225,6 +2080,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/studies/:studyId/series-selection", async (req: Request, res: Response) => {
+    try {
+      const studyId = Number(req.params.studyId);
+      if (!Number.isFinite(studyId)) {
+        return res.status(400).json({ error: 'Invalid study id' });
+      }
+
+      const selection = await seriesSelectionService.getSeriesSelectionData(studyId);
+      res.json(selection);
+    } catch (error) {
+      console.error('Series selection error:', error);
+      res.status(500).json({ error: 'Failed to calculate series selection' });
+    }
+  });
+
   // Get RT structure series for a study (patient-wide search and cross-study association)
   app.get("/api/studies/:studyId/rt-structures", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -2367,6 +2237,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error fetching registration:', error);
       res.status(500).json({ error: 'Failed to fetch registration information', details: error.message });
+    }
+  });
+
+  app.get("/api/series/:seriesId/fusion-candidates", async (req: Request, res: Response) => {
+    try {
+      const seriesId = Number(req.params.seriesId);
+      if (!Number.isFinite(seriesId)) {
+        return res.status(400).json({ error: 'Invalid series id' });
+      }
+
+      const candidates = await seriesSelectionService.getFusionCandidatesForSeries(seriesId);
+      res.json(candidates);
+    } catch (error) {
+      console.error('Fusion candidate retrieval error:', error);
+      res.status(500).json({ error: 'Failed to fetch fusion candidates' });
     }
   });
 
@@ -3416,7 +3301,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = req.body ?? {};
       const primarySeriesId = Number(body.primarySeriesId);
       const secondarySeriesId = Number(body.secondarySeriesId);
-      const requestedRegistrationId = typeof body.registrationId === 'string' ? body.registrationId : undefined;
       const interpolation = typeof body.interpolation === 'string' ? body.interpolation : 'linear';
 
       if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
@@ -3434,19 +3318,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Primary series has no images' });
       }
 
-      const primaryFiles = await collectSeriesFiles(primarySeriesId);
-      const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
-      if (!primaryFiles.length || !secondaryFiles.length) {
-        return res.status(404).json({ error: 'DICOM files missing on disk for requested series' });
+      // Use the manifest service to ensure we're testing the same path as the viewer
+      const { fusionManifestService } = await import('./fusion/manifest-service.ts');
+      const manifest = await fusionManifestService.getManifest({
+        primarySeriesId,
+        secondarySeriesIds: [secondarySeriesId],
+        interpolation: interpolation as any,
+        preload: true,
+        force: false,
+        logger: fuseboxEmit,
+      });
+
+      const secondary = manifest.secondaries.find(sec => sec.secondarySeriesId === secondarySeriesId);
+      if (!secondary) {
+        return res.status(404).json({ 
+          error: 'Secondary series not found in manifest',
+          availableSecondaries: manifest.secondaries.map(s => s.secondarySeriesId),
+        });
       }
 
-      const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
-
-      const transformInfo = await resolveFuseboxTransform(primarySeriesId, secondarySeriesId, requestedRegistrationId, fuseboxEmit);
-      if (!transformInfo || (!transformInfo.matrix && !transformInfo.transformFile)) {
-        return res.status(404).json({ error: 'Registration transform unavailable for series pair' });
+      if (secondary.status !== 'ready') {
+        return res.status(500).json({
+          error: `Secondary series status: ${secondary.status}`,
+          details: secondary.error || 'Fusion generation failed',
+        });
       }
 
+      // Determine which slices to extract
       const sliceCount = primaryImages.length;
       let sliceIndices: number[] = [];
       if (Array.isArray(body.sliceIndices)) {
@@ -3461,17 +3359,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       sliceIndices = Array.from(new Set(sliceIndices)).sort((a, b) => a - b);
 
-      const invertTransformFile = transformInfo.transformFile ? true : undefined;
-      const baseConfig: Record<string, any> = {
-        primary: primaryFiles,
-        secondary: secondaryFiles,
-        transform: transformInfo.matrix,
-        transformFile: undefined, // Force matrix-only mode for debugging
-        invertTransformFile,
-        interpolation,
-        includePrimary: true,
-      };
-
+      // Load and return the requested slices from the manifest-generated fusion
+      const primaryFiles = await collectSeriesFiles(primarySeriesId);
       const slices = [] as Array<{
         sliceIndex: number;
         primary: any;
@@ -3480,14 +3369,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }>;
 
       for (const sliceIndex of sliceIndices) {
-        const result = await runFuseboxResample({ ...baseConfig, sliceIndex }, fuseboxEmit);
-        if (!result || result.error) {
-          return res.status(500).json({
-            error: 'Fusebox resample failed',
-            details: result?.error || 'Unknown error',
-            sliceIndex,
-          });
+        const fusedInstance = secondary.instances[sliceIndex];
+        if (!fusedInstance) {
+          continue;
         }
+
+        // Use the fusebox resample to generate comparison slices
+        const result = await runFuseboxResample({
+          primary: primaryFiles,
+          secondary: [fusedInstance.filePath],
+          sliceIndex,
+          interpolation: 'nearest',
+          includePrimary: true,
+        }, fuseboxEmit);
+
+        if (!result || result.error) {
+          logger.warn({
+            sliceIndex,
+            error: result?.error || 'Unknown error',
+          }, 'Failed to generate test slice');
+          continue;
+        }
+
         slices.push({
           sliceIndex,
           primary: result.primary,
@@ -3511,6 +3414,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
 
+      const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
       const primaryFrameOfReferenceUID = primaryImages[0]?.filePath 
         ? extractFrameOfReferenceUID(primaryImages[0].filePath)
         : null;
@@ -3523,12 +3427,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         primarySeriesId,
         secondarySeriesId,
         sliceIndices,
-        registrationId: transformInfo.registrationId || requestedRegistrationId || null,
-        transformSource: transformInfo.transformSource || (transformInfo.transformFile ? 'helper-generated' : undefined),
-        transformMatrix: Array.isArray(transformInfo.matrix) ? transformInfo.matrix : null,
-        transformFile: transformInfo.transformFile || null,
+        registrationId: secondary.registrationId || null,
+        transformSource: 'manifest-service',
+        transformMatrix: null,
+        transformFile: null,
         primaryFrameOfReferenceUID,
         secondaryFrameOfReferenceUID,
+        manifestPath: secondary.manifestPath,
+        outputDirectory: secondary.outputDirectory,
         slices,
       });
     } catch (err: any) {
@@ -3666,6 +3572,275 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       logger.error(`fusion manifest failed: ${err?.message || String(err)}`);
       res.status(500).json({ error: 'fusion-manifest failed', details: err?.message || String(err) });
+    }
+  });
+
+  // Patient-level fusion overview endpoint
+  app.get("/api/patients/:id/fusion/overview", async (req: Request, res: Response) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const overview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json(overview);
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to build patient fusion overview');
+      res.status(500).json({ error: 'Failed to build fusion overview', details: err?.message || String(err) });
+    }
+  });
+
+  // Run manifest generation for all fusion pairs in a patient
+  app.post("/api/patients/:id/fusion/run-manifest", async (req: Request, res: Response) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const includeReady = Boolean(body.includeReady);
+
+      const pairSet = new Map<string, { primary: number; secondary: number }>();
+      const addPair = (primary: unknown, secondary: unknown) => {
+        const p = Number(primary);
+        const s = Number(secondary);
+        if (!Number.isFinite(p) || !Number.isFinite(s)) return;
+        pairSet.set(`${p}:${s}`, { primary: p, secondary: s });
+      };
+
+      const toNumberArray = (value: unknown): number[] => {
+        if (Array.isArray(value)) {
+          return value
+            .map((entry) => Number(entry))
+            .filter((num) => Number.isFinite(num));
+        }
+        if (typeof value === 'string') {
+          return value
+            .split(',')
+            .map((entry) => Number(entry.trim()))
+            .filter((num) => Number.isFinite(num));
+        }
+        return [];
+      };
+
+      const primarySeriesId = Number(body.primarySeriesId);
+      const secondarySeriesIds = toNumberArray(body.secondarySeriesIds);
+      if (Number.isFinite(primarySeriesId) && secondarySeriesIds.length) {
+        secondarySeriesIds.forEach((secondaryId) => addPair(primarySeriesId, secondaryId));
+      }
+
+      if (Array.isArray(body.pairs) && !pairSet.size) {
+        (body.pairs as any[]).forEach((pair) => {
+          if (!pair) return;
+          addPair((pair as any).primarySeriesId ?? (pair as any).primary, (pair as any).secondarySeriesId ?? (pair as any).secondary);
+        });
+      }
+
+      if (!pairSet.size) {
+        const overview = await buildPatientFusionOverview(patientId);
+        overview.associations.forEach((association) => {
+          if (!Number.isFinite(association.primarySeriesId ?? NaN)) return;
+          if (!Number.isFinite(association.secondarySeriesId ?? NaN)) return;
+          if (!includeReady && association.status === 'ready') return;
+          addPair(association.primarySeriesId, association.secondarySeriesId);
+        });
+      }
+
+      if (!pairSet.size) {
+        const refreshed = await buildPatientFusionOverview(patientId, { includeDebug });
+        return res.json({
+          ok: true,
+          runs: [],
+          overview: refreshed,
+          message: 'No fusion associations queued for manifest generation.',
+        });
+      }
+
+      const results: Array<Record<string, unknown>> = [];
+      for (const { primary, secondary } of pairSet.values()) {
+        try {
+          logger.info({ patientId, primary, secondary }, 'Running fusion manifest from patient manager');
+          const manifest = await fusionManifestService.getManifest({
+            primarySeriesId: primary,
+            secondarySeriesIds: [secondary],
+            force: true,
+            preload: true,
+            logger: fuseboxEmit,
+          });
+          const descriptor = manifest.secondaries.find((sec) => sec.secondarySeriesId === secondary);
+          results.push({
+            primarySeriesId: primary,
+            secondarySeriesId: secondary,
+            status: descriptor?.status ?? 'unknown',
+            markers: descriptor?.markers ?? [],
+            generatedAt: descriptor?.generatedAt ?? null,
+            outputDirectory: descriptor?.outputDirectory ?? null,
+            manifestPath: descriptor?.manifestPath ?? null,
+          });
+        } catch (err: any) {
+          logger.error({ err, patientId, primary, secondary }, 'Fusion manifest run failed from patient manager');
+          results.push({
+            primarySeriesId: primary,
+            secondarySeriesId: secondary,
+            status: 'error',
+            error: err?.message || String(err),
+          });
+        }
+      }
+
+      const refreshedOverview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json({ ok: true, runs: results, overview: refreshedOverview });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to run fusion manifest from patient manager');
+      res.status(500).json({ error: 'Failed to run fusion manifest', details: err?.message || String(err) });
+    }
+  });
+
+  // Clear patient fusion derived data
+  app.post("/api/patients/:id/fusion/clear", async (req: Request, res: Response) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+      const includeDebug = typeof req.query.debug === 'string' && ['1', 'true', 'yes'].includes(req.query.debug.toLowerCase());
+      const cleared = await clearPatientFusionDerivedData(patientId);
+      const overview = await buildPatientFusionOverview(patientId, { includeDebug });
+      res.json({ ok: true, cleared, overview });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to clear patient fusion derived data');
+      res.status(500).json({ error: 'Failed to clear fusion derived data', details: err?.message || String(err) });
+    }
+  });
+
+  // Get registration relationships for a study (for fusion debug dialog)
+  app.get("/api/studies/:studyId/registration-relationships", async (req: Request, res: Response) => {
+    try {
+      const studyId = Number(req.params.studyId);
+      if (!Number.isFinite(studyId)) {
+        return res.status(400).json({ error: 'Invalid study id' });
+      }
+
+      // Get all series for this study
+      const studySeries = await db
+        .select()
+        .from(series)
+        .where(eq(series.studyId, studyId));
+
+      const seriesIds = studySeries.map(s => s.id);
+
+      if (seriesIds.length === 0) {
+        return res.json({ relationships: [] });
+      }
+
+      // Get all registration relationships where primary or secondary is in this study
+      const relationships = await db
+        .select({
+          id: seriesRegistrationRelationships.id,
+          primarySeriesId: seriesRegistrationRelationships.primarySeriesId,
+          secondarySeriesId: seriesRegistrationRelationships.secondarySeriesId,
+          registrationId: seriesRegistrationRelationships.registrationId,
+          registrationFilePath: seriesRegistrationRelationships.registrationFilePath,
+          relationshipType: seriesRegistrationRelationships.relationshipType,
+          registrationMethod: seriesRegistrationRelationships.registrationMethod,
+          confidenceScore: seriesRegistrationRelationships.confidenceScore,
+          geometricValidationPassed: seriesRegistrationRelationships.geometricValidationPassed,
+        })
+        .from(seriesRegistrationRelationships)
+        .where(
+          or(
+            inArray(seriesRegistrationRelationships.primarySeriesId, seriesIds),
+            inArray(seriesRegistrationRelationships.secondarySeriesId, seriesIds)
+          )
+        );
+
+      // Enrich with series modality and description
+      const enrichedRelationships = await Promise.all(
+        relationships.map(async (rel) => {
+          const primarySeries = studySeries.find(s => s.id === rel.primarySeriesId);
+          const secondarySeries = studySeries.find(s => s.id === rel.secondarySeriesId);
+
+          return {
+            ...rel,
+            primaryModality: primarySeries?.modality || null,
+            primaryDescription: primarySeries?.seriesDescription || null,
+            secondaryModality: secondarySeries?.modality || null,
+            secondaryDescription: secondarySeries?.seriesDescription || null,
+          };
+        })
+      );
+
+      res.json({ relationships: enrichedRelationships });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to fetch study registration relationships');
+      res.status(500).json({ error: 'Failed to fetch registration relationships', details: err?.message || String(err) });
+    }
+  });
+
+  // Get fusion diagnostics for a study
+  app.get("/api/studies/:studyId/fusion-diagnostics", async (req: Request, res: Response) => {
+    try {
+      const studyId = Number(req.params.studyId);
+      if (!Number.isFinite(studyId)) {
+        return res.status(400).json({ error: 'Invalid study id' });
+      }
+
+      const { getFusionDiagnostics } = await import('./fusion/fusion-diagnostics');
+      const diagnostics = await getFusionDiagnostics(studyId);
+
+      res.json(diagnostics);
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to get fusion diagnostics');
+      res.status(500).json({ error: 'Failed to get diagnostics', details: err?.message || String(err) });
+    }
+  });
+
+  // Process registration relationships for a study (batch reprocessing)
+  app.post("/api/studies/:studyId/process-registration-relationships", async (req: Request, res: Response) => {
+    try {
+      const studyId = Number(req.params.studyId);
+      if (!Number.isFinite(studyId)) {
+        return res.status(400).json({ error: 'Invalid study id' });
+      }
+
+      const { processStudyRegistrationRelationships } = await import('./services/registration-relationship-service');
+      const relationshipsCreated = await processStudyRegistrationRelationships(studyId);
+
+      res.json({
+        ok: true,
+        studyId,
+        relationshipsCreated,
+        message: `Processed registration relationships for study ${studyId}, created ${relationshipsCreated} relationships`
+      });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to process study registration relationships');
+      res.status(500).json({ error: 'Failed to process registration relationships', details: err?.message || String(err) });
+    }
+  });
+
+  // Process registration relationships for a patient (batch reprocessing)
+  app.post("/api/patients/:id/process-registration-relationships", async (req: Request, res: Response) => {
+    try {
+      const patientId = Number(req.params.id);
+      if (!Number.isFinite(patientId)) {
+        return res.status(400).json({ error: 'Invalid patient id' });
+      }
+
+      const { processPatientRegistrationRelationships } = await import('./services/registration-relationship-service');
+      const relationshipsCreated = await processPatientRegistrationRelationships(patientId);
+
+      res.json({
+        ok: true,
+        patientId,
+        relationshipsCreated,
+        message: `Processed registration relationships for patient ${patientId}, created ${relationshipsCreated} relationships`
+      });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to process patient registration relationships');
+      res.status(500).json({ error: 'Failed to process registration relationships', details: err?.message || String(err) });
     }
   });
 

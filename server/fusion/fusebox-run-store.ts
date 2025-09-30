@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db.ts';
-import { fuseboxRuns, type FuseboxRun } from '@shared/schema';
+import { fuseboxRuns, type FuseboxRun } from '../../shared/schema';
 
 export type FuseboxRunStatus = 'pending' | 'running' | 'ready' | 'error';
 
