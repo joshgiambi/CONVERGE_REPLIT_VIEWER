@@ -54,15 +54,17 @@ const createImageData = (slice: SlicePayload, modality: string | null | undefine
   const isCT = mode === 'CT' || mode === 'MR' || mode === '';
 
   const applyFdg = (n: number) => {
+    // Medical-grade PET colormap (hot metal / FDG standard) - synchronized with fusion-utils.ts
     const stops = [
-      { t: 0.05, c: [0, 0, 0, 0] },
-      { t: 0.2, c: [90, 25, 0, 255] },
-      { t: 0.5, c: [220, 110, 0, 255] },
-      { t: 0.8, c: [255, 200, 0, 255] },
+      { t: 0.0, c: [0, 0, 0, 0] },
+      { t: 0.01, c: [0, 0, 0, 0] },
+      { t: 0.15, c: [90, 25, 0, 220] },
+      { t: 0.4, c: [220, 110, 0, 240] },
+      { t: 0.7, c: [255, 200, 0, 250] },
       { t: 1.0, c: [255, 255, 255, 255] },
     ];
 
-    if (n <= stops[0].t) return [0, 0, 0, 0];
+    if (n <= stops[1].t) return [0, 0, 0, 0];
     for (let i = 0; i < stops.length - 1; i += 1) {
       const a = stops[i];
       const b = stops[i + 1];

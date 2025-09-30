@@ -23,8 +23,8 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
-import type { FuseboxSlice } from "@/lib/fusion-utils";
+import { FusionOverlayManager } from "@/lib/fusion-overlay-manager";
+import { clearFusionSlices } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -228,31 +228,47 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
+  
+  // NEW FUSION: Simple manager-based approach
+  const fusionManagerRef = useRef<FusionOverlayManager | null>(null);
+  if (!fusionManagerRef.current) {
+    fusionManagerRef.current = new FusionOverlayManager(seriesId);
+  }
+  const fusionManager = fusionManagerRef.current;
+  
+  const [fusionTransformSource, setFusionTransformSource] = useState<string | null>(null);
+  const [fusionRegistrationId, setFusionRegistrationId] = useState<string | null>(null);
+  
+  // LEGACY STUBS: These will be removed once old code is cleaned up
+  const [secondaryModality, setSecondaryModality] = useState('PT');
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
-  const [secondaryModality, setSecondaryModality] = useState<string>('MR');
-  const [fuseboxTransformSource, setFuseboxTransformSource] = useState<FuseboxSlice['transformSource'] | null>(null);
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string | null>(null);
   const [registrationAssociationsForPrimary, setRegistrationAssociationsForPrimary] = useState<RegistrationAssociation[]>([]);
-  // Fusion debug support
-  const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const [showRegDetails, setShowRegDetails] = useState(false);
   const [regDetailsText, setRegDetailsText] = useState('');
   const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
   const fusionIssueRef = useRef<string | null>(null);
   const missingMatrixLogRef = useRef(false);
-  const fuseboxCacheRef = useRef<Map<string, {
-    canvas: HTMLCanvasElement;
-    slice: FuseboxSlice;
-    timestamp: number;
-    hasSignal: boolean;
-  }>>(new Map());
-  // CT transform for fusion coordinate system alignment
-  const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
-  const scheduleRenderRef = useRef<(() => void) | null>(null);
+  const fuseboxCacheRef = useRef(new Map());
+  const ctTransform = useRef<any>(null);
+  const scheduleRenderRef = useRef<any>(null);
   const fusionRequestTokenRef = useRef(0);
   const fusionAbortControllerRef = useRef<AbortController | null>(null);
-  const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
+  const fusionPrefetchSetRef = useRef(new Set());
+  const [fusionLogs, setFusionLogs] = useState<string[]>([]);
+  const setFuseboxTransformSource = setFusionTransformSource; // Alias for compatibility
+  const fuseboxTransformSource = fusionTransformSource; // Alias for compatibility
+  const getFusionManifest = () => null; // Stub
+  
+  // Update fusion manager when secondary changes
+  useEffect(() => {
+    if (fusionManager) {
+      fusionManager.setSecondary(secondarySeriesId, secondaryModality);
+      fusionManager.clearCache(); // Clear cache on secondary change
+      clearFusionSlices(seriesId); // Clear old fusion data
+    }
+  }, [secondarySeriesId, fusionManager, secondaryModality, seriesId]);
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
     if (!image) return null;
@@ -405,17 +421,24 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       alpha: number,
     ) => {
       if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
+      
+      // CRITICAL FIX: Use proper medical image fusion blending
+      // The overlay should match the exact size and position of the base CT image
       const targetWidth = transform.imageWidth * transform.scale;
       const targetHeight = transform.imageHeight * transform.scale;
       if (targetWidth === 0 || targetHeight === 0) return;
 
-      const widthScale = targetWidth / overlayCanvas.width;
-      const heightScale = targetHeight / overlayCanvas.height;
-
       ctx.save();
+      
+      // Set proper compositing for medical fusion overlays
+      // 'lighter' blend mode adds color values, which works well for PET/CT fusion
+      ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = alpha;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
+      
+      // Draw overlay canvas to match the exact transform of the base CT image
+      // The overlay dimensions should match the base image dimensions, not be scaled separately
       ctx.drawImage(
         overlayCanvas,
         0,
@@ -424,9 +447,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         overlayCanvas.height,
         transform.offsetX,
         transform.offsetY,
-        overlayCanvas.width * widthScale,
-        overlayCanvas.height * heightScale,
+        targetWidth,
+        targetHeight,
       );
+      
       ctx.restore();
     },
     [],
@@ -3406,6 +3430,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
       console.log(`🔄 INDEX CHANGED: currentIndex=${currentIndex} sopUID=${images[currentIndex]?.sopInstanceUID?.slice(-10)} fusion=${secondarySeriesId ? 'ON' : 'OFF'}`);
+      
       // Immediate rendering for smooth scrolling - this is critical for DICOM viewer performance
       scheduleRender();
       
@@ -4389,16 +4414,32 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
-      // Render secondary image overlay for fusion if available
-      // NOTE: Run fusion rendering asynchronously to avoid blocking primary CT display
-      if (secondarySeriesId) {
-        // Fusion overlay rendering - don't await so primary CT renders immediately
-        renderFusionOverlayNew(ctx, currentImage).catch((fusionError: any) => {
-          console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
-          // Continue without fusion rather than failing entire image display
+      // NEW FUSION: Simple overlay compositing
+      if (secondarySeriesId && fusionOpacity > 0) {
+        const primaryPosition = parseImagePosition(currentImage);
+        const instNumber = Number(currentImage.instanceNumber ?? currentImage.metadata?.instanceNumber ?? NaN);
+        
+        fusionManager.getOverlay(
+          currentImage.sopInstanceUID,
+          currentIndex,
+          Number.isFinite(instNumber) ? instNumber : null,
+          primaryPosition
+        ).then(overlay => {
+          if (overlay && overlay.hasSignal) {
+            // Composite the overlay onto the primary CT
+            ctx.save();
+            ctx.globalAlpha = fusionOpacity;
+            ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+            
+            // Update metadata for UI
+            setFusionTransformSource(overlay.transformSource);
+            setFusionRegistrationId(overlay.registrationId);
+          }
+        }).catch(err => {
+          // Fusion failed - primary CT already rendered, so just log it
+          console.warn("Fusion overlay failed:", err);
         });
-      } else {
-        console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
       // Render RT structure overlays if available
@@ -4761,7 +4802,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             max: slice.max,
           });
         }
-      } catch (error) {
+      } catch (error: any) {
+        fuseboxCacheRef.current.delete(cacheKey);
+        if ((error as any)?.name === 'FusionOutOfRangeError') {
+          if (ensureActive()) {
+            fusionIssueRef.current = 'fusion-out-of-range';
+            setFuseboxTransformSource(null);
+          }
+          return;
+        }
         if (ensureActive()) {
           console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';

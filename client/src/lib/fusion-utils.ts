@@ -335,42 +335,84 @@ export async function getFusedSliceSmart(
   preferredIndex?: number | null,
   preferredImagePosition?: [number, number, number] | null,
 ): Promise<FuseboxSlice> {
+  const createOutOfRangeError = (): Error => {
+    const error = new Error('Fusion slice out of range');
+    (error as any).name = 'FusionOutOfRangeError';
+    return error;
+  };
+
   const entry = manifestCache.get(primarySeriesId);
   if (!entry) throw new Error('Fusion manifest not loaded');
   const cache = entry.secondaries.get(secondarySeriesId);
   if (!cache) throw new Error('Fusion secondary missing in manifest cache');
 
   const descriptor = cache.descriptor;
+  const instanceCount = descriptor.instances.length;
+
+  const indexIsOutOfBounds = typeof preferredIndex === 'number'
+    && (preferredIndex < 0 || preferredIndex >= instanceCount);
+  const instanceNumberIsOutOfBounds = typeof preferredInstanceNumber === 'number'
+    && (preferredInstanceNumber < 1 || preferredInstanceNumber > instanceCount);
+
   // 1) Try exact SOP match
   let target = descriptor.instances.find((inst) => inst.sopInstanceUID === sopInstanceUID) || null;
   if (!target) {
     target = descriptor.instances.find((inst) => inst.primarySopInstanceUID === sopInstanceUID) || null;
   }
   // 2) Fall back to instanceNumber match if available
+  if (!target && instanceNumberIsOutOfBounds) {
+    throw createOutOfRangeError();
+  }
   if (!target && preferredInstanceNumber != null) {
     target = descriptor.instances.find((inst) => inst.instanceNumber === preferredInstanceNumber) || null;
   }
   // 3) Fall back to index if provided and in-bounds
-  if (!target && preferredIndex != null) {
-    const idx = Math.max(0, Math.min(descriptor.instances.length - 1, preferredIndex));
+  if (!target && indexIsOutOfBounds) {
+    throw createOutOfRangeError();
+  }
+  if (!target && preferredIndex != null && !indexIsOutOfBounds) {
+    const idx = Math.max(0, Math.min(instanceCount - 1, preferredIndex));
     target = descriptor.instances[idx] || null;
   }
   // 4) Fall back to closest image position if available
   if (!target && preferredImagePosition && Array.isArray(preferredImagePosition)) {
-    let best: { inst: FusionInstanceDescriptor | null; distance: number } = { inst: null, distance: Number.POSITIVE_INFINITY };
-    const preferredZ = Number(preferredImagePosition[2]);
-    descriptor.instances.forEach((inst) => {
-      const pos = Array.isArray(inst.imagePositionPatient) ? inst.imagePositionPatient : null;
-      if (!pos || pos.length < 3) return;
-      const z = Number(pos[2]);
-      if (!Number.isFinite(z)) return;
-      const distance = Math.abs(z - preferredZ);
-      if (distance < best.distance) {
-        best = { inst, distance };
+    const getZ = (value: unknown): number | null => {
+      if (Array.isArray(value) && value.length >= 3) {
+        const z = Number(value[2]);
+        return Number.isFinite(z) ? z : null;
       }
-    });
-    if (best.inst) {
-      target = best.inst;
+      return null;
+    };
+
+    const preferredZ = Number(preferredImagePosition[2]);
+    const hasPreferredZ = Number.isFinite(preferredZ);
+    const zValues = descriptor.instances
+      .map((inst) => getZ(inst.imagePositionPatient))
+      .filter((z): z is number => Number.isFinite(z));
+
+    if (hasPreferredZ && zValues.length) {
+      const minZ = Math.min(...zValues);
+      const maxZ = Math.max(...zValues);
+      if (preferredZ < minZ - POSITION_TOLERANCE_MM || preferredZ > maxZ + POSITION_TOLERANCE_MM) {
+        throw createOutOfRangeError();
+      }
+    }
+
+    if (hasPreferredZ) {
+      let best: { inst: FusionInstanceDescriptor | null; distance: number } = { inst: null, distance: Number.POSITIVE_INFINITY };
+      descriptor.instances.forEach((inst) => {
+        const pos = Array.isArray(inst.imagePositionPatient) ? inst.imagePositionPatient : null;
+        if (!pos || pos.length < 3) return;
+        const z = Number(pos[2]);
+        if (!Number.isFinite(z)) return;
+        const distance = Math.abs(z - preferredZ);
+        if (distance < best.distance) {
+          best = { inst, distance };
+        }
+      });
+      if (best.inst) {
+        target = best.inst;
+      }
     }
   }
   // 5) Final fallback: use middle slice
@@ -404,15 +446,18 @@ export function fuseboxSliceToImageData(
   let hasSignal = false;
 
   const applyFdg = (n: number) => {
+    // Medical-grade PET colormap (hot metal / FDG standard)
+    // CRITICAL FIX: Lowered transparency threshold from 0.05 to 0.01 to show low uptake regions
     const stops = [
-      { t: 0.05, c: [0, 0, 0, 0] },
-      { t: 0.2, c: [90, 25, 0, 255] },
-      { t: 0.5, c: [220, 110, 0, 255] },
-      { t: 0.8, c: [255, 200, 0, 255] },
-      { t: 1.0, c: [255, 255, 255, 255] },
+      { t: 0.0, c: [0, 0, 0, 0] },        // Fully transparent at zero
+      { t: 0.01, c: [0, 0, 0, 0] },       // Start showing signal at 1% (was 5%)
+      { t: 0.15, c: [90, 25, 0, 220] },   // Dark brown/red for low uptake
+      { t: 0.4, c: [220, 110, 0, 240] },  // Orange for moderate uptake
+      { t: 0.7, c: [255, 200, 0, 250] },  // Yellow for high uptake  
+      { t: 1.0, c: [255, 255, 255, 255] },// White for maximum uptake
     ];
 
-    if (n <= stops[0].t) return [0, 0, 0, 0];
+    if (n <= stops[1].t) return [0, 0, 0, 0]; // Transparent below 1%
     for (let i = 0; i < stops.length - 1; i++) {
       const a = stops[i];
       const b = stops[i + 1];
