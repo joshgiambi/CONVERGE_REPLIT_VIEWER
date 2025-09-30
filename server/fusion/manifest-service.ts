@@ -642,6 +642,33 @@ export class FusionManifestService {
       }),
     };
 
+      // CRITICAL: Overwrite helper's manifest with corrected primarySopInstanceUID mappings
+      // The helper writes a manifest without primarySopInstanceUID, causing viewer to freeze on slice 0
+      try {
+        const helperManifestPath = descriptor.manifestPath;
+        await fs.promises.writeFile(
+          helperManifestPath,
+          JSON.stringify({
+            manifestVersion: 1,
+            instances: descriptor.instances,
+            sliceCount: descriptor.sliceCount,
+            rows: descriptor.rows,
+            columns: descriptor.columns,
+            pixelSpacing: descriptor.pixelSpacing,
+            imageOrientationPatient: descriptor.imageOrientationPatient,
+            windowCenter: descriptor.windowCenter,
+            windowWidth: descriptor.windowWidth,
+          }, null, 2),
+          'utf-8'
+        );
+        manifestDebug('info', 'Overwrote helper manifest with primarySopInstanceUID mappings', {
+          path: helperManifestPath,
+          instanceCount: descriptor.instances.length,
+        });
+      } catch (writeErr) {
+        manifestDebug('warn', 'Failed to overwrite helper manifest', { error: writeErr });
+      }
+
       await markFuseboxRunReady({
         ...baseRunContext,
         manifestPath: descriptor.manifestPath || response.manifestPath || aggregatedManifestPath,
