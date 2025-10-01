@@ -23,8 +23,9 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { FusionOverlayManager } from "@/lib/fusion-overlay-manager";
-import { clearFusionSlices } from "@/lib/fusion-utils";
+// import { FusionOverlayManager } from "@/lib/fusion-overlay-manager";
+import { setPrimary as fusionSetPrimary, setSecondary as fusionSetSecondary, refreshManifest as fusionRefreshManifest, getOverlayForSop as fusionGetOverlayForSop } from '@/lib/use-fusion-store';
+import { clearFusionSlices, getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -229,13 +230,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
   
-  // NEW FUSION: Simple manager-based approach
-  const fusionManagerRef = useRef<FusionOverlayManager | null>(null);
-  if (!fusionManagerRef.current) {
-    fusionManagerRef.current = new FusionOverlayManager(seriesId);
-  }
-  const fusionManager = fusionManagerRef.current;
-  
+  // NEW FUSION: store-driven overlay layer
+  // Fusion store API (module-level)
+
   const [fusionTransformSource, setFusionTransformSource] = useState<string | null>(null);
   const [fusionRegistrationId, setFusionRegistrationId] = useState<string | null>(null);
   
@@ -261,14 +258,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const fuseboxTransformSource = fusionTransformSource; // Alias for compatibility
   const getFusionManifest = () => null; // Stub
   
-  // Update fusion manager when secondary changes
+  // Initialize fusion store for this primary series and selected secondary
   useEffect(() => {
-    if (fusionManager) {
-      fusionManager.setSecondary(secondarySeriesId, secondaryModality);
-      fusionManager.clearCache(); // Clear cache on secondary change
-      clearFusionSlices(seriesId); // Clear old fusion data
-    }
-  }, [secondarySeriesId, fusionManager, secondaryModality, seriesId]);
+    fusionSetPrimary(seriesId);
+    fusionRefreshManifest({ force: true, preload: true });
+  }, [seriesId]);
+
+  useEffect(() => {
+    fusionSetSecondary(secondarySeriesId ?? null, secondaryModality);
+    clearFusionSlices(seriesId);
+  }, [secondarySeriesId, secondaryModality, seriesId]);
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
     if (!image) return null;
@@ -457,7 +456,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   );
 
   const convertSliceToCanvas = useCallback(
-    (slice: FuseboxSlice, defaultModality: string) => {
+    (slice: any, defaultModality: string) => {
       const { imageData, hasSignal } = fuseboxSliceToImageData(
         slice,
         slice.secondaryModality ?? defaultModality,
@@ -477,7 +476,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   useEffect(() => {
     const entries = Array.from(fuseboxCacheRef.current.entries());
     if (!entries.length) return;
-    const updatedCache = new Map<string, { canvas: HTMLCanvasElement; slice: FuseboxSlice; timestamp: number; hasSignal: boolean }>();
+    const updatedCache = new Map<string, { canvas: HTMLCanvasElement; slice: any; timestamp: number; hasSignal: boolean }>();
     entries.forEach(([key, value]) => {
       const updated = convertSliceToCanvas(value.slice, value.slice.secondaryModality ?? secondaryModality ?? '');
       if (updated) {
@@ -547,7 +546,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : centerIndex;
               const preferredPosition = parseImagePosition(image);
 
-              let slice;
+              let slice: any;
               try {
                 slice = await getFusedSlice(seriesId, secondarySeriesId, sop);
               } catch (error) {
@@ -4414,32 +4413,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
-      // NEW FUSION: Simple overlay compositing
+      // NEW FUSION: Compose overlay via fusion store (non-blocking)
       if (secondarySeriesId && fusionOpacity > 0) {
         const primaryPosition = parseImagePosition(currentImage);
         const instNumber = Number(currentImage.instanceNumber ?? currentImage.metadata?.instanceNumber ?? NaN);
-        
-        fusionManager.getOverlay(
-          currentImage.sopInstanceUID,
-          currentIndex,
-          Number.isFinite(instNumber) ? instNumber : null,
-          primaryPosition
-        ).then(overlay => {
+        fusionGetOverlayForSop({
+          sopInstanceUID: currentImage.sopInstanceUID,
+          index: currentIndex,
+          instanceNumber: Number.isFinite(instNumber) ? instNumber : null,
+          imagePosition: primaryPosition
+        }).then(overlay => {
           if (overlay && overlay.hasSignal) {
-            // Composite the overlay onto the primary CT
             ctx.save();
             ctx.globalAlpha = fusionOpacity;
             ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
             ctx.restore();
-            
-            // Update metadata for UI
             setFusionTransformSource(overlay.transformSource);
             setFusionRegistrationId(overlay.registrationId);
           }
-        }).catch(err => {
-          // Fusion failed - primary CT already rendered, so just log it
-          console.warn("Fusion overlay failed:", err);
-        });
+        }).catch(() => {});
       }
 
       // Render RT structure overlays if available
@@ -4516,9 +4508,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Render MPR views asynchronously with same window/level as axial
           await Promise.all([
-            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, currentWindowLevel.width, currentWindowLevel.center),
-            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, currentWindowLevel.width, currentWindowLevel.center)
-          ]);
+            sagittalCanvasRef.current && renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, currentWindowLevel.width, currentWindowLevel.center),
+            coronalCanvasRef.current && renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, currentWindowLevel.width, currentWindowLevel.center)
+          ].filter(Boolean));
         } catch (mprError) {
           console.warn("Error rendering MPR views:", mprError);
         }
@@ -4682,165 +4674,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionPrefetchSetRef.current.clear();
   }, [secondarySeriesId]);
 
+  // LEGACY PATH DISABLED: Fusion overlay now handled by FusionOverlayLayer + useFusionStore
   const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
-    const requestToken = ++fusionRequestTokenRef.current;
-
-    // Abort any previous fusion fetch to prevent race conditions during fast switching
-    if (fusionAbortControllerRef.current) {
-      fusionAbortControllerRef.current.abort();
-    }
-    const abortController = new AbortController();
-    fusionAbortControllerRef.current = abortController;
-
-    const ensureActive = () => {
-      const isActive = requestToken === fusionRequestTokenRef.current;
-      if (!isActive) {
-        abortController.abort(); // Abort if this request is no longer active
-      }
-      return isActive;
-    };
-
-    if (!secondarySeriesId || fusionOpacity === 0) {
-      if (ensureActive()) setFuseboxTransformSource(null);
-      return;
-    }
-
-    if (fusionManifestLoading) {
-      // Gate rendering while the manifest is still loading
-      if (ensureActive()) {
-        fusionIssueRef.current = 'manifest-not-ready';
-        setFuseboxTransformSource(null);
-      }
-      return;
-    }
-
-    const status = fusionSecondaryStatuses?.get(secondarySeriesId);
-    // Normalize ID comparison to avoid string/number mismatch gating overlays forever
-    const manifestMatches = Number(fusionManifestPrimarySeriesId) === Number(seriesId);
-    const localManifest = getFusionManifest(seriesId);
-    const localReady = !!localManifest && localManifest.secondaries.some((s) => s.secondarySeriesId === secondarySeriesId && s.status === 'ready');
-    if (status?.status !== 'ready' || !manifestMatches || !localReady) {
-      if (ensureActive()) {
-        fusionIssueRef.current = 'manifest-not-ready';
-        setFuseboxTransformSource(null);
-      }
-      return;
-    }
-
-    const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
-
-    if (!primaryImage?.sopInstanceUID) {
-      if (ensureActive()) setFuseboxTransformSource(null);
-      return;
-    }
-
-    const transform = ctTransform.current;
-    if (!transform) {
-      return;
-    }
-
-    if (hasRegistrationMatrix) {
-      missingMatrixLogRef.current = false;
-    } else if (!missingMatrixLogRef.current) {
-      pushFusionLog('Proceeding without client-side matrix; expecting helper output', {
-        primary: seriesId,
-        secondary: secondarySeriesId,
-        registrationId: selectedRegistrationId ?? null,
-      });
-      missingMatrixLogRef.current = true;
-    }
-
-    const cacheKey = buildFuseboxCacheKey(
-      primaryImage.sopInstanceUID,
-      secondarySeriesId,
-      selectedRegistrationId ?? null,
-    );
-    let cached = fuseboxCacheRef.current.get(cacheKey);
-
-    if (!cached) {
-      try {
-        // Try exact SOP match first; if not found, fall back by instance number or index
-        let slice: FuseboxSlice;
-        const preferredPosition = parseImagePosition(primaryImage);
-        try {
-          slice = await getFusedSlice(seriesId, secondarySeriesId, primaryImage.sopInstanceUID);
-        } catch (e) {
-          const instNumber = Number(primaryImage.instanceNumber ?? primaryImage.metadata?.instanceNumber ?? NaN);
-          const index = Number.isFinite(instNumber) ? instNumber - 1 : currentIndex;
-          slice = await getFusedSliceSmart(
-            seriesId,
-            secondarySeriesId,
-            primaryImage.sopInstanceUID,
-            Number.isFinite(instNumber) ? instNumber : null,
-            index,
-            preferredPosition,
-          );
-        }
-
-        if (slice.registrationId && slice.registrationId !== selectedRegistrationId && ensureActive()) {
-          setSelectedRegistrationId(slice.registrationId);
-        }
-
-        if (slice.secondaryModality && slice.secondaryModality !== secondaryModality && ensureActive()) {
-          setSecondaryModality(slice.secondaryModality);
-        }
-
-        const prepared = convertSliceToCanvas(slice, secondaryModality);
-        if (!prepared) {
-          if (ensureActive()) {
-            fusionIssueRef.current = 'overlay-canvas-error';
-            setFuseboxTransformSource(null);
-          }
-          return;
-        }
-        cached = { ...prepared, timestamp: Date.now() };
-        fuseboxCacheRef.current.set(cacheKey, cached);
-        if (!prepared.hasSignal) {
-          pushFusionLog('Fused slice had no visible signal', {
-            sop: primaryImage.sopInstanceUID,
-            min: slice.min,
-            max: slice.max,
-          });
-        }
-      } catch (error: any) {
-        fuseboxCacheRef.current.delete(cacheKey);
-        if ((error as any)?.name === 'FusionOutOfRangeError') {
-          if (ensureActive()) {
-            fusionIssueRef.current = 'fusion-out-of-range';
-            setFuseboxTransformSource(null);
-          }
-          return;
-        }
-        if (ensureActive()) {
-          console.error('Fused overlay load failed:', error);
-          fusionIssueRef.current = 'fusebox-fetch-error';
-          setFuseboxTransformSource(null);
-        }
-        return;
-      }
-    }
-
-    if (!cached) {
-      if (ensureActive()) setFuseboxTransformSource(null);
-      return;
-    }
-
-    if (!cached.hasSignal) {
-      if (ensureActive()) {
-        fusionIssueRef.current = 'empty-fusebox-slice';
-        setFuseboxTransformSource(cached.slice.transformSource ?? null);
-      }
-      return;
-    }
-
-    if (!ensureActive()) return;
-
-    const source = cached.slice.transformSource ?? null;
-    setFuseboxTransformSource(source);
-    fusionIssueRef.current = null;
-
-    drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
-    prefetchFusionSlices(currentIndex);
+    return; // Single overlay path enforced
   };
 
   // Coordinate transformation functions for pen tool with CT transform applied

@@ -19,6 +19,7 @@ import { DICOMSeries, DICOMStudy, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/li
 import type { RegistrationAssociation, RegistrationSeriesDetail } from '@/types/fusion';
 import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
 import { fetchFusionManifest, preloadFusionSecondary, getFusionManifest, clearFusionCaches } from '@/lib/fusion-utils';
+import { setPrimary as fusionSetPrimary, setSecondary as fusionSetSecondary, refreshManifest as fusionRefreshManifest } from '@/lib/use-fusion-store';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
 import { useSeriesSelection } from '@/hooks/use-series-selection';
@@ -39,6 +40,7 @@ interface ViewerInterfaceProps {
 }
 
 export function ViewerInterface({ studyData, onContourSettingsChange, contourSettings, onLoadedRTSeriesChange }: ViewerInterfaceProps) {
+  // Fusion store integration: mirror selected CT and chosen secondary
   const [selectedSeries, setSelectedSeries] = useState<DICOMSeries | null>(null);
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [error, setError] = useState<any>(null);
@@ -121,6 +123,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       setShowFusionPanel(true);
     }
   }, [secondarySeriesId]);
+
+  // Keep fusion store in sync with UI selection
+  useEffect(() => {
+    const primaryId = selectedSeries?.id ?? null;
+    if (primaryId) {
+      fusionSetPrimary(primaryId);
+      fusionRefreshManifest({ force: true, preload: true });
+    }
+  }, [selectedSeries?.id, fusionSetPrimary, fusionRefreshManifest]);
+
+  useEffect(() => {
+    const modality = (series.find(s => s.id === secondarySeriesId)?.modality || 'PT') as string;
+    fusionSetSecondary(secondarySeriesId, modality);
+  }, [secondarySeriesId, series, fusionSetSecondary]);
   
   // Boolean operations state
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
