@@ -63,6 +63,7 @@
     "@uppy/file-input": "^4.2.2",
     "@uppy/progress-bar": "^4.3.2",
     "@uppy/react": "^4.5.2",
+    "archiver": "^7.0.1",
     "bull": "^4.16.5",
     "canvas": "^3.1.2",
     "class-variance-authority": "^0.7.1",
@@ -121,7 +122,7 @@
     "yauzl": "^3.2.0",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0",
-    "archiver": "^7.0.1"
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.2.7",
