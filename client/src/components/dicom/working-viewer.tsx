@@ -23,8 +23,9 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { FusionOverlayManager } from "@/lib/fusion-overlay-manager";
-import { clearFusionSlices } from "@/lib/fusion-utils";
+import { FusionOverlayManager, type OverlayCanvas } from "@/lib/fusion-overlay-manager";
+import { clearFusionSlices, fuseboxSliceToImageData, getFusedSlice, getFusedSliceSmart } from "@/lib/fusion-utils";
+import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -145,6 +146,12 @@ interface WorkingViewerProps {
   fusionSecondaryStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
   fusionManifestLoading?: boolean;
   fusionManifestPrimarySeriesId?: number | null;
+  fusionGetOverlayForImage?: (request: {
+    sopInstanceUID: string;
+    sliceIndex: number;
+    instanceNumber?: number | null;
+    position?: [number, number, number] | null;
+  }) => Promise<OverlayCanvas | null>;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -184,6 +191,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionSecondaryStatuses,
     fusionManifestLoading = false,
     fusionManifestPrimarySeriesId = null,
+    fusionGetOverlayForImage,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -235,6 +243,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionManagerRef.current = new FusionOverlayManager(seriesId);
   }
   const fusionManager = fusionManagerRef.current;
+
+  const requestFusionOverlay = useCallback(
+    (
+      sopInstanceUID: string,
+      sliceIndex: number,
+      instanceNumber: number | null,
+      position: [number, number, number] | null,
+    ): Promise<OverlayCanvas | null> => {
+      if (fusionGetOverlayForImage) {
+        return fusionGetOverlayForImage({
+          sopInstanceUID,
+          sliceIndex,
+          instanceNumber,
+          position,
+        });
+      }
+      const manager = fusionManagerRef.current;
+      if (!manager) return Promise.resolve(null);
+      return manager.getOverlay(sopInstanceUID, sliceIndex, instanceNumber, position);
+    },
+    [fusionGetOverlayForImage],
+  );
   
   const [fusionTransformSource, setFusionTransformSource] = useState<string | null>(null);
   const [fusionRegistrationId, setFusionRegistrationId] = useState<string | null>(null);
@@ -497,6 +527,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
+      if (fusionGetOverlayForImage) return;
       if (!secondarySeriesId || !images.length) return;
       // Gate prefetch on manifest readiness to avoid 'manifest not loaded' errors
       const status = fusionSecondaryStatuses?.get(secondarySeriesId);
@@ -4418,28 +4449,29 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (secondarySeriesId && fusionOpacity > 0) {
         const primaryPosition = parseImagePosition(currentImage);
         const instNumber = Number(currentImage.instanceNumber ?? currentImage.metadata?.instanceNumber ?? NaN);
-        
-        fusionManager.getOverlay(
+        const requestToken = ++fusionRequestTokenRef.current;
+
+        requestFusionOverlay(
           currentImage.sopInstanceUID,
           currentIndex,
           Number.isFinite(instNumber) ? instNumber : null,
-          primaryPosition
-        ).then(overlay => {
-          if (overlay && overlay.hasSignal) {
-            // Composite the overlay onto the primary CT
-            ctx.save();
-            ctx.globalAlpha = fusionOpacity;
-            ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
-            ctx.restore();
-            
-            // Update metadata for UI
-            setFusionTransformSource(overlay.transformSource);
-            setFusionRegistrationId(overlay.registrationId);
-          }
-        }).catch(err => {
-          // Fusion failed - primary CT already rendered, so just log it
-          console.warn("Fusion overlay failed:", err);
-        });
+          primaryPosition,
+        )
+          .then((overlay) => {
+            if (fusionRequestTokenRef.current !== requestToken) return;
+            if (overlay && overlay.hasSignal) {
+              ctx.save();
+              ctx.globalAlpha = fusionOpacity;
+              ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
+              ctx.restore();
+              setFusionTransformSource(overlay.transformSource);
+              setFusionRegistrationId(overlay.registrationId);
+            }
+          })
+          .catch((err) => {
+            if (fusionRequestTokenRef.current !== requestToken) return;
+            console.warn('Fusion overlay failed:', err);
+          });
       }
 
       // Render RT structure overlays if available

@@ -10,7 +10,7 @@
 
 import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, type FuseboxSlice } from './fusion-utils';
 
-interface OverlayCanvas {
+export interface OverlayCanvas {
   canvas: HTMLCanvasElement;
   hasSignal: boolean;
   timestamp: number;
