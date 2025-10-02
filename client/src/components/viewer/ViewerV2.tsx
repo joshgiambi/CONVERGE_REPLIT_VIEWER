@@ -27,6 +27,8 @@ import { SeriesSelector } from '@/components/dicom/series-selector';
 import { ContourEditToolbar } from '@/components/dicom/contour-edit-toolbar';
 import { BooleanOperationsToolbar } from '@/components/dicom/boolean-operations-toolbar-new';
 import { MarginToolbar } from '@/components/dicom/margin-toolbar';
+import { SimpleBrushTool } from '@/components/dicom/simple-brush-tool';
+import { PenToolUnifiedV2 } from '@/components/dicom/pen-tool-unified-v2';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
 import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
 
@@ -85,6 +87,10 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
 
   // Get RT context - now safe because RTProvider wraps this component
   const rt = useRT();
+  const contourServiceRef = useRef<ReturnType<typeof createContourOperationsService> | null>(null);
+  if (!contourServiceRef.current) {
+    contourServiceRef.current = createContourOperationsService();
+  }
 
   // Viewport control handlers
   const handleZoomIn = () => viewportRef.current?.zoomIn();
@@ -123,6 +129,122 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const fusionOpacity = fusion?.opacity ?? 0.5;
   const showFusionPanel = fusion?.showFusionPanel ?? false;
 
+  const handleMarginOperation = async (operation: {
+    type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
+    parameters: any;
+    structureId: number;
+    targetStructureId?: number | 'new';
+    preview?: boolean;
+  }) => {
+    if (!rt.rtStructures) {
+      console.warn('[ViewerV2] Margin operation skipped - no RT structures loaded');
+      return;
+    }
+
+    const contourService = contourServiceRef.current ?? createContourOperationsService();
+    contourServiceRef.current = contourService;
+
+    const baseStructures = rt.rtStructures;
+    const sourceStructure = baseStructures.structures?.find((s: any) => s.roiNumber === operation.structureId);
+    if (!sourceStructure) {
+      console.warn('[ViewerV2] Margin operation skipped - source structure missing', operation.structureId);
+      return;
+    }
+
+    const shouldSetBusy = !operation.preview;
+    if (shouldSetBusy) rt.setBusy(true);
+
+    try {
+      let workingSet = structuredClone(baseStructures);
+
+      const marginValues = operation?.parameters?.marginValues ?? {};
+      const fallbackMargin = Number(operation?.parameters?.margin ?? marginValues?.uniform ?? 0) || 0;
+
+      switch (operation.type) {
+        case 'uniform_margin': {
+          const margin = Number(marginValues?.uniform ?? fallbackMargin) || 0;
+          workingSet = await contourService.applyUniformMargin(workingSet, operation.structureId, margin);
+          break;
+        }
+        case 'anisotropic_margin': {
+          const anisotropicSource = {
+            superior: Number(marginValues?.z ?? marginValues?.superior ?? fallbackMargin) || 0,
+            inferior: Number(marginValues?.z ?? marginValues?.inferior ?? fallbackMargin) || 0,
+            anterior: Number(marginValues?.y ?? marginValues?.anterior ?? fallbackMargin) || 0,
+            posterior: Number(marginValues?.y ?? marginValues?.posterior ?? fallbackMargin) || 0,
+            left: Number(marginValues?.x ?? marginValues?.left ?? fallbackMargin) || 0,
+            right: Number(marginValues?.x ?? marginValues?.right ?? fallbackMargin) || 0,
+          };
+          workingSet = await contourService.applyAnisotropicMargin(workingSet, operation.structureId, anisotropicSource);
+          break;
+        }
+        case 'directional_margin': {
+          const directionEntries = Object.entries(marginValues ?? {});
+          for (const [dir, value] of directionEntries) {
+            const distance = Number(value) || 0;
+            if (!distance) continue;
+            const normalized = dir as 'superior' | 'inferior' | 'anterior' | 'posterior' | 'left' | 'right';
+            if (!['superior', 'inferior', 'anterior', 'posterior', 'left', 'right'].includes(normalized)) continue;
+            workingSet = await contourService.applyGrowStructure(workingSet, operation.structureId, distance, normalized);
+          }
+          break;
+        }
+        default: {
+          // Unsupported margin types fall back to uniform expansion
+          if (fallbackMargin !== 0) {
+            workingSet = await contourService.applyUniformMargin(workingSet, operation.structureId, fallbackMargin);
+          }
+          break;
+        }
+      }
+
+      const resultStructure = workingSet.structures.find((s: any) => s.roiNumber === operation.structureId);
+      const resultContours = structuredClone(resultStructure?.contours ?? []);
+
+      if (operation.preview) {
+        rt.setPreviewContours(resultContours.map((contour: any) => ({
+          slicePosition: contour.slicePosition,
+          points: contour.points,
+        })));
+        return;
+      }
+
+      const finalSet = structuredClone(baseStructures);
+      let targetRoiNumber: number;
+
+      if (operation.targetStructureId === 'new') {
+        const maxRoi = Math.max(0, ...finalSet.structures.map((s: any) => Number(s.roiNumber) || 0));
+        targetRoiNumber = maxRoi + 1;
+        finalSet.structures.push({
+          roiNumber: targetRoiNumber,
+          structureName: `${sourceStructure.structureName}_margin`,
+          color: structuredClone(sourceStructure.color ?? [59, 130, 246]),
+          contours: resultContours,
+        });
+      } else {
+        targetRoiNumber = typeof operation.targetStructureId === 'number'
+          ? operation.targetStructureId
+          : operation.structureId;
+
+        const targetStructure = finalSet.structures.find((s: any) => s.roiNumber === targetRoiNumber);
+        if (!targetStructure) {
+          console.warn('[ViewerV2] Margin operation target structure missing', targetRoiNumber);
+          return;
+        }
+        targetStructure.contours = resultContours;
+      }
+
+      rt.setStructures(finalSet);
+      rt.saveHistory('margin_operation', targetRoiNumber);
+      rt.clearPreview();
+      setShowMarginToolbar(false);
+    } catch (error) {
+      console.error('[ViewerV2] Margin operation failed', error);
+    } finally {
+      if (shouldSetBusy) rt.setBusy(false);
+    }
+  };
+
   // Wrap entire composition with RTProvider so all components can access useRT()
   return (
     <>
@@ -137,6 +259,104 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
             {/* Order: Fusion first (clears), RT second (strokes) */}
             {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
             <RTOverlayLayer />
+            
+            {/* Brush Tool - Active when brush is enabled in RTProvider */}
+            <SimpleBrushTool
+              canvasRef={viewportRef}
+              isActive={rt.brush.enabled}
+              brushSize={rt.brush.size}
+              selectedStructure={rt.selection.selectedForEdit}
+              rtStructures={rt.rtStructures}
+              currentSlicePosition={viewportRef.current?.currentImage?.parsedSliceLocation ?? 0}
+              onContourUpdate={async (payload: any) => {
+                if (!payload.action || !payload.structureId) return;
+                
+                try {
+                  rt.setBusy(true);
+                  const service = createContourOperationsService();
+                  
+                  let updatedStructures = rt.rtStructures;
+                  if (payload.action === 'brush_stroke' || payload.action === 'smart_brush_stroke') {
+                    updatedStructures = await service.addBrushStroke(
+                      rt.rtStructures,
+                      payload.structureId,
+                      payload.slicePosition,
+                      payload.points
+                    );
+                  } else if (payload.action === 'erase_stroke') {
+                    updatedStructures = await service.eraseBrushStroke(
+                      rt.rtStructures,
+                      payload.structureId,
+                      payload.slicePosition,
+                      payload.points
+                    );
+                  }
+                  
+                  rt.setStructures(updatedStructures);
+                  rt.saveHistory(payload.action, payload.structureId);
+                } catch (err) {
+                  console.error('[SimpleBrushTool] Error:', err);
+                } finally {
+                  rt.setBusy(false);
+                }
+              }}
+              zoom={viewportRef.current?.zoom ?? 1}
+              panX={viewportRef.current?.panX ?? 0}
+              panY={viewportRef.current?.panY ?? 0}
+              imageMetadata={viewportRef.current?.imageMetadata ?? null}
+              isEraseMode={rt.brush.mode === 'erase'}
+              onBrushSizeChange={(size: number) => rt.setBrushSize(size)}
+              ctTransform={null}
+            />
+            
+            {/* Pen Tool - Active when pen is enabled in RTProvider */}
+            <PenToolUnifiedV2
+              isActive={rt.pen.enabled}
+              canvasRef={viewportRef}
+              imageMetadata={viewportRef.current?.imageMetadata ?? null}
+              worldToCanvas={(x: number, y: number): [number, number] => {
+                // TODO: Implement proper world-to-canvas transform using viewport zoom/pan
+                return [x, y];
+              }}
+              canvasToWorld={(x: number, y: number): [number, number] => {
+                // TODO: Implement proper canvas-to-world transform using viewport zoom/pan
+                return [x, y];
+              }}
+              rtStructures={rt.rtStructures}
+              selectedStructure={rt.selection.selectedForEdit}
+              onContourUpdate={async (action: string, payload: any) => {
+                if (!payload.structureId) return;
+                
+                try {
+                  rt.setBusy(true);
+                  const service = createContourOperationsService();
+                  
+                  let updatedStructures = rt.rtStructures;
+                  if (action === 'add_pen_stroke') {
+                    updatedStructures = await service.addPenStroke(
+                      rt.rtStructures,
+                      payload.structureId,
+                      payload.slicePosition,
+                      payload.points
+                    );
+                  } else if (action === 'cut_pen_stroke') {
+                    updatedStructures = await service.cutPenStroke(
+                      rt.rtStructures,
+                      payload.structureId,
+                      payload.slicePosition,
+                      payload.points
+                    );
+                  }
+                  
+                  rt.setStructures(updatedStructures);
+                  rt.saveHistory(action, payload.structureId);
+                } catch (err) {
+                  console.error('[PenToolUnifiedV2] Error:', err);
+                } finally {
+                  rt.setBusy(false);
+                }
+              }}
+            />
           </PrimaryViewport>
         }
         sidebar={
@@ -456,15 +676,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
               rt.saveHistory('create_structure', maxRoi + 1);
             }
           }}
-          onExecuteOperation={(operation) => {
-            console.log('[ViewerV2] Margin operation:', operation);
-            if (operation.preview) {
-              // TODO: Wire to margin preview
-            } else {
-              // TODO: Wire to margin execution
-              setShowMarginToolbar(false);
-            }
-          }}
+          onExecuteOperation={handleMarginOperation}
           onPreviewClear={() => {
             rt.clearPreview();
           }}

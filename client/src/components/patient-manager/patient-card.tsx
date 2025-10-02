@@ -701,6 +701,16 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 View
               </Button>
             </Link>
+            <Link href={`/viewer-v2?patientId=${patient.patientID}`}>
+              <Button
+                size="sm"
+                className="bg-green-600 hover:bg-green-700 text-white border border-green-500"
+                onClick={onPatientOpened}
+              >
+                <Eye className="h-4 w-4 mr-1" />
+                ViewerV2 ⚡
+              </Button>
+            </Link>
             <Link href={`/fusion-test?patientId=${patient.patientID}`}>
               <Button
                 size="sm"
