@@ -38,7 +38,8 @@ export function FusionOverlayLayer({ opacity }: Props) {
     zoom,                // Current zoom level
     panX,                // Pan X offset
     panY,                // Pan Y offset
-    windowLevel          // Current window/level
+    windowLevel,         // Current window/level
+    imageMetadata        // Image metadata (spacing, orientation, etc.)
   } = viewport;
   
   // Draw fusion overlay to overlayCanvas...
