@@ -75,7 +75,6 @@ export function FusionOverlayLayer({ opacity }: Props) {
   }, [
     fusion,
     opacity,
-    viewport.canvasRef,
     viewport.currentImage,
     viewport.currentIndex,
     viewport.zoom,
