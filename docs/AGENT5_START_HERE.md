@@ -481,10 +481,13 @@ Import the **existing legacy UI components** from `/viewer` into `/viewer-v2` an
 
 ## 🔧 Adapter Pattern Reference
 
-**Agent 3's `RTControlPanel` shows the correct pattern.** Use it as a reference for how to wire operations:
+**Agent 3's `RTControlPanelDemo.tsx` shows the correct pattern.** Use it as a reference for how to wire operations:
+
+⚠️ **Important**: `RTControlPanelDemo.tsx` is for REFERENCE ONLY (not used in production). The actual production panel (`RTControlPanel.tsx`) maintains the legacy structure list UI.
 
 ```typescript
-// Reference: client/src/rt-structures/components/RTControlPanel.tsx
+// Reference: client/src/rt-structures/components/RTControlPanelDemo.tsx
+// ⚠️ This is the DEMO file showing wiring patterns (not production)
 
 // 1. Get provider state
 const { 
@@ -564,7 +567,12 @@ return (
 - `docs/UI_MIGRATION_STRATEGY.md` - Migration strategy
 
 **Agent 3's reference code**:
-- `client/src/rt-structures/components/RTControlPanel.tsx` - **Study this!**
+- `client/src/rt-structures/components/RTControlPanelDemo.tsx` - **Study this for wiring patterns!** ⚠️
+  - Shows how to wire brush/pen/boolean controls to provider
+  - NOT used in production (demo only)
+- `client/src/rt-structures/components/RTControlPanel.tsx` - Production panel (legacy-matching)
+  - Simple structure list + visibility toggles
+  - This is what actually ships
 - `client/src/rt-structures/RTProvider.tsx` - Provider API
 - `client/src/rt-structures/services/ContourOperationsService.ts` - All operations
 
