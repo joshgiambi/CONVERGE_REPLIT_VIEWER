@@ -200,6 +200,19 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
     const [windowLevel, setWindowLevel] = useState<WindowLevel>(
       initialWindowLevel || { window: 350, level: 40 }
     );
+
+    useEffect(() => {
+      if (!initialWindowLevel) return;
+      setWindowLevel((prev) => {
+        if (
+          Math.abs(prev.window - initialWindowLevel.window) < 0.01 &&
+          Math.abs(prev.level - initialWindowLevel.level) < 0.01
+        ) {
+          return prev;
+        }
+        return { window: initialWindowLevel.window, level: initialWindowLevel.level };
+      });
+    }, [initialWindowLevel?.window, initialWindowLevel?.level]);
     const [zoom, setZoom] = useState(autoZoomLevel);
     const [panX, setPanX] = useState(0);
     const [panY, setPanY] = useState(0);

@@ -42,14 +42,29 @@ interface ViewerV2Props {
   seriesId: number;
   studyId?: number;
   initialSeriesList?: DICOMSeries[];
+  onLoadedRtSeriesChange?: (seriesId: number | null) => void;
 }
 
 // Inner component that uses both fusion and RT contexts
-function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: ViewerV2Props) {
+interface ViewerV2ContentProps {
+  patientId: string;
+  seriesId: number;
+  studyId?: number;
+  initialSeriesList?: DICOMSeries[];
+  onSeriesChange?: (series: DICOMSeries) => void;
+}
+
+function ViewerV2Content({
+  patientId,
+  seriesId,
+  studyId,
+  initialSeriesList,
+  onSeriesChange,
+}: ViewerV2ContentProps) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
   const [fusionMinimized, setFusionMinimized] = useState(false);
-  
+
   // State for floating toolbars
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
@@ -67,7 +82,6 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
 
   // State for series selector
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
-  const [currentSeriesId, setCurrentSeriesId] = useState<number>(seriesId);
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const legacyImageMetadata = useMemo(() => {
     if (!imageMetadata) return null;
@@ -81,9 +95,28 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
     };
   }, [imageMetadata]);
 
+  useEffect(() => {
+    if (!imageMetadata) return;
+    const nextLevel = Number(imageMetadata.windowCenter);
+    const nextWindow = Number(imageMetadata.windowWidth);
+    if (!Number.isFinite(nextLevel) || !Number.isFinite(nextWindow)) return;
+    setWindowLevel((prev) => {
+      if (Math.abs(prev.level - nextLevel) < 0.01 && Math.abs(prev.window - nextWindow) < 0.01) {
+        return prev;
+      }
+      return { level: nextLevel, window: nextWindow };
+    });
+  }, [imageMetadata]);
+
+  useEffect(() => {
+    setIsContourEditMode(false);
+    setShowBooleanOperations(false);
+    setShowMarginToolbar(false);
+  }, [seriesId]);
+
   // Fetch all series for the patient
   const hasInitialSeries = Array.isArray(initialSeriesList) && initialSeriesList.length > 0;
-  const { data: allSeries = hasInitialSeries ? initialSeriesList! : [], isLoading: seriesLoading } = useQuery<DICOMSeries[]>({
+  const { data: allSeries = hasInitialSeries ? initialSeriesList! : [] } = useQuery<DICOMSeries[]>({
     queryKey: ['patient-series', patientId],
     queryFn: async () => {
       const response = await fetch(`/api/patients/${patientId}/series`);
@@ -100,13 +133,13 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
 
   // Find the selected series object
   const selectedSeriesObj = useMemo(() => {
-    return allSeries.find((s: DICOMSeries) => s.id === currentSeriesId) || null;
-  }, [allSeries, currentSeriesId]);
+    return allSeries.find((s: DICOMSeries) => s.id === seriesId) || null;
+  }, [allSeries, seriesId]);
 
   // Handle series selection change
   const handleSeriesSelect = (series: DICOMSeries) => {
-    setCurrentSeriesId(series.id);
-    // TODO: Navigate to new series (would need to update URL or notify parent)
+    setImageMetadata(null);
+    onSeriesChange?.(series);
   };
 
   // Try to get fusion context - may not exist if not a CT series
@@ -310,6 +343,8 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
           ref={viewportRef}
           seriesId={seriesId}
           studyId={studyId}
+          windowLevel={windowLevel}
+          onWindowLevelChange={setWindowLevel}
           onImageMetadataChange={setImageMetadata}
         >
             {/* Order: Fusion first (clears), RT second (strokes) */}
@@ -771,18 +806,49 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
 }
 
 // Main component with conditional FusionProvider wrapper
-export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: ViewerV2Props) {
+export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLoadedRtSeriesChange }: ViewerV2Props) {
+  const [activeSeriesId, setActiveSeriesId] = useState<number>(seriesId);
+  const [activeStudyId, setActiveStudyId] = useState<number | undefined>(studyId);
+
+  useEffect(() => {
+    if (Number.isFinite(seriesId) && seriesId !== activeSeriesId) {
+      setActiveSeriesId(seriesId);
+    }
+  }, [seriesId, activeSeriesId]);
+
+  useEffect(() => {
+    if (studyId == null) {
+      if (activeStudyId !== undefined) {
+        setActiveStudyId(undefined);
+      }
+      return;
+    }
+    if (studyId !== activeStudyId) {
+      setActiveStudyId(studyId);
+    }
+  }, [studyId, activeStudyId]);
+
   // Fetch series metadata to check modality
   const { data: seriesData } = useQuery<any>({
-    queryKey: ['series-metadata', seriesId],
+    queryKey: ['series-metadata', activeSeriesId],
     queryFn: async () => {
-      const response = await fetch(`/api/series/${seriesId}`);
+      if (!Number.isFinite(activeSeriesId)) return null;
+      const response = await fetch(`/api/series/${activeSeriesId}`);
       if (!response.ok) return null;
       return response.json();
     },
-    enabled: !!seriesId,
+    enabled: Number.isFinite(activeSeriesId),
     staleTime: 5 * 60 * 1000,
   });
+
+  useEffect(() => {
+    if (seriesData?.studyId != null) {
+      const nextStudyId = Number(seriesData.studyId);
+      if (Number.isFinite(nextStudyId) && nextStudyId !== activeStudyId) {
+        setActiveStudyId(nextStudyId);
+      }
+    }
+  }, [seriesData?.studyId, activeStudyId]);
 
   // Determine if this is a CT series (required for fusion primary)
   const isCT = useMemo(() => {
@@ -791,14 +857,14 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
   }, [seriesData?.modality]);
 
   // Only compute fusion data if this is a CT series
-  const fusionPrimarySeriesId = isCT ? seriesId : null;
+  const fusionPrimarySeriesId = isCT ? activeSeriesId : null;
 
   // Fetch series selection data (includes planning CT and fusion candidates)
-  const { data: seriesSelectionData } = useSeriesSelection(studyId);
+  const { data: seriesSelectionData } = useSeriesSelection(activeStudyId);
 
   // Only fetch fusion candidates if this is a CT series (optimization)
   const { data: directFusionCandidates = [] } = useFusionCandidates(
-    isCT ? seriesId : undefined // Skip API call if not CT
+    isCT ? activeSeriesId : undefined // Skip API call if not CT
   );
 
   // Merge fusion candidates from series selection and direct API
@@ -815,22 +881,22 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
   }, [fusionPrimarySeriesId, seriesSelectionData?.fusionCandidates, directFusionCandidates]);
 
   // Fetch registration associations for this patient/study
-  const studyIds = useMemo(() => studyId ? [studyId] : undefined, [studyId]);
+  const studyIds = useMemo(() => (Number.isFinite(activeStudyId) ? [activeStudyId as number] : undefined), [activeStudyId]);
   const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
 
   // Fetch RT structure series for the study (mirrors legacy viewer flow)
   const { data: rtSeriesList = [] } = useQuery({
-    queryKey: ['study-rt-series', studyId],
+    queryKey: ['study-rt-series', activeStudyId],
     queryFn: async () => {
-      if (!Number.isFinite(studyId)) return [];
-      const res = await fetch(`/api/studies/${studyId}/rt-structures`);
+      if (!Number.isFinite(activeStudyId)) return [];
+      const res = await fetch(`/api/studies/${activeStudyId}/rt-structures`);
       if (!res.ok) {
         if (res.status === 404) return [];
         throw new Error('Failed to load RT structure list');
       }
       return res.json();
     },
-    enabled: Number.isFinite(studyId),
+    enabled: Number.isFinite(activeStudyId),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -857,11 +923,11 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
     if (!rtSeriesList?.length) return [];
     const primaryUid = seriesData?.seriesInstanceUID;
     return rtSeriesList.filter((rt: any) => {
-      const byId = Number(rt?.referencedSeriesId) === seriesId;
+      const byId = Number(rt?.referencedSeriesId) === activeSeriesId;
       const byUid = primaryUid && rt?.referencedSeriesUID === primaryUid;
       return byId || byUid;
     });
-  }, [rtSeriesList, seriesId, seriesData?.seriesInstanceUID]);
+  }, [rtSeriesList, activeSeriesId, seriesData?.seriesInstanceUID]);
 
   const selectedRtSeries = useMemo(() => {
     if (referencingRtSeries.length) {
@@ -871,6 +937,11 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
   }, [referencingRtSeries, rtSeriesList, selectMostRecent]);
 
   const selectedRtSeriesId = selectedRtSeries?.id ? Number(selectedRtSeries.id) : null;
+
+  useEffect(() => {
+    if (!onLoadedRtSeriesChange) return;
+    onLoadedRtSeriesChange(Number.isFinite(selectedRtSeriesId) ? selectedRtSeriesId : null);
+  }, [onLoadedRtSeriesChange, selectedRtSeriesId]);
 
   // Fetch RT structures for the chosen RTSTRUCT series
   const { data: rtStructures } = useQuery({
@@ -912,15 +983,27 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
     });
   }
 
+  const rtProviderKey = `rt-${activeSeriesId}-${selectedRtSeriesId ?? 'none'}`;
+
   // RTProvider wraps entire viewer composition so all components can access useRT()
   // Pass fetched RT structures as initialStructures to avoid null state issues
   const content = (
-    <RTProvider initialStructures={rtStructures ?? null}>
-      <ViewerV2Content 
+    <RTProvider key={rtProviderKey} initialStructures={rtStructures ?? null}>
+      <ViewerV2Content
         patientId={patientId}
-        seriesId={seriesId}
-        studyId={studyId}
+        seriesId={activeSeriesId}
+        studyId={activeStudyId}
         initialSeriesList={initialSeriesList}
+        onSeriesChange={(series) => {
+          const nextSeriesId = Number(series?.id);
+          if (Number.isFinite(nextSeriesId)) {
+            setActiveSeriesId(nextSeriesId);
+          }
+          const nextStudyId = Number(series?.studyId);
+          if (Number.isFinite(nextStudyId)) {
+            setActiveStudyId(nextStudyId);
+          }
+        }}
       />
     </RTProvider>
   );
