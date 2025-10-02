@@ -9,10 +9,6 @@ import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 
-import { PrimaryViewport } from './primary-viewport';
-import { FusionOverlayLayer } from './fusion-overlay-layer';
-import { RTOverlayLayer } from './rt-overlay-layer';
-
 import { MeasurementTool } from "./measurement-tool";
 import { MPRFloating } from './mpr-floating';
 import { BrushOperation } from "@shared/schema";
@@ -27,10 +23,8 @@ import {
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
 import { predictNextSliceContour } from "@/lib/contour-prediction";
-import { FusionOverlayManager, type OverlayCanvas } from "@/lib/fusion-overlay-manager";
-import { clearFusionSlices, fuseboxSliceToImageData, getFusedSlice, getFusedSliceSmart } from "@/lib/fusion-utils";
+import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
-import { useFusion } from '@/fusion/fusion-context';
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
 import { undoRedoManager } from "@/lib/undo-system";
@@ -45,6 +39,7 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import type { RegistrationAssociation, RegistrationTransformCandidate, RegistrationSeriesDetail } from '@/types/fusion';
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
@@ -55,6 +50,37 @@ type PreviewContour = {
   points: number[]; 
   slicePosition: number; 
   meta?: { margin?: number; type?: string };
+};
+
+type RegistrationOption = {
+  id: string | null;
+  label: string;
+  relationship: RegistrationAssociation['relationship'];
+  regFile: string | null;
+  matrix: number[] | null;
+  association: RegistrationAssociation;
+  candidate?: RegistrationTransformCandidate | null;
+  sourceDetail: RegistrationSeriesDetail | null;
+  targetDetail: RegistrationSeriesDetail | null;
+};
+
+const IDENTITY_MATRIX_4X4 = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+] as const;
+
+const cloneIdentityMatrix = () => Array.from(IDENTITY_MATRIX_4X4);
+
+const matricesEqual = (a: number[] | null, b: number[] | null) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (Math.abs(a[i] - b[i]) > 1e-6) return false;
+  }
+  return true;
 };
 
 // Using doPolygonsIntersectSimple from simple-polygon-operations for consistency
@@ -114,16 +140,11 @@ interface WorkingViewerProps {
     studyId?: number;
   }>;
   allowedSecondaryIds?: number[];
+  registrationAssociations?: Map<number, RegistrationAssociation[]>;
   fusionWindowLevel?: { window: number; level: number } | null;
   fusionSecondaryStatuses?: Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>;
   fusionManifestLoading?: boolean;
   fusionManifestPrimarySeriesId?: number | null;
-  fusionGetOverlayForImage?: (request: {
-    sopInstanceUID: string;
-    sliceIndex: number;
-    instanceNumber?: number | null;
-    position?: [number, number, number] | null;
-  }) => Promise<OverlayCanvas | null>;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -158,11 +179,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     imageCache,
     orientation = 'axial',
     availableSeries,
+    registrationAssociations,
     fusionWindowLevel,
     fusionSecondaryStatuses,
     fusionManifestLoading = false,
     fusionManifestPrimarySeriesId = null,
-    fusionGetOverlayForImage,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,86 +226,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Use external MPR visibility state or fallback to internal state
   const mprVisible = props.isMPRVisible ?? false;
   
-  const secondarySeriesId = fusionSelectedSecondaryId ?? externalSecondarySeriesId ?? null; // Prefer fusion context selection
+  const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
-  
-  // NEW FUSION: Simple manager-based approach
-  const fusionManagerRef = useRef<FusionOverlayManager | null>(null);
-  if (!fusionManagerRef.current) {
-    fusionManagerRef.current = new FusionOverlayManager(seriesId);
-  }
-  const fusionManager = fusionManagerRef.current;
-
-  const fusion = useFusion();
-  const {
-    selectedSecondaryId: fusionSelectedSecondaryId,
-    registrationOptions,
-    selectedRegistrationId,
-    setSelectedRegistrationId,
-    registrationMatrix,
-    registrationResolveInfo,
-    getOverlayForImage: contextGetOverlayForImage,
-  } = fusion;
-  const lastResolveInfo = registrationResolveInfo;
-
-  const requestFusionOverlay = useCallback(
-    (
-      sopInstanceUID: string,
-      sliceIndex: number,
-      instanceNumber: number | null,
-      position: [number, number, number] | null,
-    ): Promise<OverlayCanvas | null> => {
-      if (fusionGetOverlayForImage) {
-        return fusionGetOverlayForImage({
-          sopInstanceUID,
-          sliceIndex,
-          instanceNumber,
-          position,
-        });
-      }
-      if (contextGetOverlayForImage) {
-        return contextGetOverlayForImage({
-          sopInstanceUID,
-          sliceIndex,
-          instanceNumber,
-          position,
-        });
-      }
-      const manager = fusionManagerRef.current;
-      if (!manager) return Promise.resolve(null);
-      return manager.getOverlay(sopInstanceUID, sliceIndex, instanceNumber, position);
-    },
-    [contextGetOverlayForImage, fusionGetOverlayForImage],
-  );
-  
-  const [fusionTransformSource, setFusionTransformSource] = useState<string | null>(null);
-  const [fusionRegistrationId, setFusionRegistrationId] = useState<string | null>(null);
-  
-  // LEGACY STUBS: These will be removed once old code is cleaned up
-  const [secondaryModality, setSecondaryModality] = useState('PT');
+  const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
+  const registrationMatrixRef = useRef<number[] | null>(null);
+  const [secondaryModality, setSecondaryModality] = useState<string>('MR');
+  const [fuseboxTransformSource, setFuseboxTransformSource] = useState<FuseboxSlice['transformSource'] | null>(null);
+  const [selectedRegistrationId, setSelectedRegistrationId] = useState<string | null>(null);
+  const [registrationAssociationsForPrimary, setRegistrationAssociationsForPrimary] = useState<RegistrationAssociation[]>([]);
+  // Fusion debug support
+  const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const [showRegDetails, setShowRegDetails] = useState(false);
   const [regDetailsText, setRegDetailsText] = useState('');
+  const [lastResolveInfo, setLastResolveInfo] = useState<any>(null);
   const fusionIssueRef = useRef<string | null>(null);
   const missingMatrixLogRef = useRef(false);
-  const fuseboxCacheRef = useRef(new Map());
-  const ctTransform = useRef<any>(null);
-  const scheduleRenderRef = useRef<any>(null);
+  const fuseboxCacheRef = useRef<Map<string, {
+    canvas: HTMLCanvasElement;
+    slice: FuseboxSlice;
+    timestamp: number;
+    hasSignal: boolean;
+  }>>(new Map());
+  // CT transform for fusion coordinate system alignment
+  const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
+  const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
   const fusionAbortControllerRef = useRef<AbortController | null>(null);
-  const fusionPrefetchSetRef = useRef(new Set());
-  const [fusionLogs, setFusionLogs] = useState<string[]>([]);
-  const setFuseboxTransformSource = setFusionTransformSource; // Alias for compatibility
-  const fuseboxTransformSource = fusionTransformSource; // Alias for compatibility
-  const getFusionManifest = () => null; // Stub
-  
-  // Update fusion manager when secondary changes
-  useEffect(() => {
-    if (fusionManager) {
-      fusionManager.setSecondary(secondarySeriesId, secondaryModality);
-      fusionManager.clearCache(); // Clear cache on secondary change
-      clearFusionSlices(seriesId); // Clear old fusion data
-    }
-  }, [secondarySeriesId, fusionManager, secondaryModality, seriesId]);
+  const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
     if (!image) return null;
@@ -310,6 +278,118 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return null;
   }, []);
 
+  const registrationOptions = useMemo<RegistrationOption[]>(() => {
+    if (secondarySeriesId == null) {
+      console.log('registrationOptions: no secondary selected');
+      return [];
+    }
+    const secondaryId = Number(secondarySeriesId);
+    if (!Number.isFinite(secondaryId)) {
+      console.log('registrationOptions: secondary not finite', secondarySeriesId);
+      return [];
+    }
+
+    const describeSeries = (detail: RegistrationSeriesDetail | null | undefined) => {
+      if (!detail) return null;
+      const modality = detail.modality ? detail.modality.toUpperCase() : null;
+      const description = detail.description?.trim();
+      const fallbackId = detail.id != null ? `Series ${detail.id}` : null;
+      if (modality && description) return `${modality} · ${description}`;
+      if (modality) return `${modality} · ${description || fallbackId || detail.uid || 'Series'}`;
+      if (description) return description;
+      if (fallbackId) return fallbackId;
+      if (detail.uid) return detail.uid;
+      return null;
+    };
+
+    const options: RegistrationOption[] = [];
+    const seenOptionKeys = new Set<string>();
+
+    for (const assoc of registrationAssociationsForPrimary) {
+      const siblingIds = Array.isArray(assoc.siblingSeriesIds)
+        ? assoc.siblingSeriesIds.map((id: any) => Number(id)).filter(Number.isFinite)
+        : [];
+      const sourceIds = Array.isArray(assoc.sourcesSeriesIds)
+        ? assoc.sourcesSeriesIds.map((id: any) => Number(id)).filter(Number.isFinite)
+        : [];
+
+      const isShared = assoc.relationship === 'shared-frame' && siblingIds.includes(secondaryId);
+      const isRegistered = assoc.relationship === 'registered' && sourceIds.includes(secondaryId);
+      if (!isShared && !isRegistered) continue;
+
+      const sourceDetail = Array.isArray(assoc.sourceSeriesDetails)
+        ? assoc.sourceSeriesDetails.find(detail => detail?.id === secondaryId) || null
+        : null;
+      const targetDetail = assoc.targetSeriesDetail ?? null;
+      const sourceLabel = describeSeries(sourceDetail) ?? `Series ${secondaryId}`;
+      const targetLabel = describeSeries(targetDetail) ?? 'Primary CT';
+
+      if (assoc.relationship === 'shared-frame') {
+        const key = `${assoc.regFile || 'shared'}:${secondaryId}:shared`;
+        if (seenOptionKeys.has(key)) continue;
+        seenOptionKeys.add(key);
+        options.push({
+          id: null,
+          label: `Shared FoR · ${sourceLabel}`,
+          relationship: assoc.relationship,
+          regFile: assoc.regFile,
+          matrix: cloneIdentityMatrix(),
+          association: assoc,
+          candidate: null,
+          sourceDetail,
+          targetDetail,
+        });
+        continue;
+      }
+
+      const candidates = Array.isArray(assoc.transformCandidates) ? assoc.transformCandidates : [];
+      if (!candidates.length) {
+        const key = `${assoc.regFile || 'reg'}:${secondaryId}:default`;
+        if (seenOptionKeys.has(key)) continue;
+        seenOptionKeys.add(key);
+        const baseName = assoc.regFile ? assoc.regFile.split(/[\\/]/).pop() : null;
+        options.push({
+          id: null,
+          label: baseName ? `${sourceLabel} → ${targetLabel} (${baseName})` : `${sourceLabel} → ${targetLabel}`,
+          relationship: assoc.relationship,
+          regFile: assoc.regFile,
+          matrix: null,
+          association: assoc,
+          candidate: null,
+          sourceDetail,
+          targetDetail,
+        });
+        continue;
+      }
+
+      candidates.forEach((cand, idx) => {
+        if (!Array.isArray(cand.matrix) || cand.matrix.length !== 16) return;
+        const regFile = cand.regFile || assoc.regFile;
+        const suffixIndex = typeof cand.id === 'string' && cand.id.includes('::')
+          ? Number(cand.id.split('::')[1])
+          : idx;
+        const candidateNumber = Number.isFinite(suffixIndex) ? (Number(suffixIndex) + 1) : (idx + 1);
+        const candidateLabel = candidates.length > 1 ? ` (candidate ${candidateNumber})` : '';
+        const label = `${sourceLabel} → ${targetLabel}${candidateLabel}`;
+        const key = `${regFile || 'reg'}:${secondaryId}:${cand.id ?? candidateNumber}`;
+        if (seenOptionKeys.has(key)) return;
+        seenOptionKeys.add(key);
+        options.push({
+          id: cand.id ?? `${regFile || 'reg'}::${candidateNumber}`,
+          label,
+          relationship: assoc.relationship,
+          regFile: regFile ?? null,
+          matrix: cand.matrix.slice(),
+          association: assoc,
+          candidate: cand,
+          sourceDetail,
+          targetDetail,
+        });
+      });
+    }
+    console.log('registration options', { secondaryId, options, registrationAssociationsForPrimary });
+    return options;
+  }, [registrationAssociationsForPrimary, secondarySeriesId]);
 
   const buildFuseboxCacheKey = useCallback(
     (sopInstanceUID: string, secondaryId: number, registrationId: string | null) =>
@@ -325,24 +405,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       alpha: number,
     ) => {
       if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
-      
-      // CRITICAL FIX: Use proper medical image fusion blending
-      // The overlay should match the exact size and position of the base CT image
       const targetWidth = transform.imageWidth * transform.scale;
       const targetHeight = transform.imageHeight * transform.scale;
       if (targetWidth === 0 || targetHeight === 0) return;
 
+      const widthScale = targetWidth / overlayCanvas.width;
+      const heightScale = targetHeight / overlayCanvas.height;
+
       ctx.save();
-      
-      // Set proper compositing for medical fusion overlays
-      // 'lighter' blend mode adds color values, which works well for PET/CT fusion
-      ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = alpha;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      
-      // Draw overlay canvas to match the exact transform of the base CT image
-      // The overlay dimensions should match the base image dimensions, not be scaled separately
       ctx.drawImage(
         overlayCanvas,
         0,
@@ -351,10 +424,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         overlayCanvas.height,
         transform.offsetX,
         transform.offsetY,
-        targetWidth,
-        targetHeight,
+        overlayCanvas.width * widthScale,
+        overlayCanvas.height * heightScale,
       );
-      
       ctx.restore();
     },
     [],
@@ -401,7 +473,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
-      if (fusionGetOverlayForImage) return;
       if (!secondarySeriesId || !images.length) return;
       // Gate prefetch on manifest readiness to avoid 'manifest not loaded' errors
       const status = fusionSecondaryStatuses?.get(secondarySeriesId);
@@ -516,22 +587,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [seriesId]);
 
   // Aggressive prefetch when secondary series is selected
-  // Use a ref to track the latest prefetch function to avoid recreating the effect
-  const prefetchFusionSlicesRef = useRef(prefetchFusionSlices);
-  useEffect(() => {
-    prefetchFusionSlicesRef.current = prefetchFusionSlices;
-  });
-
   useEffect(() => {
     if (!secondarySeriesId || !images.length || currentIndex < 0) return;
 
     // Immediately prefetch visible slice and surrounding slices
     const timer = setTimeout(() => {
-      prefetchFusionSlicesRef.current(currentIndex);
+      prefetchFusionSlices(currentIndex);
     }, 50); // Small delay to let manifest settle
 
     return () => clearTimeout(timer);
-  }, [secondarySeriesId, currentIndex, images.length]); // Removed prefetchFusionSlices from deps to prevent infinite loop
+  }, [secondarySeriesId, currentIndex, images.length, prefetchFusionSlices]);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -609,8 +674,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const openFusionDebug = useCallback((reason: string) => {
     fusionIssueRef.current = reason;
     const txt = compileFusionDebug();
-    // Debug UI removed - log to console instead
-    console.log('🔍 Fusion Debug:', reason, '\n', txt);
+    setFusionDebugText(txt);
+    setShowFusionDebug(true);
   }, [compileFusionDebug]);
 
   const openRegDetails = useCallback(async () => {
@@ -3154,16 +3219,137 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     loadImages();
   }, [seriesId]);
 
+  useEffect(() => {
+    if (!registrationAssociations) {
+      setRegistrationAssociationsForPrimary([]);
+      return;
+    }
+    const list = registrationAssociations.get(seriesId) || [];
+    console.log('registration associations for primary', { seriesId, list });
+    setRegistrationAssociationsForPrimary(list);
+  }, [registrationAssociations, seriesId]);
+
+  useEffect(() => {
+    if (secondarySeriesId == null) {
+      setSelectedRegistrationId(null);
+      return;
+    }
+    if (!registrationOptions.length) {
+      setSelectedRegistrationId(null);
+      return;
+    }
+    const hasSelected = registrationOptions.some(opt => (opt.id ?? null) === (selectedRegistrationId ?? null));
+    if (!hasSelected) {
+      setSelectedRegistrationId(registrationOptions[0].id ?? null);
+    }
+  }, [secondarySeriesId, registrationOptions, selectedRegistrationId]);
+
+  // Apply registration matrix derived from association graph instead of resolve endpoint
+  useEffect(() => {
+    if (!seriesId || secondarySeriesId == null) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 204,
+        ok: false,
+        data: {
+          reason: !seriesId ? 'missing-primary-series' : 'missing-secondary-series',
+          primarySeriesId: seriesId ?? null,
+          secondarySeriesId: secondarySeriesId ?? null,
+        },
+      });
+      return;
+    }
+
+    if (!registrationOptions.length) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 404,
+        ok: false,
+        data: {
+          reason: 'no-registration-options',
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+        },
+      });
+      return;
+    }
+
+    const selectedOption = registrationOptions.find(opt => (opt.id ?? null) === (selectedRegistrationId ?? null))
+      ?? registrationOptions[0];
+
+    if (!selectedOption) {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 404,
+        ok: false,
+        data: {
+          reason: 'registration-option-not-found',
+          primarySeriesId: seriesId,
+          secondarySeriesId,
+          registrationId: selectedRegistrationId ?? null,
+        },
+      });
+      return;
+    }
+
+    const derivedMatrix = Array.isArray(selectedOption.matrix) && selectedOption.matrix.length === 16
+      ? selectedOption.matrix.slice()
+      : (selectedOption.relationship === 'shared-frame' ? cloneIdentityMatrix() : null);
+
+    if (derivedMatrix) {
+      if (!matricesEqual(registrationMatrixRef.current, derivedMatrix)) {
+        registrationMatrixRef.current = derivedMatrix;
+        setRegistrationMatrix(derivedMatrix);
+      } else if (registrationMatrixRef.current === null) {
+        registrationMatrixRef.current = derivedMatrix;
+        setRegistrationMatrix(derivedMatrix);
+      }
+      setLastResolveInfo({
+        status: 200,
+        ok: true,
+        data: {
+          source: 'associations',
+          registrationId: selectedOption.id ?? null,
+          relationship: selectedOption.relationship,
+          regFile: selectedOption.regFile ?? null,
+          targetSeriesId: selectedOption.association?.targetSeriesId ?? null,
+          sourceSeriesIds: selectedOption.association?.sourcesSeriesIds ?? [],
+        },
+      });
+    } else {
+      if (registrationMatrixRef.current !== null) {
+        registrationMatrixRef.current = null;
+        setRegistrationMatrix(null);
+      }
+      setLastResolveInfo({
+        status: 422,
+        ok: false,
+        data: {
+          source: 'associations',
+          registrationId: selectedOption.id ?? null,
+          relationship: selectedOption.relationship,
+          reason: 'missing-matrix',
+        },
+      });
+    }
+  }, [seriesId, secondarySeriesId, registrationOptions, selectedRegistrationId]);
+  
   // Re-render fusion overlay when registration matrix updates
   useEffect(() => {
     fuseboxCacheRef.current.clear();
     clearFusionSlices(seriesId);
     setFuseboxTransformSource(null);
-    // NOTE: Removed selectedRegistrationId from deps to prevent infinite loop
-    // selectedRegistrationId is set BY renderFusionOverlayNew, so including it creates circular dependency
-    // Cache should only clear when external registration changes (matrix/secondary/series), not when
-    // the fusion rendering discovers which registration to use
-  }, [registrationMatrix, secondarySeriesId, seriesId]);
+    scheduleRender();
+  }, [registrationMatrix, secondarySeriesId, selectedRegistrationId, scheduleRender, seriesId]);
 
   useEffect(() => {
     if (!secondarySeriesId) {
@@ -3210,8 +3396,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   useEffect(() => {
     if (images.length > 0 && !isPreloading) {
-      console.log(`🔄 INDEX CHANGED: currentIndex=${currentIndex} sopUID=${images[currentIndex]?.sopInstanceUID?.slice(-10)} fusion=${secondarySeriesId ? 'ON' : 'OFF'}`);
-      
       // Immediate rendering for smooth scrolling - this is critical for DICOM viewer performance
       scheduleRender();
       
@@ -4132,7 +4316,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Ensure currentIndex is valid
         const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
         currentImage = images[safeIndex];
-        console.log(`🎨 DISPLAY IMAGE: index=${safeIndex} sopUID=${currentImage?.sopInstanceUID?.slice(-10)} fusion=${secondarySeriesId ? 'ON' : 'OFF'}`);
       } else {
         // For sagittal/coronal, use MPR reconstruction
         const mprSlice = await getMPRSlice(orientation, currentIndex);
@@ -4195,33 +4378,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Always use CPU rendering for now - GPU integration needs more work
       render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
-      // NEW FUSION: Simple overlay compositing
-      if (secondarySeriesId && fusionOpacity > 0) {
-        const primaryPosition = parseImagePosition(currentImage);
-        const instNumber = Number(currentImage.instanceNumber ?? currentImage.metadata?.instanceNumber ?? NaN);
-        const requestToken = ++fusionRequestTokenRef.current;
-
-        requestFusionOverlay(
-          currentImage.sopInstanceUID,
-          currentIndex,
-          Number.isFinite(instNumber) ? instNumber : null,
-          primaryPosition,
-        )
-          .then((overlay) => {
-            if (fusionRequestTokenRef.current !== requestToken) return;
-            if (overlay && overlay.hasSignal) {
-              ctx.save();
-              ctx.globalAlpha = fusionOpacity;
-              ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
-              ctx.restore();
-              setFusionTransformSource(overlay.transformSource);
-              setFusionRegistrationId(overlay.registrationId);
-            }
-          })
-          .catch((err) => {
-            if (fusionRequestTokenRef.current !== requestToken) return;
-            console.warn('Fusion overlay failed:', err);
-          });
+      // Render secondary image overlay for fusion if available
+      if (secondarySeriesId) {
+        // Fusion overlay rendering
+        try {
+          await renderFusionOverlayNew(ctx, currentImage);
+        } catch (fusionError: any) {
+          console.error("🐟 FUSION: ERROR in renderFusionOverlayNew:", fusionError);
+          // Continue without fusion rather than failing entire image display
+        }
+      } else {
+        console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
       // Render RT structure overlays if available
@@ -4456,8 +4623,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     return () => window.clearInterval(interval);
   }, []);
 
-  // REMOVED: This was causing infinite loops - prefetching is now handled
-  // automatically by the ref-based useEffect earlier in the component
+  useEffect(() => {
+    if (!secondarySeriesId) return;
+    prefetchFusionSlices(currentIndex);
+  }, [secondarySeriesId, selectedRegistrationId, currentIndex, prefetchFusionSlices]);
 
   useEffect(() => {
     if (secondarySeriesId) return;
@@ -4584,15 +4753,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             max: slice.max,
           });
         }
-      } catch (error: any) {
-        fuseboxCacheRef.current.delete(cacheKey);
-        if ((error as any)?.name === 'FusionOutOfRangeError') {
-          if (ensureActive()) {
-            fusionIssueRef.current = 'fusion-out-of-range';
-            setFuseboxTransformSource(null);
-          }
-          return;
-        }
+      } catch (error) {
         if (ensureActive()) {
           console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';
@@ -5000,10 +5161,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const goToPrevious = () => {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0 && prevIndex < images.length) {
-      console.log(`📍 Navigate PREVIOUS: ${currentIndex} → ${prevIndex} (fusion=${secondarySeriesId ? 'ON' : 'OFF'})`);
+      console.log(`📍 Navigate: ${currentIndex} → ${prevIndex}`);
       setCurrentIndex(prevIndex);
-    } else {
-      console.log(`📍 Navigate PREVIOUS BLOCKED: already at ${currentIndex}`);
     }
   };
 
@@ -5021,10 +5180,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Add protection against unexpected navigation
     const nextIndex = currentIndex + 1;
     if (nextIndex < maxSlices && nextIndex >= 0) {
-      console.log(`📍 Navigate NEXT: ${currentIndex} → ${nextIndex} (max: ${maxSlices}, fusion=${secondarySeriesId ? 'ON' : 'OFF'})`);
+      console.log(`📍 Navigate: ${currentIndex} → ${nextIndex} (max: ${maxSlices})`);
       setCurrentIndex(nextIndex);
-    } else {
-      console.log(`📍 Navigate NEXT BLOCKED: at ${currentIndex}, max=${maxSlices}`);
     }
   };
 
@@ -5261,15 +5418,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     e.preventDefault();
     e.stopPropagation();
 
-    // Visual debug indicator
-    if (secondarySeriesId) {
-      const indicator = document.createElement('div');
-      indicator.textContent = `🖱️ WHEEL EVENT RECEIVED! Delta: ${e.deltaY}`;
-      indicator.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,0,0,0.9); color: white; padding: 20px; border-radius: 10px; z-index: 99999; font-size: 24px; font-weight: bold;';
-      document.body.appendChild(indicator);
-      setTimeout(() => indicator.remove(), 500);
-    }
-
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+scroll for zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -5277,7 +5425,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`🔍 Zoom: ${e.deltaY > 0 ? 'out' : 'in'} (factor: ${zoomFactor})`);
     } else {
       // Regular scroll for slice navigation
-      console.log(`🖱️ SCROLL EVENT: deltaY=${e.deltaY} currentIndex=${currentIndex} fusion=${secondarySeriesId ? 'YES' : 'NO'} opacity=${fusionOpacity}`);
+      console.log(`🖱️ Scroll: deltaY=${e.deltaY} currentIndex=${currentIndex}`);
       if (e.deltaY > 0) {
         goToNext();
       } else {
@@ -5648,11 +5796,33 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 )}
               </>
             )}
-            <FusionOverlayLayer
-              secondarySeriesId={secondarySeriesId}
-              modality={secondaryModality}
-              opacity={fusionOpacity}
-            />
+            {secondarySeriesId && (
+              <Badge className={`flex items-center gap-1 border backdrop-blur-sm ${
+                secondaryModality === 'PT' 
+                  ? 'bg-yellow-900/40 text-yellow-200 border-yellow-600/30' 
+                  : secondaryModality === 'CT'
+                  ? 'bg-blue-900/40 text-blue-200 border-blue-600/30'
+                  : 'bg-purple-900/40 text-purple-200 border-purple-600/30'
+              }`}>
+                <div className={`w-2 h-2 rounded-full animate-pulse ${
+                  secondaryModality === 'PT' 
+                    ? 'bg-yellow-400' 
+                    : secondaryModality === 'CT'
+                    ? 'bg-blue-400'
+                    : 'bg-purple-400'
+                }`} />
+                {secondaryModality === 'PT' ? 'PT' : secondaryModality === 'CT' ? 'CT' : 'MR'} Fusion
+                <span className={
+                  secondaryModality === 'PT'
+                    ? 'text-yellow-300'
+                    : secondaryModality === 'CT'
+                    ? 'text-blue-300'
+                    : 'text-purple-300'
+                }>
+                  ({Math.round(fusionOpacity * 100)}%)
+                </span>
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center space-x-2">
@@ -5739,42 +5909,42 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
-        </PrimaryViewport>
+          </div>
+        </div>
       </div>
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
-        <PrimaryViewport
-          canvasRef={canvasRef}
-          canvasProps={{
-            width: 1280,
-            height: 1280,
-            onMouseDown: handleCanvasMouseDown,
-            onMouseMove: (e) => {
+        <div className="relative w-full h-full flex items-center justify-center">
+          <canvas
+            ref={canvasRef}
+            width={1280}
+            height={1280}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={(e) => {
               handleCanvasMouseMove(e);
               // Crosshair position is only updated on click in crosshair mode
               // Not on mouse move
-            },
-            onMouseUp: handleCanvasMouseUp,
-            onWheel: (e) => {
+            }}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={(e) => {
               // Always handle wheel events for scrolling, even when pen tool is active
               handleCanvasWheel(e);
-            },
-            onContextMenu: (e) => e.preventDefault(),
-            className: `max-w-full max-h-full object-contain rounded ${
-              brushToolState?.isActive && brushToolState?.tool === 'brush'
-                ? 'cursor-none'
-                : brushToolState?.isActive && (brushToolState?.tool === 'pen' || brushToolState?.tool === 'pen-original')
-                  ? ''
-                  : 'cursor-move'
-            }`,
-            style: {
-              backgroundColor: 'black',
-              imageRendering: 'auto',
-              userSelect: 'none',
-            },
-          }}
-        >
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? "cursor-none"
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                ? ""
+                : "cursor-move"
+            }`}
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
+            }}
+          />
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&

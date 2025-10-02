@@ -1,3 +1,43 @@
+export type RTPoint3D = [number, number, number];
+
+export interface RTContour {
+  slicePosition: number; // patient-space Z or position along image orientation in mm
+  numberOfPoints: number;
+  points: number[]; // flat array [x,y,z,x,y,z,...] in patient space (mm)
+}
+
+export interface RTStructure {
+  roiNumber: number;
+  structureName: string;
+  color: [number, number, number];
+  contours: RTContour[];
+}
+
+export interface RTStructureSet {
+  seriesId?: number;
+  frameOfReferenceUID?: string | null;
+  structures: RTStructure[];
+}
+
+export interface RTSelectionState {
+  selectedStructureIds: Set<number>;
+  selectedForEdit: number | null;
+  visibility: Map<number, boolean>; // roiNumber -> visible
+  allStructuresVisible: boolean;
+}
+
+export interface RTUpdatePayload {
+  rtStructures: RTStructureSet;
+  reason:
+    | 'boolean_operation'
+    | 'apply_margin'
+    | 'preview_margin'
+    | 'grow_contour'
+    | 'edit_contour'
+    | 'color_change'
+    | 'visibility_change';
+}
+
 /**
  * RT Structure Type Definitions
  * 

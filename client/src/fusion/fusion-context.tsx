@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import type { ReactNode } from 'react';
 import { FusionOverlayManager, type OverlayCanvas } from '@/lib/fusion-overlay-manager';
 import { fetchFusionManifest, preloadFusionSecondary } from '@/lib/fusion-utils';
-import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
+import type { FusionManifest, FusionSecondaryDescriptor, RegistrationAssociation, RegistrationOption } from '@/types/fusion';
+import { useRegistrationOptions, type RegistrationResolveInfo } from './hooks/useRegistrationOptions';
 
 export type SecondaryState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
@@ -189,6 +190,7 @@ function getDefaultWindowForModality(modality?: string | null): { window: number
 interface FusionProviderProps {
   primarySeriesId: number | null;
   candidateSecondaryIds: number[];
+  registrationAssociations?: Map<number, RegistrationAssociation[]>;
   children: ReactNode;
 }
 
@@ -209,12 +211,17 @@ interface FusionContextValue {
   showFusionPanel: boolean;
   refreshManifest: (force?: boolean) => Promise<void>;
   getOverlayForImage: (request: FusionOverlayRequest) => Promise<OverlayCanvas | null>;
+  registrationOptions: RegistrationOption[];
+  selectedRegistrationId: string | null;
+  setSelectedRegistrationId: (id: string | null) => void;
+  registrationMatrix: number[] | null;
+  registrationResolveInfo: RegistrationResolveInfo | null;
   isPolling: boolean;
 }
 
 const FusionContext = createContext<FusionContextValue | undefined>(undefined);
 
-export function FusionProvider({ primarySeriesId, candidateSecondaryIds, children }: FusionProviderProps) {
+export function FusionProvider({ primarySeriesId, candidateSecondaryIds, registrationAssociations, children }: FusionProviderProps) {
   const [state, dispatch] = useReducer(fusionReducer, initialState);
   const overlayManagerRef = useRef<FusionOverlayManager | null>(null);
   const requestTokenRef = useRef(0);
@@ -234,6 +241,18 @@ export function FusionProvider({ primarySeriesId, candidateSecondaryIds, childre
 
   const secondaries = state.manifest?.secondaries ?? [];
   const manifestRef = useRef<FusionManifest | null>(state.manifest);
+
+  const {
+    registrationOptions,
+    selectedRegistrationId,
+    setSelectedRegistrationId,
+    registrationMatrix,
+    registrationResolveInfo,
+  } = useRegistrationOptions({
+    primarySeriesId: state.primarySeriesId,
+    secondarySeriesId: state.selectedSecondaryId,
+    registrationAssociations,
+  });
 
   useEffect(() => {
     secondaryMapRef.current = state.secondaryMap;
@@ -545,6 +564,11 @@ export function FusionProvider({ primarySeriesId, candidateSecondaryIds, childre
     showFusionPanel,
     refreshManifest,
     getOverlayForImage,
+    registrationOptions,
+    selectedRegistrationId,
+    setSelectedRegistrationId,
+    registrationMatrix,
+    registrationResolveInfo,
     isPolling: state.isPolling,
   }), [
     getOverlayForImage,
@@ -563,6 +587,11 @@ export function FusionProvider({ primarySeriesId, candidateSecondaryIds, childre
     state.primarySeriesId,
     state.secondaryMap,
     state.selectedSecondaryId,
+    registrationMatrix,
+    registrationOptions,
+    registrationResolveInfo,
+    selectedRegistrationId,
+    setSelectedRegistrationId,
     state.isPolling,
   ]);
 

@@ -5,10 +5,322 @@
 
 ## Executive Summary
 
-- **viewer-interface.tsx**: 2,270 lines, ~45 major functions
-- **working-viewer.tsx**: 6,419 lines, ~120+ functions
-- **Total complexity**: ~8,700 lines to refactor
-- **Strategy**: Parallel implementation → gradual migration → deprecation
+- **viewer-interface.tsx**: 2,339 lines (1,982 actual code, 85% density), ~45 major functions
+- **working-viewer.tsx**: 3,318 lines (2,580 actual code, 78% density), ~120+ functions
+- **Total actual code**: ~4,560 lines to refactor (not including comments/blank lines)
+- **Strategy**: Parallel implementation with 5 agents → 24-hour execution → gradual migration
+- **Timeline**: 24 hours with 5-agent parallel execution
+
+---
+
+## 24-Hour Parallel Execution Plan (5 Agents)
+
+### Agent Assignment & Responsibilities
+
+**Critical Success Factors**:
+- Clear boundaries - no file conflicts
+- Each agent owns distinct files/directories
+- Shared interfaces defined upfront
+- Continuous integration every 4 hours
+- Test after each integration
+
+### Hour 0: Setup & Interface Definition (All Agents)
+
+**All agents collaborate for first 2 hours to establish contracts:**
+
+1. **Define TypeScript interfaces** (30 minutes)
+   - Create `types/viewer.ts` - All shared types
+   - Create `types/fusion.ts` - Fusion-specific types
+   - Create `types/rt-structures.ts` - RT-specific types
+   - Commit to main
+
+2. **Define hook signatures** (30 minutes)
+   - Document all hook return types
+   - Document all hook parameters
+   - Commit to main
+
+3. **Define component props** (30 minutes)
+   - All component interfaces
+   - Event handler signatures
+   - Commit to main
+
+4. **Setup parallel branches** (30 minutes)
+   - Agent 1: `feature/viewer-core`
+   - Agent 2: `feature/fusion-layer`
+   - Agent 3: `feature/rt-structures`
+   - Agent 4: `feature/services-hooks`
+   - Agent 5: `feature/integration-testing`
+
+---
+
+### Agent 1: Viewer Core (PrimaryViewport + Controls)
+**Branch**: `feature/viewer-core`
+**Est. Lines**: ~1,200 lines
+**Timeline**: 0-20 hours
+
+| Hours | Task | Lines | Files Created |
+|-------|------|-------|---------------|
+| 0-2 | Interface definition (shared) | - | types/viewer.ts |
+| 2-6 | Build PrimaryViewport shell | 400 | components/viewer/PrimaryViewport.tsx |
+| 6-10 | Add canvas rendering + zoom/pan | 300 | (continue PrimaryViewport) |
+| 10-14 | Build ViewportControls | 300 | components/viewer/ViewportControls.tsx |
+| 14-18 | Mouse interaction handlers | 200 | hooks/useViewportInteractions.ts |
+| 18-20 | Integration with Agent 4's hooks | - | - |
+| 20 | CHECKPOINT: Merge to main | - | - |
+
+**Deliverables**:
+- ✅ `components/viewer/PrimaryViewport.tsx` - Canvas rendering, zoom, pan, windowing
+- ✅ `components/viewer/ViewportControls.tsx` - Toolbar controls
+- ✅ `hooks/useViewportInteractions.ts` - Mouse/keyboard events
+- ✅ Basic CT viewing works (no fusion, no RT)
+
+**Dependencies**: 
+- Consumes: `useDICOMImages` from Agent 4
+- Provides: Canvas ref for Agent 2 & 3
+
+---
+
+### Agent 2: Fusion Layer (Overlays + Registration)
+**Branch**: `feature/fusion-layer`
+**Est. Lines**: ~1,000 lines
+**Timeline**: 2-20 hours (starts after interfaces defined)
+
+| Hours | Task | Lines | Files Created |
+|-------|------|-------|---------------|
+| 0-2 | Interface definition (shared) | - | types/fusion.ts |
+| 2-6 | Extract useFusionCandidates | 400 | fusion/hooks/useFusionCandidates.ts |
+| 6-10 | Extract useRegistrationOptions | 150 | fusion/hooks/useRegistrationOptions.ts |
+| 10-14 | Build FusionOverlayLayer | 350 | fusion/components/FusionOverlayLayer.tsx |
+| 14-16 | Build useFusionDebug | 100 | fusion/hooks/useFusionDebug.ts |
+| 16-18 | Integration with Agent 1's canvas | - | - |
+| 18-20 | Test PET/CT fusion | - | - |
+| 20 | CHECKPOINT: Merge to main | - | - |
+
+**Deliverables**:
+- ✅ `fusion/hooks/useFusionCandidates.ts` - Complex graph traversal logic
+- ✅ `fusion/hooks/useRegistrationOptions.ts` - Registration option building
+- ✅ `fusion/components/FusionOverlayLayer.tsx` - Overlay rendering + cache
+- ✅ `fusion/hooks/useFusionDebug.ts` - Debug tooling
+- ✅ PET/CT fusion works
+
+**Dependencies**:
+- Consumes: Canvas ref from Agent 1
+- Consumes: `DICOMMetadataService` from Agent 4
+- Provides: Overlay rendering for Agent 1
+
+**CRITICAL PATH**: useFusionCandidates is 400 lines of complex logic - highest risk
+
+---
+
+### Agent 3: RT Structures (Contours + Operations)
+**Branch**: `feature/rt-structures`
+**Est. Lines**: ~1,400 lines
+**Timeline**: 2-22 hours (starts after interfaces defined)
+
+| Hours | Task | Lines | Files Created |
+|-------|------|-------|---------------|
+| 0-2 | Interface definition (shared) | - | types/rt-structures.ts |
+| 2-6 | Build RTProvider | 400 | rt-structures/RTProvider.tsx |
+| 6-10 | Build RTOverlayLayer | 500 | rt-structures/components/RTOverlayLayer.tsx |
+| 10-14 | Extract ContourOperationsService | 300 | rt-structures/services/ContourOperationsService.ts |
+| 14-17 | Build RTControlPanel | 200 | rt-structures/components/RTControlPanel.tsx |
+| 17-20 | Integration with Agent 1's canvas | - | - |
+| 20-22 | Test RT structure loading + editing | - | - |
+| 22 | CHECKPOINT: Merge to main | - | - |
+
+**Deliverables**:
+- ✅ `rt-structures/RTProvider.tsx` - RT state management
+- ✅ `rt-structures/components/RTOverlayLayer.tsx` - Contour rendering
+- ✅ `rt-structures/services/ContourOperationsService.ts` - Boolean ops, margins, grow/shrink
+- ✅ `rt-structures/components/RTControlPanel.tsx` - Structure selection UI
+- ✅ RT structure viewing and editing works
+
+**Dependencies**:
+- Consumes: Canvas ref from Agent 1
+- Consumes: `VolumeService` from Agent 4
+- Provides: RT rendering for Agent 1
+
+---
+
+### Agent 4: Services & Hooks (Foundation)
+**Branch**: `feature/services-hooks`
+**Est. Lines**: ~1,200 lines
+**Timeline**: 0-18 hours (MUST complete early - others depend on this)
+
+| Hours | Task | Lines | Files Created |
+|-------|------|-------|---------------|
+| 0-2 | Interface definition (shared) | - | types/viewer.ts |
+| 2-5 | Build DICOMMetadataService | 200 | services/DICOMMetadataService.ts |
+| 5-8 | Build useDICOMImages hook | 250 | hooks/useDICOMImages.ts |
+| 8-10 | Build SeriesFilterService | 100 | services/SeriesFilterService.ts |
+| 10-12 | Build useSeriesData hook | 150 | hooks/useSeriesData.ts |
+| 12-14 | Build VolumeService | 300 | services/VolumeService.ts |
+| 14-16 | Build useViewportTools hook | 200 | hooks/useViewportTools.ts |
+| 16-18 | CHECKPOINT: Make available to other agents | - | - |
+
+**Deliverables**:
+- ✅ `services/DICOMMetadataService.ts` - Parse DICOM metadata
+- ✅ `services/SeriesFilterService.ts` - Filter derived series
+- ✅ `services/VolumeService.ts` - 3D volume processing
+- ✅ `hooks/useDICOMImages.ts` - Load images via worker
+- ✅ `hooks/useSeriesData.ts` - Fetch series data
+- ✅ `hooks/useViewportTools.ts` - Tool state management
+
+**Dependencies**: NONE (foundation layer)
+**Critical**: Agents 1, 2, 3 are blocked until hour 18
+
+---
+
+### Agent 5: Integration & Testing (Orchestration)
+**Branch**: `feature/integration-testing`
+**Est. Lines**: ~600 lines
+**Timeline**: 6-24 hours (starts later, works through night)
+
+| Hours | Task | Lines | Files Created |
+|-------|------|-------|---------------|
+| 6-10 | Build ViewerShell layout | 200 | components/viewer/ViewerShell.tsx |
+| 10-14 | Build ViewerV2 entry point | 300 | components/viewer/ViewerV2.tsx |
+| 14-16 | Add /viewer-v2 route | 50 | App.tsx (update routing) |
+| 16-18 | Create test fixtures | 50 | tests/fixtures/* |
+| 18-20 | Wait for Agent 1-4 checkpoints | - | - |
+| 20-22 | Integration: Merge Agent 1 + 4 | - | Test CT viewing |
+| 22-23 | Integration: Merge Agent 2 | - | Test PET/CT fusion |
+| 23-24 | Integration: Merge Agent 3 | - | Test RT structures |
+| 24 | FINAL: Deploy to /viewer-v2 | - | - |
+
+**Deliverables**:
+- ✅ `components/viewer/ViewerShell.tsx` - Layout wrapper
+- ✅ `components/viewer/ViewerV2.tsx` - Main entry point
+- ✅ `/viewer-v2/:patientId/:seriesId` route
+- ✅ Integration tests pass
+- ✅ Working viewer accessible at new route
+
+**Dependencies**: ALL other agents
+**Role**: Orchestrator - assembles all pieces
+
+---
+
+## Critical Path Analysis
+
+**Timeline Dependencies**:
+```
+Hour 0-2:  All agents → Interface definition
+Hour 2-18: Agent 4 → Foundation (BLOCKING)
+Hour 6-20: Agent 1 → Viewer Core (needs Agent 4 @ hour 18)
+Hour 2-20: Agent 2 → Fusion (needs Agent 4 @ hour 18)
+Hour 2-22: Agent 3 → RT (needs Agent 4 @ hour 18)
+Hour 6-24: Agent 5 → Integration (needs all @ hour 20-22)
+```
+
+**Critical Path**: Agent 4 → Agent 1/2/3 → Agent 5
+
+**Bottleneck**: Hour 18 when Agent 1, 2, 3 need Agent 4's deliverables
+
+---
+
+## Integration Checkpoints
+
+### Checkpoint 1: Hour 18 (Agent 4 Complete)
+**Action**: Agent 4 merges foundation layer to main
+**Tests**:
+- [ ] All services export correctly
+- [ ] All hooks export correctly
+- [ ] TypeScript compiles
+- [ ] No runtime errors
+
+**Unblocks**: Agents 1, 2, 3 can now integrate
+
+---
+
+### Checkpoint 2: Hour 20 (Agent 1 Complete)
+**Action**: Agent 1 merges viewer core to main
+**Tests**:
+- [ ] Basic CT viewing works
+- [ ] Zoom/pan works
+- [ ] Window/level works
+- [ ] Canvas renders correctly
+
+**Unblocks**: Agent 5 can start integration
+
+---
+
+### Checkpoint 3: Hour 20 (Agent 2 Complete)
+**Action**: Agent 2 merges fusion layer to main
+**Tests**:
+- [ ] Fusion candidates resolve correctly
+- [ ] Registration options build correctly
+- [ ] Overlay rendering works
+- [ ] PET/CT fusion displays
+
+**Unblocks**: Agent 5 can integrate fusion
+
+---
+
+### Checkpoint 4: Hour 22 (Agent 3 Complete)
+**Action**: Agent 3 merges RT structures to main
+**Tests**:
+- [ ] RT structures load
+- [ ] Contours render correctly
+- [ ] Structure selection works
+- [ ] Editing operations work
+
+**Unblocks**: Agent 5 can complete integration
+
+---
+
+### Final Checkpoint: Hour 24 (Agent 5 Complete)
+**Action**: Full integration deployed to /viewer-v2
+**Tests**:
+- [ ] CT viewing works
+- [ ] PET/CT fusion works
+- [ ] RT structures work
+- [ ] All interactions work
+- [ ] Performance acceptable
+
+**Deliverable**: Working viewer at `/viewer-v2/:patientId/:seriesId`
+
+---
+
+## Risk Mitigation
+
+### High-Risk Tasks
+1. **useFusionCandidates (Agent 2)**: 400 lines of complex graph traversal
+   - **Mitigation**: Extract logic piece by piece, test each step
+   - **Fallback**: Use simplified candidate matching if needed
+
+2. **ContourOperationsService (Agent 3)**: 300 lines of geometry operations
+   - **Mitigation**: Reuse existing functions from lib/
+   - **Fallback**: Import old functions as-is initially
+
+3. **Agent 4 blocking others**: Foundation must complete by hour 18
+   - **Mitigation**: Agent 4 works fastest path, publishes early
+   - **Fallback**: Others mock interfaces if Agent 4 delayed
+
+### Conflict Resolution
+- **File conflicts**: Each agent owns distinct directories
+- **Type conflicts**: All interfaces defined hour 0-2
+- **Integration conflicts**: Checkpoints every 2-4 hours
+
+### Communication Protocol
+- **Hour 0-2**: All in same chat - define interfaces
+- **Hour 2-18**: Async work, check-in every 4 hours
+- **Hour 18-24**: Real-time coordination for integration
+
+---
+
+## Work Distribution Summary
+
+| Agent | Focus Area | Lines | Critical? | Dependencies |
+|-------|-----------|-------|-----------|--------------|
+| **Agent 1** | Viewer Core | 1,200 | HIGH | Agent 4 |
+| **Agent 2** | Fusion Layer | 1,000 | CRITICAL | Agent 4, Agent 1 |
+| **Agent 3** | RT Structures | 1,400 | HIGH | Agent 4, Agent 1 |
+| **Agent 4** | Services/Hooks | 1,200 | CRITICAL | None (foundation) |
+| **Agent 5** | Integration | 600 | MEDIUM | All others |
+| **Total** | | ~5,400 | | |
+
+**Parallel Efficiency**: 5 agents × 24 hours = 120 agent-hours
+**Sequential**: Would take ~12 days (96 hours) for 1 person
 
 ---
 

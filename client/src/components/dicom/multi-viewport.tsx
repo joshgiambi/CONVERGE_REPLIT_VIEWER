@@ -5,6 +5,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { useViewportGrid, Viewport } from '@/lib/viewport-grid-service';
 import { WorkingViewer } from './working-viewer';
 import { Button } from '@/components/ui/button';
+import { FusionProvider } from '@/fusion/fusion-context';
 import { 
   Maximize2, 
   Grid3X3, 
@@ -109,19 +110,21 @@ const MultiViewport: React.FC<MultiViewportProps> = ({
       >
         {viewport.seriesInstanceUID ? (
           <div className="relative w-full h-full">
-            <WorkingViewer
-              studyId={studyId}
-              seriesId={parseInt(viewport.seriesInstanceUID)}
-              rtStructures={rtStructures}
-              onContourUpdate={onRTStructureUpdate}
-              allStructuresVisible={allStructuresVisible}
-              imageCache={imageCache}
-              orientation={
-                viewport.type === 'MPR_SAGITTAL' ? 'sagittal' :
-                viewport.type === 'MPR_CORONAL' ? 'coronal' : 
-                'axial'
-              }
-            />
+            <FusionProvider primarySeriesId={null} candidateSecondaryIds={[]}>
+              <WorkingViewer
+                studyId={studyId}
+                seriesId={parseInt(viewport.seriesInstanceUID)}
+                rtStructures={rtStructures}
+                onContourUpdate={onRTStructureUpdate}
+                allStructuresVisible={allStructuresVisible}
+                imageCache={imageCache}
+                orientation={
+                  viewport.type === 'MPR_SAGITTAL' ? 'sagittal' :
+                  viewport.type === 'MPR_CORONAL' ? 'coronal' : 
+                  'axial'
+                }
+              />
+            </FusionProvider>
             
             {/* Viewport overlay info */}
             <div className="absolute top-2 left-2 text-white text-xs bg-black/50 px-2 py-1 rounded">
