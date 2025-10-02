@@ -158,6 +158,10 @@ export function useViewport() {
   return ctx;
 }
 
+export function useOptionalViewport() {
+  return useContext(ViewportContext);
+}
+
 export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function PrimaryViewport(props, ref) {
   const {
     seriesId,

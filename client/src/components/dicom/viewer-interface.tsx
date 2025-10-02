@@ -12,7 +12,7 @@ import { useFusionPanelState } from '@/fusion/hooks/useFusionPanel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
-import { undoRedoManager } from '@/lib/undo-system';
+import { useRT } from '@/rt-structures/RTProvider';
 import { log } from '@/lib/log';
 import { Button } from '@/components/ui/button';
 import { MarginToolbar } from './margin-toolbar';
@@ -1292,26 +1292,19 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  // Undo/Redo handlers for bottom toolbar
+  // Undo/Redo handlers via RT provider
+  const rt = useRT();
   const handleGlobalUndo = () => {
-    const prev = undoRedoManager.undo();
-    if (prev) {
-      setRTStructures(prev.rtStructures);
-    }
+    const prev = rt.undoRedo.undo();
+    if (prev) setRTStructures(prev.rtStructures);
   };
-
   const handleGlobalRedo = () => {
-    const next = undoRedoManager.redo();
-    if (next) {
-      setRTStructures(next.rtStructures);
-    }
+    const next = rt.undoRedo.redo();
+    if (next) setRTStructures(next.rtStructures);
   };
-
   const handleJumpToHistory = (index: number) => {
-    const state = undoRedoManager.jumpTo(index);
-    if (state) {
-      setRTStructures(state.rtStructures);
-    }
+    const state = rt.undoRedo.jumpTo(index);
+    if (state) setRTStructures(state.rtStructures);
   };
 
 
@@ -1325,19 +1318,15 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   useEffect(() => {
     const update = () => {
-      try {
-        setHistoryState({
-          canUndo: undoRedoManager.canUndo(),
-          canRedo: undoRedoManager.canRedo(),
-          items: undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId })),
-          index: undoRedoManager.getCurrentIndex()
-        });
-      } catch {}
+      setHistoryState({
+        canUndo: rt.undoRedo.canUndo(),
+        canRedo: rt.undoRedo.canRedo(),
+        items: rt.undoRedo.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: (h.structureId as number) })),
+        index: rt.undoRedo.getCurrentIndex(),
+      });
     };
     update();
-    const unsubscribe = undoRedoManager.subscribe(update);
-    return () => unsubscribe();
-  }, [selectedSeries?.id]);
+  }, [rt.undoRedo, rt.rtStructures, selectedSeries?.id]);
 
   // Auto-zoom functionality based on structure bounds
   const getStructureBounds = (structure: any) => {
@@ -1756,10 +1745,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               className="toolbar-custom"
               onUndo={handleGlobalUndo}
               onRedo={handleGlobalRedo}
-              canUndo={undoRedoManager.canUndo()}
-              canRedo={undoRedoManager.canRedo()}
-              historyItems={undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId }))}
-              currentHistoryIndex={undoRedoManager.getCurrentIndex()}
+              canUndo={historyState.canUndo}
+              canRedo={historyState.canRedo}
+              historyItems={historyState.items}
+              currentHistoryIndex={historyState.index}
               onSelectHistory={handleJumpToHistory}
             />
           )

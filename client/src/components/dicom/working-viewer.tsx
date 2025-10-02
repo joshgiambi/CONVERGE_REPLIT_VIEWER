@@ -33,7 +33,7 @@ import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { useFusion } from '@/fusion/fusion-context';
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
 import { doPolygonsIntersectSimple, unionMultipleContoursSimple, growContourSimple } from "@/lib/simple-polygon-operations";
-import { undoRedoManager } from "@/lib/undo-system";
+import { useRT } from '@/rt-structures/RTProvider';
 import { attachDiceDebug } from "@/lib/dice-utils";
 import { 
   isGPUAccelerationAvailable,
@@ -210,6 +210,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const mprVisible = props.isMPRVisible ?? false;
   
   const fusion = useFusion();
+  const rtCtx = useRT();
   const {
     selectedSecondaryId: fusionSelectedSecondaryId,
     registrationOptions,
@@ -975,7 +976,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(next);
       saveContourUpdates(next, 'boolean_operation');
       if (onContourUpdate) onContourUpdate(next);
-      if (seriesId) undoRedoManager.saveState(seriesId, 'boolean_operation', sourceStructureId, next);
+      rtCtx.saveHistory('boolean_operation', sourceStructureId);
     } catch (error) {
       log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
     }
@@ -1588,9 +1589,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
         // Clear preview and persist
         setPreviewContours([]);
-        if (seriesId) {
-          undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
-        }
+        rtCtx.saveHistory('apply_margin', structureId);
         setLocalRTStructures(updatedRTStructures);
         saveContourUpdates(updatedRTStructures, 'apply_margin');
         if (onContourUpdate) {
@@ -1679,7 +1678,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Save to undo/redo and persist
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'apply_margin', structureId, updatedRTStructures);
+        rtCtx.saveHistory('apply_margin', structureId);
+        rtCtx.saveHistory('apply_margin', structureId);
       }
       setLocalRTStructures(updatedRTStructures);
       saveContourUpdates(updatedRTStructures, 'apply_margin');
@@ -2208,7 +2208,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       // Save state to new undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('add_brush_stroke', payload.structureId);
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
       // Trigger immediate render to show contours
@@ -2302,7 +2302,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       // Save state to undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'smart_brush_stroke', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('smart_brush_stroke', payload.structureId);
       }
       saveContourUpdates(updatedStructures, 'smart_brush_stroke');
       // Trigger immediate render to show contours
@@ -2383,7 +2383,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Save state to undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'erase_brush_stroke', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('erase_brush_stroke', payload.structureId);
       }
       saveContourUpdates(updatedStructures, 'erase_brush_stroke');
       // Trigger immediate render to show contours
@@ -2428,7 +2428,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       // Save state to new undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, payload.action, payload.structureId, updatedStructures);
+        rtCtx.saveHistory(payload.action, payload.structureId);
       }
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
@@ -2595,7 +2595,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       // Save state to undo system
       if (seriesId && payload.structureId) {
-        undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('pen_tool', payload.structureId);
       }
       // Save to server
       saveContourUpdates(updatedStructures, 'pen_tool');
@@ -2941,7 +2941,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       // Save state to undo system
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'smooth', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('smooth', payload.structureId);
       }
       saveContourUpdates(updatedStructures, 'smooth');
     } else if (payload.action === 'open_remove_blobs_dialog') {
@@ -2980,7 +2980,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       structure.contours = [];
       setLocalRTStructures(updatedStructures);
       if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'separate_blobs', payload.structureId, updatedStructures);
+        rtCtx.saveHistory('separate_blobs', payload.structureId);
       }
       saveContourUpdates(updatedStructures, 'separate_blobs');
     }
@@ -5986,7 +5986,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
                       setLocalRTStructures(updated);
                       if (seriesId) {
-                        undoRedoManager.saveState(seriesId, 'remove_blobs', blobDialogData.structureId, updated);
+                        rtCtx.saveHistory('remove_blobs', blobDialogData.structureId);
                       }
                       saveContourUpdates(updated, 'remove_blobs');
                     } finally {

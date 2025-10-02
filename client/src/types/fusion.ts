@@ -270,6 +270,10 @@ export interface UseFusionPanelStateResult {
   secondaryLoadingStates: Map<number, { progress: number; isLoading: boolean }>;
   showPanel: boolean;
   currentlyLoadingSecondary: number | null;
+  // Registration options (Agent 2)
+  registrationOptions?: RegistrationOption[];
+  selectedRegistrationId?: string | null;
+  setSelectedRegistrationId?: (id: string | null) => void;
 }
 
 export interface UseFusionDebugResult {

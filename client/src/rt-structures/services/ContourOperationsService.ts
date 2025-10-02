@@ -42,7 +42,7 @@ export function createContourOperationsService(): ContourServiceApi {
 
       const clipper = await import('@/lib/clipper-boolean-operations');
       let resultContours: number[][] = [];
-      if (op === 'union' || op === 'combine') {
+      if (op === 'union') {
         resultContours = await clipper.combineContours(sourceContour.points, targetContour.points);
       } else if (op === 'subtract') {
         resultContours = await clipper.subtractContours(sourceContour.points, targetContour.points);
