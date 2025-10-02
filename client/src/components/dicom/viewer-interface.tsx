@@ -5,6 +5,7 @@ import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
 import { FusionControlPanel } from './fusion-control-panel';
+import { FusionViewerShell } from '@/fusion/components/FusionViewerShell';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
@@ -1571,13 +1572,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }, [secondarySeriesId]);
 
     return (
-      <>
-
-      <div className="animate-in fade-in-50 duration-500">
-      <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
-        
-        {/* Series Selector - Responsive Width */}
-        <div className="w-full md:w-96 h-full overflow-hidden flex-shrink-0 hidden md:block">
+      <FusionViewerShell
+        sidebar={
           <SeriesSelector
             series={visibleSeries}
             selectedSeries={selectedSeries}
@@ -1632,11 +1628,10 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             fusionStatuses={fusionSecondaryStatuses}
             fusionSiblingMap={fusionSiblingMap}
           />
-        </div>
+        }
 
-        {/* DICOM Viewer with Dynamic Border - Flexible Width */}
-        <div className="flex-1 relative overflow-hidden">
-          {selectedSeries ? (
+        viewport={
+          selectedSeries ? (
             <div className="relative h-full overflow-hidden">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
@@ -1743,68 +1738,81 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             <div className="h-full flex items-center justify-center bg-black border border-indigo-800 rounded-lg">
               <p className="text-indigo-400">Select a series to view DICOM images</p>
             </div>
-          )}
-        </div>
-      </div>
+          )
+        }
 
-      {/* Floating Toolbar */}
-      {selectedSeries && (
-        <ViewerToolbar
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onFitToWindow={handleResetZoom}
-          onPan={handlePanTool}
-          onMeasure={handleMeasureTool}
-          onCrosshairs={handleCrosshairsTool}
-          onContourEdit={() => {
-            // Close boolean operations toolbar when opening contour edit
-            setShowBooleanOperations(false);
-            // Close margin toolbar when opening contour edit
-            setShowMarginToolbar(false);
-            
-            // If no structure is selected, select the first one or last loaded
-            if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
-              // Try to get the last loaded structure or default to first
-              const lastStructure = rtStructures.structures[rtStructures.structures.length - 1];
-              setSelectedForEdit(lastStructure.roiNumber);
-            }
-            
-            setIsContourEditMode(true);
-          }}
-          onContourOperations={() => {
-            // Close contour edit toolbar when opening boolean operations
-            setIsContourEditMode(false);
-            // Close margin toolbar when opening boolean operations
-            setShowMarginToolbar(false);
-            setShowBooleanOperations(true);
-          }}
-          onAdvancedMarginTool={() => {
-            // Close contour edit toolbar when opening margin toolbar
-            setIsContourEditMode(false);
-            // Close boolean operations toolbar when opening margin toolbar
-            setShowBooleanOperations(false);
-            setShowMarginToolbar(true);
-          }}
-          onMPRToggle={() => setMprVisible(!mprVisible)}
-          isMPRActive={mprVisible}
-          isPanActive={activeToolMode === 'pan'}
-          isCrosshairsActive={activeToolMode === 'crosshairs'}
-          isMeasureActive={activeToolMode === 'measure'}
-          isContourEditActive={isContourEditMode}
-          isContourOperationsActive={showBooleanOperations}
-          isAdvancedMarginToolActive={showMarginToolbar}
-          onLocalization={handleLocalizationToggle}
-          isLocalizationActive={showLocalizationTool}
-          className="toolbar-custom"
-          onUndo={handleGlobalUndo}
-          onRedo={handleGlobalRedo}
-          canUndo={undoRedoManager.canUndo()}
-          canRedo={undoRedoManager.canRedo()}
-          historyItems={undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId }))}
-          currentHistoryIndex={undoRedoManager.getCurrentIndex()}
-          onSelectHistory={handleJumpToHistory}
-        />
-      )}
+        toolbar={
+          selectedSeries && (
+            <ViewerToolbar
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onFitToWindow={handleResetZoom}
+              onPan={handlePanTool}
+              onMeasure={handleMeasureTool}
+              onCrosshairs={handleCrosshairsTool}
+              onContourEdit={() => {
+                setShowBooleanOperations(false);
+                setShowMarginToolbar(false);
+
+                if (!selectedForEdit && rtStructures?.structures && rtStructures.structures.length > 0) {
+                  const lastStructure = rtStructures.structures[rtStructures.structures.length - 1];
+                  setSelectedForEdit(lastStructure.roiNumber);
+                }
+
+                setIsContourEditMode(true);
+              }}
+              onContourOperations={() => {
+                setIsContourEditMode(false);
+                setShowMarginToolbar(false);
+                setShowBooleanOperations(true);
+              }}
+              onAdvancedMarginTool={() => {
+                setIsContourEditMode(false);
+                setShowBooleanOperations(false);
+                setShowMarginToolbar(true);
+              }}
+              onMPRToggle={() => setMprVisible(!mprVisible)}
+              isMPRActive={mprVisible}
+              isPanActive={activeToolMode === 'pan'}
+              isCrosshairsActive={activeToolMode === 'crosshairs'}
+              isMeasureActive={activeToolMode === 'measure'}
+              isContourEditActive={isContourEditMode}
+              isContourOperationsActive={showBooleanOperations}
+              isAdvancedMarginToolActive={showMarginToolbar}
+              onLocalization={handleLocalizationToggle}
+              isLocalizationActive={showLocalizationTool}
+              className="toolbar-custom"
+              onUndo={handleGlobalUndo}
+              onRedo={handleGlobalRedo}
+              canUndo={undoRedoManager.canUndo()}
+              canRedo={undoRedoManager.canRedo()}
+              historyItems={undoRedoManager.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: h.structureId }))}
+              currentHistoryIndex={undoRedoManager.getCurrentIndex()}
+              onSelectHistory={handleJumpToHistory}
+            />
+          )
+        }
+
+        fusionPanel={
+          manifest && manifest.secondaries.length > 0 ? (
+            <FusionControlPanel
+              opacity={fusionOpacity}
+              onOpacityChange={setOpacity}
+              secondaryOptions={manifest.secondaries}
+              selectedSecondaryId={secondarySeriesId}
+              onSecondarySeriesSelect={setSelectedSecondaryId}
+              secondaryStatuses={fusionSecondaryStatuses}
+              manifestLoading={fusionManifestLoading}
+              manifestError={fusionManifestError}
+              minimized={fusionPanelMinimized || !showPanel}
+              onToggleMinimized={setFusionPanelMinimized}
+              windowLevel={fusionWindowLevel}
+              onWindowLevelPreset={(preset) => setFusionWindowLevel(preset)}
+            />
+          ) : null
+        }
+
+      >
 
       {/* Contour Edit Toolbar and Fusion Control are handled inside WorkingViewer */}
 
@@ -2318,9 +2326,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         loadingStates={secondaryLoadingStates as any}
         className="animate-in slide-in-from-right-2 duration-300"
       />
-    </div>
-    </>
-  );
+      </FusionViewerShell>
+    );
   };
 
   return (
