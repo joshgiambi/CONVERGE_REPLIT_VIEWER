@@ -82,34 +82,45 @@ export default function ViewerV2Page() {
     return null;
   }, [studyIdParam, bootstrap]);
 
-  // Get series from the bootstrap studyData instead of a separate API call
+  // Fetch series data for all studies in bootstrap
+  const { data: allSeriesData, isLoading: seriesLoading } = useQuery({
+    queryKey: ['viewer-v2-all-series', bootstrap?.studyData?.studies?.map((s: any) => s.id)],
+    queryFn: async () => {
+      if (!bootstrap?.studyData?.studies) return [];
+      
+      // Fetch series for all studies and combine them
+      const seriesPromises = bootstrap.studyData.studies.map(async (study: any) => {
+        const response = await fetch(`/api/studies/${study.id}/series`);
+        if (!response.ok) return [];
+        return response.json();
+      });
+      
+      const seriesArrays = await Promise.all(seriesPromises);
+      return seriesArrays.flat();
+    },
+    enabled: !!bootstrap?.studyData?.studies && !seriesIdParam,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Get fallback series ID from fetched series data
   const fallbackSeriesId = useMemo(() => {
-    if (seriesIdParam) return null; // Already have series
-    if (!bootstrap?.studyData?.studies) return null;
-    
-    // Flatten all series from all studies for this patient
-    const allSeries: any[] = [];
-    for (const study of bootstrap.studyData.studies) {
-      if (study.series && Array.isArray(study.series)) {
-        allSeries.push(...study.series);
-      }
-    }
+    if (seriesIdParam || !allSeriesData?.length) return null;
     
     // Prefer CT series if available, otherwise take first
-    const ctSeries = allSeries.find((s: any) => s.modality === 'CT');
-    const firstSeries = ctSeries || allSeries[0];
+    const ctSeries = allSeriesData.find((s: any) => s.modality === 'CT');
+    const firstSeries = ctSeries || allSeriesData[0];
     
     return firstSeries?.id ? String(firstSeries.id) : null;
-  }, [bootstrap, seriesIdParam]);
+  }, [allSeriesData, seriesIdParam]);
 
   const effectiveSeriesId = seriesIdParam || fallbackSeriesId;
 
-  if (studiesLoading) {
+  if (studiesLoading || seriesLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
         <div className="text-center text-white">
           <h1 className="text-2xl font-bold mb-4">ViewerV2</h1>
-          <p className="text-gray-400">Resolving viewer context...</p>
+          <p className="text-gray-400">Loading viewer data...</p>
         </div>
       </div>
     );
