@@ -376,22 +376,35 @@
 
 ---
 
-## 📊 Current Status
+## 📊 Current Status (Updated: 2025-10-02 - AGENT5B Track B Complete)
 
 | Component | Current Viewer | ViewerV2 | Match? |
 |-----------|---------------|----------|--------|
-| **Toolbar position** | Bottom | Top | ❌ |
-| **Toolbar style** | Floating | Static bar | ❌ |
-| **ContourEditToolbar** | Yes | Missing | ❌ |
-| **BooleanOpsToolbar** | Yes | Missing | ❌ |
-| **MarginToolbar** | Yes | Missing | ❌ |
-| **RT panel position** | Overlay (bottom-left) | Panels (right) | ❌ |
+| **Toolbar position** | Bottom (floating) | Bottom (floating) | ✅ |
+| **Toolbar style** | Floating | Floating | ✅ |
+| **ContourEditToolbar** | Yes | ✅ WIRED | ✅ |
+| **BooleanOpsToolbar** | Yes | ✅ WIRED | ✅ |
+| **MarginToolbar** | Yes | ✅ WIRED | ✅ |
+| **RT panel position** | Overlay (bottom-left) | Panels (right) | ⚠️ |
 | **Structure tags** | Yes (top-right) | Missing | ❌ |
-| **SeriesSelector** | Full | Placeholder | ❌ |
-| **FusionPanel** | Integrated | Not added | ❌ |
-| **Canvas rendering** | Cornerstone | Custom | ✅ Different |
+| **SeriesSelector** | Full | ✅ INTEGRATED | ✅ |
+| **FusionPanel** | Integrated | ✅ INTEGRATED | ✅ |
+| **Canvas rendering** | Cornerstone | Custom | ✅ Different (intentional) |
 
-**Match Score**: **1/10** (only canvas exists)
+**Match Score**: **7/10** → Significant progress!
+
+### ✅ Completed (Agent 5B - Track B):
+1. **ViewerToolbar** - Already wired, floating at bottom center
+2. **SeriesSelector** - Already wired to sidebar
+3. **FusionPanel** - Already wired (wraps legacy FusionControlPanel)
+4. **ContourEditToolbar** - ✅ JUST WIRED to RTProvider
+5. **BooleanOperationsToolbar** - ✅ JUST WIRED to RTProvider
+6. **MarginToolbar** - ✅ JUST WIRED to RTProvider
+
+### ⚠️ Remaining Differences:
+1. **RT panel positioning** - Currently in right panel area, legacy has it overlaid on viewport (bottom-left)
+2. **Structure tags** - Missing visual indicators on top-right (not critical for MVP)
+3. **Tool integration** - Brush/pen tools need canvas integration (Agent 3 work)
 
 ---
 
