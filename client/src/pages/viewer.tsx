@@ -12,6 +12,7 @@ import { log } from '@/lib/log';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckboxIndicator } from '@radix-ui/react-checkbox';
 import { Checkbox } from '@/components/ui/checkbox';
+import { resolveViewerBootstrap } from '@/lib/viewer-bootstrap';
 
 export default function Viewer() {
   const [studyData, setStudyData] = useState<any>(null);
@@ -31,75 +32,56 @@ export default function Viewer() {
   });
   
   useEffect(() => {
+    let cancelled = false;
+
     const loadStudyData = async () => {
       log.debug('=== Enhanced Viewer Debug ===', 'viewer');
       log.debug(`Studies loaded: ${Array.isArray(studies) ? studies.length : 0}`, 'viewer');
       log.debug(`Loading: ${isLoading}`, 'viewer');
       if (error) log.debug(`Error: ${String(error)}`, 'viewer');
-      
-      if (studies && studies.length > 0) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const studyId = urlParams.get('studyId');
-        const patientId = urlParams.get('patientId');
-        
-        log.debug(`URL studyId: ${studyId}`, 'viewer');
-        log.debug(`URL patientId: ${patientId}`, 'viewer');
-        log.debug(`All patient IDs: ${JSON.stringify(studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })))}`, 'viewer');
-        
-        let study;
-        let patient = null;
-        
-        if (studyId) {
-          study = studies.find((s: any) => s.id === parseInt(studyId));
-          log.debug(`Found study by ID: ${JSON.stringify(study)}`, 'viewer');
-          if (study) {
-            // Always load ALL studies for this patient so that PET/CT in another study appears
-            const patientStudies = studies.filter((s: any) => s.patientId === study.patientId);
-            log.debug(`Bundling all studies for patient ${study.patientId}: ${patientStudies.length}`, 'viewer');
-            setStudyData({ studies: patientStudies, patient: { id: study.patientId, patientID: study.patientID, patientName: study.patientName } });
-          }
-        } else if (patientId) {
-          // Find ALL studies for this patient
-          
-          // First try exact match on patientID - get ALL matching studies
-          const matchingStudiesByPatientID = studies.filter((s: any) => s.patientID === patientId);
-          log.debug(`Found studies by exact patientID match: ${matchingStudiesByPatientID.length}`, 'viewer');
-          
-          if (matchingStudiesByPatientID.length > 0) {
-            // Found studies directly by patientID
-            log.debug(`Setting studyData with all matching studies: ${matchingStudiesByPatientID.length}`, 'viewer');
-            setStudyData({ studies: matchingStudiesByPatientID });
-            study = matchingStudiesByPatientID[0]; // Set first for compatibility
-          } else {
-            // If not found, try to find by patient database ID
-            const patientQuery = await fetch('/api/patients').then(res => res.json());
-            patient = patientQuery.find((p: any) => p.patientID === patientId);
-            log.debug(`Found patient with patientID: ${patientId} -> ${!!patient}`, 'viewer');
-            
-            if (patient) {
-              const patientStudies = studies.filter((s: any) => s.patientId === patient.id);
-              log.debug(`Found all studies by patient database ID: ${patientStudies.length}`, 'viewer');
-              if (patientStudies.length > 0) {
-                setStudyData({ studies: patientStudies, patient });
-                study = patientStudies[0];
-              }
-            }
-          }
-        } else {
-          study = studies[0];
-          log.debug(`Using first study: ${study?.id}`, 'viewer');
-          if (study) {
-            setStudyData({ studies: [study] });
-          }
-        }
-        
-        if (!study && !studyData) {
-          log.warn('NO STUDY FOUND!', 'viewer');
-        }
+
+      if (!Array.isArray(studies) || studies.length === 0) {
+        return;
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const studyId = urlParams.get('studyId');
+      const patientId = urlParams.get('patientId');
+
+      log.debug(`URL studyId: ${studyId}`, 'viewer');
+      log.debug(`URL patientId: ${patientId}`, 'viewer');
+      log.debug(
+        `All patient IDs: ${JSON.stringify(
+          studies.map((s: any) => ({ id: s.id, patientID: s.patientID, patientId: s.patientId })),
+        )}`,
+        'viewer',
+      );
+
+      const result = await resolveViewerBootstrap({
+        studies,
+        studyIdParam: studyId,
+        patientIdParam: patientId,
+      });
+
+      if (cancelled) return;
+
+      if (result.studyData) {
+        log.debug(
+          `Resolved viewer context: studyCount=${result.studyData.studies.length}, patientDbId=${result.patientDbId}`,
+          'viewer',
+        );
+        setStudyData(result.studyData);
+      } else {
+        log.warn('NO STUDY FOUND!', 'viewer');
+        setStudyData(null);
       }
     };
-    
+
     loadStudyData();
+
+    return () => {
+      cancelled = true;
+    };
   }, [studies, isLoading, error]);
 
   const formatDate = (dateString: string) => {
