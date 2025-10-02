@@ -175,7 +175,7 @@ export class FusionManifestService {
     if (!force && this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey)!;
       const requestedSet = new Set(secondarySeriesIds);
-      const hasAllSecondaries = secondarySeriesIds.length === 0 || cached.secondaries.some(sec => requestedSet.has(sec.secondarySeriesId));
+      const hasAllSecondaries = secondarySeriesIds.length === 0 || secondarySeriesIds.every(id => cached.secondaries.some(sec => sec.secondarySeriesId === id));
       if (hasAllSecondaries) {
         manifestDebug('info', 'Manifest served from cache', {
           primarySeriesId,
