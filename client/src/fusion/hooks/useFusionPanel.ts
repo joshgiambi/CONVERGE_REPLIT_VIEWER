@@ -5,7 +5,7 @@ type SecondaryStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 type SecondaryStatusEntry = {
   status: SecondaryStatus;
-  error?: string | null;
+  error: string | null;
 };
 
 type SecondaryLoadingEntry = {
@@ -75,5 +75,9 @@ export function useFusionPanelState() {
     secondaryLoadingStates,
     showPanel,
     currentlyLoadingSecondary: fusion.currentlyLoadingSecondary,
+    // NEW: registration options passthrough
+    registrationOptions: fusion.registrationOptions,
+    selectedRegistrationId: fusion.selectedRegistrationId,
+    setSelectedRegistrationId: fusion.setSelectedRegistrationId,
   };
 }

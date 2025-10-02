@@ -8,7 +8,7 @@
  * Created: Hour 2-6
  */
 
-import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle, createContext, useContext, useMemo } from 'react';
 import type {
   PrimaryViewportProps,
   DICOMImage,
@@ -137,6 +137,26 @@ function parseImagePosition(image: DICOMImage): [number, number, number] | null 
 // ============================================================================
 // PrimaryViewport Component
 // ============================================================================
+
+type ViewportContextValue = {
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  images: DICOMImage[];
+  currentImage: DICOMImage | null;
+  currentIndex: number;
+  windowLevel: WindowLevel;
+  zoom: number;
+  panX: number;
+  panY: number;
+  imageMetadata: ImageMetadata | null;
+};
+
+const ViewportContext = createContext<ViewportContextValue | null>(null);
+
+export function useViewport() {
+  const ctx = useContext(ViewportContext);
+  if (!ctx) throw new Error('useViewport must be used within PrimaryViewport');
+  return ctx;
+}
 
 export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function PrimaryViewport(props, ref) {
   const {
@@ -510,38 +530,52 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function Pr
     );
   }
 
+  const contextValue = useMemo<ViewportContextValue>(() => ({
+    canvasRef,
+    images,
+    currentImage: images[currentIndex] ?? null,
+    currentIndex,
+    windowLevel,
+    zoom,
+    panX,
+    panY,
+    imageMetadata,
+  }), [canvasRef, images, currentIndex, windowLevel, zoom, panX, panY, imageMetadata]);
+
   return (
-    <div className="relative w-full h-full bg-black">
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full cursor-move"
-        style={{ imageRendering: 'pixelated' }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
-        onContextMenu={handleContextMenu}
-      />
-      
-      {/* Slice info overlay */}
-      <div className="absolute top-4 left-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-        Slice {currentIndex + 1} / {images.length}
+    <ViewportContext.Provider value={contextValue}>
+      <div className="relative w-full h-full bg-black">
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full cursor-move"
+          style={{ imageRendering: 'pixelated' }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onWheel={handleWheel}
+          onContextMenu={handleContextMenu}
+        />
+        
+        {/* Slice info overlay */}
+        <div className="absolute top-4 left-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
+          Slice {currentIndex + 1} / {images.length}
+        </div>
+        
+        {/* Window/Level info */}
+        <div className="absolute top-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
+          W: {windowLevel.window} | L: {windowLevel.level}
+        </div>
+        
+        {/* Zoom info */}
+        <div className="absolute bottom-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
+          Zoom: {(zoom * 100).toFixed(0)}%
+        </div>
+        
+        {/* Children (overlays will be added here by Agents 2 & 3) */}
+        {children}
       </div>
-      
-      {/* Window/Level info */}
-      <div className="absolute top-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-        W: {windowLevel.window} | L: {windowLevel.level}
-      </div>
-      
-      {/* Zoom info */}
-      <div className="absolute bottom-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-        Zoom: {(zoom * 100).toFixed(0)}%
-      </div>
-      
-      {/* Children (overlays will be added here by Agents 2 & 3) */}
-      {children}
-    </div>
+    </ViewportContext.Provider>
   );
 });
 

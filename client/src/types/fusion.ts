@@ -81,6 +81,11 @@ export interface FusionSecondaryDescriptor {
   volumePath?: string | null;
   manifestPath?: string | null;
   registrationId?: string | null;
+  // Optional fields (present when available from manifest)
+  windowCenter?: number[];
+  windowWidth?: number[];
+  secondarySeriesDescription?: string | null;
+  sliceCount?: number;
 }
 
 export interface FusionSecondaryState {
@@ -123,6 +128,8 @@ export interface OverlayCanvas {
   width: number;
   height: number;
   hasSignal: boolean;
+  registrationId?: string | null;
+  transformSource?: string | null;
   metadata?: {
     secondaryModality: string;
     sliceIndex: number;
@@ -188,23 +195,7 @@ export interface FusionCacheKey {
 // Component Props
 // ============================================================================
 
-export interface FusionOverlayLayerProps {
-  primaryImage: DICOMImage;
-  secondarySeriesId: number | null;
-  opacity: number;
-  windowLevel: WindowLevel | null;
-  registrationId: string | null;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
-  transform: {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    imageWidth: number;
-    imageHeight: number;
-  };
-  onOverlayReady?: (overlay: OverlayCanvas | null) => void;
-  onError?: (error: Error) => void;
-}
+// DEPRECATED: FusionOverlayLayer now reads from viewport context (no props contract)
 
 export interface FusionPanelProps {
   opacity: number;

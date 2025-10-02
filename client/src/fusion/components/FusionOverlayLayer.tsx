@@ -1,39 +1,32 @@
 import { useEffect, useRef } from 'react';
-import type { FusionOverlayLayerProps } from '@/types/fusion';
 import { useFusion } from '../fusion-context';
+import { useViewport } from '@/components/viewer/PrimaryViewport';
 
-export function FusionOverlayLayer({
-  primaryImage,
-  secondarySeriesId,
-  opacity,
-  windowLevel,
-  registrationId,
-  canvasRef,
-  transform,
-  onOverlayReady,
-  onError,
-}: FusionOverlayLayerProps) {
+interface Props {
+  opacity: number;
+}
+
+export function FusionOverlayLayer({ opacity }: Props) {
   const fusion = useFusion();
   const requestTokenRef = useRef(0);
+  const viewport = useViewport();
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const baseCanvas = viewport.canvasRef.current;
+    if (!baseCanvas) return;
+    const baseCtx = baseCanvas.getContext('2d');
+    if (!baseCtx) return;
 
-    if (!secondarySeriesId || opacity <= 0) {
-      if (onOverlayReady) onOverlayReady(null);
-      return;
-    }
+    if (!fusion.selectedSecondaryId || opacity <= 0) return;
 
-    const sopInstanceUID = (primaryImage as any)?.sopInstanceUID ?? null;
-    const instanceNumber = Number((primaryImage as any)?.instanceNumber ?? (primaryImage as any)?.metadata?.instanceNumber ?? NaN);
-    const position = (primaryImage as any)?.imagePositionPatient ?? (primaryImage as any)?.metadata?.imagePositionPatient ?? null;
-    const sliceIndex = Number((primaryImage as any)?.index ?? (primaryImage as any)?.sliceIndex ?? NaN);
+    const currentImage: any = viewport.currentImage;
+    const sopInstanceUID = currentImage?.sopInstanceUID ?? null;
+    const instanceNumber = Number(currentImage?.instanceNumber ?? currentImage?.metadata?.instanceNumber ?? NaN);
+    const position = currentImage?.imagePositionPatient ?? currentImage?.metadata?.imagePositionPatient ?? null;
+    const sliceIndex = Number.isFinite(viewport.currentIndex) ? viewport.currentIndex : 0;
 
     if (!sopInstanceUID) {
-      if (onOverlayReady) onOverlayReady(null);
       return;
     }
 
@@ -48,23 +41,33 @@ export function FusionOverlayLayer({
       })
       .then((overlay) => {
         if (requestTokenRef.current !== token) return;
-        if (!overlay || !overlay.hasSignal) {
-          if (onOverlayReady) onOverlayReady(null);
-          return;
+        if (!overlay || !overlay.hasSignal) return;
+
+        // Prepare overlay canvas once, matching base canvas size
+        if (!overlayCanvasRef.current) {
+          overlayCanvasRef.current = document.createElement('canvas');
         }
+        const overlayCanvas = overlayCanvasRef.current;
+        overlayCanvas.width = baseCanvas.width;
+        overlayCanvas.height = baseCanvas.height;
+        const octx = overlayCanvas.getContext('2d');
+        if (!octx) return;
 
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
-        ctx.drawImage(overlay.canvas, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
+        // Draw overlay into its own canvas (scale to base size)
+        octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        octx.drawImage(overlay.canvas, 0, 0, overlayCanvas.width, overlayCanvas.height);
 
-        if (onOverlayReady) onOverlayReady(overlay);
+        // Composite onto base canvas
+        baseCtx.save();
+        baseCtx.globalAlpha = Math.max(0, Math.min(1, opacity));
+        baseCtx.drawImage(overlayCanvas, 0, 0);
+        baseCtx.restore();
       })
       .catch((err) => {
         if (requestTokenRef.current !== token) return;
-        if (onError) onError(err as Error);
+        console.warn('FusionOverlayLayer error', err);
       });
-  }, [canvasRef, fusion, opacity, primaryImage, registrationId, secondarySeriesId, transform, windowLevel, onOverlayReady, onError]);
+  }, [fusion, opacity, viewport.canvasRef, viewport.currentImage, viewport.currentIndex]);
 
   return null;
 }

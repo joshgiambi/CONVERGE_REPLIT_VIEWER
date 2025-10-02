@@ -1,4 +1,4 @@
-import type { RTContour, RTStructure, RTStructureSet } from '@/types/rt-structures';
+import type { RTStructureSet } from '@/types/rt-structures';
 
 export type BooleanOperation = 'union' | 'intersect' | 'subtract';
 
@@ -12,13 +12,13 @@ export interface ContourServiceApi {
     sourceRoiNumber: number,
     targetRoiNumber: number,
     op: BooleanOperation,
-  ): RTStructureSet;
+  ): Promise<RTStructureSet>;
 
   applyUniformMargin(
     structures: RTStructureSet,
     roiNumber: number,
     marginMm: number,
-  ): RTStructureSet;
+  ): Promise<RTStructureSet>;
 }
 
 function deepClone<T>(obj: T): T {
@@ -28,22 +28,54 @@ function deepClone<T>(obj: T): T {
 // NOTE: Stubs – wire to existing helpers during integration
 export function createContourOperationsService(): ContourServiceApi {
   return {
-    booleanOperation(structures, sourceRoiNumber, targetRoiNumber, op) {
+    async booleanOperation(structures, sourceRoiNumber, targetRoiNumber, op) {
       const cloned = deepClone(structures);
       const source = cloned.structures.find((s) => s.roiNumber === sourceRoiNumber);
       const target = cloned.structures.find((s) => s.roiNumber === targetRoiNumber);
       if (!source || !target) return cloned;
-      // TODO: Integrate with existing boolean ops once extracted
-      // For now, no-op and return cloned set
+      const sliceZ = (source.contours?.[0]?.slicePosition ?? target.contours?.[0]?.slicePosition ?? 0);
+
+      // Find first contours on same slice for simplicity (matches current usage)
+      const sourceContour = (source.contours || []).find(c => Math.abs(c.slicePosition - sliceZ) < 0.5);
+      const targetContour = (target.contours || []).find(c => Math.abs(c.slicePosition - sliceZ) < 0.5);
+      if (!sourceContour || !targetContour) return cloned;
+
+      const clipper = await import('@/lib/clipper-boolean-operations');
+      let resultContours: number[][] = [];
+      if (op === 'union' || op === 'combine') {
+        resultContours = await clipper.combineContours(sourceContour.points, targetContour.points);
+      } else if (op === 'subtract') {
+        resultContours = await clipper.subtractContours(sourceContour.points, targetContour.points);
+      } else if (op === 'intersect') {
+        resultContours = await clipper.intersectContours(sourceContour.points, targetContour.points);
+      }
+
+      // Replace source contour on slice with results
+      const idx = (source.contours || []).findIndex(c => Math.abs(c.slicePosition - sliceZ) < 0.5);
+      if (idx >= 0) {
+        source.contours.splice(idx, 1);
+      }
+      for (const pts of resultContours) {
+        if (pts.length >= 9) {
+          source.contours.push({ slicePosition: sliceZ, points: pts, numberOfPoints: pts.length / 3 });
+        }
+      }
+
       return cloned;
     },
 
-    applyUniformMargin(structures, roiNumber, marginMm) {
+    async applyUniformMargin(structures, roiNumber, marginMm) {
       const cloned = deepClone(structures);
       const structure = cloned.structures.find((s) => s.roiNumber === roiNumber);
       if (!structure) return cloned;
-      // TODO: Integrate with margin helpers (e.g., grow/smooth) for each contour on each slice
-      // For now, return cloned without modification
+
+      const { growContourSimple } = await import('@/lib/simple-polygon-operations');
+      for (const contour of structure.contours || []) {
+        if (!contour.points || contour.points.length < 6) continue;
+        const expanded = growContourSimple(contour.points, marginMm);
+        contour.points = expanded;
+        contour.numberOfPoints = expanded.length / 3;
+      }
       return cloned;
     },
   };

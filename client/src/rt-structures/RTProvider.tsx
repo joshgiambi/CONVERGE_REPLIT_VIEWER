@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useReducer } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { RTSelectionState, RTStructureSet } from '@/types/rt-structures';
+import { createUndoRedoService, type UndoRedoService } from '@/rt-structures/services/UndoRedoService';
 
 type RTStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -79,12 +80,22 @@ interface RTContextValue extends RTState {
   setSelectedForEdit: (roiNumber: number | null) => void;
   setStructureVisibility: (roiNumber: number, visible: boolean) => void;
   setAllStructuresVisible: (visible: boolean) => void;
+  undoRedo: UndoRedoService;
+  saveHistory: (action: string, structureId?: number | null) => void;
 }
 
 const RTContext = createContext<RTContextValue | undefined>(undefined);
 
 export function RTProvider({ children, initialStructures = null }: RTProviderProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const undoRedoRef = useRef<UndoRedoService>(createUndoRedoService());
+
+  // Seed initial structures if provided
+  useEffect(() => {
+    if (initialStructures) {
+      dispatch({ type: 'setStructures', payload: initialStructures });
+    }
+  }, [initialStructures]);
 
   const setStructures = useCallback((set: RTStructureSet) => {
     dispatch({ type: 'setStructures', payload: set });
@@ -110,6 +121,12 @@ export function RTProvider({ children, initialStructures = null }: RTProviderPro
     dispatch({ type: 'setAllVisible', visible });
   }, []);
 
+  const saveHistory = useCallback((action: string, structureId?: number | null) => {
+    if (state.rtStructures) {
+      undoRedoRef.current.saveState(action as any, state.rtStructures, structureId);
+    }
+  }, [state.rtStructures]);
+
   const value = useMemo<RTContextValue>(() => ({
     ...state,
     setStructures,
@@ -118,7 +135,9 @@ export function RTProvider({ children, initialStructures = null }: RTProviderPro
     setSelectedForEdit: setSelectedForEditCb,
     setStructureVisibility,
     setAllStructuresVisible,
-  }), [state, setStructures, setError, selectStructure, setSelectedForEditCb, setStructureVisibility, setAllStructuresVisible]);
+    undoRedo: undoRedoRef.current,
+    saveHistory,
+  }), [state, setStructures, setError, selectStructure, setSelectedForEditCb, setStructureVisibility, setAllStructuresVisible, saveHistory]);
 
   return <RTContext.Provider value={value}>{children}</RTContext.Provider>;
 }

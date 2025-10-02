@@ -10,8 +10,8 @@ import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
 
 import { PrimaryViewport } from './primary-viewport';
-import { FusionOverlayLayer } from './fusion-overlay-layer';
-import { RTOverlayLayer } from './rt-overlay-layer';
+import { FusionOverlayLayer } from '@/fusion/components/FusionOverlayLayer';
+// Removed legacy local RT overlay import in favor of provider-based overlay
 
 import { MeasurementTool } from "./measurement-tool";
 import { MPRFloating } from './mpr-floating';
@@ -45,6 +45,8 @@ import { createOrUpdateGPUViewport, hideGPUViewport, cleanupGPUViewports } from 
 import { getDicomWorkerManager, destroyDicomWorkerManager } from '@/lib/dicom-worker-manager';
 import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from "@/lib/dicom-spatial-helpers";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import RTOverlayLayer from "@/rt-structures/components/RTOverlayLayer";
+import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
@@ -124,6 +126,7 @@ interface WorkingViewerProps {
     instanceNumber?: number | null;
     position?: [number, number, number] | null;
   }) => Promise<OverlayCanvas | null>;
+  rtOverlayControlled?: boolean;
 }
 
 const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingViewerProps, ref: any) {
@@ -163,6 +166,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionManifestLoading = false,
     fusionManifestPrimarySeriesId = null,
     fusionGetOverlayForImage,
+    rtOverlayControlled = false,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,16 +209,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Use external MPR visibility state or fallback to internal state
   const mprVisible = props.isMPRVisible ?? false;
   
-  const secondarySeriesId = fusionSelectedSecondaryId ?? externalSecondarySeriesId ?? null; // Prefer fusion context selection
-  const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
-  
-  // NEW FUSION: Simple manager-based approach
-  const fusionManagerRef = useRef<FusionOverlayManager | null>(null);
-  if (!fusionManagerRef.current) {
-    fusionManagerRef.current = new FusionOverlayManager(seriesId);
-  }
-  const fusionManager = fusionManagerRef.current;
-
   const fusion = useFusion();
   const {
     selectedSecondaryId: fusionSelectedSecondaryId,
@@ -226,6 +220,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     getOverlayForImage: contextGetOverlayForImage,
   } = fusion;
   const lastResolveInfo = registrationResolveInfo;
+
+  const secondarySeriesId = fusionSelectedSecondaryId ?? externalSecondarySeriesId ?? null; // Prefer fusion context selection
+  const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
+
+  // NEW FUSION: Simple manager-based approach
+  const fusionManagerRef = useRef<FusionOverlayManager | null>(null);
+  if (!fusionManagerRef.current) {
+    fusionManagerRef.current = new FusionOverlayManager(seriesId);
+  }
+  const fusionManager = fusionManagerRef.current;
 
   const requestFusionOverlay = useCallback(
     (
@@ -275,7 +279,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const setFuseboxTransformSource = setFusionTransformSource; // Alias for compatibility
   const fuseboxTransformSource = fusionTransformSource; // Alias for compatibility
-  const getFusionManifest = () => null; // Stub
+  const getFusionManifest = (primaryId?: number) => null; // Stub signature to satisfy callers
   
   // Update fusion manager when secondary changes
   useEffect(() => {
@@ -816,11 +820,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Draw cached fusion overlay with new opacity
         drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
 
-        // Redraw RT structures on top
-        try {
-          const imageWithMetadata = { ...currentImage, imageMetadata };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
-        } catch {}
+        // Redraw RT structures on top (disabled when controlled by RT overlay layer)
+        if (!rtOverlayControlled) {
+          try {
+            const imageWithMetadata = { ...currentImage, imageMetadata };
+            renderRTStructures(ctx, canvas, imageWithMetadata);
+          } catch {}
+        }
 
         // Redraw crosshairs if axial
         try {
@@ -963,71 +969,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     try {
-      let resultContours: number[][];
-
-      // Import the boolean operations
-      const { combineContours, subtractContours } = await import('@/lib/clipper-boolean-operations');
-
-      if (operation === 'combine') {
-        // Combine the two contours
-        resultContours = await combineContours(sourceContour.points, targetContour.points);
-        log.debug(`🔶 Combine returned ${resultContours.length} contours`, 'viewer');
-      } else if (operation === 'subtract') {
-        // Subtract target from source
-        resultContours = await subtractContours(sourceContour.points, targetContour.points);
-        log.debug(`🔶 Subtract returned ${resultContours.length} contours`, 'viewer');
-      } else {
-        log.error(`Unknown boolean operation: ${operation}`, 'viewer');
-        return;
-      }
-
-      // Remove the source contour from current slice
-      const sourceContourIndex = sourceStructure.contours.findIndex(
-        (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM
-      );
-      
-      if (sourceContourIndex >= 0) {
-        sourceStructure.contours.splice(sourceContourIndex, 1);
-      }
-
-      // Add all result contours
-      if (resultContours && resultContours.length > 0) {
-        resultContours.forEach((contourPoints: number[]) => {
-          if (contourPoints.length >= 9) {
-            sourceStructure.contours.push({
-              slicePosition: slicePosition,
-              points: contourPoints,
-              numberOfPoints: contourPoints.length / 3,
-            });
-          }
-        });
-        
-        log.debug(`✅ Boolean ${operation} completed: ${resultContours.length} contours`, 'viewer');
-      } else {
-        log.debug(`✅ Boolean ${operation} completed: empty`, 'viewer');
-      }
-
-      // Update local structures and save to server
-      setLocalRTStructures(updatedRTStructures);
-      saveContourUpdates(updatedRTStructures, 'boolean_operation');
-      
-      // Pass the updated structures up to parent component
-      if (onContourUpdate) {
-        onContourUpdate(updatedRTStructures);
-      }
-
-      // Save state to undo system
-      if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'boolean_operation', sourceStructureId, updatedRTStructures);
-      }
-
+      const service = createContourOperationsService();
+      const op = operation === 'combine' ? 'union' : operation === 'subtract' ? 'subtract' : 'intersect';
+      const next = await service.booleanOperation(updatedRTStructures, sourceStructureId, targetStructureId, op as any);
+      setLocalRTStructures(next);
+      saveContourUpdates(next, 'boolean_operation');
+      if (onContourUpdate) onContourUpdate(next);
+      if (seriesId) undoRedoManager.saveState(seriesId, 'boolean_operation', sourceStructureId, next);
     } catch (error) {
       log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
     }
   };
 
   // Handle Eclipse TPS margin operation
-  const handleMarginOperation = (payload: any) => {
+  const handleMarginOperation = async (payload: any) => {
     log.debug('🔹 handleMarginOperation called', 'viewer');
     
     if (!localRTStructures && !rtStructures) {
@@ -1107,34 +1062,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       try {
         const marginValueMm = marginParams.marginValues.uniform;
-        
-        const grownContour = growContour(
-          {
-            points: contour.points,
-            slicePosition: slicePosition,
-          },
-          marginValueMm,
-        );
-        
-        let smoothingFactor = 0.15;
-        if (marginParams.interpolationType === 'SMOOTH') {
-          smoothingFactor = 0.25;
-        } else if (marginParams.interpolationType === 'DISCRETE') {
-          smoothingFactor = 0.05;
-        }
-        
-        const smoothedContour = smoothContour(grownContour, smoothingFactor);
-        
-        contour.points = smoothedContour.points;
-        contour.numberOfPoints = smoothedContour.points.length / 3;
-        
-        setLocalRTStructures(updatedRTStructures);
-        saveContourUpdates(updatedRTStructures, 'apply_margin');
-        
-        if (onContourUpdate) {
-          onContourUpdate(updatedRTStructures);
-        }
-        
+        const service = createContourOperationsService();
+        const next = await service.applyUniformMargin(updatedRTStructures, structureId, marginValueMm);
+        setLocalRTStructures(next);
+        saveContourUpdates(next, 'apply_margin');
+        if (onContourUpdate) onContourUpdate(next);
         log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
       } catch (error) {
         log.error(`Error applying margin operation: ${String(error)}`, 'viewer');
@@ -4298,9 +4230,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Render MPR views asynchronously with same window/level as axial
           await Promise.all([
-            renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, currentWindowLevel.width, currentWindowLevel.center),
-            renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, currentWindowLevel.width, currentWindowLevel.center)
-          ]);
+            sagittalCanvasRef.current && renderMPRCanvas(sagittalCanvasRef.current, 'sagittal', sagittalSliceIndex, currentWindowLevel.width, currentWindowLevel.center),
+            coronalCanvasRef.current && renderMPRCanvas(coronalCanvasRef.current, 'coronal', coronalSliceIndex, currentWindowLevel.width, currentWindowLevel.center)
+          ].filter(Boolean));
         } catch (mprError) {
           console.warn("Error rendering MPR views:", mprError);
         }
@@ -5648,31 +5580,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 )}
               </>
             )}
-            <FusionOverlayLayer
-              secondarySeriesId={secondarySeriesId}
-              modality={secondaryModality}
-              opacity={fusionOpacity}
-            />
+            <FusionOverlayLayer opacity={fusionOpacity} />
           </div>
 
           <div className="flex items-center space-x-2">
-            {rtStructures && (
-              <div className="flex items-center gap-1 px-2 py-1 bg-gray-800/50 rounded-lg">
-                <Badge
-                  variant={showStructures ? "default" : "secondary"}
-                  className={`${
-                    showStructures
-                      ? 'bg-green-600/80 text-white border-green-500/50'
-                      : 'bg-gray-700/50 text-gray-300'
-                  }`}
-                >
-                  RT ({rtStructures?.structures?.length || 0})
-                </Badge>
-                <span className="text-xs text-gray-400">
-                  {showStructures ? 'Visible' : 'Hidden'}
-                </span>
-              </div>
-            )}
+            <RTOverlayLayer
+              canvasRef={canvasRef}
+              imageWidth={imageMetadata?.columns ?? 0}
+              imageHeight={imageMetadata?.rows ?? 0}
+              zoom={ctTransform.current?.scale ?? 1}
+              panX={ctTransform.current?.offsetX ?? 0}
+              panY={ctTransform.current?.offsetY ?? 0}
+              currentSlicePosition={
+                images.length > 0 && images[currentIndex]
+                  ? (images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex)
+                  : 0
+              }
+            />
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -5739,7 +5665,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
-        </PrimaryViewport>
+          </div>
+        </div>
       </div>
 
       {/* Canvas */}
@@ -5775,6 +5702,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             },
           }}
         >
+          {/* RT overlay layer (provider-controlled) */}
+          {rtOverlayControlled && (
+            <RTOverlayLayer
+              canvasRef={canvasRef}
+              imageWidth={(() => {
+                const img = images[currentIndex];
+                return img ? (img.columns || img.width || 512) : 512;
+              })()}
+              imageHeight={(() => {
+                const img = images[currentIndex];
+                return img ? (img.rows || img.height || 512) : 512;
+              })()}
+              zoom={zoom}
+              panX={panX}
+              panY={panY}
+              currentSlicePosition={images.length > 0 && images[currentIndex]
+                ? (images[currentIndex].parsedSliceLocation ?? images[currentIndex].parsedZPosition ?? currentIndex)
+                : 0}
+              contourWidth={contourSettings?.width ?? 2}
+              contourOpacity={contourSettings?.opacity ?? 60}
+            />
+          )}
 
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
@@ -6126,7 +6075,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               </div>
             </div>
           )}
-        </div>
+        </PrimaryViewport>
       </div>
     </Card>
   );

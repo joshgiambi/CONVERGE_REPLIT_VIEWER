@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Layers, Loader2, Maximize2, Minimize2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import type { FusionSecondaryDescriptor } from '@/types/fusion';
+
+const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ');
 
 interface FusionControlPanelProps {
   opacity: number;
@@ -20,6 +21,10 @@ interface FusionControlPanelProps {
   onToggleMinimized?: (minimized: boolean) => void;
   windowLevel?: { window: number; level: number } | null;
   onWindowLevelPreset?: (preset: { window: number; level: number } | null) => void;
+  // NEW: registration integration
+  registrationOptions?: Array<{ id: string | null; label: string }>;
+  selectedRegistrationId?: string | null;
+  onRegistrationSelect?: (id: string | null) => void;
 }
 
 export function FusionControlPanel({
@@ -35,6 +40,9 @@ export function FusionControlPanel({
   onToggleMinimized,
   windowLevel,
   onWindowLevelPreset,
+  registrationOptions = [],
+  selectedRegistrationId = null,
+  onRegistrationSelect,
 }: FusionControlPanelProps) {
   const activeDescriptor = useMemo(() => {
     return secondaryOptions.find((sec) => sec.secondarySeriesId === selectedSecondaryId) ?? null;
@@ -284,6 +292,28 @@ export function FusionControlPanel({
                 >
                   Auto
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {activeDescriptor && registrationOptions.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Registration</div>
+              <div className="grid gap-2">
+                {registrationOptions.map((opt) => {
+                  const isActive = (opt.id ?? null) === (selectedRegistrationId ?? null);
+                  return (
+                    <Button
+                      key={opt.id ?? 'default'}
+                      size="sm"
+                      variant={isActive ? 'default' : 'secondary'}
+                      className={cn('justify-start text-xs', isActive ? 'bg-cyan-600/70 hover:bg-cyan-600 text-slate-900' : 'bg-slate-800/70 hover:bg-slate-700 text-slate-200')}
+                      onClick={() => onRegistrationSelect?.(opt.id ?? null)}
+                    >
+                      {opt.label}
+                    </Button>
+                  );
+                })}
               </div>
             </div>
           )}

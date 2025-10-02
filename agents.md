@@ -90,6 +90,26 @@ This viewer toolkit blends a React/Vite client with an Express + Vite middleware
 - `python scripts/fusebox_resample_volume.py --help` – Inspect resampler options for manual testing.
 - `scripts/fusebox_resample_volume.py` expects JSON configs under `tmp/` (see manifest service for examples).
 
+## Frame of Reference (FoR) Only Registration Handling
+
+**Context**: Some DICOM REG files only contain Frame of Reference UIDs without explicit Series Instance UID references (common in PET/CT fusion).
+
+**Solution Implemented**:
+1. **FoR-only registration detection**: When `parseDicomRegistrationFromFile` returns FoR UIDs but no Series UIDs, the system creates `series_registration_relationships` entries with type `frame-of-reference` for all matching series.
+2. **SeriesSelectionService integration**: Recognizes and traverses `frame-of-reference` relationships, logs when included in candidates.
+3. **Transform metadata**: `resolveFuseboxTransform` carries FoR metadata (`sourceFrameOfReferenceUid`, `targetFrameOfReferenceUid`, `referencedSeriesInstanceUids`) and emits `frame-of-reference` debug events.
+4. **Manifest filtering relaxation**: Explicit `secondarySeriesIds` bypass automatic candidate filtering (warns instead of dropping).
+5. **Harmonized test harness**: `/api/fusebox/test-slices` uses manifest service internally (same path as viewer).
+
+**Debug Sources**:
+- `frame-of-reference`: Transform selection events (`/api/debug/events?source=frame-of-reference`)
+- `fusion-manifest`: Manifest lifecycle, filtering warnings (`/api/debug/events?source=fusion-manifest`)
+- `fusebox`: Helper/resample events (existing)
+
+**Quick Troubleshooting**: If PET fusion disappears, check `/api/debug/events?source=fusion-manifest` for "Requested secondary series are not valid fusion candidates" and verify `series_registration_relationships` has `frame-of-reference` type entries.
+
+See `docs/FRAME_OF_REFERENCE_REGISTRATION.md` for complete documentation.
+
 ## Troubleshooting Checklist
 - `npm run dev:setup` fails → rebuild helper (`cmake --build build/dicom-reg-converter`) or recreate `sam_env` then `pip install -e .`.
 - Missing fusion overlays → hit `/api/debug/events?source=fusion-manifest` for manifest state, confirm resample succeeded and outputs exist under `tmp/fusebox-*`.

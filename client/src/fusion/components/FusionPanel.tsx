@@ -29,6 +29,9 @@ export function FusionPanel({ minimized, onToggleMinimized, state: providedState
       onToggleMinimized={onToggleMinimized}
       windowLevel={state.fusionWindowLevel}
       onWindowLevelPreset={state.setFusionWindowLevel}
+      registrationOptions={state.registrationOptions?.map(opt => ({ id: opt.id ?? null, label: opt.label }))}
+      selectedRegistrationId={state.selectedRegistrationId ?? null}
+      onRegistrationSelect={state.setSelectedRegistrationId}
     />
   );
 }

@@ -1,3 +1,5 @@
+import { RTProvider } from '@/rt-structures/RTProvider';
+import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
@@ -1626,6 +1628,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               )}
               
               {/* Main Viewer - always single view; MPR shown as floating windows */}
+              <RTProvider initialStructures={rtStructures}>
                 <WorkingViewer 
                   ref={workingViewerRef}
                   seriesId={selectedSeries.id}
@@ -1633,6 +1636,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   windowLevel={windowLevel}
                   onWindowLevelChange={setWindowLevel}
                   rtStructures={rtStructures}
+                  rtOverlayControlled
                   structureVisibility={structureVisibility}
                   brushToolState={brushToolState}
                   selectedForEdit={selectedForEdit}
@@ -1668,6 +1672,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionManifestPrimarySeriesId={fusionManifestPrimarySeriesId}
                   fusionGetOverlayForImage={getOverlayForImage}
                 />
+                {/* Dev-only: RT control panel overlay within provider */}
+                <div className="absolute left-2 bottom-2 z-20 max-h-[60vh] overflow-y-auto bg-black/70 border border-gray-700 rounded-md p-2 hidden sm:block">
+                  <RTControlPanel />
+                </div>
+              </RTProvider>
               
               {/* Structure Tags on Right Side - Responsive */}
               {selectedStructures.size > 0 && rtStructures?.structures && (

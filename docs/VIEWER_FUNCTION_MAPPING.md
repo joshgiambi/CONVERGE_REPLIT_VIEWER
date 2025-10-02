@@ -11,6 +11,13 @@
 - **Strategy**: Parallel implementation with 5 agents → 24-hour execution → gradual migration
 - **Timeline**: 24 hours with 5-agent parallel execution
 
+### Status Check (2025-02-14)
+
+- FusionProvider + FusionPanel pipeline is live and WorkingViewer now consumes `useFusion()` for secondary selection, registration, and overlays. ✅ Aligns with Agent 2 milestones.
+- A lightweight `PrimaryViewport` wrapper exists under `client/src/components/dicom/primary-viewport.tsx`, but the comprehensive `components/viewer/PrimaryViewport.tsx` called out below has not been implemented yet (mouse interactions, window/level HUD, etc.). ⏳ Needs Agent 1 follow-up.
+- RT overlay rendering still relies on legacy state inside WorkingViewer; `rt-structures/RTProvider` is not wired in. Agent 3 tasks remain open.
+- Full decomposition of `viewer-interface.tsx` has not started; current viewer continues to orchestrate fusion/RT/tooling directly.
+
 ---
 
 ## 24-Hour Parallel Execution Plan (5 Agents)
@@ -68,11 +75,11 @@
 | 18-20 | Integration with Agent 4's hooks | - | - |
 | 20 | CHECKPOINT: Merge to main | - | - |
 
-**Deliverables**:
-- ✅ `components/viewer/PrimaryViewport.tsx` - Canvas rendering, zoom, pan, windowing
-- ✅ `components/viewer/ViewportControls.tsx` - Toolbar controls
-- ✅ `hooks/useViewportInteractions.ts` - Mouse/keyboard events
-- ✅ Basic CT viewing works (no fusion, no RT)
+**Deliverables (current status)**:
+- 🚧 `components/viewer/PrimaryViewport.tsx` – **pending**. Only a minimal wrapper exists in `client/src/components/dicom/primary-viewport.tsx`; full canvas/interaction implementation still required.
+- ⏳ `components/viewer/ViewportControls.tsx` – not started.
+- ⏳ `hooks/useViewportInteractions.ts` – not started.
+- ⏳ Basic CT viewing without fusion/RT is still handled by legacy WorkingViewer.
 
 **Dependencies**: 
 - Consumes: `useDICOMImages` from Agent 4
@@ -96,12 +103,12 @@
 | 18-20 | Test PET/CT fusion | - | - |
 | 20 | CHECKPOINT: Merge to main | - | - |
 
-**Deliverables**:
-- ✅ `fusion/hooks/useFusionCandidates.ts` - Complex graph traversal logic
-- ✅ `fusion/hooks/useRegistrationOptions.ts` - Registration option building
-- ✅ `fusion/components/FusionOverlayLayer.tsx` - Overlay rendering + cache
-- ✅ `fusion/hooks/useFusionDebug.ts` - Debug tooling
-- ✅ PET/CT fusion works
+**Deliverables (current status)**:
+- ✅ `fusion/hooks/useFusionCandidates.ts` - Complex graph traversal logic.
+- ✅ `fusion/hooks/useRegistrationOptions.ts` - Registration option building (now consumed by WorkingViewer via FusionProvider).
+- ⚠️ `fusion/components/FusionOverlayLayer.tsx` - Component exists and is used in legacy WorkingViewer, but still depends on local canvas refs; integration with the future `PrimaryViewport` is pending.
+- ✅ `fusion/hooks/useFusionDebug.ts` - Debug tooling scaffolded (needs UI surface).
+- ⚠️ PET/CT fusion works through legacy viewer paths; refactored pipeline remains incomplete until Agent 1 delivers the new viewport.
 
 **Dependencies**:
 - Consumes: Canvas ref from Agent 1
@@ -128,12 +135,12 @@
 | 20-22 | Test RT structure loading + editing | - | - |
 | 22 | CHECKPOINT: Merge to main | - | - |
 
-**Deliverables**:
-- ✅ `rt-structures/RTProvider.tsx` - RT state management
-- ✅ `rt-structures/components/RTOverlayLayer.tsx` - Contour rendering
-- ✅ `rt-structures/services/ContourOperationsService.ts` - Boolean ops, margins, grow/shrink
-- ✅ `rt-structures/components/RTControlPanel.tsx` - Structure selection UI
-- ✅ RT structure viewing and editing works
+**Deliverables (current status)**:
+- ⏳ `rt-structures/RTProvider.tsx` - Pending; WorkingViewer still manages RT state locally.
+- ⏳ `rt-structures/components/RTOverlayLayer.tsx` - Pending integration; legacy contour rendering remains in WorkingViewer.
+- ⏳ `rt-structures/services/ContourOperationsService.ts` - Not extracted; boolean/margin logic still inline.
+- ⏳ `rt-structures/components/RTControlPanel.tsx` - Not started.
+- ⚠️ RT structure viewing/editing continues to function via legacy implementation.
 
 **Dependencies**:
 - Consumes: Canvas ref from Agent 1
@@ -817,4 +824,3 @@ ViewerInterface (root)
 ---
 
 **Next Steps**: Review this mapping and confirm the approach before beginning implementation.
-
