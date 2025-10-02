@@ -24,6 +24,9 @@ import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations
 import { useQuery } from '@tanstack/react-query';
 import { ViewerToolbar } from '@/components/dicom/viewer-toolbar';
 import { SeriesSelector } from '@/components/dicom/series-selector';
+import { ContourEditToolbar } from '@/components/dicom/contour-edit-toolbar';
+import { BooleanOperationsToolbar } from '@/components/dicom/boolean-operations-toolbar-new';
+import { MarginToolbar } from '@/components/dicom/margin-toolbar';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
 
 interface ViewerV2Props {
@@ -219,6 +222,178 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
           if (entry) rt.setStructures(entry.rtStructures);
         }}
       />
+
+      {/* Contour Edit Toolbar - wired to RTProvider */}
+      {isContourEditMode && rt.selection.selectedForEdit && rt.rtStructures && (
+        <ContourEditToolbar
+          selectedStructure={rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) || null}
+          isVisible={isContourEditMode}
+          onClose={() => {
+            setIsContourEditMode(false);
+            rt.setSelectedForEdit(null);
+          }}
+          onStructureNameChange={(name: string) => {
+            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
+            const updated = structuredClone(rt.rtStructures);
+            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
+            if (structure) {
+              structure.structureName = name;
+              rt.setStructures(updated);
+            }
+          }}
+          onStructureColorChange={(color: string) => {
+            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const rgb: [number, number, number] = [
+              Number.isFinite(r) ? r : 255,
+              Number.isFinite(g) ? g : 255,
+              Number.isFinite(b) ? b : 255,
+            ];
+            const updated = structuredClone(rt.rtStructures);
+            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
+            if (structure) {
+              structure.color = rgb;
+              rt.setStructures(updated);
+            }
+          }}
+          onToolChange={(toolState) => {
+            console.log('[ViewerV2] Tool change requested:', toolState);
+          }}
+          currentSlicePosition={0}
+          onContourUpdate={(payload) => {
+            console.log('[ViewerV2] Contour update:', payload);
+          }}
+          availableStructures={rt.rtStructures.structures}
+          onTargetStructureSelect={(structureId) => {
+            console.log('[ViewerV2] Target structure selected:', structureId);
+          }}
+          seriesId={seriesId}
+          imageMetadata={null}
+          onOpenBooleanOperations={() => {
+            setIsContourEditMode(false);
+            setShowMarginToolbar(false);
+            setShowBooleanOperations(true);
+          }}
+          onOpenAdvancedMarginTool={() => {
+            setIsContourEditMode(false);
+            setShowBooleanOperations(false);
+            setShowMarginToolbar(true);
+          }}
+        />
+      )}
+
+      {/* Boolean Operations Toolbar - wired to RTProvider */}
+      {showBooleanOperations && rt.rtStructures && (
+        <BooleanOperationsToolbar
+          isVisible={showBooleanOperations}
+          onClose={() => {
+            setShowBooleanOperations(false);
+            rt.clearPreview();
+          }}
+          availableStructures={rt.rtStructures.structures?.map((s: any) => s.structureName) || []}
+          structures={rt.rtStructures.structures}
+          grid={{
+            xSize: 512,
+            ySize: 512,
+            zSize: 1,
+            xRes: 1,
+            yRes: 1,
+            zRes: 1,
+            origin: { x: 0, y: 0, z: 0 }
+          }}
+          structureColors={(rt.rtStructures.structures || []).reduce((acc: Record<string, string>, s: any) => {
+            if (s?.structureName && Array.isArray(s?.color)) {
+              acc[s.structureName] = `rgb(${s.color.join(',')})`;
+            }
+            return acc;
+          }, {})}
+          onPreview={(target, contours) => {
+            rt.setPreviewContours(contours.map((c: any) => ({
+              ...c,
+              color: [255, 223, 0]
+            })));
+          }}
+          onPreviewStateChange={(previewInfo) => {
+            if (!previewInfo.targetName) {
+              rt.clearPreview();
+            }
+          }}
+          onHighlightStructures={(inputs, output) => {
+            console.log('[ViewerV2] Highlight structures:', inputs, output);
+          }}
+          onApply={(target, contours) => {
+            if (!rt.rtStructures) return;
+            const updated = structuredClone(rt.rtStructures);
+            let targetStruct = updated.structures.find((s: any) => s.structureName?.toLowerCase() === (target.name || '').toLowerCase());
+            if (!targetStruct) {
+              const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+              targetStruct = {
+                roiNumber: maxRoi + 1,
+                structureName: target.name,
+                color: target.color || [59, 130, 246],
+                contours: []
+              };
+              updated.structures.push(targetStruct);
+            }
+            targetStruct.contours = contours;
+            rt.setStructures(updated);
+            rt.saveHistory('boolean_operation', targetStruct.roiNumber);
+            rt.clearPreview();
+            setShowBooleanOperations(false);
+          }}
+          onExecuteOperation={(expression) => {
+            console.log('[ViewerV2] Execute boolean expression:', expression);
+          }}
+        />
+      )}
+
+      {/* Margin Toolbar - wired to RTProvider */}
+      {showMarginToolbar && rt.selection.selectedForEdit && rt.rtStructures && (
+        <MarginToolbar
+          selectedStructure={rt.rtStructures.structures?.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) ? {
+            id: rt.selection.selectedForEdit!,
+            structureName: rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.structureName || 'Unknown',
+            color: `rgb(${rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.color?.join(',') || '255,255,255'})`
+          } : null}
+          isVisible={showMarginToolbar}
+          onClose={() => setShowMarginToolbar(false)}
+          availableStructures={rt.rtStructures.structures?.map((s: any) => ({
+            id: s.roiNumber,
+            name: s.structureName
+          })) || []}
+          onCreateNewStructure={(basedOnId) => {
+            const baseStructure = rt.rtStructures?.structures?.find((s: any) => s.roiNumber === basedOnId);
+            if (baseStructure && rt.rtStructures) {
+              const newName = `${baseStructure.structureName}_margin`;
+              const maxRoi = Math.max(0, ...rt.rtStructures.structures.map((s: any) => s.roiNumber || 0));
+              const updated = structuredClone(rt.rtStructures);
+              updated.structures.push({
+                roiNumber: maxRoi + 1,
+                structureName: newName,
+                color: baseStructure.color,
+                contours: []
+              });
+              rt.setStructures(updated);
+              rt.saveHistory('create_structure', maxRoi + 1);
+            }
+          }}
+          onExecuteOperation={(operation) => {
+            console.log('[ViewerV2] Margin operation:', operation);
+            if (operation.preview) {
+              // TODO: Wire to margin preview
+            } else {
+              // TODO: Wire to margin execution
+              setShowMarginToolbar(false);
+            }
+          }}
+          onPreviewClear={() => {
+            rt.clearPreview();
+          }}
+        />
+      )}
     </>
   );
 }

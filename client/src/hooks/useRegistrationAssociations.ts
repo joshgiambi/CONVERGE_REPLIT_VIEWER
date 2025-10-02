@@ -105,31 +105,54 @@ export function useRegistrationAssociations(patientId?: string | number, studyId
           imageCount: null,
         };
 
-        const sourceIds = Array.isArray(a.sourceSeriesIds) ? a.sourceSeriesIds : [];
+        // Use API's sourceSeriesDetails if available (contains metadata)
         const seenSecondary = new Set<number>();
         const validSecondaryIds: number[] = [];
         const validSecondaryDetails: RegistrationSeriesDetail[] = [];
 
-        for (const rawId of sourceIds) {
-          const normalizedId = normalizeSeriesId(rawId);
-          if (normalizedId == null || seenSecondary.has(normalizedId)) continue;
+        // First, try to use the detailed objects from API
+        if (Array.isArray(a.sourceSeriesDetails) && a.sourceSeriesDetails.length > 0) {
+          for (const apiDetail of a.sourceSeriesDetails) {
+            const normalizedId = normalizeSeriesId(apiDetail?.id);
+            if (normalizedId == null || seenSecondary.has(normalizedId)) continue;
 
-          // Basic detail construction (can be enhanced with seriesData if available)
-          const detail: RegistrationSeriesDetail = {
-            id: normalizedId,
-            uid: null,
-            description: null,
-            modality: '',
-            studyId: null,
-            imageCount: null,
-          };
+            const detail: RegistrationSeriesDetail = {
+              id: normalizedId,
+              uid: ensureString(apiDetail?.uid) ?? null,
+              description: ensureString(apiDetail?.description) ?? null,
+              modality: ensureString(apiDetail?.modality)?.toUpperCase() ?? '',
+              studyId: normalizeSeriesId(apiDetail?.studyId),
+              imageCount: typeof apiDetail?.imageCount === 'number' ? apiDetail.imageCount : null,
+            };
 
-          const modality = ensureString(detail?.modality)?.toUpperCase() ?? '';
-          if (modality && !allowedFusionModalities.has(modality)) continue;
+            const modality = detail.modality;
+            if (modality && !allowedFusionModalities.has(modality)) continue;
 
-          seenSecondary.add(normalizedId);
-          validSecondaryIds.push(normalizedId);
-          validSecondaryDetails.push(detail);
+            seenSecondary.add(normalizedId);
+            validSecondaryIds.push(normalizedId);
+            validSecondaryDetails.push(detail);
+          }
+        } else {
+          // Fallback: use sourceSeriesIds array if details not available
+          const sourceIds = Array.isArray(a.sourceSeriesIds) ? a.sourceSeriesIds : [];
+          for (const rawId of sourceIds) {
+            const normalizedId = normalizeSeriesId(rawId);
+            if (normalizedId == null || seenSecondary.has(normalizedId)) continue;
+
+            // Minimal detail without metadata (API should provide this, but fallback)
+            const detail: RegistrationSeriesDetail = {
+              id: normalizedId,
+              uid: null,
+              description: null,
+              modality: '',
+              studyId: null,
+              imageCount: null,
+            };
+
+            seenSecondary.add(normalizedId);
+            validSecondaryIds.push(normalizedId);
+            validSecondaryDetails.push(detail);
+          }
         }
 
         if (!validSecondaryIds.length) continue;
@@ -153,6 +176,7 @@ export function useRegistrationAssociations(patientId?: string | number, studyId
           studyIds,
           associationCount: associationMap.size,
           ctacCount: ctacUnion.size,
+          sampleEntry: associationMap.size > 0 ? Array.from(associationMap.values())[0][0] : null,
         });
       }
 
