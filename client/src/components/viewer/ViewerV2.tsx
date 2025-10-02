@@ -30,16 +30,18 @@ import { MarginToolbar } from '@/components/dicom/margin-toolbar';
 import { SimpleBrushTool } from '@/components/dicom/simple-brush-tool';
 import { PenToolUnifiedV2 } from '@/components/dicom/pen-tool-unified-v2';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
+import type { ImageMetadata } from '@/types/viewer';
 import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
 
 interface ViewerV2Props {
   patientId: string;
   seriesId: number;
   studyId?: number;
+  initialSeriesList?: DICOMSeries[];
 }
 
 // Inner component that uses both fusion and RT contexts
-function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
+function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: ViewerV2Props) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
   const [fusionMinimized, setFusionMinimized] = useState(false);
@@ -52,17 +54,33 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   // State for series selector
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
   const [currentSeriesId, setCurrentSeriesId] = useState<number>(seriesId);
+  const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
+  const legacyImageMetadata = useMemo(() => {
+    if (!imageMetadata) return null;
+    return {
+      ...imageMetadata,
+      pixelSpacing: `${imageMetadata.pixelSpacing[0]}\\${imageMetadata.pixelSpacing[1]}`,
+      imagePosition: `${imageMetadata.imagePositionPatient[0]}\\${imageMetadata.imagePositionPatient[1]}\\${imageMetadata.imagePositionPatient[2]}`,
+      Columns: imageMetadata.columns,
+      Rows: imageMetadata.rows,
+      sliceThickness: imageMetadata.sliceThickness,
+    };
+  }, [imageMetadata]);
 
   // Fetch all series for the patient
-  const { data: allSeries = [], isLoading: seriesLoading } = useQuery<DICOMSeries[]>({
+  const hasInitialSeries = Array.isArray(initialSeriesList) && initialSeriesList.length > 0;
+  const { data: allSeries = hasInitialSeries ? initialSeriesList! : [], isLoading: seriesLoading } = useQuery<DICOMSeries[]>({
     queryKey: ['patient-series', patientId],
     queryFn: async () => {
       const response = await fetch(`/api/patients/${patientId}/series`);
       if (!response.ok) return [];
       const data = await response.json();
-      return data.series || [];
+      if (Array.isArray(data?.series)) return data.series;
+      if (Array.isArray(data)) return data;
+      return [];
     },
-    enabled: !!patientId,
+    enabled: !!patientId && !hasInitialSeries,
+    initialData: hasInitialSeries ? initialSeriesList : undefined,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -251,11 +269,12 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
       <ViewerShell
         toolbar={null}
         viewport={
-          <PrimaryViewport
-            ref={viewportRef}
-            seriesId={seriesId}
-            studyId={studyId}
-          >
+        <PrimaryViewport
+          ref={viewportRef}
+          seriesId={seriesId}
+          studyId={studyId}
+          onImageMetadataChange={setImageMetadata}
+        >
             {/* Order: Fusion first (clears), RT second (strokes) */}
             {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
             <RTOverlayLayer />
@@ -303,7 +322,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
               zoom={viewportRef.current?.zoom ?? 1}
               panX={viewportRef.current?.panX ?? 0}
               panY={viewportRef.current?.panY ?? 0}
-              imageMetadata={viewportRef.current?.imageMetadata ?? null}
+              imageMetadata={legacyImageMetadata}
               isEraseMode={rt.brush.mode === 'erase'}
               onBrushSizeChange={(size: number) => rt.setBrushSize(size)}
               ctTransform={null}
@@ -313,7 +332,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
             <PenToolUnifiedV2
               isActive={rt.pen.enabled}
               canvasRef={viewportRef}
-              imageMetadata={viewportRef.current?.imageMetadata ?? null}
+              imageMetadata={legacyImageMetadata}
               worldToCanvas={(x: number, y: number): [number, number] => {
                 // TODO: Implement proper world-to-canvas transform using viewport zoom/pan
                 return [x, y];
@@ -687,7 +706,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
 }
 
 // Main component with conditional FusionProvider wrapper
-export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
+export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: ViewerV2Props) {
   // Fetch series metadata to check modality
   const { data: seriesData } = useQuery<any>({
     queryKey: ['series-metadata', seriesId],
@@ -836,6 +855,7 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
         patientId={patientId}
         seriesId={seriesId}
         studyId={studyId}
+        initialSeriesList={initialSeriesList}
       />
     </RTProvider>
   );

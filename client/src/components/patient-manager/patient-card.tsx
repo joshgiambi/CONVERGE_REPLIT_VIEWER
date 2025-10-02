@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -52,25 +52,6 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
   // Find MRI series that have registrations
   const ctSeries = imageSeries.filter(s => s.modality === 'CT');
   const mriSeries = imageSeries.filter(s => s.modality === 'MR');
-
-  const primarySeries = useMemo(() => {
-    const associationPrimaryId = associationData?.associations?.find((assoc) => assoc.relationship === 'registered')?.targetSeriesId;
-    if (associationPrimaryId) {
-      const found = series.find((s) => s.id === associationPrimaryId);
-      if (found) return found;
-    }
-    if (ctSeries.length) return ctSeries[0];
-    if (imageSeries.length) return imageSeries[0];
-    return series[0] ?? null;
-  }, [associationData, series, ctSeries, imageSeries]);
-
-  const viewerV2Href = useMemo(() => {
-    const params = new URLSearchParams();
-    params.set('patientId', patient.patientID);
-    if (primarySeries?.id) params.set('seriesId', String(primarySeries.id));
-    if (primarySeries?.studyId) params.set('studyId', String(primarySeries.studyId));
-    return `/viewer-v2?${params.toString()}`;
-  }, [patient.patientID, primarySeries]);
 
   // Load patient tags
   useEffect(() => {
@@ -720,7 +701,7 @@ export function PatientCard({ patient, studies, series, isSelectable, isSelected
                 View
               </Button>
             </Link>
-            <Link href={viewerV2Href}>
+            <Link href={`/viewer-v2?patientId=${patient.patientID}`}>
               <Button
                 size="sm"
                 className="bg-green-600 hover:bg-green-700 text-white border border-green-500"

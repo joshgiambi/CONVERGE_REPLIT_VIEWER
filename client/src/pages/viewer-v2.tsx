@@ -13,6 +13,7 @@ import { useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
 import { ViewerV2 } from '@/components/viewer/ViewerV2';
 import { resolveViewerBootstrap, type ViewerBootstrapResult } from '@/lib/viewer-bootstrap';
+import type { DICOMSeries } from '@/types/viewer';
 
 export default function ViewerV2Page() {
   const [location] = useLocation();
@@ -74,48 +75,71 @@ export default function ViewerV2Page() {
     return null;
   }, [bootstrap, patientIdParam]);
 
-  const displayPatientId = patientIdParam ?? patientApiId;
-
   const studyIdResolved = useMemo(() => {
     if (studyIdParam) return studyIdParam;
     if (bootstrap?.currentStudy?.id != null) return String(bootstrap.currentStudy.id);
     return null;
   }, [studyIdParam, bootstrap]);
 
-  // Fetch series data for all studies in bootstrap
-  const { data: allSeriesData, isLoading: seriesLoading } = useQuery({
-    queryKey: ['viewer-v2-all-series', bootstrap?.studyData?.studies?.map((s: any) => s.id)],
+  const { data: studySeriesList = [], isLoading: studySeriesLoading, error: studySeriesError } = useQuery<DICOMSeries[]>({
+    queryKey: ['viewer-v2-study-series', bootstrap?.studyData?.studies?.map((s: any) => s.id)],
     queryFn: async () => {
-      if (!bootstrap?.studyData?.studies) return [];
-      
-      // Fetch series for all studies and combine them
-      const seriesPromises = bootstrap.studyData.studies.map(async (study: any) => {
+      if (!bootstrap?.studyData?.studies?.length) return [];
+      const collected: DICOMSeries[] = [];
+      for (const study of bootstrap.studyData.studies) {
         const response = await fetch(`/api/studies/${study.id}/series`);
-        if (!response.ok) return [];
-        return response.json();
-      });
-      
-      const seriesArrays = await Promise.all(seriesPromises);
-      return seriesArrays.flat();
+        if (!response.ok) {
+          throw new Error(`Failed to fetch series for study ${study.id}`);
+        }
+        const payload = await response.json();
+        const entries = Array.isArray(payload?.series)
+          ? payload.series
+          : Array.isArray(payload)
+            ? payload
+            : [];
+        collected.push(
+          ...entries.map((s: any) => ({ ...s, studyId: study.id })),
+        );
+      }
+      return collected;
     },
-    enabled: !!bootstrap?.studyData?.studies && !seriesIdParam,
+    enabled: !!bootstrap?.studyData?.studies?.length,
     staleTime: 2 * 60 * 1000,
   });
 
-  // Get fallback series ID from fetched series data
+  const { data: patientSeriesList = [], isLoading: patientSeriesLoading, error: patientSeriesError } = useQuery<DICOMSeries[]>({
+    queryKey: ['viewer-v2-patient-series', patientApiId],
+    queryFn: async () => {
+      if (!patientApiId) return [];
+      const response = await fetch(`/api/patients/${patientApiId}/series`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch patient series');
+      }
+      const payload = await response.json();
+      if (Array.isArray(payload?.series)) return payload.series;
+      if (Array.isArray(payload)) return payload;
+      return [];
+    },
+    enabled: !!patientApiId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const combinedSeries = useMemo<DICOMSeries[]>(() => {
+    if (studySeriesList.length) return studySeriesList as DICOMSeries[];
+    return patientSeriesList as DICOMSeries[];
+  }, [studySeriesList, patientSeriesList]);
+
   const fallbackSeriesId = useMemo(() => {
-    if (seriesIdParam || !allSeriesData?.length) return null;
-    
-    // Prefer CT series if available, otherwise take first
-    const ctSeries = allSeriesData.find((s: any) => s.modality === 'CT');
-    const firstSeries = ctSeries || allSeriesData[0];
-    
+    if (seriesIdParam) return null;
+    if (!combinedSeries.length) return null;
+    const ctSeries = combinedSeries.find((s) => (s.modality || '').toUpperCase() === 'CT');
+    const firstSeries = ctSeries || combinedSeries[0];
     return firstSeries?.id ? String(firstSeries.id) : null;
-  }, [allSeriesData, seriesIdParam]);
+  }, [combinedSeries, seriesIdParam]);
 
   const effectiveSeriesId = seriesIdParam || fallbackSeriesId;
 
-  if (studiesLoading || seriesLoading) {
+  if (studiesLoading || studySeriesLoading || patientSeriesLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
         <div className="text-center text-white">
@@ -126,7 +150,7 @@ export default function ViewerV2Page() {
     );
   }
 
-  if (studiesError || bootstrapError) {
+  if (studiesError || bootstrapError || studySeriesError || patientSeriesError) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
         <div className="text-center text-white">
@@ -170,6 +194,7 @@ export default function ViewerV2Page() {
       patientId={patientApiId}
       seriesId={parseInt(effectiveSeriesId, 10)}
       studyId={studyIdResolved ? parseInt(studyIdResolved, 10) : undefined}
+      initialSeriesList={combinedSeries.length ? combinedSeries : undefined}
     />
   );
 }
