@@ -12,9 +12,8 @@
 import { useRef, useState, useMemo } from 'react';
 import { ViewerShell } from './ViewerShell';
 import { PrimaryViewport } from './PrimaryViewport';
-import { ViewportControls } from './ViewportControls';
 import { useViewportTools } from '@/hooks/useViewportTools';
-import { RTProvider } from '@/rt-structures/RTProvider';
+import { RTProvider, useRT } from '@/rt-structures/RTProvider';
 import RTOverlayLayer from '@/rt-structures/components/RTOverlayLayer';
 import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import FusionOverlayLayer from '@/fusion/components/FusionOverlayLayer';
@@ -23,6 +22,7 @@ import { FusionPanel } from '@/fusion/components/FusionPanel';
 import { useFusionCandidates, useSeriesSelection } from '@/hooks/use-series-selection';
 import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations';
 import { useQuery } from '@tanstack/react-query';
+import { ViewerToolbar } from '@/components/dicom/viewer-toolbar';
 
 interface ViewerV2Props {
   patientId: string;
@@ -35,6 +35,11 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
   const [fusionMinimized, setFusionMinimized] = useState(false);
+  
+  // State for floating toolbars
+  const [isContourEditMode, setIsContourEditMode] = useState(false);
+  const [showBooleanOperations, setShowBooleanOperations] = useState(false);
+  const [showMarginToolbar, setShowMarginToolbar] = useState(false);
 
   // Try to get fusion context - may not exist if not a CT series
   let fusion: any = null;
@@ -44,6 +49,9 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
     // FusionProvider not present - this is expected for non-CT series
   }
 
+  // Try to get RT context for undo/redo
+  const rt = useRT();
+
   // Viewport control handlers
   const handleZoomIn = () => viewportRef.current?.zoomIn();
   const handleZoomOut = () => viewportRef.current?.zoomOut();
@@ -52,25 +60,40 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const handleCrosshairs = () => setMode('crosshairs');
   const handleMeasure = () => setMode('measure');
 
+  // Toolbar handlers
+  const handleContourEdit = () => {
+    setShowBooleanOperations(false);
+    setShowMarginToolbar(false);
+    
+    // Auto-select last structure if none selected
+    if (!rt.selection.selectedForEdit && rt.rtStructures?.structures && rt.rtStructures.structures.length > 0) {
+      const lastStructure = rt.rtStructures.structures[rt.rtStructures.structures.length - 1];
+      rt.setSelectedForEdit(lastStructure.roiNumber);
+    }
+    
+    setIsContourEditMode(true);
+  };
+
+  const handleContourOperations = () => {
+    setIsContourEditMode(false);
+    setShowMarginToolbar(false);
+    setShowBooleanOperations(true);
+  };
+
+  const handleAdvancedMarginTool = () => {
+    setIsContourEditMode(false);
+    setShowBooleanOperations(false);
+    setShowMarginToolbar(true);
+  };
+
   const fusionOpacity = fusion?.opacity ?? 0.5;
   const showFusionPanel = fusion?.showFusionPanel ?? false;
 
   return (
-    <ViewerShell
-      toolbar={
-        <ViewportControls
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onResetZoom={handleResetZoom}
-          onPan={handlePan}
-          onCrosshairs={handleCrosshairs}
-          onMeasure={handleMeasure}
-          isPanActive={isPanMode}
-          isCrosshairsActive={isCrosshairMode}
-          isMeasureActive={isMeasureMode}
-        />
-      }
-      viewport={
+    <>
+      <ViewerShell
+        toolbar={null}
+        viewport={
         <RTProvider>
           <PrimaryViewport
             ref={viewportRef}
@@ -120,7 +143,47 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
           </div>
         </div>
       }
-    />
+      />
+      
+      {/* Floating ViewerToolbar (positions itself at bottom center) */}
+      <ViewerToolbar
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onFitToWindow={handleResetZoom}
+        onPan={handlePan}
+        onMeasure={handleMeasure}
+        onCrosshairs={handleCrosshairs}
+        onContourEdit={handleContourEdit}
+        onContourOperations={handleContourOperations}
+        onAdvancedMarginTool={handleAdvancedMarginTool}
+        isContourEditActive={isContourEditMode}
+        isContourOperationsActive={showBooleanOperations}
+        isAdvancedMarginToolActive={showMarginToolbar}
+        isPanActive={isPanMode}
+        isMeasureActive={isMeasureMode}
+        isCrosshairsActive={isCrosshairMode}
+        onUndo={() => {
+          const entry = rt.undoRedo?.undo();
+          if (entry) rt.setStructures(entry.rtStructures);
+        }}
+        onRedo={() => {
+          const entry = rt.undoRedo?.redo();
+          if (entry) rt.setStructures(entry.rtStructures);
+        }}
+        canUndo={rt.undoRedo?.canUndo() ?? false}
+        canRedo={rt.undoRedo?.canRedo() ?? false}
+        historyItems={rt.undoRedo?.getHistory().map(h => ({
+          timestamp: h.timestamp,
+          action: h.action,
+          structureId: h.structureId ?? 0
+        })) ?? []}
+        currentHistoryIndex={rt.undoRedo?.getCurrentIndex() ?? -1}
+        onSelectHistory={(index) => {
+          const entry = rt.undoRedo?.jumpTo(index);
+          if (entry) rt.setStructures(entry.rtStructures);
+        }}
+      />
+    </>
   );
 }
 
