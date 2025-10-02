@@ -28,6 +28,7 @@ import { ContourEditToolbar } from '@/components/dicom/contour-edit-toolbar';
 import { BooleanOperationsToolbar } from '@/components/dicom/boolean-operations-toolbar-new';
 import { MarginToolbar } from '@/components/dicom/margin-toolbar';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
+import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
 
 interface ViewerV2Props {
   patientId: string;
@@ -521,18 +522,73 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
   const studyIds = useMemo(() => studyId ? [studyId] : undefined, [studyId]);
   const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
 
-  // Fetch RT structures for this series
-  const { data: rtStructures } = useQuery({
-    queryKey: ['rt-structures', seriesId],
+  // Fetch RT structure series for the study (mirrors legacy viewer flow)
+  const { data: rtSeriesList = [] } = useQuery({
+    queryKey: ['study-rt-series', studyId],
     queryFn: async () => {
-      const res = await fetch(`/api/rt-structures/${seriesId}/contours`);
+      if (!Number.isFinite(studyId)) return [];
+      const res = await fetch(`/api/studies/${studyId}/rt-structures`);
       if (!res.ok) {
-        if (res.status === 404) return null; // No RT structures for this series
+        if (res.status === 404) return [];
+        throw new Error('Failed to load RT structure list');
+      }
+      return res.json();
+    },
+    enabled: Number.isFinite(studyId),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const selectMostRecent = useMemo(() => {
+    return (list: any[]): any | null => {
+      if (!Array.isArray(list) || list.length === 0) return null;
+      return [...list].sort((a, b) => {
+        const dateA = (a?.seriesDate || a?.createdAt || '') as string;
+        const dateB = (b?.seriesDate || b?.createdAt || '') as string;
+        if (dateA && dateB && dateA !== dateB) {
+          return dateB.localeCompare(dateA);
+        }
+        const numberA = Number(a?.seriesNumber) || 0;
+        const numberB = Number(b?.seriesNumber) || 0;
+        if (numberA !== numberB) return numberB - numberA;
+        const idA = Number(a?.id) || 0;
+        const idB = Number(b?.id) || 0;
+        return idB - idA;
+      })[0] ?? null;
+    };
+  }, []);
+
+  const referencingRtSeries = useMemo(() => {
+    if (!rtSeriesList?.length) return [];
+    const primaryUid = seriesData?.seriesInstanceUID;
+    return rtSeriesList.filter((rt: any) => {
+      const byId = Number(rt?.referencedSeriesId) === seriesId;
+      const byUid = primaryUid && rt?.referencedSeriesUID === primaryUid;
+      return byId || byUid;
+    });
+  }, [rtSeriesList, seriesId, seriesData?.seriesInstanceUID]);
+
+  const selectedRtSeries = useMemo(() => {
+    if (referencingRtSeries.length) {
+      return selectMostRecent(referencingRtSeries);
+    }
+    return selectMostRecent(rtSeriesList);
+  }, [referencingRtSeries, rtSeriesList, selectMostRecent]);
+
+  const selectedRtSeriesId = selectedRtSeries?.id ? Number(selectedRtSeries.id) : null;
+
+  // Fetch RT structures for the chosen RTSTRUCT series
+  const { data: rtStructures } = useQuery({
+    queryKey: ['rt-structures', selectedRtSeriesId],
+    queryFn: async () => {
+      if (!Number.isFinite(selectedRtSeriesId)) return null;
+      const res = await fetch(`/api/rt-structures/${selectedRtSeriesId}/contours`);
+      if (!res.ok) {
+        if (res.status === 404) return null;
         throw new Error('RT load failed');
       }
       return res.json();
     },
-    enabled: !!seriesId,
+    enabled: Number.isFinite(selectedRtSeriesId),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -548,10 +604,14 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
         ? 'seriesSelection' 
         : (directFusionCandidates.length ? 'directAPI' : 'none'),
       skippedFusionCandidatesAPI: !isCT,
+      rtSeriesCount: rtSeriesList?.length ?? 0,
+      referencingRtSeriesCount: referencingRtSeries.length,
+      selectedRtSeriesId,
       rtStructures: rtStructures ? {
         loaded: true,
         structureCount: rtStructures.structures?.length || 0,
-        referencedSeriesId: rtStructures.referencedSeriesInstanceUID
+        referencedSeriesId: selectedRtSeries?.referencedSeriesId ?? null,
+        referencedSeriesUID: selectedRtSeries?.referencedSeriesUID ?? null,
       } : { loaded: false },
     });
   }
@@ -579,4 +639,3 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
     </FusionProvider>
   ) : content;
 }
-
