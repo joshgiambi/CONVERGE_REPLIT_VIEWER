@@ -259,11 +259,87 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
             }
           }}
           onToolChange={(toolState) => {
-            console.log('[ViewerV2] Tool change requested:', toolState);
+            console.log('[ViewerV2] Tool change:', toolState);
+            // Wire tool changes to RTProvider
+            if (toolState.tool === 'brush') {
+              rt.setBrushMode('add');
+              rt.setBrushEnabled(true);
+              rt.setPenEnabled(false);
+            } else if (toolState.tool === 'eraser') {
+              rt.setBrushMode('erase');
+              rt.setBrushEnabled(true);
+              rt.setPenEnabled(false);
+            } else if (toolState.tool === 'pen') {
+              rt.setPenMode('add');
+              rt.setPenEnabled(true);
+              rt.setBrushEnabled(false);
+            } else if (toolState.tool === 'scissors') {
+              rt.setPenMode('cut');
+              rt.setPenEnabled(true);
+              rt.setBrushEnabled(false);
+            } else {
+              // Other tools - disable brush/pen
+              rt.setBrushEnabled(false);
+              rt.setPenEnabled(false);
+            }
+            
+            // Update brush size if provided
+            if (toolState.brushSize !== undefined) {
+              rt.setBrushSize(toolState.brushSize);
+            }
           }}
           currentSlicePosition={0}
-          onContourUpdate={(payload) => {
+          onContourUpdate={async (payload) => {
             console.log('[ViewerV2] Contour update:', payload);
+            if (!rt.rtStructures) return;
+            
+            try {
+              rt.setBusy(true);
+              const { createContourOperationsService } = await import('@/rt-structures/services/ContourOperationsService');
+              const service = createContourOperationsService();
+              
+              let updated = rt.rtStructures;
+              
+              // Handle different contour operations
+              if (payload.action === 'smart_brush_stroke' || payload.action === 'brush_add') {
+                updated = await service.addBrushStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points
+                );
+              } else if (payload.action === 'erase_stroke') {
+                updated = await service.eraseBrushStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points
+                );
+              } else if (payload.action === 'add_pen_stroke') {
+                updated = await service.addPenStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points
+                );
+              } else if (payload.action === 'cut_pen_stroke') {
+                updated = await service.cutPenStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points
+                );
+              }
+              
+              if (updated !== rt.rtStructures) {
+                rt.setStructures(updated);
+                rt.saveHistory(payload.action, payload.structureId);
+              }
+            } catch (err) {
+              console.error('[ViewerV2] Contour operation failed:', err);
+            } finally {
+              rt.setBusy(false);
+            }
           }}
           availableStructures={rt.rtStructures.structures}
           onTargetStructureSelect={(structureId) => {
