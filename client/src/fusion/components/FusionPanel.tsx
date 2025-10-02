@@ -1,13 +1,15 @@
 import { FusionControlPanel } from '@/components/dicom/fusion-control-panel';
 import { useFusionPanelState } from '../hooks/useFusionPanel';
+import type { UseFusionPanelStateResult } from '@/types/fusion';
 
 interface FusionPanelProps {
   minimized: boolean;
   onToggleMinimized: (minimized: boolean) => void;
+  state?: UseFusionPanelStateResult;
 }
 
-export function FusionPanel({ minimized, onToggleMinimized }: FusionPanelProps) {
-  const state = useFusionPanelState();
+export function FusionPanel({ minimized, onToggleMinimized, state: providedState }: FusionPanelProps) {
+  const state = providedState ?? useFusionPanelState();
 
   if (!state.showPanel) {
     return null;
@@ -27,6 +29,9 @@ export function FusionPanel({ minimized, onToggleMinimized }: FusionPanelProps) 
       onToggleMinimized={onToggleMinimized}
       windowLevel={state.fusionWindowLevel}
       onWindowLevelPreset={state.setFusionWindowLevel}
+      registrationOptions={state.registrationOptions?.map(opt => ({ id: opt.id ?? null, label: opt.label }))}
+      selectedRegistrationId={state.selectedRegistrationId ?? null}
+      onRegistrationSelect={state.setSelectedRegistrationId}
     />
   );
 }
