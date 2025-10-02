@@ -1,6 +1,7 @@
 import { RTProvider } from '@/rt-structures/RTProvider';
 import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { ComponentProps } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
@@ -1292,42 +1293,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  // Undo/Redo handlers via RT provider
-  const rt = useRT();
-  const handleGlobalUndo = () => {
-    const prev = rt.undoRedo.undo();
-    if (prev) setRTStructures(prev.rtStructures);
-  };
-  const handleGlobalRedo = () => {
-    const next = rt.undoRedo.redo();
-    if (next) setRTStructures(next.rtStructures);
-  };
-  const handleJumpToHistory = (index: number) => {
-    const state = rt.undoRedo.jumpTo(index);
-    if (state) setRTStructures(state.rtStructures);
-  };
-
-
-  // Subscribe to undo manager changes to refresh toolbar state
-  const [historyState, setHistoryState] = useState({
-    canUndo: false,
-    canRedo: false,
-    items: [] as Array<{ timestamp: number; action: string; structureId: number }>,
-    index: -1
-  });
-
-  useEffect(() => {
-    const update = () => {
-      setHistoryState({
-        canUndo: rt.undoRedo.canUndo(),
-        canRedo: rt.undoRedo.canRedo(),
-        items: rt.undoRedo.getHistory().map(h => ({ timestamp: h.timestamp, action: h.action, structureId: (h.structureId as number) })),
-        index: rt.undoRedo.getCurrentIndex(),
-      });
-    };
-    update();
-  }, [rt.undoRedo, rt.rtStructures, selectedSeries?.id]);
-
   // Auto-zoom functionality based on structure bounds
   const getStructureBounds = (structure: any) => {
     let xMin = Infinity, xMax = -Infinity;
@@ -1704,7 +1669,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
         toolbar={
           selectedSeries && (
-            <ViewerToolbar
+            <ViewerToolbarWithUndo
+              selectedSeriesId={selectedSeries.id ?? null}
+              setRTStructures={setRTStructures}
               onZoomIn={handleZoomIn}
               onZoomOut={handleZoomOut}
               onFitToWindow={handleResetZoom}
@@ -1743,13 +1710,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
               onLocalization={handleLocalizationToggle}
               isLocalizationActive={showLocalizationTool}
               className="toolbar-custom"
-              onUndo={handleGlobalUndo}
-              onRedo={handleGlobalRedo}
-              canUndo={historyState.canUndo}
-              canRedo={historyState.canRedo}
-              historyItems={historyState.items}
-              currentHistoryIndex={historyState.index}
-              onSelectHistory={handleJumpToHistory}
             />
           )
         }
@@ -2271,5 +2231,78 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     >
       <FusionContent />
     </FusionProvider>
+  );
+}
+
+type ViewerToolbarBaseProps = ComponentProps<typeof ViewerToolbar>;
+
+interface ViewerToolbarWithUndoProps extends Omit<ViewerToolbarBaseProps,
+  'onUndo' | 'onRedo' | 'canUndo' | 'canRedo' | 'historyItems' | 'currentHistoryIndex' | 'onSelectHistory'
+> {
+  setRTStructures: (value: any) => void;
+  selectedSeriesId: number | null;
+}
+
+function ViewerToolbarWithUndo({
+  setRTStructures,
+  selectedSeriesId,
+  ...toolbarProps
+}: ViewerToolbarWithUndoProps) {
+  const rt = useRT();
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    items: [] as Array<{ timestamp: number; action: string; structureId: number }>,
+    index: -1,
+  });
+
+  const handleGlobalUndo = useCallback(() => {
+    const prev = rt.undoRedo.undo();
+    if (prev) {
+      rt.setStructures(prev.rtStructures);
+      setRTStructures(prev.rtStructures);
+    }
+  }, [rt, setRTStructures]);
+
+  const handleGlobalRedo = useCallback(() => {
+    const next = rt.undoRedo.redo();
+    if (next) {
+      rt.setStructures(next.rtStructures);
+      setRTStructures(next.rtStructures);
+    }
+  }, [rt, setRTStructures]);
+
+  const handleJumpToHistory = useCallback((index: number) => {
+    const state = rt.undoRedo.jumpTo(index);
+    if (state) {
+      rt.setStructures(state.rtStructures);
+      setRTStructures(state.rtStructures);
+    }
+  }, [rt, setRTStructures]);
+
+  useEffect(() => {
+    setHistoryState({
+      canUndo: rt.undoRedo.canUndo(),
+      canRedo: rt.undoRedo.canRedo(),
+      items: rt.undoRedo.getHistory().map((h) => ({
+        timestamp: h.timestamp,
+        action: h.action,
+        structureId: h.structureId as number,
+      })),
+      index: rt.undoRedo.getCurrentIndex(),
+    });
+  }, [rt.undoRedo, rt.rtStructures, selectedSeriesId]);
+
+  return (
+    <ViewerToolbar
+      {...toolbarProps}
+      onUndo={handleGlobalUndo}
+      onRedo={handleGlobalRedo}
+      canUndo={historyState.canUndo}
+      canRedo={historyState.canRedo}
+      historyItems={historyState.items}
+      currentHistoryIndex={historyState.index}
+      onSelectHistory={handleJumpToHistory}
+    />
   );
 }
