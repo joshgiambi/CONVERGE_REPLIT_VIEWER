@@ -424,8 +424,10 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
   // Fetch series selection data (includes planning CT and fusion candidates)
   const { data: seriesSelectionData } = useSeriesSelection(studyId);
 
-  // Fetch fusion candidates - use series selection data if available, otherwise direct API
-  const { data: directFusionCandidates = [] } = useFusionCandidates(seriesId);
+  // Only fetch fusion candidates if this is a CT series (optimization)
+  const { data: directFusionCandidates = [] } = useFusionCandidates(
+    isCT ? seriesId : undefined // Skip API call if not CT
+  );
 
   // Merge fusion candidates from series selection and direct API
   const candidateSecondaryIds = useMemo(() => {
@@ -436,7 +438,7 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
       return seriesSelectionData.fusionCandidates.map((c: any) => c.seriesId);
     }
     
-    // Fallback to direct API call
+    // Fallback to direct API call (only happens for CT series)
     return directFusionCandidates.map(c => c.seriesId);
   }, [fusionPrimarySeriesId, seriesSelectionData?.fusionCandidates, directFusionCandidates]);
 
@@ -452,6 +454,10 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
       fusionPrimarySeriesId,
       candidateCount: candidateSecondaryIds.length,
       registrationCount: registrationData?.size || 0,
+      candidatesSource: seriesSelectionData?.fusionCandidates?.length 
+        ? 'seriesSelection' 
+        : (directFusionCandidates.length ? 'directAPI' : 'none'),
+      skippedFusionCandidatesAPI: !isCT,
     });
   }
 
