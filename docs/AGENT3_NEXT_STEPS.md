@@ -50,173 +50,116 @@
 
 ## 🔴 WHAT'S MISSING (Your Remaining Work)
 
-### **Option A: Just Polish What You Have** (Recommended)
+### **Focus: PARITY ONLY - Match Legacy Viewer**
 
-If the existing operations are sufficient, just:
+**User Decision**: Stay on parity path. No advanced operations (blob separation, hole filling) yet. Just complete what legacy viewer already has.
 
-**1. Add Progress Callbacks** (2 hours)
-```typescript
-// ContourOperationsService.ts
-async booleanOperationMultiSlice(
-  structures,
-  sourceRoi,
-  targetRoi,
-  op,
-  onProgress?: (current: number, total: number) => void  // ADD THIS
-) {
-  const slices = Array.from(bySlice.keys());
-  for (let i = 0; i < slices.length; i++) {
-    // ... process slice ...
-    onProgress?.(i + 1, slices.length);  // Report progress
-  }
-}
-```
+**Your Remaining Tasks**:
 
-**2. Add Error Handling** (1 hour)
-- Log errors to console
-- Return error states from operations
-- Don't silently fail
+### **1. Pen Tool Service Logic** (3 hours)
 
-**3. Document Anisotropic Limitation** (30 min)
-- Add comment that current implementation uses max distance
-- Note that true 3D requires image orientation
-
-**4. Test Your Services** (2 hours)
-- Create simple test cases
-- Verify boolean ops work
-- Verify margins work
-- Verify undo/redo works
-
-**Total: ~6 hours**
-
----
-
-### **Option B: Add Advanced Operations** (If Needed)
-
-Only do this if user needs them:
-
-**1. Blob Separation** (3 hours)
-- Split disconnected regions into separate structures
-
-**2. Blob Removal** (2 hours)
-- Remove small islands by area threshold
-
-**3. Hole Filling** (2 hours)
-- Fill interior gaps in contours
-
-**4. Contour Simplification** (3 hours)
-- Reduce points while preserving shape
-
-**Total: ~10 hours**
-
----
-
-## 📋 IMMEDIATE NEXT STEPS
-
-### **Step 1: Confirm Scope with User** (5 minutes)
-
-Ask user:
-- "Do you need advanced operations (blob separation, hole filling)?"
-- "Or should I just polish what's already built?"
-
-**If polish only**: Follow Option A (~6 hours)  
-**If advanced needed**: Follow Option B (~10 hours)
-
----
-
-### **Step 2: Polish ContourOperationsService** (if Option A)
+**Check legacy viewer**: Does it have a pen tool? If yes, you need:
 
 **File**: `client/src/rt-structures/services/ContourOperationsService.ts`
 
-**Add**:
-
-#### 2.1 Progress Reporting
+**Add pen tool methods**:
 ```typescript
-export interface OperationProgress {
-  current: number;
-  total: number;
-  message?: string;
-}
-
-// Add to all long-running operations:
-async booleanOperationMultiSlice(
+// Add to ContourServiceApi interface
+addPenPoint(
   structures: RTStructureSet,
-  sourceRoi: number,
-  targetRoi: number,
-  op: BooleanOperation,
-  onProgress?: (progress: OperationProgress) => void
-): Promise<RTStructureSet> {
-  // ... existing code ...
-  
-  const slices = Array.from(bySlice.keys());
-  for (let i = 0; i < slices.length; i++) {
-    // Process slice...
-    
-    if (onProgress) {
-      onProgress({
-        current: i + 1,
-        total: slices.length,
-        message: `Processing slice ${i + 1}/${slices.length}`
-      });
-    }
-  }
-  
-  return cloned;
-}
-```
+  roiNumber: number,
+  slicePosition: number,
+  point: { x: number; y: number; z: number }
+): Promise<RTStructureSet>;
 
-#### 2.2 Error Handling
-```typescript
-async booleanOperation(...) {
-  try {
-    // ... existing code ...
-  } catch (error) {
-    console.error('Boolean operation failed:', error);
-    // Return unchanged structure on error
-    return deepClone(structures);
-  }
-}
-```
-
-#### 2.3 Documentation Comments
-```typescript
-/**
- * Performs boolean operation (union/intersect/subtract) on two structures.
- * 
- * @param structures - RT structure set
- * @param sourceRoiNumber - ROI to modify (result stored here)
- * @param targetRoiNumber - ROI to operate with
- * @param op - Operation: 'union' | 'intersect' | 'subtract'
- * @returns Modified structure set with results in source ROI
- * 
- * Note: Single-slice operation. For multi-slice, use booleanOperationMultiSlice.
- */
-async booleanOperation(
+completePenContour(
   structures: RTStructureSet,
-  sourceRoiNumber: number,
-  targetRoiNumber: number,
-  op: BooleanOperation,
-): Promise<RTStructureSet> {
-  // ...
-}
+  roiNumber: number,
+  slicePosition: number
+): Promise<RTStructureSet>;
+
+cancelPenContour(
+  structures: RTStructureSet,
+  roiNumber: number
+): Promise<RTStructureSet>;
 ```
+
+**Implementation**:
+- Store points as user clicks
+- Close contour when complete
+- Add to structure's contours
+- Support undo
 
 ---
 
-### **Step 3: Update RTProvider** (if needed)
+### **2. Preview/Brush State in Provider** (2 hours)
 
 **File**: `client/src/rt-structures/RTProvider.tsx`
 
-**Only if you need to expose operations**:
-
+**Add state for drawing tools**:
 ```typescript
-interface RTContextValue extends RTState {
+interface RTState {
   // ... existing ...
   
-  // Add operation wrappers if not already exposed
-  performBooleanOp: (sourceId: number, targetId: number, op: BooleanOperation) => Promise<void>;
+  // Drawing tool state
+  activeTool: 'none' | 'brush' | 'pen' | 'erase';
+  brushSize: number;
+  penPoints: Array<{ x: number; y: number; z: number }>; // For pen tool in progress
+  previewContour: { roiNumber: number; points: number[] } | null; // For operation preview
+}
+
+type Action =
+  // ... existing ...
+  | { type: 'setActiveTool'; tool: 'none' | 'brush' | 'pen' | 'erase' }
+  | { type: 'setBrushSize'; size: number }
+  | { type: 'addPenPoint'; point: { x: number; y: number; z: number } }
+  | { type: 'clearPenPoints' }
+  | { type: 'setPreviewContour'; preview: { roiNumber: number; points: number[] } | null };
+```
+
+**Expose in context**:
+```typescript
+interface RTContextValue {
+  // ... existing ...
+  
+  // Tool state
+  activeTool: 'none' | 'brush' | 'pen' | 'erase';
+  brushSize: number;
+  setActiveTool: (tool: 'none' | 'brush' | 'pen' | 'erase') => void;
+  setBrushSize: (size: number) => void;
+  
+  // Pen tool
+  penPoints: Array<{ x: number; y: number; z: number }>;
+  addPenPoint: (point: { x: number; y: number; z: number }) => void;
+  completePenContour: () => Promise<void>;
+  cancelPenContour: () => void;
+  
+  // Preview
+  previewContour: { roiNumber: number; points: number[] } | null;
+  setPreviewContour: (preview: { roiNumber: number; points: number[] } | null) => void;
+}
+```
+
+**Why**: Agent 5 needs these in provider so legacy toolbar can read/write tool state.
+
+---
+
+### **3. Wire Operations to Provider** (2 hours)
+
+**File**: `client/src/rt-structures/RTProvider.tsx`
+
+**Expose all operations** so Agent 5 can call them:
+
+```typescript
+interface RTContextValue {
+  // ... existing ...
+  
+  // Operations (async)
+  performBooleanOp: (sourceId: number, targetId: number, op: 'union' | 'subtract' | 'intersect') => Promise<void>;
   performMarginOp: (roiId: number, marginMm: number) => Promise<void>;
   performGrowOp: (roiId: number, distanceMm: number) => Promise<void>;
+  performBrushAdd: (roiId: number, sliceZ: number, points: number[]) => Promise<void>;
+  performBrushErase: (roiId: number, sliceZ: number, points: number[]) => Promise<void>;
 }
 
 // In provider:
@@ -234,19 +177,133 @@ const performBooleanOp = useCallback(async (sourceId, targetId, op) => {
   setStructures(result);
   saveHistory(`boolean_${op}`, sourceId);
 }, [state.rtStructures, setStructures, saveHistory]);
+
+// ... similar for all operations ...
 ```
 
 ---
 
-### **Step 4: Test Your Work** (2 hours)
+### **4. Preview Rendering in Overlay** (2 hours)
 
-**Create test file**: `client/src/rt-structures/__tests__/operations.test.ts`
+**File**: `client/src/rt-structures/components/RTOverlayLayer.tsx`
 
-**Or test manually**:
-1. Load RT structures
-2. Call operations via provider
-3. Verify results are correct
-4. Check undo/redo works
+**Add preview contour rendering**:
+```typescript
+export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props) {
+  const { rtStructures, selection, previewContour } = useRT(); // Get preview
+  
+  // ... existing rendering ...
+  
+  // AFTER rendering normal structures, render preview
+  if (previewContour) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)'; // Yellow preview
+    ctx.lineWidth = lw + 1; // Slightly thicker
+    ctx.setLineDash([5, 5]); // Dashed line
+    
+    ctx.beginPath();
+    for (let i = 0; i < previewContour.points.length; i += 3) {
+      const x = previewContour.points[i];
+      const y = previewContour.points[i + 1];
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+```
+
+---
+
+### **5. Test Everything Legacy Viewer Has** (3 hours)
+
+**Checklist of parity**:
+- [ ] Load RT structures
+- [ ] Select structure
+- [ ] Toggle visibility
+- [ ] Brush tool - add to contour
+- [ ] Brush tool - erase from contour
+- [ ] Pen tool - draw new contour (if in legacy)
+- [ ] Boolean union
+- [ ] Boolean subtract
+- [ ] Boolean intersect
+- [ ] Uniform margin
+- [ ] Anisotropic margin (simplified version OK)
+- [ ] Grow/shrink
+- [ ] Preview operation
+- [ ] Undo operation
+- [ ] Redo operation
+
+**If it works in `/viewer`, it must work through your provider/services.**
+
+---
+
+## **Total Remaining: ~12 hours**
+
+---
+
+## 📋 IMMEDIATE NEXT STEPS
+
+### **Step 1: Inventory Legacy Viewer** (1 hour)
+
+**Open**: `client/src/components/dicom/working-viewer.tsx` and `viewer-interface.tsx`
+
+**Document**:
+- What RT operations exist?
+- Is there a pen tool?
+- What tool states are tracked?
+- How is preview handled?
+- What can be undone?
+
+**Create list**: "Everything RT that works in /viewer"
+
+This is your **parity checklist**. Your job: Make all of it work through RTProvider/services.
+
+---
+
+### **Step 2: Complete Pen Tool** (if needed)
+
+Check if legacy viewer has pen tool. If yes, add the service methods above. If no, skip.
+
+---
+
+### **Step 3: Add Tool State to RTProvider**
+
+Add tool state (brush/pen/erase), brush size, pen points, preview contour as shown in Task #2 above. This lets Agent 5 wire the legacy toolbars to your provider.
+
+---
+
+### **Step 4: Wire All Operations to Provider**
+
+Add wrapper methods in RTProvider that call your ContourOperationsService. This lets Agent 5's UI adapters call operations through provider instead of directly.
+
+---
+
+### **Step 5: Add Preview Rendering**
+
+Update RTOverlayLayer to render preview contours (dashed yellow line) when `previewContour` is set in provider.
+
+---
+
+### **Step 6: Test Parity** (3 hours)
+
+**Test every RT feature** that exists in `/viewer`:
+
+Go through your parity checklist:
+- [ ] Load RT structures ✅ (already works)
+- [ ] Select/visibility ✅ (already works)
+- [ ] Brush add
+- [ ] Brush erase
+- [ ] Pen tool (if exists)
+- [ ] Boolean ops (all three)
+- [ ] Margins (uniform & anisotropic)
+- [ ] Grow/shrink
+- [ ] Preview
+- [ ] Undo/redo ✅ (already works)
+
+**If it's in `/viewer`, it must work through your provider/services.**
 
 ---
 
@@ -324,16 +381,17 @@ Total: ~6 hours to completion
 
 ---
 
-## 📞 Questions to Ask User
+## 📞 Questions Answered by User
 
-1. "Do you need advanced operations (blob separation, hole filling, etc)?"
-   - If NO → Follow Option A (~6 hours)
-   - If YES → Follow Option B (~10 hours)
+**User's Decision**: 
+- ✅ Stay on **parity path**
+- ❌ **No advanced operations** (blob separation, hole filling) for now
+- ✅ Complete pen tool service/UI wiring
+- ✅ Hook preview/brush toggles into provider
+- ✅ Make everything legacy viewer supports work through new plumbing
+- ✅ Then hand off to Agent 5
 
-2. "Should I expose operation functions in RTProvider for Agent 5?"
-   - This makes it easier for Agent 5 to wire UI
-
-3. "Any specific error scenarios I should handle?"
+**Your Focus**: Match legacy viewer's RT functionality exactly. No more, no less.
 
 ---
 
@@ -356,19 +414,23 @@ Total: ~6 hours to completion
 
 **Before continuing**:
 - [ ] Read this document completely
-- [ ] Ask user: Option A or Option B?
-- [ ] Understand: You do backend, Agent 5 does UI
+- [x] User decision: **Parity path confirmed**
+- [x] Understand: You do backend, Agent 5 does UI
 
-**Your work**:
-- [ ] Add progress callbacks to operations
-- [ ] Add error handling
-- [ ] Document limitations
-- [ ] Test your services
-- [ ] Expose operations in RTProvider (if needed)
+**Your work** (~12 hours):
+- [ ] Inventory legacy viewer RT features (1h)
+- [ ] Add pen tool service (if in legacy) (3h)
+- [ ] Add tool state to RTProvider (brush/pen/erase, brush size) (2h)
+- [ ] Wire all operations to RTProvider methods (2h)
+- [ ] Add preview rendering to RTOverlayLayer (2h)
+- [ ] Test complete parity with legacy viewer (3h)
 
 **When done**:
+- [ ] All legacy RT features work through new plumbing
+- [ ] Agent 5 can call everything via RTProvider
+- [ ] Preview/tool state exposed
 - [ ] Push code to git
-- [ ] Update status: "Agent 3 complete"
+- [ ] Update status: "Agent 3 parity complete"
 - [ ] Hand off to Agent 5
 
 ---
