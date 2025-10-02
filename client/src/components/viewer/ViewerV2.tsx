@@ -13,6 +13,10 @@ import { ViewerShell } from './ViewerShell';
 import { PrimaryViewport } from './PrimaryViewport';
 import { ViewportControls } from './ViewportControls';
 import { useViewportTools } from '@/hooks/useViewportTools';
+import { RTProvider } from '@/rt-structures/RTProvider';
+import RTOverlayLayer from '@/rt-structures/components/RTOverlayLayer';
+import RTControlPanel from '@/rt-structures/components/RTControlPanel';
+import FusionOverlayLayer from '@/fusion/components/FusionOverlayLayer';
 
 interface ViewerV2Props {
   patientId: string;
@@ -48,11 +52,17 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
         />
       }
       viewport={
-        <PrimaryViewport
-          ref={viewportRef}
-          seriesId={seriesId}
-          studyId={studyId}
-        />
+        <RTProvider>
+          <PrimaryViewport
+            ref={viewportRef}
+            seriesId={seriesId}
+            studyId={studyId}
+          >
+            {/* Order: Fusion first (clears), RT second (strokes) */}
+            <FusionOverlayLayer opacity={0.5} />
+            <RTOverlayLayer />
+          </PrimaryViewport>
+        </RTProvider>
       }
       sidebar={
         <div className="text-white p-4">
@@ -66,11 +76,16 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
         </div>
       }
       panels={
-        <div className="absolute bottom-4 right-4 bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
-          <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
-          <div>Tool: {activeTool}</div>
-          <div className="text-gray-400 mt-2">Fusion: Agent 2</div>
-          <div className="text-gray-400">RT: Agent 3</div>
+        <div className="absolute bottom-4 right-4 space-y-2">
+          <div className="bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
+            <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
+            <div>Tool: {activeTool}</div>
+            <div className="text-gray-400 mt-2">Fusion: Agent 2</div>
+            <div className="text-gray-400">RT: Agent 3</div>
+          </div>
+          <div className="bg-black/70 border border-gray-700 rounded-md p-2">
+            <RTControlPanel />
+          </div>
         </div>
       }
     />

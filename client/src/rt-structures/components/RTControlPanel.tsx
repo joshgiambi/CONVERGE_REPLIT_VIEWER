@@ -5,6 +5,13 @@ interface Props {
   onLoadRT?: () => void;
 }
 
+/**
+ * RTControlPanel - Production panel matching legacy UI
+ * 
+ * Shows only structure list with visibility toggles (legacy behavior).
+ * For brush/pen/boolean controls, see RTControlPanelDemo.tsx or
+ * wire legacy toolbars through provider hooks (see RT_PROVIDER_INTEGRATION_GUIDE.md).
+ */
 export function RTControlPanel({ onLoadRT }: Props) {
   const { rtStructures, selection, selectStructure, setStructureVisibility, setAllStructuresVisible } = useRT();
 

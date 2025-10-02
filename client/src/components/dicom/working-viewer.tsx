@@ -963,31 +963,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       return;
     }
 
-    // Find contours on the specified slice for both structures
-    const sourceContour = sourceStructure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
-    );
-    const targetContour = targetStructure.contours?.find(
-      (c: any) => Math.abs(c.slicePosition - slicePosition) < SLICE_TOL_MM,
-    );
-
-    if (!sourceContour || !sourceContour.points || sourceContour.points.length < 9) {
-      log.warn(`No source contour found on slice ${slicePosition}`, 'viewer');
-      return;
-    }
-
-    if (!targetContour || !targetContour.points || targetContour.points.length < 9) {
-      log.warn(`No target contour found on slice ${slicePosition}`, 'viewer');
-      return;
-    }
-
     try {
       const service = createContourOperationsService();
       const op = operation === 'combine' ? 'union' : operation === 'subtract' ? 'subtract' : 'intersect';
-      const next = await service.booleanOperation(updatedRTStructures, sourceStructureId, targetStructureId, op as any);
+      const next = await service.booleanOperationMultiSlice(updatedRTStructures, sourceStructureId, targetStructureId, op as any);
       commitRtStructures(next, 'boolean_operation', sourceStructureId);
     } catch (error) {
       log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
+    }
+  };
+
+  // Handle boolean preview (non-destructive)
+  const handleBooleanPreview = async (payload: any) => {
+    const base = localRTStructures || rtStructures;
+    if (!base) return;
+    const { operation, sourceStructureId, targetStructureId } = payload;
+    try {
+      const service = createContourOperationsService();
+      const op = operation === 'combine' ? 'union' : operation === 'subtract' ? 'subtract' : 'intersect';
+      const previews = await service.previewBooleanOperation(base, sourceStructureId, targetStructureId, op as any);
+      const previewContoursWithSlices = previews.map((p) => ({ points: p.points, slicePosition: p.slicePosition, isPreview: true }));
+      setPreviewContours(previewContoursWithSlices as any);
+      try { scheduleRender(); } catch {}
+    } catch (err) {
+      console.warn('Boolean preview failed', err);
+      setPreviewContours([]);
     }
   };
 
@@ -1071,11 +1071,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       
       try {
-        const marginValueMm = marginParams.marginValues.uniform;
         const service = createContourOperationsService();
-        const next = await service.applyUniformMargin(updatedRTStructures, structureId, marginValueMm);
-        commitRtStructures(next, 'apply_margin', structureId);
-        log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
+        const values = (marginParams && marginParams.marginValues) || {};
+        const hasDirectional = ['superior','inferior','anterior','posterior','left','right'].some((k) => Number.isFinite(values?.[k as keyof typeof values]));
+        if (hasDirectional) {
+          const next = await service.applyAnisotropicMargin(updatedRTStructures, structureId, {
+            superior: Number(values.superior) || 0,
+            inferior: Number(values.inferior) || 0,
+            anterior: Number(values.anterior) || 0,
+            posterior: Number(values.posterior) || 0,
+            left: Number(values.left) || 0,
+            right: Number(values.right) || 0,
+            mode: marginParams?.interpolationType || 'SMOOTH',
+          });
+          commitRtStructures(next, 'apply_margin', structureId);
+          log.debug(`Applied anisotropic margin to structure ${structureId}`, 'viewer');
+        } else {
+          const marginValueMm = Number(values.uniform) || Number((marginParams as any).margin) || 0;
+          const next = await service.applyUniformMargin(updatedRTStructures, structureId, marginValueMm);
+          commitRtStructures(next, 'apply_margin', structureId);
+          log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
+        }
       } catch (error) {
         log.error(`Error applying margin operation: ${String(error)}`, 'viewer');
       }
@@ -2221,203 +2237,42 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log('🎯 CONTOUR FIX: Immediate render triggered after brush stroke');
       } catch {}
     } else if (payload.action === "smart_brush_stroke") {
-      // Handle smart brush stroke - add already processed contour points
-      if (false) console.log("🎯 Processing smart brush stroke:", payload);
-      
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (!structure) {
-        console.error(`Structure ${payload.structureId} not found`);
-        return;
+      // New provider path: delegate to service for brush union on slice
+      try {
+        const service = createContourOperationsService();
+        const next = await service.addBrushStroke(updatedStructures, payload.structureId, payload.slicePosition, payload.points);
+        commitRtStructures(next, 'smart_brush_stroke', payload.structureId);
+        try { scheduleRender(); } catch {}
+      } catch (err) {
+        console.error('Brush union failed', err);
       }
-
-      // The smart brush now provides a pre-unified polygon. We will process it
-      // with the same robust logic as a regular brush stroke to correctly handle
-      // intersections and the creation of multiple blobs.
-      const brushPolygon: number[] = payload.points;
-
-      // Collect all contours on this slice
-      const existingOnSlice = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM
-      );
-
-      // Check if brush stroke intersects with any existing contour
-      let intersectsWithExisting = false;
-      const intersectingContours: any[] = [];
-      const nonIntersectingContours: any[] = [];
-
-      for (const contour of existingOnSlice) {
-        if (contour.points && contour.points.length >= 9) {
-          const intersects = doPolygonsIntersectSimple(brushPolygon, contour.points);
-          if (intersects) {
-            intersectsWithExisting = true;
-            intersectingContours.push(contour);
-          } else {
-            nonIntersectingContours.push(contour);
-          }
-        }
-      }
-
-      // Remove all existing contours at this slice; we will add them back.
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-      );
-
-      if (intersectsWithExisting) {
-        // If the new stroke intersects, union it with all intersecting contours
-        const polygonsToUnion = [brushPolygon, ...intersectingContours.map(c => c.points)];
-        const unionResults = unionMultipleContoursSimple(polygonsToUnion);
-        
-        // Add the new unified contour(s)
-        if (unionResults && unionResults.length > 0) {
-          unionResults.forEach((polygonPoints: number[]) => {
-            if (polygonPoints.length >= 9) {
-              structure.contours.push({
-                slicePosition: payload.slicePosition,
-                points: polygonPoints,
-                numberOfPoints: polygonPoints.length / 3,
-              });
-            }
-          });
-        }
-        
-        // Re-add the contours that did not intersect
-        for (const contour of nonIntersectingContours) {
-          structure.contours.push(contour);
-        }
-      } else {
-        // If there's no intersection, add the new brush stroke as a new contour
-        structure.contours.push({
-          slicePosition: payload.slicePosition,
-          points: brushPolygon,
-          numberOfPoints: brushPolygon.length / 3,
-        });
-        
-        // And re-add all the other existing contours as they were
-        for (const contour of existingOnSlice) {
-          structure.contours.push(contour);
-        }
-      }
-
-      if (false) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
-      commitRtStructures(updatedStructures, 'smart_brush_stroke', payload.structureId);
-      // Trigger immediate render to show contours
-      try { scheduleRender(); } catch {}
     } else if (payload.action === "erase_stroke") {
-      // Handle erase stroke - subtract points from contour
-      console.log("🔹 Processing erase stroke:", payload);
-      
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (!structure) {
-        console.error(`Structure ${payload.structureId} not found`);
-        return;
+      // New provider path: delegate to service for erase subtraction on slice
+      try {
+        const erasePolygon = addBrushToContour([], payload.points, payload.brushSize);
+        const service = createContourOperationsService();
+        const next = await service.eraseBrushStroke(updatedStructures, payload.structureId, payload.slicePosition, erasePolygon);
+        commitRtStructures(next, 'erase_brush_stroke', payload.structureId);
+        try { scheduleRender(); } catch {}
+      } catch (err) {
+        console.error('Brush erase failed', err);
       }
-
-      // Convert erase stroke to polygon for subtraction
-      const erasePolygon = addBrushToContour(
-        [], // Empty array to get just the erase polygon
-        payload.points,
-        payload.brushSize,
-      );
-      
-      console.log(`Erase polygon created with ${erasePolygon.length / 3} points`);
-
-      // Collect all contours on this slice
-      const tol = 0.5;
-      const existingOnSlice = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
-      );
-
-      // Remove all existing contours at this slice
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
-      );
-
-      // Process each existing contour - subtract the erase area
-      for (const contour of existingOnSlice) {
-        if (contour.points && contour.points.length >= 9) {
-          // Check if erase polygon intersects with this contour
-          const intersects = doPolygonsIntersectSimple(erasePolygon, contour.points);
-          
-          if (intersects) {
-            // Subtract erase area from this contour
-            const { subtractContourSimple } = await import('@/lib/simple-polygon-operations');
-            const subtractResults = subtractContourSimple(contour.points, erasePolygon);
-            
-            // Add resulting contours (there may be multiple after subtraction)
-            for (const resultContour of subtractResults) {
-              if (resultContour.length >= 9) {
-                structure.contours.push({
-                  slicePosition: payload.slicePosition,
-                  points: resultContour,
-                  numberOfPoints: resultContour.length / 3,
-                });
-              }
-            }
-          } else {
-            // No intersection - keep original contour
-            structure.contours.push({
-              slicePosition: payload.slicePosition,
-              points: contour.points,
-              numberOfPoints: contour.numberOfPoints,
-            });
-          }
-        }
-      }
-
-      console.log(`Erase completed - structure now has ${structure.contours.length} contours`);
-
-      // Commit state
-      commitRtStructures(updatedStructures, 'erase_brush_stroke', payload.structureId);
-      // Trigger immediate render to show contours
-      try { scheduleRender(); } catch {}
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
     ) {
-      // Handle pen tool operations
-      const structure = updatedStructures.structures.find(
-        (s: any) => s.roiNumber === payload.structureId,
-      );
-      if (!structure) return;
-
-      // Find contour on current slice - use very tight tolerance to avoid affecting adjacent slices
-      const tolerance = 0.1; // 0.1mm tolerance - much tighter to prevent multi-slice issues
-      const sliceContour = structure.contours.find(
-        (c: any) =>
-          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
-      );
-
-      if (payload.action === "add_pen_stroke") {
-        if (sliceContour) {
-          // Just append the new pen stroke without connecting
-          // This creates a separate blob on the same slice
-          const mergedPoints = [...sliceContour.points, ...payload.points];
-          sliceContour.points = mergedPoints;
-          sliceContour.numberOfPoints = mergedPoints.length / 3;
-        } else {
-          // Create new contour from pen stroke
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: payload.points,
-            numberOfPoints: payload.points.length / 3,
-          });
+      try {
+        const service = createContourOperationsService();
+        let next = updatedStructures;
+        if (payload.action === 'add_pen_stroke') {
+          next = await service.addPenStroke(updatedStructures, payload.structureId, payload.slicePosition, payload.points);
+        } else if (payload.action === 'cut_pen_stroke') {
+          next = await service.cutPenStroke(updatedStructures, payload.structureId, payload.slicePosition, payload.points);
         }
-      } else if (payload.action === "cut_pen_stroke") {
-        // TODO: Implement contour cutting logic
-        console.log("Cut pen stroke not yet implemented");
+        commitRtStructures(next, payload.action, payload.structureId);
+      } catch (err) {
+        console.error('Pen tool operation failed', err);
       }
-
-      setLocalRTStructures(updatedStructures);
-      // Save state to new undo system
-      if (seriesId) {
-        rtCtx.saveHistory(payload.action, payload.structureId);
-      }
-      // Save contour updates to server
-      saveContourUpdates(updatedStructures, payload.action);
       // Trigger immediate render to show contours
       try { 
         scheduleRender(); 
@@ -2700,6 +2555,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } else if (payload.action === "apply_margin") {
       // Handle margin operation (Eclipse TPS style)
       handleMarginOperation(payload);
+    } else if (payload.action === "boolean_preview") {
+      // Non-destructive boolean preview across slices
+      await handleBooleanPreview(payload);
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       await handleBooleanOperation(payload);
@@ -5567,21 +5425,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           </div>
 
           <div className="flex items-center space-x-2">
-            <RTOverlayLayer
-              canvasRef={canvasRef}
-              imageWidth={imageMetadata?.columns ?? 0}
-              imageHeight={imageMetadata?.rows ?? 0}
-              zoom={ctTransform.current?.scale ?? 1}
-              panX={ctTransform.current?.offsetX ?? 0}
-              panY={ctTransform.current?.offsetY ?? 0}
-              currentSlicePosition={
-                images.length > 0 && images[currentIndex]
-                  ? (images[currentIndex].parsedSliceLocation ??
-                    images[currentIndex].parsedZPosition ??
-                    currentIndex)
-                  : 0
-              }
-            />
+            <RTOverlayLayer />
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -5688,21 +5532,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           {/* RT overlay layer (provider-controlled) */}
           {rtOverlayControlled && (
             <RTOverlayLayer
-              canvasRef={canvasRef}
-              imageWidth={(() => {
-                const img = images[currentIndex];
-                return img ? (img.columns || img.width || 512) : 512;
-              })()}
-              imageHeight={(() => {
-                const img = images[currentIndex];
-                return img ? (img.rows || img.height || 512) : 512;
-              })()}
-              zoom={zoom}
-              panX={panX}
-              panY={panY}
-              currentSlicePosition={images.length > 0 && images[currentIndex]
-                ? (images[currentIndex].parsedSliceLocation ?? images[currentIndex].parsedZPosition ?? currentIndex)
-                : 0}
               contourWidth={contourSettings?.width ?? 2}
               contourOpacity={contourSettings?.opacity ?? 60}
             />

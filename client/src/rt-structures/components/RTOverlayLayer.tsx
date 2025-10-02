@@ -15,6 +15,8 @@ function drawStructures(
   currentSlicePosition: number,
   cssWidth: number,
   cssHeight: number,
+  imageWidth: number,
+  imageHeight: number,
   zoom: number,
   panX: number,
   panY: number,
@@ -26,19 +28,16 @@ function drawStructures(
   selectedForEdit: number | null,
 ) {
   ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Do not clear the full canvas. Fusion clears first; RT paints on top.
 
   // CSS pixel space transform matching PrimaryViewport
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const baseScale = Math.min(cssWidth / cssWidth, cssHeight / cssHeight) || 1; // 1 by construction; keeping pattern
-  const totalScale = baseScale * zoom;
-  const scaledWidth = cssWidth * totalScale;
-  const scaledHeight = cssHeight * totalScale;
-  const imageX = (canvas.width / dpr - scaledWidth) / 2 + panX;
-  const imageY = (canvas.height / dpr - scaledHeight) / 2 + panY;
+  const baseScale = Math.min(cssWidth / imageWidth, cssHeight / imageHeight);
+  const totalScale = baseScale * Math.max(0.1, zoom);
+  const scaledWidth = imageWidth * totalScale;
+  const scaledHeight = imageHeight * totalScale;
+  const imageX = (cssWidth - scaledWidth) / 2 + (panX || 0);
+  const imageY = (cssHeight - scaledHeight) / 2 + (panY || 0);
 
-  // Convert to device pixels
-  ctx.scale(dpr, dpr);
   ctx.translate(imageX, imageY);
   ctx.scale(totalScale, totalScale);
 
@@ -84,7 +83,7 @@ function drawStructures(
 }
 
 export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props) {
-  const { rtStructures, selection } = useRT();
+  const { rtStructures, selection, previewContours } = useRT();
   const viewport = useViewport();
 
   useEffect(() => {
@@ -93,26 +92,27 @@ export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props)
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const dpr = window.devicePixelRatio || 1;
     const cssWidth = canvas.width / dpr;
     const cssHeight = canvas.height / dpr;
 
-    // PrimaryViewport should expose currentImage/currentIndex/zoom/pan from context; fallback to defaults if missing
-    const zoom = (viewport as any).zoom ?? 1;
-    const panX = (viewport as any).panX ?? 0;
-    const panY = (viewport as any).panY ?? 0;
-    const currentSlicePosition = (viewport as any).currentImage?.parsedSliceLocation
-      ?? (viewport as any).currentImage?.parsedZPosition
-      ?? (viewport as any).currentIndex
+    const zoom = viewport.zoom;
+    const panX = viewport.panX;
+    const panY = viewport.panY;
+    const imageWidth = viewport.imageMetadata?.columns ?? viewport.currentImage?.columns ?? 512;
+    const imageHeight = viewport.imageMetadata?.rows ?? viewport.currentImage?.rows ?? 512;
+    const currentSlicePosition = viewport.currentImage?.parsedSliceLocation
+      ?? viewport.currentImage?.parsedZPosition
+      ?? viewport.currentIndex
       ?? 0;
-    const imageWidth = (viewport as any).metadata?.columns ?? (viewport as any).currentImage?.columns ?? 512;
-    const imageHeight = (viewport as any).metadata?.rows ?? (viewport as any).currentImage?.rows ?? 512;
 
     drawStructures(
       ctx,
       canvas,
       rtStructures,
       currentSlicePosition,
+      cssWidth,
+      cssHeight,
       imageWidth,
       imageHeight,
       zoom,
@@ -125,7 +125,35 @@ export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props)
       selection.selectedStructureIds,
       selection.selectedForEdit,
     );
-  }, [viewport, rtStructures, selection, contourWidth, contourOpacity]);
+
+    // Draw preview contours on top (non-destructive)
+    if (previewContours && previewContours.length) {
+      // Use same transform already applied to context
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = Math.max(0.5, (contourWidth + 1) / Math.max(zoom, 0.01));
+      ctx.strokeStyle = 'rgba(255, 230, 50, 0.95)';
+      ctx.fillStyle = 'rgba(255, 230, 50, 0.25)';
+      const tolMicrons = 100;
+      const zMicrons = Math.round(currentSlicePosition * 1000);
+      for (const c of previewContours) {
+        const cz = Math.round(c.slicePosition * 1000);
+        if (Math.abs(cz - zMicrons) > tolMicrons) continue;
+        const pts = c.points;
+        if (!pts || pts.length < 6) continue;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i += 3) {
+          const x = pts[i];
+          const y = pts[i + 1];
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }, [viewport.currentImage, viewport.currentIndex, viewport.zoom, viewport.panX, viewport.panY, viewport.imageMetadata, rtStructures, selection, contourWidth, contourOpacity, previewContours]);
 
   return null;
 }

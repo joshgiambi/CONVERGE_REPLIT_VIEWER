@@ -1,75 +1,79 @@
 # Fusion Refactor Tracking
 
-## Purpose
-Create a maintainable, testable fusion experience by extracting manifest/overlay orchestration from monolithic viewer components into dedicated stores, hooks, and composable UI layers.
+**Updated:** 2025-10-02
 
-## Current Snapshot (2025-02-??)
-- **FusionProvider** (`client/src/fusion/fusion-context.tsx`) now owns manifest fetching, polling, preload progress, opacity, windowing, and overlay lookups.
-- `viewer-interface.tsx` and `working-viewer.tsx` consume fusion state via provider props instead of managing bespoke caches.
-- Core outcome: Fusion overlay logic is shareable, but viewer files still contain intertwined responsibilities (fusion + RT + tools + layout).
+## Purpose
+Keep a running record of how fusion functionality is being lifted out of the legacy viewer and into composable providers, services, and reusable UI modules—without changing the visible UI.
+
+---
+
+## Current Snapshot
+- ✅ `FusionProvider` (`client/src/fusion/fusion-context.tsx`) owns manifest fetching, polling, registration, preload progress, opacity, and overlay lookups.
+- ✅ `PrimaryViewport` + shared overlay canvas are in place (`client/src/components/viewer/PrimaryViewport.tsx`), so fusion/RT layers now draw through the same CSS-space pipeline.
+- ✅ `FusionOverlayLayer` works with the shared viewport context (no local canvas refs, proper DPR handling).
+- ✅ Fusion state consumers (`useFusionCandidates`, `useRegistrationOptions`, `useFusionPanel`) are stable and used by both the legacy and refactored viewers.
+- 🟡 `FusionPanel` UI exists in `client/src/fusion/components/FusionPanel.tsx` but is not yet mounted in `ViewerV2`; legacy `fusion-control-panel.tsx` still provides the production UI.
+- 🟡 ViewerV2 currently shows a placeholder sidebar/panel; Agent 5 will swap in the legacy components during final integration.
+
+---
 
 ## Completed Work
 | Area | Notes |
-| --- | --- |
-| Fusion state ownership | Added FusionProvider with manifest lifecycle, cache coordination, preload progress, and overlay accessor. |
-| Viewer integration | Updated ViewerInterface to wrap content in provider; WorkingViewer delegates overlay fetch via provider when available. |
-| Layout shell | Introduced `FusionViewerShell` to centralize sidebar/viewport/toolbar composition in ViewerInterface. |
-| Overlay manager contract | Exported `OverlayCanvas` type and unified access for server/client slices. |
-
-## Outstanding Risks / Debt
-- `working-viewer.tsx` retains legacy state (window globals, registration matrix stubs, direct cache mutation).
-- `viewer-interface.tsx` still exceeds 2k LOC; fusion panel, RT tooling, and selection logic live in a single component.
-- Debug hooks (`__fusion`), cache invalidation, and registration selection remain tangled in viewer layer.
-
-## Upcoming Milestones
-1. **Decompose viewer into feature-focused components**
-   - Extract fusion overlay presentation and controls into a dedicated layer using provider state.
-   - Move RT structure management into its own provider/hook.
-   - Isolate toolbars and orchestration logic from rendering surface.
-2. **Legacy fusion cleanup**
-   - Remove inline manifest polling, cache refs, and token/cooldown guards now superseded by FusionProvider.
-   - Consolidate registration handling inside a dedicated service/hook.
-3. **Testing & harnesses**
-   - Add Storybook or lightweight Cypress harness to exercise fusion overlay with mocked manifests.
-
-## Next PR Draft – “Fusion Viewer Decomposition: Phase 1”
-**Goal**: Carve `viewer-interface.tsx` and `working-viewer.tsx` into composable pieces that consume the shared fusion store, reducing surface area per file and enabling targeted tests.
-
-### Scope & Requirements
-1. **Create a viewer layout shell**
-   - New component `FusionViewerShell` handles layout & global UI (series sidebar, toolbar frame).
-   - `ViewerInterface` becomes a coordinator that wires data providers and passes props to shell.
-2. **Extract fusion-specific UI**
-   - Move fusion panel logic into `FusionPanel` (controls + status badges) consuming `useFusion()` directly.
-   - Add `useFusionPanel()` hook for status mapping (ready/loading/error) and opacity presets.
-3. **Isolate WorkingViewer responsibilities**
-   - Split into: `PrimaryViewport` (CT render + overlays), `FusionOverlayLayer` (canvas compositing), `RTOverlayLayer`, and `ViewportControls` (crosshairs, zoom, MPR toggles).
-   - Each subcomponent receives explicit props; eliminate cross-cutting refs except via controlled callbacks.
-4. **Registration handling**
-   - Introduce `useRegistrationOptions(primaryId, secondaryId)` hook encapsulating association lookups, matrix resolution, and selection state.
-   - Replace scattered registration state with hook outputs; persist selection in provider or dedicated context.
-5. **Debug & developer tooling**
-   - Remove `window.__fusion` exports; expose a `useFusionDebug()` hook that returns snapshot data for dev panels.
-   - Build a developer-only `<FusionDebugPanel />` rendered behind feature flag/environment check.
-
-### Acceptance Criteria
-- No component in fusion viewer stack exceeds ~500 LOC; each layer has single responsibility.
-- Viewer renders without legacy refs (`fusionManagerRef`, `fusionPrefetchSetRef`, `MAX_INIT_ATTEMPTS`) unless encapsulated in new hooks/providers.
-- Switching secondaries updates overlays exclusively through provider; no direct cache mutation from `working-viewer`.
-- TypeScript passes for touched files; add focused unit/Storybook stories for `FusionPanel` and `PrimaryViewport`.
-- Documentation: update this tracking file and add README snippet under `client/src/fusion/` describing provider & hooks.
-
-### Implementation Steps
-1. Scaffold new components/hooks (fusion panel, primary viewport, registration hook).
-2. Incrementally migrate logic from `working-viewer.tsx`, removing legacy refs as functionality moves over.
-3. Update imports/sites to use decomposed components; ensure lint/tsc passes.
-4. Add stories/tests; verify dev workflow with mock manifest.
-5. Final cleanup: delete redundant state, update docs, attach PR checklist.
-
-### Testing Strategy
-- Unit tests for hooks (`useFusionPanel`, `useRegistrationOptions`).
-- Storybook stories showing CT-only, CT+PET ready, and loading/error states.
-- Cypress/Playwright smoke: verify overlay toggles and opacity adjustments with mocked API.
+|------|-------|
+| State ownership | `FusionProvider` encapsulates manifest lifecycle, cache coordination, and overlay retrieval. |
+| Service hooks | `useFusionCandidates`, `useRegistrationOptions`, and `useFusionDebug` give typed access to provider state. |
+| Overlay rendering | `FusionOverlayLayer` draws PET overlays on the shared overlay canvas with correct transform math. |
+| Legacy bridge | `working-viewer.tsx`/`viewer-interface.tsx` now call into the provider for overlays and registration, reducing bespoke cache code. |
+| Layout shell | `ViewerShell` and `PrimaryViewport` give fusion (and RT) a clean host without altering the visible UI yet. |
 
 ---
-_Last updated: 2025-02-14_
+
+## Outstanding Risks / Debt
+- ViewerV2 still renders placeholder sidebar/panel content; legacy fusion panel not yet mounted (Agent 5 TODO).
+- `viewer-interface.tsx` and `working-viewer.tsx` remain large; they still orchestrate fusion + RT + tool logic until the final UI swap happens.
+- FusionPanel (new component) diverges from the legacy UI; ensure parity when Agent 5 integrates it or keep using the existing `fusion-control-panel.tsx` layout.
+- No automated regression harness for fusion flows; manual testing required after each integration pass.
+
+---
+
+## Updated Roadmap
+1. **UI Parity (in progress)**
+   - Import the production `fusion-control-panel.tsx` (and related toolbars) into `ViewerV2` so the refactored viewer matches the legacy UI exactly (Agent 5).
+   - Keep FusionPanel available for future redesign, but do not ship it yet.
+
+2. **Legacy cleanup (post UI swap)**
+   - Once ViewerV2 hosts the production UI, strip remaining fusion-specific code from `working-viewer.tsx` / `viewer-interface.tsx` (registration refs, cache mutation, polling guards).
+   - Remove `window.__fusion` exports and replace remaining debug hooks with `useFusionDebug()`.
+
+3. **Testing & Tooling**
+   - Add Storybook / Cypress harnesses that mount `FusionProvider` with mocked manifest responses.
+   - Provide a developer-only `<FusionDebugPanel />` behind a feature flag for troubleshooting.
+
+---
+
+## Near-Term Tasks
+- **Agent 2**: Supply any missing props/state for the legacy fusion panel so it can run on top of `FusionProvider` without UI changes.
+- **Agent 5**: Mount the production fusion/RT panels, toolbars, and series selector into the `ViewerShell` slots in `ViewerV2`; verify styling matches `/viewer`.
+- **Agent 3**: Continue migrating RT logic (brush/pen) so fusion and RT share the same viewer scaffolding.
+
+---
+
+## Long-Term Enhancements (Optional)
+- Refactor `FusionPanel` to replace the legacy UI once parity has been validated.
+- Provide configurable panel layouts (PanelStack helper, persistence, drag-to-reposition).
+- Move manifest polling & preload metrics into observability dashboards.
+
+---
+
+## Status Tracker
+| Item | Owner | Status | Notes |
+|------|-------|--------|-------|
+| FusionProvider lifecycle | Agent 2 | ✅ Done | Stable since May, 2025 |
+| Shared overlay canvas | Agents 1/2/3 | ✅ Done | Fusion + RT draw through same canvas |
+| Legacy UI mounting | Agent 5 | 🟡 Pending | Needs to import legacy panels into ViewerV2 |
+| Fusion-specific UI redesign | Agent 2/5 | ⏸️ Deferred | Only after parity is confirmed |
+| Automated tests | Agent 2/5 | 🔴 Not started | Add after UI parity is delivered |
+
+---
+
+**Next review checkpoint:** After Agent 5 mounts the legacy panels and runs UI regression (target mid‑Oct 2025).

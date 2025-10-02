@@ -4,12 +4,29 @@ import type { RTSelectionState, RTStructureSet } from '@/types/rt-structures';
 import { createUndoRedoService, type UndoRedoService } from '@/rt-structures/services/UndoRedoService';
 
 type RTStatus = 'idle' | 'loading' | 'ready' | 'error';
+type BrushMode = 'add' | 'erase';
+type PenMode = 'add' | 'cut';
+
+interface BrushState {
+  size: number; // diameter in mm
+  mode: BrushMode;
+  enabled: boolean;
+}
+
+interface PenState {
+  mode: PenMode;
+  enabled: boolean;
+}
 
 interface RTState {
   status: RTStatus;
   error: string | null;
   rtStructures: RTStructureSet | null;
   selection: RTSelectionState;
+  previewContours: Array<{ slicePosition: number; points: number[] }>;
+  brush: BrushState;
+  pen: PenState;
+  busy: boolean;
 }
 
 type Action =
@@ -20,7 +37,15 @@ type Action =
   | { type: 'toggleStructureSelection'; roiNumber: number; selected: boolean }
   | { type: 'setSelectedForEdit'; roiNumber: number | null }
   | { type: 'setVisibility'; roiNumber: number; visible: boolean }
-  | { type: 'setAllVisible'; visible: boolean };
+  | { type: 'setAllVisible'; visible: boolean }
+  | { type: 'setPreviewContours'; contours: Array<{ slicePosition: number; points: number[] }> }
+  | { type: 'clearPreview' }
+  | { type: 'setBrushSize'; size: number }
+  | { type: 'setBrushMode'; mode: BrushMode }
+  | { type: 'setBrushEnabled'; enabled: boolean }
+  | { type: 'setPenMode'; mode: PenMode }
+  | { type: 'setPenEnabled'; enabled: boolean }
+  | { type: 'setBusy'; busy: boolean };
 
 const initialState: RTState = {
   status: 'idle',
@@ -32,6 +57,17 @@ const initialState: RTState = {
     visibility: new Map<number, boolean>(),
     allStructuresVisible: true,
   },
+  previewContours: [],
+  brush: {
+    size: 10, // 10mm default
+    mode: 'add',
+    enabled: false,
+  },
+  pen: {
+    mode: 'add',
+    enabled: false,
+  },
+  busy: false,
 };
 
 function cloneVisibility(map: Map<number, boolean>): Map<number, boolean> {
@@ -63,6 +99,22 @@ function reducer(state: RTState, action: Action): RTState {
     }
     case 'setAllVisible':
       return { ...state, selection: { ...state.selection, allStructuresVisible: action.visible } };
+    case 'setPreviewContours':
+      return { ...state, previewContours: action.contours };
+    case 'clearPreview':
+      return { ...state, previewContours: [] };
+    case 'setBrushSize':
+      return { ...state, brush: { ...state.brush, size: action.size } };
+    case 'setBrushMode':
+      return { ...state, brush: { ...state.brush, mode: action.mode } };
+    case 'setBrushEnabled':
+      return { ...state, brush: { ...state.brush, enabled: action.enabled } };
+    case 'setPenMode':
+      return { ...state, pen: { ...state.pen, mode: action.mode } };
+    case 'setPenEnabled':
+      return { ...state, pen: { ...state.pen, enabled: action.enabled } };
+    case 'setBusy':
+      return { ...state, busy: action.busy };
     default:
       return state;
   }
@@ -82,6 +134,14 @@ interface RTContextValue extends RTState {
   setAllStructuresVisible: (visible: boolean) => void;
   undoRedo: UndoRedoService;
   saveHistory: (action: string, structureId?: number | null) => void;
+  setPreviewContours: (contours: Array<{ slicePosition: number; points: number[] }>) => void;
+  clearPreview: () => void;
+  setBrushSize: (size: number) => void;
+  setBrushMode: (mode: BrushMode) => void;
+  setBrushEnabled: (enabled: boolean) => void;
+  setPenMode: (mode: PenMode) => void;
+  setPenEnabled: (enabled: boolean) => void;
+  setBusy: (busy: boolean) => void;
 }
 
 const RTContext = createContext<RTContextValue | undefined>(undefined);
@@ -137,6 +197,14 @@ export function RTProvider({ children, initialStructures = null }: RTProviderPro
     setAllStructuresVisible,
     undoRedo: undoRedoRef.current,
     saveHistory,
+    setPreviewContours: (contours) => dispatch({ type: 'setPreviewContours', contours }),
+    clearPreview: () => dispatch({ type: 'clearPreview' }),
+    setBrushSize: (size) => dispatch({ type: 'setBrushSize', size }),
+    setBrushMode: (mode) => dispatch({ type: 'setBrushMode', mode }),
+    setBrushEnabled: (enabled) => dispatch({ type: 'setBrushEnabled', enabled }),
+    setPenMode: (mode) => dispatch({ type: 'setPenMode', mode }),
+    setPenEnabled: (enabled) => dispatch({ type: 'setPenEnabled', enabled }),
+    setBusy: (busy) => dispatch({ type: 'setBusy', busy }),
   }), [state, setStructures, setError, selectStructure, setSelectedForEditCb, setStructureVisibility, setAllStructuresVisible, saveHistory]);
 
   return <RTContext.Provider value={value}>{children}</RTContext.Provider>;
