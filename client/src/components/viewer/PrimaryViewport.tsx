@@ -173,6 +173,12 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function Pr
   // Image metadata
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   
+  // Mouse interaction state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [lastPanX, setLastPanX] = useState(0);
+  const [lastPanY, setLastPanY] = useState(0);
+  
   // Cache refs
   const imageCacheRef = useRef<Map<string, any>>(new Map());
 
@@ -336,6 +342,123 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function Pr
   }, [displayCurrentImage]);
 
   // ============================================================================
+  // Mouse & Keyboard Interactions
+  // EXTRACTED FROM: working-viewer.tsx (handleCanvasMouseDown, handleCanvasMouseMove, etc.)
+  // ============================================================================
+
+  /**
+   * Handle mouse down - initiate pan or window/level adjustment
+   */
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.button === 0) {
+      // Left click - pan mode
+      setIsDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setLastPanX(panX);
+      setLastPanY(panY);
+    } else if (e.button === 2) {
+      // Right click - window/level adjustment
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startWindow = windowLevel.window;
+      const startLevel = windowLevel.level;
+
+      const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
+        moveEvent.preventDefault();
+        const deltaX = moveEvent.clientX - startX;
+        const deltaY = moveEvent.clientY - startY;
+
+        const newWindow = Math.max(1, startWindow + deltaX * 2);
+        const newLevel = startLevel - deltaY * 1.5;
+
+        const newWindowLevel = { window: newWindow, level: newLevel };
+        setWindowLevel(newWindowLevel);
+        if (onWindowLevelChange) {
+          onWindowLevelChange(newWindowLevel);
+        }
+      };
+
+      const handleWindowLevelEnd = (endEvent: MouseEvent) => {
+        endEvent.preventDefault();
+        document.removeEventListener('mousemove', handleWindowLevelDrag);
+        document.removeEventListener('mouseup', handleWindowLevelEnd);
+      };
+
+      document.addEventListener('mousemove', handleWindowLevelDrag);
+      document.addEventListener('mouseup', handleWindowLevelEnd);
+    }
+  }, [panX, panY, windowLevel, onWindowLevelChange]);
+
+  /**
+   * Handle mouse move - update pan during drag
+   */
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDragging) {
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
+      setPanX(lastPanX + deltaX);
+      setPanY(lastPanY + deltaY);
+    }
+  }, [isDragging, dragStart, lastPanX, lastPanY]);
+
+  /**
+   * Handle mouse up - end pan drag
+   */
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  /**
+   * Handle mouse wheel - zoom with Ctrl/Cmd, slice navigation without
+   */
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd + scroll for zoom
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom((prev) => Math.max(0.1, Math.min(10, prev * zoomFactor)));
+    } else {
+      // Regular scroll for slice navigation
+      if (e.deltaY > 0) {
+        setCurrentIndex(i => Math.min(i + 1, images.length - 1));
+      } else {
+        setCurrentIndex(i => Math.max(i - 1, 0));
+      }
+    }
+  }, [images.length]);
+
+  /**
+   * Handle context menu - prevent right click menu
+   */
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+  }, []);
+
+  /**
+   * Keyboard shortcuts for slice navigation
+   */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        setCurrentIndex(i => Math.max(i - 1, 0));
+      }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        setCurrentIndex(i => Math.min(i + 1, images.length - 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [images.length]);
+
+  // ============================================================================
   // Public API (exposed via ref)
   // ============================================================================
 
@@ -391,8 +514,14 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function Pr
     <div className="relative w-full h-full bg-black">
       <canvas
         ref={canvasRef}
-        className="w-full h-full"
+        className="w-full h-full cursor-move"
         style={{ imageRendering: 'pixelated' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        onContextMenu={handleContextMenu}
       />
       
       {/* Slice info overlay */}
