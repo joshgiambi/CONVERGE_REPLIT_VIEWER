@@ -192,22 +192,16 @@ await service.cutPenStroke(structures, roiId, sliceZ, cutPath);
 
 ---
 
-## 📞 Handoff Questions for User
+## ✅ USER DECISION: OPTION B CONFIRMED
 
-Before Agent 5 begins:
+**User has decided**: Import legacy toolbars (Option B)
 
-1. **Should Agent 5 use the new RTControlPanel or import legacy toolbars?**
-   - New panel = faster (~4h)
-   - Legacy import = guaranteed parity (~12h)
+**Rationale**: Keeps `/viewer-v2` visually identical to `/viewer` - guaranteed parity
 
-2. **What's the priority: speed or exact visual match?**
-   - Speed → use RTControlPanel
-   - Exact match → import legacy
-
-3. **Can we do a hybrid approach?**
-   - Start with RTControlPanel
-   - Get user feedback
-   - Switch to legacy if needed
+**Agent 3's RTControlPanel**:
+- ✅ Use as **reference** for callback patterns
+- ❌ Do NOT use in production
+- Purpose: Shows Agent 5 how to wire operations
 
 ---
 

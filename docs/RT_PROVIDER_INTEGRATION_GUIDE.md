@@ -183,14 +183,16 @@ const handleBooleanApply = async () => {
 
 ## Reference Implementation
 
-See `client/src/rt-structures/components/RTControlPanel.tsx` for a complete working example that demonstrates:
+**Important**: `RTControlPanel.tsx` matches the legacy production UI (structure list only). For a complete example of provider wiring, see `RTControlPanelDemo.tsx`.
+
+See `client/src/rt-structures/components/RTControlPanelDemo.tsx` for a complete working example that demonstrates:
 - Structure list with visibility toggles
 - Brush tool mode and size controls
 - Pen tool mode controls
 - Boolean operation preview/apply workflow
 - Busy state indicators
 
-This panel can be used as-is or adapted to match the legacy UI styling.
+**Note**: This demo panel is for reference only. Production UI (`RTControlPanel.tsx`) matches the legacy viewer exactly. When Agent 5 mounts legacy toolbars in ViewerV2, they should use this demo as a wiring guide while preserving the original toolbar appearance.
 
 ---
 
@@ -230,7 +232,8 @@ When adapting existing toolbars to use RTProvider:
 
 **Questions?** Refer to:
 - `client/src/rt-structures/RTProvider.tsx` - Provider implementation
-- `client/src/rt-structures/components/RTControlPanel.tsx` - Reference UI
+- `client/src/rt-structures/components/RTControlPanel.tsx` - Production UI (legacy-matching)
+- `client/src/rt-structures/components/RTControlPanelDemo.tsx` - Reference wiring example
 - `client/src/rt-structures/services/ContourOperationsService.ts` - Service layer
 - `docs/AGENT3_COMPREHENSIVE_REVIEW.md` - Feature completion status
 

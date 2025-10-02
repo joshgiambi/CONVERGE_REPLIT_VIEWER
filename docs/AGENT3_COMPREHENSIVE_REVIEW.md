@@ -47,14 +47,15 @@ All operations deep-clone data, rely on the existing clipper helpers, and return
 - Boolean preview flow populates `previewContours` without mutating state.
 
 ### 5. Control Surface
-- `RTControlPanel.tsx` now includes:
+- `RTControlPanel.tsx` matches legacy UI exactly (structure list with visibility toggles only)
+- `RTControlPanelDemo.tsx` provides a complete reference implementation showing:
   - Structure list with visibility toggles
   - Brush tool controls (Add/Erase mode, size adjustment)
   - Pen tool controls (Add/Cut mode)
   - Boolean operations with Preview/Apply/Clear buttons
   - All controls wired through RTProvider state (no local state leaks)
   - Busy indicator during async operations
-- This panel serves as the reference implementation for how legacy toolbars should be adapted to use provider state.
+- The demo panel serves as the reference for how legacy toolbars should be adapted to use provider state.
 
 ---
 
