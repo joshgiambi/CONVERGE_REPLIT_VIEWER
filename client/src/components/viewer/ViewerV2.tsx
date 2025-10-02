@@ -35,7 +35,7 @@ interface ViewerV2Props {
   studyId?: number;
 }
 
-// Inner component that uses fusion context (if available)
+// Inner component that uses both fusion and RT contexts
 function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
@@ -82,7 +82,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
     // FusionProvider not present - this is expected for non-CT series
   }
 
-  // Try to get RT context for undo/redo
+  // Get RT context - now safe because RTProvider wraps this component
   const rt = useRT();
 
   // Viewport control handlers
@@ -122,12 +122,12 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const fusionOpacity = fusion?.opacity ?? 0.5;
   const showFusionPanel = fusion?.showFusionPanel ?? false;
 
+  // Wrap entire composition with RTProvider so all components can access useRT()
   return (
     <>
       <ViewerShell
         toolbar={null}
         viewport={
-        <RTProvider>
           <PrimaryViewport
             ref={viewportRef}
             seriesId={seriesId}
@@ -137,9 +137,8 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
             {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
             <RTOverlayLayer />
           </PrimaryViewport>
-        </RTProvider>
-      }
-      sidebar={
+        }
+        sidebar={
         <SeriesSelector
           series={allSeries}
           selectedSeries={selectedSeriesObj}
@@ -446,8 +445,23 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
   const studyIds = useMemo(() => studyId ? [studyId] : undefined, [studyId]);
   const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
 
+  // Fetch RT structures for this series
+  const { data: rtStructures } = useQuery({
+    queryKey: ['rt-structures', seriesId],
+    queryFn: async () => {
+      const res = await fetch(`/api/rt-structures/${seriesId}/contours`);
+      if (!res.ok) {
+        if (res.status === 404) return null; // No RT structures for this series
+        throw new Error('RT load failed');
+      }
+      return res.json();
+    },
+    enabled: !!seriesId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   if (import.meta.env.DEV) {
-    console.log('🔧 ViewerV2 Fusion Setup:', {
+    console.log('🔧 ViewerV2 Setup:', {
       seriesId,
       modality: seriesData?.modality,
       isCT,
@@ -458,32 +472,35 @@ export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
         ? 'seriesSelection' 
         : (directFusionCandidates.length ? 'directAPI' : 'none'),
       skippedFusionCandidatesAPI: !isCT,
+      rtStructures: rtStructures ? {
+        loaded: true,
+        structureCount: rtStructures.structures?.length || 0,
+        referencedSeriesId: rtStructures.referencedSeriesInstanceUID
+      } : { loaded: false },
     });
   }
 
-  // Only wrap with FusionProvider if this is a CT series
-  if (!isCT || !fusionPrimarySeriesId) {
-    return (
+  // RTProvider wraps entire viewer composition so all components can access useRT()
+  // Pass fetched RT structures as initialStructures to avoid null state issues
+  const content = (
+    <RTProvider initialStructures={rtStructures ?? null}>
       <ViewerV2Content 
         patientId={patientId}
         seriesId={seriesId}
         studyId={studyId}
       />
-    );
-  }
+    </RTProvider>
+  );
 
-  return (
+  // Conditionally wrap with FusionProvider for CT series
+  return isCT && fusionPrimarySeriesId ? (
     <FusionProvider
       primarySeriesId={fusionPrimarySeriesId}
       candidateSecondaryIds={candidateSecondaryIds}
       registrationAssociations={registrationData || new Map()}
     >
-      <ViewerV2Content 
-        patientId={patientId}
-        seriesId={seriesId}
-        studyId={studyId}
-      />
+      {content}
     </FusionProvider>
-  );
+  ) : content;
 }
 

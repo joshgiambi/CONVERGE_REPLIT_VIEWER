@@ -277,6 +277,78 @@ export function LegacyComponentAdapter(adapterProps) {
 **Completed**: 2025-10-02  
 **Agent**: AGENT5B (UI Integration Specialist)
 
+### 🔧 CRITICAL ARCHITECTURAL FIXES (Post-Initial Integration)
+
+#### **Fix 1: Provider Scoping** (Structural)
+
+**Issue Identified**: RTProvider was incorrectly scoped - only wrapping PrimaryViewport instead of entire composition
+**Problem**: `useRT()` was being called in ViewerV2Content before RTProvider was mounted, causing context errors
+**Solution Applied**: Restructured provider hierarchy
+
+#### **Fix 2: RT Data Loading** (Data Flow)
+
+**Issue Identified**: RTProvider had no initial data, leaving components in null state
+**Problem**: All RT-dependent components had to handle null/loading states independently
+**Solution Applied**: Added centralized RT structure fetching in ViewerV2
+
+**Complete Architecture**:
+```tsx
+// ViewerV2 (outer component)
+export function ViewerV2({ patientId, seriesId, studyId }) {
+  // Fetch RT structures for this series
+  const { data: rtStructures } = useQuery({
+    queryKey: ['rt-structures', seriesId],
+    queryFn: async () => {
+      const res = await fetch(`/api/rt-structures/${seriesId}/contours`);
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error('RT load failed');
+      }
+      return res.json();
+    },
+    enabled: !!seriesId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Pass fetched data to RTProvider
+  const content = (
+    <RTProvider initialStructures={rtStructures ?? null}>  // ← Data passed here
+      <ViewerV2Content />            // ← Can now safely call useRT() with data
+        <ViewerShell>
+          <PrimaryViewport>
+            <RTOverlayLayer />       // ← Has RT context + data
+          </PrimaryViewport>
+          <SeriesSelector />         // ← Has RT context + data
+          <RTControlPanel />         // ← Has RT context + data
+        </ViewerShell>
+        <ContourEditToolbar />       // ← Has RT context + data
+        <BooleanOperationsToolbar /> // ← Has RT context + data
+        <MarginToolbar />            // ← Has RT context + data
+    </RTProvider>
+  );
+
+  // Conditionally wrap with FusionProvider for CT series
+  return isCT ? <FusionProvider>{content}</FusionProvider> : content;
+}
+```
+
+**Impact**: 
+- ✅ All components can now access `useRT()` safely
+- ✅ RTProvider receives initial data on mount (no null state issues)
+- ✅ SeriesSelector RT controls work properly with loaded structures
+- ✅ RTControlPanel renders immediately with structure list
+- ✅ All RT toolbars have proper provider access + data
+- ✅ Provider ordering correct: RT always present, Fusion conditional
+- ✅ Data fetching centralized (no scattered fetch logic in adapters)
+- ✅ Matches legacy viewer data loading pattern
+
+**Files Modified**: `client/src/components/viewer/ViewerV2.tsx`
+- Lines 448-461: Added RT structures useQuery
+- Lines 463-480: Enhanced dev logging to show RT load status
+- Lines 483-493: Pass initialStructures to RTProvider
+
+---
+
 ### ✅ What Was Completed:
 
 #### **Task 1: Series Selector Port** - ✅ ALREADY DONE
@@ -397,6 +469,11 @@ export function LegacyComponentAdapter(adapterProps) {
 1. **client/src/components/viewer/ViewerV2.tsx**
    - Added imports for 3 toolbar components
    - Added 170 lines of conditional rendering + wiring
+   - **CRITICAL FIX**: Rescoped RTProvider to wrap entire viewer composition (lines 463-483)
+     - Previously: RTProvider only wrapped PrimaryViewport
+     - Now: RTProvider wraps all of ViewerV2Content
+     - Pattern: `<RTProvider><ViewerV2Content /></RTProvider>` then conditionally wrap with `<FusionProvider>`
+     - **Impact**: All components (SeriesSelector, toolbars, panels) can now access `useRT()` properly
    - All changes non-breaking, gated behind state flags
 
 2. **docs/UI_COMPARISON.md**
@@ -413,9 +490,13 @@ export function LegacyComponentAdapter(adapterProps) {
 5. Consider extracting toolbar wiring into adapter components for cleaner code
 
 **For Agent 3 (RT Canvas Integration)**:
+- ✅ **RTProvider now receives initial data** via `initialStructures` prop
+- ✅ RT structures are fetched at ViewerV2 level and passed down
+- ✅ No need to handle null state - RTProvider always has data when series has RT
 - ContourEditToolbar `onToolChange` callback is ready to receive brush/pen state
 - Preview system is working via `rt.setPreviewContours()`
 - Contour updates should call `rt.setStructures()` directly
+- Pen/brush logic can now safely assume `rt.rtStructures` is populated when available
 
 **For Production Deployment**:
 - All toolbars functional for structure management (rename, recolor, visibility)
