@@ -6,9 +6,13 @@
  * 
  * Agent 1: Viewer Core
  * Created: Hour 2-6
+ * REVISED: Based on Agent 1 feedback
  */
 
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle, createContext, useContext, useMemo } from 'react';
+import { useDICOMImages } from '@/hooks/useDICOMImages';
+import { useViewportInteractions } from '@/hooks/useViewportInteractions';
+import { DICOMMetadataService } from '@/services/DICOMMetadataService';
 import type {
   PrimaryViewportProps,
   DICOMImage,
@@ -99,56 +103,56 @@ function render16BitImage(
   if (!tempCtx) return;
   
   tempCtx.putImageData(imageData, 0, 0);
-  
-  // Clear main canvas
+
+  // Clear and draw scaled image
   ctx.fillStyle = 'black';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  // Draw scaled image
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
 }
 
 /**
- * Parse DICOM image position
+ * Parse DICOM image position patient tag
  * EXTRACTED FROM: working-viewer.tsx (parseImagePosition function)
  */
 function parseImagePosition(image: DICOMImage): [number, number, number] | null {
   if (!image) return null;
   
-  // Try direct imagePositionPatient
-  const direct = image.imagePositionPatient;
-  if (direct && Array.isArray(direct) && direct.length >= 3) {
-    const coords = direct.map(Number) as [number, number, number];
-    if (coords.every(v => Number.isFinite(v))) return coords;
+  if (image.imagePositionPatient && Array.isArray(image.imagePositionPatient)) {
+    const coords = image.imagePositionPatient.map(Number) as [number, number, number];
+    if (coords.every(v => Number.isFinite(v))) {
+      return coords;
+    }
   }
   
-  // Try metadata
-  const metaArray = (image.metadata as any)?.imagePositionPatient;
-  if (metaArray && Array.isArray(metaArray) && metaArray.length >= 3) {
-    const coords = metaArray.map(Number) as [number, number, number];
-    if (coords.every(v => Number.isFinite(v))) return coords;
+  if ((image.metadata as any)?.imagePositionPatient) {
+    const metaArray = (image.metadata as any).imagePositionPatient;
+    if (Array.isArray(metaArray) && metaArray.length >= 3) {
+      const coords = metaArray.map(Number) as [number, number, number];
+      if (coords.every(v => Number.isFinite(v))) {
+        return coords;
+      }
+    }
   }
   
   return null;
 }
 
 // ============================================================================
-// PrimaryViewport Component
+// Viewport Context (for Agent 2 & 3 overlay integration)
 // ============================================================================
 
-type ViewportContextValue = {
+interface ViewportContextValue {
   canvasRef: React.RefObject<HTMLCanvasElement>;
-  images: DICOMImage[];
+  overlayCanvasRef: React.RefObject<HTMLCanvasElement>;
   currentImage: DICOMImage | null;
   currentIndex: number;
-  windowLevel: WindowLevel;
+  images: DICOMImage[];
   zoom: number;
   panX: number;
   panY: number;
-  imageMetadata: ImageMetadata | null;
-};
+  windowLevel: WindowLevel;
+}
 
 const ViewportContext = createContext<ViewportContextValue | null>(null);
 
@@ -158,430 +162,297 @@ export function useViewport() {
   return ctx;
 }
 
-export function useOptionalViewport() {
-  return useContext(ViewportContext);
-}
+// ============================================================================
+// PrimaryViewport Component
+// ============================================================================
 
-export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(function PrimaryViewport(props, ref) {
-  const {
-    seriesId,
-    studyId,
-    orientation = 'axial',
-    windowLevel: externalWindowLevel,
-    onWindowLevelChange,
-    onSliceChange,
-    onImageMetadataChange,
-    autoZoomLevel,
-    autoLocalizeTarget,
-    imageCache,
-    children,
-  } = props;
+export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
+  function PrimaryViewport(
+    {
+      seriesId,
+      studyId,
+      windowLevel: initialWindowLevel,
+      autoZoomLevel = 1,
+      onWindowLevelChange,
+      onSliceChange,
+      onImageMetadataChange,
+      imageCache,
+      children,
+    },
+    ref,
+  ) {
+    // Canvas refs
+    const containerRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Canvas ref
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // Image state
-  const [images, setImages] = useState<DICOMImage[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Viewport state
-  const [zoom, setZoom] = useState(1);
-  const [panX, setPanX] = useState(0);
-  const [panY, setPanY] = useState(0);
-  const [windowLevel, setWindowLevel] = useState<WindowLevel>(
-    externalWindowLevel || { window: 350, level: 40 }
-  );
-  
-  // Image metadata
-  const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
-  
-  // Mouse interaction state
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [lastPanX, setLastPanX] = useState(0);
-  const [lastPanY, setLastPanY] = useState(0);
-  
-  // Cache refs
-  const imageCacheRef = useRef<Map<string, any>>(new Map());
+    // Viewport state
+    const [windowLevel, setWindowLevel] = useState<WindowLevel>(
+      initialWindowLevel || { window: 350, level: 40 }
+    );
+    const [zoom, setZoom] = useState(autoZoomLevel);
+    const [panX, setPanX] = useState(0);
+    const [panY, setPanY] = useState(0);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
 
-  // ============================================================================
-  // Image Loading
-  // ============================================================================
+    // FIXED: Use Agent 4's useDICOMImages hook instead of manual loading
+    const {
+      images,
+      isLoading,
+      error,
+      currentImage,
+      metadata,
+      setCurrentIndex: setDICOMCurrentIndex,
+    } = useDICOMImages({
+      seriesId,
+      autoLoad: true,
+      cache: imageCache,
+      onLoadComplete: (loadedImages) => {
+        if (loadedImages.length > 0 && onImageMetadataChange && metadata) {
+          setImageMetadata(metadata);
+          onImageMetadataChange(metadata);
+        }
+      },
+      onError: (err) => {
+        console.error('Error loading DICOM images:', err);
+      },
+    });
 
-  /**
-   * Load images for the series
-   * TODO: This will be replaced by Agent 4's useDICOMImages hook at hour 18
-   */
-  const loadImages = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      const response = await fetch(`/api/series/${seriesId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch series');
+    // FIXED: Use useViewportInteractions hook instead of duplicate handlers
+    const interactions = useViewportInteractions({
+      imageCount: images.length,
+      currentIndex,
+      setCurrentIndex,
+      zoom,
+      setZoom,
+      panX,
+      setPanX,
+      panY,
+      setPanY,
+      windowLevel,
+      setWindowLevel,
+      onWindowLevelChange,
+    });
+
+    // Expose API to parent via ref
+    useImperativeHandle(ref, () => ({
+      ...interactions.controls,
+      getCurrentImage: () => currentImage,
+      getMetadata: () => metadata,
+      getImages: () => images,
+    }));
+
+    // FIXED: Implement proper canvas sizing with device pixel ratio
+    useEffect(() => {
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      const overlayCanvas = overlayCanvasRef.current;
+      if (!container || !canvas || !overlayCanvas) return;
+
+      const updateCanvasSize = () => {
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        
+        // Set display size
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        overlayCanvas.style.width = `${rect.width}px`;
+        overlayCanvas.style.height = `${rect.height}px`;
+        
+        // Set actual size (accounting for device pixel ratio)
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        overlayCanvas.width = rect.width * dpr;
+        overlayCanvas.height = rect.height * dpr;
+        
+        // Scale context to handle device pixel ratio
+        const ctx = canvas.getContext('2d');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        if (ctx) ctx.scale(dpr, dpr);
+        if (overlayCtx) overlayCtx.scale(dpr, dpr);
+        
+        // Trigger re-render
+        displayCurrentImage();
+      };
+
+      // Initial size
+      updateCanvasSize();
+
+      // Watch for resize
+      const resizeObserver = new ResizeObserver(updateCanvasSize);
+      resizeObserver.observe(container);
+
+      return () => resizeObserver.disconnect();
+    }, []);
+
+    // ============================================================================
+    // Image Rendering (using pixel data from useDICOMImages)
+    // ============================================================================
+
+    const displayCurrentImage = useCallback(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Clear canvas
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const image = images[currentIndex];
+      if (!image) return;
+
+      try {
+        // FIXED: Use pixel data already loaded by useDICOMImages
+        // The worker already parsed the DICOM and provided pixelData
+        const pixelData = (image as any).pixelData;
+        if (!pixelData) {
+          throw new Error('No pixel data available');
+        }
+
+        // Render image with window/level, zoom, pan
+        render16BitImage(
+          ctx,
+          pixelData,
+          image.columns,
+          image.rows,
+          windowLevel.window,
+          windowLevel.level,
+          image.rescaleSlope || 1,
+          image.rescaleIntercept || 0,
+          zoom,
+          panX,
+          panY,
+        );
+
+        // Notify parent of slice change
+        if (onSliceChange) {
+          onSliceChange(currentIndex);
+        }
+      } catch (err) {
+        console.error('Error displaying image:', err);
+        ctx.fillStyle = 'red';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Error rendering DICOM', canvas.width / 2, canvas.height / 2);
       }
-      
-      const seriesData = await response.json();
-      const loadedImages: DICOMImage[] = seriesData.images || [];
-      
-      if (loadedImages.length === 0) {
-        throw new Error('No images in series');
-      }
-      
-      setImages(loadedImages);
-      setCurrentIndex(0);
-      
-      // Extract metadata from first image
-      if (loadedImages[0] && onImageMetadataChange) {
-        const meta: ImageMetadata = {
-          columns: loadedImages[0].columns,
-          rows: loadedImages[0].rows,
-          pixelSpacing: (loadedImages[0].metadata as any)?.pixelSpacing || [1, 1],
-          sliceThickness: (loadedImages[0].metadata as any)?.sliceThickness || 1,
-          imageOrientation: (loadedImages[0].metadata as any)?.imageOrientation || [],
-          imagePositionPatient: parseImagePosition(loadedImages[0]) || [0, 0, 0],
-          rescaleSlope: loadedImages[0].rescaleSlope || 1,
-          rescaleIntercept: loadedImages[0].rescaleIntercept || 0,
-          windowCenter: loadedImages[0].windowCenter || 40,
-          windowWidth: loadedImages[0].windowWidth || 350,
-          bitsAllocated: loadedImages[0].bitsAllocated || 16,
-          bitsStored: loadedImages[0].bitsStored || 16,
-          pixelRepresentation: loadedImages[0].pixelRepresentation || 1,
-          photometricInterpretation: loadedImages[0].photometricInterpretation || 'MONOCHROME2',
-          frameOfReferenceUID: (loadedImages[0].metadata as any)?.frameOfReferenceUID || null,
-          sopInstanceUID: loadedImages[0].sopInstanceUID,
-          instanceNumber: loadedImages[0].instanceNumber,
-        };
+    }, [images, currentIndex, windowLevel, zoom, panX, panY, onSliceChange]);
+
+    // Trigger render when dependencies change
+    useEffect(() => {
+      displayCurrentImage();
+    }, [displayCurrentImage]);
+
+    // Sync local currentIndex with useDICOMImages
+    useEffect(() => {
+      setDICOMCurrentIndex(currentIndex);
+    }, [currentIndex, setDICOMCurrentIndex]);
+
+    // Update metadata when current image changes
+    useEffect(() => {
+      if (currentImage && onImageMetadataChange) {
+        const meta = DICOMMetadataService.extractMetadata(currentImage);
         setImageMetadata(meta);
         onImageMetadataChange(meta);
       }
-    } catch (err) {
-      console.error('Error loading images:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load images');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [seriesId, onImageMetadataChange]);
+    }, [currentImage, onImageMetadataChange]);
 
-  // Load images when series changes
-  useEffect(() => {
-    loadImages();
-  }, [loadImages]);
+    // Reload helper (refetch series images)
+    const handleReload = useCallback(() => {
+      setCurrentIndex(0);
+      // Force re-mount by clearing and reloading
+      window.location.reload();
+    }, []);
 
-  // ============================================================================
-  // Image Rendering
-  // ============================================================================
+    // Provide viewport context for Agent 2 & 3 overlays
+    const viewportContext = useMemo<ViewportContextValue>(() => ({
+      canvasRef,
+      overlayCanvasRef,
+      currentImage: currentImage || null,
+      currentIndex,
+      images,
+      zoom,
+      panX,
+      panY,
+      windowLevel,
+    }), [canvasRef, overlayCanvasRef, currentImage, currentIndex, images, zoom, panX, panY, windowLevel]);
 
-  /**
-   * Fetch and parse DICOM pixel data
-   * TODO: This will use Agent 4's DICOM worker at hour 18
-   */
-  const fetchAndParseImage = useCallback(async (sopInstanceUID: string) => {
-    // Check cache first
-    const cached = imageCacheRef.current.get(sopInstanceUID);
-    if (cached) return cached;
-    
-    try {
-      const response = await fetch(`/api/dicom/pixel-data/${sopInstanceUID}`);
-      if (!response.ok) throw new Error('Failed to fetch pixel data');
-      
-      const buffer = await response.arrayBuffer();
-      const currentImage = images.find(img => img.sopInstanceUID === sopInstanceUID);
-      
-      const imageData = {
-        data: new Int16Array(buffer),
-        width: currentImage?.columns || 512,
-        height: currentImage?.rows || 512,
-      };
-      
-      // Cache it
-      imageCacheRef.current.set(sopInstanceUID, imageData);
-      return imageData;
-    } catch (err) {
-      console.error('Error fetching pixel data:', err);
-      return null;
-    }
-  }, [images]);
+    // ============================================================================
+    // Render
+    // ============================================================================
 
-  /**
-   * Display current image on canvas
-   */
-  const displayCurrentImage = useCallback(async () => {
-    if (!canvasRef.current || images.length === 0) return;
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    try {
-      const safeIndex = Math.max(0, Math.min(currentIndex, images.length - 1));
-      const currentImage = images[safeIndex];
-      
-      if (!currentImage) {
-        console.error('No image available');
-        return;
-      }
-      
-      // Fetch pixel data
-      const imageData = await fetchAndParseImage(currentImage.sopInstanceUID);
-      if (!imageData) {
-        throw new Error('Failed to load pixel data');
-      }
-      
-      // Set canvas size
-      canvas.width = 1024;
-      canvas.height = 1024;
-      
-      // Render image with window/level, zoom, pan
-      render16BitImage(
-        ctx,
-        imageData.data,
-        imageData.width,
-        imageData.height,
-        windowLevel.window,
-        windowLevel.level,
-        currentImage.rescaleSlope || 1,
-        currentImage.rescaleIntercept || 0,
-        zoom,
-        panX,
-        panY,
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center w-full h-full bg-black">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+            <p className="text-white">Loading DICOM images...</p>
+          </div>
+        </div>
       );
-    } catch (err) {
-      console.error('Error displaying image:', err);
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'red';
-      ctx.font = '16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Error loading DICOM', canvas.width / 2, canvas.height / 2);
     }
-  }, [images, currentIndex, windowLevel, zoom, panX, panY, fetchAndParseImage]);
 
-  // Trigger render when dependencies change
-  useEffect(() => {
-    displayCurrentImage();
-  }, [displayCurrentImage]);
-
-  // ============================================================================
-  // Mouse & Keyboard Interactions
-  // EXTRACTED FROM: working-viewer.tsx (handleCanvasMouseDown, handleCanvasMouseMove, etc.)
-  // ============================================================================
-
-  /**
-   * Handle mouse down - initiate pan or window/level adjustment
-   */
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.button === 0) {
-      // Left click - pan mode
-      setIsDragging(true);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setLastPanX(panX);
-      setLastPanY(panY);
-    } else if (e.button === 2) {
-      // Right click - window/level adjustment
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const startWindow = windowLevel.window;
-      const startLevel = windowLevel.level;
-
-      const handleWindowLevelDrag = (moveEvent: MouseEvent) => {
-        moveEvent.preventDefault();
-        const deltaX = moveEvent.clientX - startX;
-        const deltaY = moveEvent.clientY - startY;
-
-        const newWindow = Math.max(1, startWindow + deltaX * 2);
-        const newLevel = startLevel - deltaY * 1.5;
-
-        const newWindowLevel = { window: newWindow, level: newLevel };
-        setWindowLevel(newWindowLevel);
-        if (onWindowLevelChange) {
-          onWindowLevelChange(newWindowLevel);
-        }
-      };
-
-      const handleWindowLevelEnd = (endEvent: MouseEvent) => {
-        endEvent.preventDefault();
-        document.removeEventListener('mousemove', handleWindowLevelDrag);
-        document.removeEventListener('mouseup', handleWindowLevelEnd);
-      };
-
-      document.addEventListener('mousemove', handleWindowLevelDrag);
-      document.addEventListener('mouseup', handleWindowLevelEnd);
-    }
-  }, [panX, panY, windowLevel, onWindowLevelChange]);
-
-  /**
-   * Handle mouse move - update pan during drag
-   */
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isDragging) {
-      const deltaX = e.clientX - dragStart.x;
-      const deltaY = e.clientY - dragStart.y;
-      setPanX(lastPanX + deltaX);
-      setPanY(lastPanY + deltaY);
-    }
-  }, [isDragging, dragStart, lastPanX, lastPanY]);
-
-  /**
-   * Handle mouse up - end pan drag
-   */
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  /**
-   * Handle mouse wheel - zoom with Ctrl/Cmd, slice navigation without
-   */
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl/Cmd + scroll for zoom
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom((prev) => Math.max(0.1, Math.min(10, prev * zoomFactor)));
-    } else {
-      // Regular scroll for slice navigation
-      if (e.deltaY > 0) {
-        setCurrentIndex(i => Math.min(i + 1, images.length - 1));
-      } else {
-        setCurrentIndex(i => Math.max(i - 1, 0));
-      }
-    }
-  }, [images.length]);
-
-  /**
-   * Handle context menu - prevent right click menu
-   */
-  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-  }, []);
-
-  /**
-   * Keyboard shortcuts for slice navigation
-   */
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        setCurrentIndex(i => Math.max(i - 1, 0));
-      }
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        setCurrentIndex(i => Math.min(i + 1, images.length - 1));
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [images.length]);
-
-  // ============================================================================
-  // Public API (exposed via ref)
-  // ============================================================================
-
-  useImperativeHandle(ref, () => ({
-    zoomIn: () => setZoom(z => Math.min(z * 1.2, 10)),
-    zoomOut: () => setZoom(z => Math.max(z / 1.2, 0.1)),
-    resetZoom: () => {
-      setZoom(1);
-      setPanX(0);
-      setPanY(0);
-    },
-    nextSlice: () => setCurrentIndex(i => Math.min(i + 1, images.length - 1)),
-    previousSlice: () => setCurrentIndex(i => Math.max(i - 1, 0)),
-    goToSlice: (index: number) => setCurrentIndex(Math.max(0, Math.min(index, images.length - 1))),
-    getCurrentIndex: () => currentIndex,
-    getImageCount: () => images.length,
-  }));
-
-  // Notify parent of slice changes
-  useEffect(() => {
-    if (onSliceChange) {
-      onSliceChange(currentIndex);
-    }
-  }, [currentIndex, onSliceChange]);
-
-  // ============================================================================
-  // Render
-  // ============================================================================
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center w-full h-full bg-black">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-white">Loading DICOM images...</p>
+    if (error) {
+      return (
+        <div className="flex items-center justify-center w-full h-full bg-black">
+          <div className="text-center">
+            <p className="text-red-500 text-lg mb-2">Error</p>
+            <p className="text-gray-400">{error.message || String(error)}</p>
+            <button
+              onClick={handleReload}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
-      </div>
+      );
+    }
+
+    return (
+      <ViewportContext.Provider value={viewportContext}>
+        <div ref={containerRef} className="relative w-full h-full bg-black">
+          {/* Main CT canvas */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full"
+            style={{ imageRendering: 'pixelated' }}
+            {...interactions.handlers}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+          
+          {/* FIXED: Dedicated overlay canvas for fusion/RT layers (Agent 2 & 3) */}
+          <canvas
+            ref={overlayCanvasRef}
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          
+          {/* Slice info overlay */}
+          <div className="absolute top-4 left-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded pointer-events-none">
+            Slice {currentIndex + 1} / {images.length}
+          </div>
+          
+          {/* Window/Level info */}
+          <div className="absolute top-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded pointer-events-none">
+            W: {windowLevel.window.toFixed(0)} | L: {windowLevel.level.toFixed(0)}
+          </div>
+          
+          {/* Zoom info */}
+          <div className="absolute bottom-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded pointer-events-none">
+            Zoom: {(zoom * 100).toFixed(0)}%
+          </div>
+          
+          {/* Children (for Agent 2 & 3 overlay components) */}
+          {children}
+        </div>
+      </ViewportContext.Provider>
     );
   }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center w-full h-full bg-black">
-        <div className="text-center">
-          <p className="text-red-500 text-lg mb-2">Error</p>
-          <p className="text-gray-400">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const contextValue = useMemo<ViewportContextValue>(() => ({
-    canvasRef,
-    images,
-    currentImage: images[currentIndex] ?? null,
-    currentIndex,
-    windowLevel,
-    zoom,
-    panX,
-    panY,
-    imageMetadata,
-  }), [canvasRef, images, currentIndex, windowLevel, zoom, panX, panY, imageMetadata]);
-
-  return (
-    <ViewportContext.Provider value={contextValue}>
-      <div className="relative w-full h-full bg-black">
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full cursor-move"
-          style={{ imageRendering: 'pixelated' }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
-          onContextMenu={handleContextMenu}
-        />
-        
-        {/* Slice info overlay */}
-        <div className="absolute top-4 left-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-          Slice {currentIndex + 1} / {images.length}
-        </div>
-        
-        {/* Window/Level info */}
-        <div className="absolute top-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-          W: {windowLevel.window} | L: {windowLevel.level}
-        </div>
-        
-        {/* Zoom info */}
-        <div className="absolute bottom-4 right-4 text-white text-sm font-mono bg-black/50 px-2 py-1 rounded">
-          Zoom: {(zoom * 100).toFixed(0)}%
-        </div>
-        
-        {/* Children (overlays will be added here by Agents 2 & 3) */}
-        {children}
-      </div>
-    </ViewportContext.Provider>
-  );
-});
+);
 
 PrimaryViewport.displayName = 'PrimaryViewport';
 
+export default PrimaryViewport;

@@ -43,31 +43,29 @@ export function FusionOverlayLayer({ opacity }: Props) {
         if (requestTokenRef.current !== token) return;
         if (!overlay || !overlay.hasSignal) return;
 
-        // Prepare overlay canvas once, matching base canvas size
-        if (!overlayCanvasRef.current) {
-          overlayCanvasRef.current = document.createElement('canvas');
-        }
-        const overlayCanvas = overlayCanvasRef.current;
-        overlayCanvas.width = baseCanvas.width;
-        overlayCanvas.height = baseCanvas.height;
-        const octx = overlayCanvas.getContext('2d');
-        if (!octx) return;
+        // Compute same transform as viewport render to align fusion overlay
+        const imageWidth = viewport.imageMetadata?.columns ?? overlay.canvas.width;
+        const imageHeight = viewport.imageMetadata?.rows ?? overlay.canvas.height;
+        const baseScale = Math.min(baseCanvas.width / imageWidth, baseCanvas.height / imageHeight);
+        const totalScale = baseScale * Math.max(0.1, viewport.zoom);
+        const scaledWidth = imageWidth * totalScale;
+        const scaledHeight = imageHeight * totalScale;
+        const x = (baseCanvas.width - scaledWidth) / 2 + (viewport.panX || 0);
+        const y = (baseCanvas.height - scaledHeight) / 2 + (viewport.panY || 0);
 
-        // Draw overlay into its own canvas (scale to base size)
-        octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-        octx.drawImage(overlay.canvas, 0, 0, overlayCanvas.width, overlayCanvas.height);
-
-        // Composite onto base canvas
+        // Composite overlay directly using viewport transform
         baseCtx.save();
         baseCtx.globalAlpha = Math.max(0, Math.min(1, opacity));
-        baseCtx.drawImage(overlayCanvas, 0, 0);
+        baseCtx.imageSmoothingEnabled = true;
+        baseCtx.imageSmoothingQuality = 'high';
+        baseCtx.drawImage(overlay.canvas, x, y, scaledWidth, scaledHeight);
         baseCtx.restore();
       })
       .catch((err) => {
         if (requestTokenRef.current !== token) return;
         console.warn('FusionOverlayLayer error', err);
       });
-  }, [fusion, opacity, viewport.canvasRef, viewport.currentImage, viewport.currentIndex]);
+  }, [fusion, opacity, viewport.canvasRef, viewport.currentImage, viewport.currentIndex, viewport.zoom, viewport.panX, viewport.panY, viewport.windowLevel]);
 
   return null;
 }

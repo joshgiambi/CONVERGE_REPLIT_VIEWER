@@ -925,6 +925,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  const commitRtStructures = (next: any, action: string, structureId?: number | null) => {
+    if (rtOverlayControlled) {
+      rtCtx.setStructures(next);
+      rtCtx.saveHistory(action, structureId);
+    } else {
+      setLocalRTStructures(next);
+      saveContourUpdates(next, action);
+      if (onContourUpdate) onContourUpdate(next);
+      rtCtx.saveHistory(action, structureId);
+    }
+  };
+
   // Handle boolean operations (combine/subtract) between structures
   const handleBooleanOperation = async (payload: any) => {
     if (!rtStructures) {
@@ -973,10 +985,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const service = createContourOperationsService();
       const op = operation === 'combine' ? 'union' : operation === 'subtract' ? 'subtract' : 'intersect';
       const next = await service.booleanOperation(updatedRTStructures, sourceStructureId, targetStructureId, op as any);
-      setLocalRTStructures(next);
-      saveContourUpdates(next, 'boolean_operation');
-      if (onContourUpdate) onContourUpdate(next);
-      rtCtx.saveHistory('boolean_operation', sourceStructureId);
+      commitRtStructures(next, 'boolean_operation', sourceStructureId);
     } catch (error) {
       log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
     }
@@ -1065,9 +1074,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const marginValueMm = marginParams.marginValues.uniform;
         const service = createContourOperationsService();
         const next = await service.applyUniformMargin(updatedRTStructures, structureId, marginValueMm);
-        setLocalRTStructures(next);
-        saveContourUpdates(next, 'apply_margin');
-        if (onContourUpdate) onContourUpdate(next);
+        commitRtStructures(next, 'apply_margin', structureId);
         log.debug(`Applied margin of ${marginValueMm}mm to structure ${structureId}`, 'viewer');
       } catch (error) {
         log.error(`Error applying margin operation: ${String(error)}`, 'viewer');
