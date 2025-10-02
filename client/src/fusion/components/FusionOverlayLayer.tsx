@@ -65,7 +65,18 @@ export function FusionOverlayLayer({ opacity }: Props) {
         if (requestTokenRef.current !== token) return;
         console.warn('FusionOverlayLayer error', err);
       });
-  }, [fusion, opacity, viewport.canvasRef, viewport.currentImage, viewport.currentIndex, viewport.zoom, viewport.panX, viewport.panY, viewport.windowLevel]);
+  }, [
+    fusion,
+    opacity,
+    viewport.canvasRef,
+    viewport.currentImage,
+    viewport.currentIndex,
+    viewport.zoom,
+    viewport.panX,
+    viewport.panY,
+    viewport.windowLevel,
+    viewport.imageMetadata,
+  ]);
 
   return null;
 }

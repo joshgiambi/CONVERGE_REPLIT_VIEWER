@@ -6,7 +6,7 @@
  * 
  * Agent 1: Viewer Core
  * Created: Hour 2-6
- * REVISED: Based on Agent 1 feedback
+ * REVISED: Based on Agent 1 feedback (rounds 1 & 2)
  */
 
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle, createContext, useContext, useMemo } from 'react';
@@ -28,6 +28,9 @@ import type {
 /**
  * Render 16-bit DICOM image data to canvas with window/level
  * EXTRACTED FROM: working-viewer.tsx (render16BitImage function)
+ * 
+ * NOTE: This function works in CSS pixel space (not physical pixels)
+ * The canvas context should be scaled by devicePixelRatio before calling this
  */
 function render16BitImage(
   ctx: CanvasRenderingContext2D,
@@ -85,15 +88,20 @@ function render16BitImage(
   // Create ImageData and render with zoom/pan
   const imageData = new ImageData(displayData, width, height);
   
+  // FIXED: Work in CSS pixel space (canvas already scaled by DPR)
+  // Get CSS dimensions (not physical dimensions)
+  const cssWidth = canvas.width / (window.devicePixelRatio || 1);
+  const cssHeight = canvas.height / (window.devicePixelRatio || 1);
+  
   // Calculate scale to fit canvas with zoom
-  const baseScale = Math.min(canvas.width / width, canvas.height / height);
+  const baseScale = Math.min(cssWidth / width, cssHeight / height);
   const totalScale = baseScale * zoom;
   const scaledWidth = width * totalScale;
   const scaledHeight = height * totalScale;
   
   // Center image with pan offset
-  const x = (canvas.width - scaledWidth) / 2 + panX;
-  const y = (canvas.height - scaledHeight) / 2 + panY;
+  const x = (cssWidth - scaledWidth) / 2 + panX;
+  const y = (cssHeight - scaledHeight) / 2 + panY;
 
   // Draw to temporary canvas for scaling
   const tempCanvas = document.createElement('canvas');
@@ -104,9 +112,9 @@ function render16BitImage(
   
   tempCtx.putImageData(imageData, 0, 0);
 
-  // Clear and draw scaled image
+  // Clear and draw scaled image (in CSS pixel space)
   ctx.fillStyle = 'black';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
 }
@@ -152,6 +160,8 @@ interface ViewportContextValue {
   panX: number;
   panY: number;
   windowLevel: WindowLevel;
+  // FIXED: Added metadata for Agent 2/3
+  imageMetadata: ImageMetadata | null;
 }
 
 const ViewportContext = createContext<ViewportContextValue | null>(null);
@@ -193,8 +203,6 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
     const [zoom, setZoom] = useState(autoZoomLevel);
     const [panX, setPanX] = useState(0);
     const [panY, setPanY] = useState(0);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
 
     // FIXED: Use Agent 4's useDICOMImages hook instead of manual loading
     const {
@@ -202,15 +210,15 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       isLoading,
       error,
       currentImage,
+      currentIndex,  // FIXED: Use hook's currentIndex as single source of truth
+      setCurrentIndex,
       metadata,
-      setCurrentIndex: setDICOMCurrentIndex,
     } = useDICOMImages({
       seriesId,
       autoLoad: true,
       cache: imageCache,
       onLoadComplete: (loadedImages) => {
         if (loadedImages.length > 0 && onImageMetadataChange && metadata) {
-          setImageMetadata(metadata);
           onImageMetadataChange(metadata);
         }
       },
@@ -243,49 +251,6 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       getImages: () => images,
     }));
 
-    // FIXED: Implement proper canvas sizing with device pixel ratio
-    useEffect(() => {
-      const container = containerRef.current;
-      const canvas = canvasRef.current;
-      const overlayCanvas = overlayCanvasRef.current;
-      if (!container || !canvas || !overlayCanvas) return;
-
-      const updateCanvasSize = () => {
-        const rect = container.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        
-        // Set display size
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
-        overlayCanvas.style.width = `${rect.width}px`;
-        overlayCanvas.style.height = `${rect.height}px`;
-        
-        // Set actual size (accounting for device pixel ratio)
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        overlayCanvas.width = rect.width * dpr;
-        overlayCanvas.height = rect.height * dpr;
-        
-        // Scale context to handle device pixel ratio
-        const ctx = canvas.getContext('2d');
-        const overlayCtx = overlayCanvas.getContext('2d');
-        if (ctx) ctx.scale(dpr, dpr);
-        if (overlayCtx) overlayCtx.scale(dpr, dpr);
-        
-        // Trigger re-render
-        displayCurrentImage();
-      };
-
-      // Initial size
-      updateCanvasSize();
-
-      // Watch for resize
-      const resizeObserver = new ResizeObserver(updateCanvasSize);
-      resizeObserver.observe(container);
-
-      return () => resizeObserver.disconnect();
-    }, []);
-
     // ============================================================================
     // Image Rendering (using pixel data from useDICOMImages)
     // ============================================================================
@@ -297,31 +262,34 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
+      // FIXED: Work in CSS pixel space
+      const cssWidth = canvas.width / (window.devicePixelRatio || 1);
+      const cssHeight = canvas.height / (window.devicePixelRatio || 1);
+
       // Clear canvas
       ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
 
-      const image = images[currentIndex];
-      if (!image) return;
+      // FIXED: Use hook's currentImage (single source of truth)
+      if (!currentImage) return;
 
       try {
         // FIXED: Use pixel data already loaded by useDICOMImages
-        // The worker already parsed the DICOM and provided pixelData
-        const pixelData = (image as any).pixelData;
+        const pixelData = (currentImage as any).pixelData;
         if (!pixelData) {
           throw new Error('No pixel data available');
         }
 
-        // Render image with window/level, zoom, pan
+        // Render image with window/level, zoom, pan (in CSS pixel space)
         render16BitImage(
           ctx,
           pixelData,
-          image.columns,
-          image.rows,
+          currentImage.columns,
+          currentImage.rows,
           windowLevel.window,
           windowLevel.level,
-          image.rescaleSlope || 1,
-          image.rescaleIntercept || 0,
+          currentImage.rescaleSlope || 1,
+          currentImage.rescaleIntercept || 0,
           zoom,
           panX,
           panY,
@@ -336,37 +304,80 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
         ctx.fillStyle = 'red';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('Error rendering DICOM', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('Error rendering DICOM', cssWidth / 2, cssHeight / 2);
       }
-    }, [images, currentIndex, windowLevel, zoom, panX, panY, onSliceChange]);
+    }, [currentImage, currentIndex, windowLevel, zoom, panX, panY, onSliceChange]);
 
     // Trigger render when dependencies change
     useEffect(() => {
       displayCurrentImage();
     }, [displayCurrentImage]);
 
-    // Sync local currentIndex with useDICOMImages
-    useEffect(() => {
-      setDICOMCurrentIndex(currentIndex);
-    }, [currentIndex, setDICOMCurrentIndex]);
-
     // Update metadata when current image changes
     useEffect(() => {
       if (currentImage && onImageMetadataChange) {
         const meta = DICOMMetadataService.extractMetadata(currentImage);
-        setImageMetadata(meta);
         onImageMetadataChange(meta);
       }
     }, [currentImage, onImageMetadataChange]);
 
+    // FIXED: Implement proper canvas sizing with device pixel ratio
+    // FIXED: Include displayCurrentImage in deps so resize observer uses latest closure
+    useEffect(() => {
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      const overlayCanvas = overlayCanvasRef.current;
+      if (!container || !canvas || !overlayCanvas) return;
+
+      const updateCanvasSize = () => {
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        
+        // Set display size (CSS pixels)
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        overlayCanvas.style.width = `${rect.width}px`;
+        overlayCanvas.style.height = `${rect.height}px`;
+        
+        // Set actual size (physical pixels = CSS pixels * DPR)
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        overlayCanvas.width = rect.width * dpr;
+        overlayCanvas.height = rect.height * dpr;
+        
+        // FIXED: Scale context by DPR so we can work in CSS pixels
+        const ctx = canvas.getContext('2d');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        if (ctx) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+          ctx.scale(dpr, dpr);
+        }
+        if (overlayCtx) {
+          overlayCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+          overlayCtx.scale(dpr, dpr);
+        }
+        
+        // FIXED: Trigger re-render with latest closure
+        displayCurrentImage();
+      };
+
+      // Initial size
+      updateCanvasSize();
+
+      // Watch for resize
+      const resizeObserver = new ResizeObserver(updateCanvasSize);
+      resizeObserver.observe(container);
+
+      return () => resizeObserver.disconnect();
+    }, [displayCurrentImage]); // FIXED: Include displayCurrentImage in deps
+
     // Reload helper (refetch series images)
     const handleReload = useCallback(() => {
       setCurrentIndex(0);
-      // Force re-mount by clearing and reloading
       window.location.reload();
-    }, []);
+    }, [setCurrentIndex]);
 
-    // Provide viewport context for Agent 2 & 3 overlays
+    // FIXED: Provide viewport context with imageMetadata for Agent 2 & 3 overlays
     const viewportContext = useMemo<ViewportContextValue>(() => ({
       canvasRef,
       overlayCanvasRef,
@@ -377,7 +388,8 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       panX,
       panY,
       windowLevel,
-    }), [canvasRef, overlayCanvasRef, currentImage, currentIndex, images, zoom, panX, panY, windowLevel]);
+      imageMetadata: metadata,  // FIXED: Include metadata
+    }), [canvasRef, overlayCanvasRef, currentImage, currentIndex, images, zoom, panX, panY, windowLevel, metadata]);
 
     // ============================================================================
     // Render
