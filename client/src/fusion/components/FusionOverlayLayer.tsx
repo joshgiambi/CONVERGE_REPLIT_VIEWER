@@ -10,15 +10,23 @@ export function FusionOverlayLayer({ opacity }: Props) {
   const fusion = useFusion();
   const requestTokenRef = useRef(0);
   const viewport = useViewport();
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    const baseCanvas = viewport.canvasRef.current;
-    if (!baseCanvas) return;
-    const baseCtx = baseCanvas.getContext('2d');
-    if (!baseCtx) return;
+    const overlayCanvas = viewport.overlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
 
-    if (!fusion.selectedSecondaryId || opacity <= 0) return;
+    // Compute CSS-space canvas size
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = overlayCanvas.width / dpr;
+    const cssHeight = overlayCanvas.height / dpr;
+
+    // Always clear immediately to avoid stale composites
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    // Invalidate any in-flight composite when inputs change
+    const token = ++requestTokenRef.current;
 
     const currentImage: any = viewport.currentImage;
     const sopInstanceUID = currentImage?.sopInstanceUID ?? null;
@@ -26,11 +34,8 @@ export function FusionOverlayLayer({ opacity }: Props) {
     const position = currentImage?.imagePositionPatient ?? currentImage?.metadata?.imagePositionPatient ?? null;
     const sliceIndex = Number.isFinite(viewport.currentIndex) ? viewport.currentIndex : 0;
 
-    if (!sopInstanceUID) {
-      return;
-    }
-
-    const token = ++requestTokenRef.current;
+    // If fusion disabled or no SOP, leave canvas cleared and exit
+    if (!fusion.selectedSecondaryId || opacity <= 0 || !sopInstanceUID) return;
 
     fusion
       .getOverlayForImage({
@@ -43,23 +48,25 @@ export function FusionOverlayLayer({ opacity }: Props) {
         if (requestTokenRef.current !== token) return;
         if (!overlay || !overlay.hasSignal) return;
 
-        // Compute same transform as viewport render to align fusion overlay
         const imageWidth = viewport.imageMetadata?.columns ?? overlay.canvas.width;
         const imageHeight = viewport.imageMetadata?.rows ?? overlay.canvas.height;
-        const baseScale = Math.min(baseCanvas.width / imageWidth, baseCanvas.height / imageHeight);
+
+        // Match PrimaryViewport transform in CSS space
+        const baseScale = Math.min(cssWidth / imageWidth, cssHeight / imageHeight);
         const totalScale = baseScale * Math.max(0.1, viewport.zoom);
         const scaledWidth = imageWidth * totalScale;
         const scaledHeight = imageHeight * totalScale;
-        const x = (baseCanvas.width - scaledWidth) / 2 + (viewport.panX || 0);
-        const y = (baseCanvas.height - scaledHeight) / 2 + (viewport.panY || 0);
+        const x = (cssWidth - scaledWidth) / 2 + (viewport.panX || 0);
+        const y = (cssHeight - scaledHeight) / 2 + (viewport.panY || 0);
 
-        // Composite overlay directly using viewport transform
-        baseCtx.save();
-        baseCtx.globalAlpha = Math.max(0, Math.min(1, opacity));
-        baseCtx.imageSmoothingEnabled = true;
-        baseCtx.imageSmoothingQuality = 'high';
-        baseCtx.drawImage(overlay.canvas, x, y, scaledWidth, scaledHeight);
-        baseCtx.restore();
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        // Clear again in case of rapid successive frames
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        ctx.drawImage(overlay.canvas, x, y, scaledWidth, scaledHeight);
+        ctx.restore();
       })
       .catch((err) => {
         if (requestTokenRef.current !== token) return;

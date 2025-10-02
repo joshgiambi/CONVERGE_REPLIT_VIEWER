@@ -2210,14 +2210,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
           
           // Update the structures again with predictions
-          setLocalRTStructures(updatedStructures);
+          commitRtStructures(updatedStructures, 'add_brush_stroke', payload.structureId);
         }
       }
-      // Save state to new undo system
-      if (seriesId) {
-        rtCtx.saveHistory('add_brush_stroke', payload.structureId);
-      }
-      saveContourUpdates(updatedStructures, 'add_brush_stroke');
+      commitRtStructures(updatedStructures, 'add_brush_stroke', payload.structureId);
       // Trigger immediate render to show contours
       try { 
         scheduleRender(); 
@@ -2305,13 +2301,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       if (false) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
-      setLocalRTStructures(updatedStructures);
-      
-      // Save state to undo system
-      if (seriesId) {
-        rtCtx.saveHistory('smart_brush_stroke', payload.structureId);
-      }
-      saveContourUpdates(updatedStructures, 'smart_brush_stroke');
+      commitRtStructures(updatedStructures, 'smart_brush_stroke', payload.structureId);
       // Trigger immediate render to show contours
       try { scheduleRender(); } catch {}
     } else if (payload.action === "erase_stroke") {
@@ -2380,19 +2370,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       console.log(`Erase completed - structure now has ${structure.contours.length} contours`);
 
-      // Update state
-      setLocalRTStructures(updatedStructures);
-
-      // Pass the updated structures up to parent component
-      if (onContourUpdate) {
-        onContourUpdate(updatedStructures);
-      }
-
-      // Save state to undo system
-      if (seriesId) {
-        rtCtx.saveHistory('erase_brush_stroke', payload.structureId);
-      }
-      saveContourUpdates(updatedStructures, 'erase_brush_stroke');
+      // Commit state
+      commitRtStructures(updatedStructures, 'erase_brush_stroke', payload.structureId);
       // Trigger immediate render to show contours
       try { scheduleRender(); } catch {}
     } else if (
@@ -2593,13 +2572,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'pen_boolean_operation');
+      commitRtStructures(updatedStructures, 'pen_boolean_operation', payload.structureId);
       // Trigger immediate render to show contours
       try { scheduleRender(); } catch {}
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
-      setLocalRTStructures(updatedStructures);
+      commitRtStructures(updatedStructures, 'pen_tool', payload.structureId);
       // Save state to undo system
       if (seriesId && payload.structureId) {
         rtCtx.saveHistory('pen_tool', payload.structureId);
@@ -2672,8 +2650,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log(`Merged contours at slice ${payload.slicePosition}: ${payload.contours.length} contours added`);
       }
 
-      setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'merge_contours');
+      commitRtStructures(updatedStructures, 'merge_contours', payload.structureId);
     } else if (payload.action === "subtract_contours") {
       // Handle boolean subtract operation (difference)
       const structure = updatedStructures.structures.find(
@@ -2704,8 +2681,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log(`Subtraction result at slice ${payload.slicePosition}: all contours removed`);
       }
 
-      setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'subtract_contours');
+      commitRtStructures(updatedStructures, 'subtract_contours', payload.structureId);
     } else if (payload.action === "grow_contour") {
       // Handle contour growing
       handleGrowContour(payload);
@@ -2762,7 +2738,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-      saveContourUpdates(updatedStructures, 'delete_slice');
+      commitRtStructures(updatedStructures, 'delete_slice', payload.structureId);
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(
@@ -2776,7 +2752,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared all contours for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_all');
+      commitRtStructures(updatedStructures, 'clear_all', payload.structureId);
     } else if (payload.action === "interpolate") {
       // Handle interpolate missing slices (SDT multi-loop with CT-grid targeting)
       const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
@@ -2846,7 +2822,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       structure.contours = newContours;
       console.log(`Interpolated ${newContours.length - structure.contours.length} new slices for structure ${payload.structureId}`);
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'interpolate');
+      commitRtStructures(updatedStructures, 'interpolate', payload.structureId);
       try { scheduleRender(); } catch {}
     } else if (payload.action === "delete_nth_slice") {
       // Handle delete every nth slice
@@ -2869,7 +2845,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Deleted ${deletedCount} contours (every ${payload.nth} slice) for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'delete_nth_slice');
+      commitRtStructures(updatedStructures, 'delete_nth_slice', payload.structureId);
     } else if (payload.action === "clear_below") {
       // Handle clear below current slice
       const structure = updatedStructures.structures.find(
@@ -2886,7 +2862,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours below slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_below');
+      commitRtStructures(updatedStructures, 'clear_below', payload.structureId);
     } else if (payload.action === "clear_above") {
       // Handle clear above current slice
       const structure = updatedStructures.structures.find(
@@ -2903,7 +2879,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Cleared ${deletedCount} contours above slice ${payload.slicePosition} for structure ${payload.structureId}`);
       
       setLocalRTStructures(updatedStructures);
-      saveContourUpdates(updatedStructures, 'clear_above');
+      commitRtStructures(updatedStructures, 'clear_above', payload.structureId);
     } else if (payload.action === "smooth") {
       // Handle contour smoothing
       const structure = updatedStructures.structures.find(
@@ -2950,7 +2926,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (seriesId) {
         rtCtx.saveHistory('smooth', payload.structureId);
       }
-      saveContourUpdates(updatedStructures, 'smooth');
+      commitRtStructures(updatedStructures, 'smooth', payload.structureId);
     } else if (payload.action === 'open_remove_blobs_dialog') {
       const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
       if (!structure || !Array.isArray(structure.contours)) return;
@@ -2989,7 +2965,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       if (seriesId) {
         rtCtx.saveHistory('separate_blobs', payload.structureId);
       }
-      saveContourUpdates(updatedStructures, 'separate_blobs');
+      commitRtStructures(updatedStructures, 'separate_blobs', payload.structureId);
     }
   };
 
@@ -6100,3 +6076,4 @@ declare global {
     workingViewerResetZoom?: () => void;
   }
 }
+
