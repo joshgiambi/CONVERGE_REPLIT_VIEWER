@@ -23,6 +23,8 @@ import { useFusionCandidates, useSeriesSelection } from '@/hooks/use-series-sele
 import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations';
 import { useQuery } from '@tanstack/react-query';
 import { ViewerToolbar } from '@/components/dicom/viewer-toolbar';
+import { SeriesSelector } from '@/components/dicom/series-selector';
+import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
 
 interface ViewerV2Props {
   patientId: string;
@@ -40,6 +42,34 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
+
+  // State for series selector
+  const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
+  const [currentSeriesId, setCurrentSeriesId] = useState<number>(seriesId);
+
+  // Fetch all series for the patient
+  const { data: allSeries = [], isLoading: seriesLoading } = useQuery<DICOMSeries[]>({
+    queryKey: ['patient-series', patientId],
+    queryFn: async () => {
+      const response = await fetch(`/api/patients/${patientId}/series`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.series || [];
+    },
+    enabled: !!patientId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Find the selected series object
+  const selectedSeriesObj = useMemo(() => {
+    return allSeries.find((s: DICOMSeries) => s.id === currentSeriesId) || null;
+  }, [allSeries, currentSeriesId]);
+
+  // Handle series selection change
+  const handleSeriesSelect = (series: DICOMSeries) => {
+    setCurrentSeriesId(series.id);
+    // TODO: Navigate to new series (would need to update URL or notify parent)
+  };
 
   // Try to get fusion context - may not exist if not a CT series
   let fusion: any = null;
@@ -107,15 +137,21 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
         </RTProvider>
       }
       sidebar={
-        <div className="text-white p-4">
-          <h2 className="text-xl font-bold mb-4">Series Selector</h2>
-          <p className="text-gray-400">Series selector will be added by Agent 5 during integration</p>
-          <div className="mt-4 p-3 bg-gray-800 rounded">
-            <p className="text-sm text-gray-300">Viewing Series {seriesId}</p>
-            {studyId && <p className="text-sm text-gray-300">Study {studyId}</p>}
-            <p className="text-sm text-gray-300">Patient {patientId}</p>
-          </div>
-        </div>
+        <SeriesSelector
+          series={allSeries}
+          selectedSeries={selectedSeriesObj}
+          onSeriesSelect={handleSeriesSelect}
+          windowLevel={windowLevel}
+          onWindowLevelChange={setWindowLevel}
+          studyId={studyId}
+          rtStructures={rt.rtStructures}
+          onStructureVisibilityChange={(structureId, visible) => {
+            rt.setStructureVisibility(structureId, visible);
+          }}
+          selectedForEdit={rt.selection.selectedForEdit}
+          onSelectedForEditChange={rt.setSelectedForEdit}
+          onAllStructuresVisibilityChange={rt.setAllStructuresVisible}
+        />
       }
       panels={
         <div className="absolute bottom-4 right-4 space-y-2">
