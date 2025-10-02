@@ -8,7 +8,7 @@
  * Created: Hour 10-14
  */
 
-import { ZoomIn, ZoomOut, Maximize2, Hand, Crosshair, Ruler, RotateCw, FlipHorizontal } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Hand, Crosshair, Ruler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ViewportControlsProps } from '@/types/viewer';
 
@@ -19,8 +19,6 @@ export function ViewportControls({
   onPan,
   onMeasure,
   onCrosshairs,
-  onRotate,
-  onFlip,
   isPanActive = false,
   isCrosshairsActive = false,
   isMeasureActive = false,
@@ -90,33 +88,8 @@ export function ViewportControls({
         </Button>
       </div>
 
-      {/* Transform Controls (Optional) */}
-      {(onRotate || onFlip) && (
-        <div className="flex items-center gap-1">
-          {onRotate && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onRotate}
-              className="text-white hover:bg-gray-700"
-              title="Rotate 90°"
-            >
-              <RotateCw className="h-4 w-4" />
-            </Button>
-          )}
-          {onFlip && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onFlip}
-              className="text-white hover:bg-gray-700"
-              title="Flip Horizontal"
-            >
-              <FlipHorizontal className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      )}
+      {/* Rotate/Flip controls removed - not implemented yet */}
+      {/* TODO: Add back when rotation/flip implemented in useViewportInteractions */}
     </div>
   );
 }

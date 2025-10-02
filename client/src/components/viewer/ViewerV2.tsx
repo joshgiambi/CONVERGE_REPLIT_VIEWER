@@ -9,7 +9,7 @@
  * Agent 5: Integration (updated to mount legacy UI components)
  */
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import { ViewerShell } from './ViewerShell';
 import { PrimaryViewport } from './PrimaryViewport';
 import { ViewportControls } from './ViewportControls';
@@ -20,7 +20,8 @@ import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import FusionOverlayLayer from '@/fusion/components/FusionOverlayLayer';
 import { FusionProvider, useFusion } from '@/fusion/fusion-context';
 import { FusionPanel } from '@/fusion/components/FusionPanel';
-import { useFusionCandidates } from '@/hooks/use-series-selection';
+import { useFusionCandidates, useSeriesSelection } from '@/hooks/use-series-selection';
+import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations';
 import { useQuery } from '@tanstack/react-query';
 
 interface ViewerV2Props {
@@ -29,12 +30,19 @@ interface ViewerV2Props {
   studyId?: number;
 }
 
-// Inner component that uses fusion context
+// Inner component that uses fusion context (if available)
 function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
-  const fusion = useFusion();
   const [fusionMinimized, setFusionMinimized] = useState(false);
+
+  // Try to get fusion context - may not exist if not a CT series
+  let fusion: any = null;
+  try {
+    fusion = useFusion();
+  } catch {
+    // FusionProvider not present - this is expected for non-CT series
+  }
 
   // Viewport control handlers
   const handleZoomIn = () => viewportRef.current?.zoomIn();
@@ -43,6 +51,9 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   const handlePan = () => setMode('pan');
   const handleCrosshairs = () => setMode('crosshairs');
   const handleMeasure = () => setMode('measure');
+
+  const fusionOpacity = fusion?.opacity ?? 0.5;
+  const showFusionPanel = fusion?.showFusionPanel ?? false;
 
   return (
     <ViewerShell
@@ -67,7 +78,7 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
             studyId={studyId}
           >
             {/* Order: Fusion first (clears), RT second (strokes) */}
-            <FusionOverlayLayer opacity={fusion.opacity} />
+            {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
             <RTOverlayLayer />
           </PrimaryViewport>
         </RTProvider>
@@ -89,12 +100,12 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
           <div className="bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
             <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
             <div>Tool: {activeTool}</div>
-            <div className="text-gray-400 mt-2">Fusion: {fusion.showFusionPanel ? 'Ready' : 'N/A'}</div>
+            <div className="text-gray-400 mt-2">Fusion: {showFusionPanel ? 'Ready' : 'N/A'}</div>
             <div className="text-gray-400">RT: Provider Active</div>
           </div>
           
           {/* Fusion Panel */}
-          {fusion.showFusionPanel && (
+          {showFusionPanel && (
             <div className="bg-black/80 border border-gray-700 rounded-md p-2">
               <FusionPanel 
                 minimized={fusionMinimized}
@@ -113,26 +124,77 @@ function ViewerV2Content({ patientId, seriesId, studyId }: ViewerV2Props) {
   );
 }
 
-// Main component with FusionProvider wrapper
+// Main component with conditional FusionProvider wrapper
 export function ViewerV2({ patientId, seriesId, studyId }: ViewerV2Props) {
-  // Fetch fusion candidates for this series
-  const { data: fusionCandidates = [], isLoading: candidatesLoading } = useFusionCandidates(seriesId);
-  
-  // Fetch registration associations (simplified for now - can be enhanced later)
-  const { data: registrationData } = useQuery<Map<number, any[]>>({
-    queryKey: ['registration-associations', seriesId],
+  // Fetch series metadata to check modality
+  const { data: seriesData } = useQuery<any>({
+    queryKey: ['series-metadata', seriesId],
     queryFn: async () => {
-      // For now, return empty Map - registration associations can be added later
-      return new Map();
+      const response = await fetch(`/api/series/${seriesId}`);
+      if (!response.ok) return null;
+      return response.json();
     },
     enabled: !!seriesId,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const candidateSecondaryIds = fusionCandidates.map(c => c.seriesId);
+  // Determine if this is a CT series (required for fusion primary)
+  const isCT = useMemo(() => {
+    const modality = (seriesData?.modality || '').toUpperCase();
+    return modality === 'CT';
+  }, [seriesData?.modality]);
+
+  // Only compute fusion data if this is a CT series
+  const fusionPrimarySeriesId = isCT ? seriesId : null;
+
+  // Fetch series selection data (includes planning CT and fusion candidates)
+  const { data: seriesSelectionData } = useSeriesSelection(studyId);
+
+  // Fetch fusion candidates - use series selection data if available, otherwise direct API
+  const { data: directFusionCandidates = [] } = useFusionCandidates(seriesId);
+
+  // Merge fusion candidates from series selection and direct API
+  const candidateSecondaryIds = useMemo(() => {
+    if (!fusionPrimarySeriesId) return [];
+    
+    // Prefer series selection data (includes relationship types and confidence)
+    if (seriesSelectionData?.fusionCandidates?.length) {
+      return seriesSelectionData.fusionCandidates.map((c: any) => c.seriesId);
+    }
+    
+    // Fallback to direct API call
+    return directFusionCandidates.map(c => c.seriesId);
+  }, [fusionPrimarySeriesId, seriesSelectionData?.fusionCandidates, directFusionCandidates]);
+
+  // Fetch registration associations for this patient/study
+  const studyIds = useMemo(() => studyId ? [studyId] : undefined, [studyId]);
+  const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
+
+  if (import.meta.env.DEV) {
+    console.log('🔧 ViewerV2 Fusion Setup:', {
+      seriesId,
+      modality: seriesData?.modality,
+      isCT,
+      fusionPrimarySeriesId,
+      candidateCount: candidateSecondaryIds.length,
+      registrationCount: registrationData?.size || 0,
+    });
+  }
+
+  // Only wrap with FusionProvider if this is a CT series
+  if (!isCT || !fusionPrimarySeriesId) {
+    return (
+      <ViewerV2Content 
+        patientId={patientId}
+        seriesId={seriesId}
+        studyId={studyId}
+      />
+    );
+  }
 
   return (
     <FusionProvider
-      primarySeriesId={seriesId}
+      primarySeriesId={fusionPrimarySeriesId}
       candidateSecondaryIds={candidateSecondaryIds}
       registrationAssociations={registrationData || new Map()}
     >

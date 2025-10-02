@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { RTStructureSet } from '@/types/rt-structures';
 import { useRT } from '@/rt-structures/RTProvider';
 import { useViewport } from '@/components/viewer/PrimaryViewport';
+import { useFusion } from '@/fusion/fusion-context';
 
 interface Props {
   contourWidth?: number;
@@ -26,9 +27,14 @@ function drawStructures(
   allStructuresVisible: boolean,
   selectedStructureIds: Set<number>,
   selectedForEdit: number | null,
+  shouldClearCanvas: boolean,
 ) {
   ctx.save();
-  // Do not clear the full canvas. Fusion clears first; RT paints on top.
+  
+  // Clear canvas if fusion is not active (fusion normally clears first)
+  if (shouldClearCanvas) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
 
   // CSS pixel space transform matching PrimaryViewport
   const baseScale = Math.min(cssWidth / imageWidth, cssHeight / imageHeight);
@@ -86,6 +92,16 @@ export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props)
   const { rtStructures, selection, previewContours } = useRT();
   const viewport = useViewport();
 
+  // Check if fusion is active - if not, RT overlay should clear canvas
+  let fusion: any = null;
+  try {
+    fusion = useFusion();
+  } catch {
+    // FusionProvider not present
+  }
+  const fusionActive = fusion?.selectedSecondaryId != null;
+  const shouldClearCanvas = !fusionActive;
+
   useEffect(() => {
     const canvas = viewport.overlayCanvasRef.current;
     if (!canvas || !rtStructures) return;
@@ -124,6 +140,7 @@ export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props)
       selection.allStructuresVisible,
       selection.selectedStructureIds,
       selection.selectedForEdit,
+      shouldClearCanvas,
     );
 
     // Draw preview contours on top (non-destructive)
@@ -153,7 +170,7 @@ export function RTOverlayLayer({ contourWidth = 2, contourOpacity = 60 }: Props)
       ctx.setLineDash([]);
       ctx.restore();
     }
-  }, [viewport.currentImage, viewport.currentIndex, viewport.zoom, viewport.panX, viewport.panY, viewport.imageMetadata, rtStructures, selection, contourWidth, contourOpacity, previewContours]);
+  }, [viewport.currentImage, viewport.currentIndex, viewport.zoom, viewport.panX, viewport.panY, viewport.imageMetadata, rtStructures, selection, contourWidth, contourOpacity, previewContours, shouldClearCanvas]);
 
   return null;
 }

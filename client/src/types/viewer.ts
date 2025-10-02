@@ -253,8 +253,7 @@ export interface ViewportControlsProps {
   onPan: () => void;
   onMeasure: () => void;
   onCrosshairs: () => void;
-  onRotate?: () => void;
-  onFlip?: () => void;
+  // onRotate and onFlip removed - not implemented yet
   isPanActive?: boolean;
   isCrosshairsActive?: boolean;
   isMeasureActive?: boolean;
