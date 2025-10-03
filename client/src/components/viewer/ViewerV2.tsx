@@ -9,7 +9,7 @@
  * Agent 5: Integration (updated to mount legacy UI components)
  */
 
-import { useRef, useState, useMemo, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ViewerShell } from './ViewerShell';
 import { PrimaryViewport } from './PrimaryViewport';
 import { useViewportTools } from '@/hooks/useViewportTools';
@@ -17,11 +17,11 @@ import { RTProvider, useRT } from '@/rt-structures/RTProvider';
 import RTOverlayLayer from '@/rt-structures/components/RTOverlayLayer';
 import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import FusionOverlayLayer from '@/fusion/components/FusionOverlayLayer';
-import { FusionProvider, useFusion } from '@/fusion/fusion-context';
+import { FusionProvider, useFusion, type FusionContextValue } from '@/fusion/fusion-context';
 import { FusionPanel } from '@/fusion/components/FusionPanel';
-import { useFusionPanelState } from '@/fusion/hooks/useFusionPanel';
 import { useFusionCandidates, useSeriesSelection } from '@/hooks/use-series-selection';
 import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations';
+import { useFusionPanelState } from '@/fusion/hooks/useFusionPanel';
 import { useQuery } from '@tanstack/react-query';
 import { ViewerToolbar } from '@/components/dicom/viewer-toolbar';
 import { SeriesSelector } from '@/components/dicom/series-selector';
@@ -30,12 +30,9 @@ import { BooleanOperationsToolbar } from '@/components/dicom/boolean-operations-
 import { MarginToolbar } from '@/components/dicom/margin-toolbar';
 import { SimpleBrushTool } from '@/components/dicom/simple-brush-tool';
 import { PenToolUnifiedV2 } from '@/components/dicom/pen-tool-unified-v2';
-import { ErrorModal } from '@/components/dicom/error-modal';
-import { LoadingProgress } from '@/components/dicom/loading-progress';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
 import type { ImageMetadata } from '@/types/viewer';
 import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
-import type { UseFusionPanelStateResult } from '@/types/fusion';
 
 interface ViewerV2Props {
   patientId: string;
@@ -45,44 +42,54 @@ interface ViewerV2Props {
   onLoadedRtSeriesChange?: (seriesId: number | null) => void;
 }
 
-// Inner component that uses both fusion and RT contexts
-interface ViewerV2ContentProps {
-  patientId: string;
-  seriesId: number;
-  studyId?: number;
-  initialSeriesList?: DICOMSeries[];
+type FusionPanelState = ReturnType<typeof useFusionPanelState> | null;
+
+interface ViewerV2ContentProps extends ViewerV2Props {
+  fusion?: FusionContextValue | null;
+  fusionPanelState?: FusionPanelState;
+  candidateSecondaryIds?: number[];
+  seriesSelectionData?: any;
+  registrationData?: Map<number, any[]> | null;
+  selectedRtSeriesId?: number | null;
   onSeriesChange?: (series: DICOMSeries) => void;
 }
 
+// Inner component that uses both fusion and RT contexts
 function ViewerV2Content({
   patientId,
   seriesId,
   studyId,
   initialSeriesList,
+  fusion = null,
+  fusionPanelState = null,
+  candidateSecondaryIds = [],
+  seriesSelectionData,
+  registrationData,
+  selectedRtSeriesId,
   onSeriesChange,
 }: ViewerV2ContentProps) {
   const viewportRef = useRef<any>(null);
-  const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
+  const { setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
   const [fusionMinimized, setFusionMinimized] = useState(false);
+  const rt = useRT();
 
   // State for floating toolbars
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
-  const [errorModal, setErrorModal] = useState<{
-    title: string;
-    message: string;
-    details?: string;
-  } | null>(null);
-  const dismissedFusionErrorRef = useRef<string | null>(null);
-  const emptyLoadingStates = useMemo(
-    () => new Map<number, { progress: number; isLoading: boolean }>(),
-    [],
-  );
+  const [showLocalizationTool, setShowLocalizationTool] = useState(true);
 
   // State for series selector
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
+  const [currentSeriesId, setCurrentSeriesId] = useState<number>(seriesId);
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
+  const [currentSliceIndex, setCurrentSliceIndex] = useState(0);
+  const [currentSlicePosition, setCurrentSlicePosition] = useState<number>(0);
+  const [previewStructureInfo, setPreviewStructureInfo] = useState<{ targetName: string; isNewStructure: boolean } | null>(null);
+  const [highlightedStructures, setHighlightedStructures] = useState<{ inputs: string[]; output: string }>({ inputs: [], output: '' });
+  const [loadedRtSeriesId, setLoadedRtSeriesId] = useState<number | null>(null);
+  const [autoZoomLevel, setAutoZoomLevel] = useState<number | null>(null);
+  const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | null>(null);
   const legacyImageMetadata = useMemo(() => {
     if (!imageMetadata) return null;
     return {
@@ -101,7 +108,10 @@ function ViewerV2Content({
     const nextWindow = Number(imageMetadata.windowWidth);
     if (!Number.isFinite(nextLevel) || !Number.isFinite(nextWindow)) return;
     setWindowLevel((prev) => {
-      if (Math.abs(prev.level - nextLevel) < 0.01 && Math.abs(prev.window - nextWindow) < 0.01) {
+      if (
+        Math.abs(prev.level - nextLevel) < 0.01 &&
+        Math.abs(prev.window - nextWindow) < 0.01
+      ) {
         return prev;
       }
       return { level: nextLevel, window: nextWindow };
@@ -113,6 +123,48 @@ function ViewerV2Content({
     setShowBooleanOperations(false);
     setShowMarginToolbar(false);
   }, [seriesId]);
+
+  useEffect(() => {
+    if (currentSeriesId !== seriesId) {
+      setCurrentSeriesId(seriesId);
+    }
+  }, [currentSeriesId, seriesId]);
+
+  const contourServiceRef = useRef<ReturnType<typeof createContourOperationsService> | null>(null);
+  if (!contourServiceRef.current) {
+    contourServiceRef.current = createContourOperationsService();
+  }
+
+  const autoZoomTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoLocalizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoZoomTimeoutRef.current) {
+        clearTimeout(autoZoomTimeoutRef.current);
+        autoZoomTimeoutRef.current = null;
+      }
+      if (autoLocalizeTimeoutRef.current) {
+        clearTimeout(autoLocalizeTimeoutRef.current);
+        autoLocalizeTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const selectedStructureIds = useMemo(() => {
+    return Array.from(rt.selection.selectedStructureIds ?? new Set<number>());
+  }, [rt.selection.selectedStructureIds]);
+
+  const selectedStructureColors = useMemo(() => {
+    if (!rt.rtStructures?.structures) return [] as string[];
+    return selectedStructureIds
+      .map((roiNumber) => {
+        const structure = rt.rtStructures?.structures?.find((s: any) => s.roiNumber === roiNumber);
+        if (!structure || !Array.isArray(structure.color)) return null;
+        return `rgb(${structure.color.join(',')})`;
+      })
+      .filter((entry): entry is string => Boolean(entry));
+  }, [selectedStructureIds, rt.rtStructures]);
 
   // Fetch all series for the patient
   const hasInitialSeries = Array.isArray(initialSeriesList) && initialSeriesList.length > 0;
@@ -131,57 +183,178 @@ function ViewerV2Content({
     staleTime: 5 * 60 * 1000,
   });
 
+  const seriesById = useMemo(() => {
+    const map = new Map<number, DICOMSeries>();
+    (allSeries || []).forEach((entry: any) => {
+      if (!entry) return;
+      const parsed = Number(entry.id);
+      if (Number.isFinite(parsed)) {
+        map.set(parsed, entry);
+      }
+    });
+    return map;
+  }, [allSeries]);
+
+  const fusionCandidatesByPrimary = useMemo(() => {
+    const merged = new Map<number, number[]>();
+    seriesById.forEach((_value, key) => merged.set(key, []));
+
+    if (fusion?.primarySeriesId) {
+      merged.set(fusion.primarySeriesId, [...candidateSecondaryIds]);
+    }
+
+    if (seriesSelectionData?.planningCT?.id && Array.isArray(seriesSelectionData?.fusionCandidates)) {
+      merged.set(
+        seriesSelectionData.planningCT.id,
+        seriesSelectionData.fusionCandidates.map((candidate: any) => candidate.seriesId),
+      );
+    }
+
+    return merged;
+  }, [seriesById, fusion?.primarySeriesId, candidateSecondaryIds, seriesSelectionData?.planningCT?.id, seriesSelectionData?.fusionCandidates]);
+
+  const fusionSiblingMap = useMemo(() => {
+    if (!registrationData || registrationData.size === 0) {
+      return new Map<number, Map<'PET' | 'MR', Map<number, number[]>>>();
+    }
+
+    const normalizeSeriesIdLocal = (value: unknown): number | null => {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'bigint') {
+        const asNumber = Number(value);
+        return Number.isFinite(asNumber) ? asNumber : null;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const modalityOf = (id: number | null): string => {
+      if (id == null) return '';
+      const entry = seriesById.get(id);
+      return (entry?.modality || '').toUpperCase();
+    };
+
+    const map = new Map<number, Map<'PET' | 'MR', Map<number, number[]>>>();
+
+    registrationData.forEach((associations, primaryIdKey) => {
+      if (!Array.isArray(associations) || primaryIdKey == null) return;
+
+      const petMapping = new Map<number, Set<number>>();
+      const mrMapping = new Map<number, Set<number>>();
+
+      (associations ?? []).forEach((assoc: any) => {
+        const petIds = new Set<number>();
+        const ctIds = new Set<number>();
+        const mrIds = new Set<number>();
+
+        const registerByModality = (rawId: unknown, modality: string | null | undefined) => {
+          const normalized = normalizeSeriesIdLocal(rawId);
+          if (normalized == null || normalized === primaryIdKey) return;
+          if (!seriesById.has(normalized)) return;
+
+          const resolvedModality = (modality || modalityOf(normalized)).toUpperCase();
+          if (!resolvedModality) return;
+          if (resolvedModality === 'CT') {
+            ctIds.add(normalized);
+          } else if (resolvedModality === 'PT' || resolvedModality === 'PET' || resolvedModality === 'NM') {
+            petIds.add(normalized);
+          } else if (resolvedModality === 'MR') {
+            mrIds.add(normalized);
+          }
+        };
+
+        if (Array.isArray(assoc?.sourceSeriesDetails)) {
+          assoc.sourceSeriesDetails.forEach((detail: any) => registerByModality(detail?.id, detail?.modality));
+        }
+
+        if (Array.isArray(assoc?.sourcesSeriesIds)) {
+          assoc.sourcesSeriesIds.forEach((value: any) => registerByModality(value, null));
+        }
+
+        if (Array.isArray(assoc?.siblingSeriesIds)) {
+          assoc.siblingSeriesIds.forEach((value: any) => registerByModality(value, null));
+        }
+
+        if (petIds.size) {
+          petIds.forEach((petId) => {
+            const entry = petMapping.get(petId) ?? new Set<number>();
+            ctIds.forEach((ctId) => entry.add(ctId));
+            petMapping.set(petId, entry);
+          });
+        }
+
+        if (mrIds.size) {
+          mrIds.forEach((mrId) => {
+            const entry = mrMapping.get(mrId) ?? new Set<number>();
+            mrIds.forEach((otherMrId) => {
+              if (otherMrId !== mrId) entry.add(otherMrId);
+            });
+            if (petIds.size) {
+              ctIds.forEach((ctId) => entry.add(ctId));
+            }
+            mrMapping.set(mrId, entry);
+          });
+        }
+      });
+
+      const petMap = new Map<number, number[]>();
+      petMapping.forEach((set, key) => petMap.set(key, Array.from(set.values())));
+      const mrMap = new Map<number, number[]>();
+      mrMapping.forEach((set, key) => mrMap.set(key, Array.from(set.values())));
+
+      map.set(primaryIdKey, new Map<'PET' | 'MR', Map<number, number[]>>([
+        ['PET', petMap],
+        ['MR', mrMap],
+      ]));
+    });
+
+    return map;
+  }, [registrationData, seriesById]);
+
   // Find the selected series object
   const selectedSeriesObj = useMemo(() => {
-    return allSeries.find((s: DICOMSeries) => s.id === seriesId) || null;
-  }, [allSeries, seriesId]);
+    return allSeries.find((s: DICOMSeries) => s.id === currentSeriesId) || null;
+  }, [allSeries, currentSeriesId]);
 
   // Handle series selection change
   const handleSeriesSelect = (series: DICOMSeries) => {
+    setCurrentSeriesId(series.id);
     setImageMetadata(null);
     onSeriesChange?.(series);
   };
 
-  // Try to get fusion context - may not exist if not a CT series
-  let fusionContext: ReturnType<typeof useFusion> | null = null;
-  let fusionPanelState: UseFusionPanelStateResult | null = null;
-  try {
-    fusionContext = useFusion();
-    fusionPanelState = useFusionPanelState();
-  } catch {
-    fusionContext = null;
-    fusionPanelState = null;
-  }
-
-  // Get RT context - now safe because RTProvider wraps this component
-  const rt = useRT();
-  const contourServiceRef = useRef<ReturnType<typeof createContourOperationsService> | null>(null);
-  if (!contourServiceRef.current) {
-    contourServiceRef.current = createContourOperationsService();
-  }
-
-  const fusionOpacity = fusionPanelState?.opacity ?? fusionContext?.opacity ?? 0.5;
-  const showFusionPanel = fusionPanelState?.showPanel ?? fusionContext?.showFusionPanel ?? false;
-  const loadingStates = fusionPanelState?.secondaryLoadingStates ?? emptyLoadingStates;
-  const manifestError = fusionPanelState?.manifestError ?? fusionContext?.manifestError ?? null;
+  useEffect(() => {
+    if (rt.selection.selectedForEdit) {
+      setIsContourEditMode(true);
+    } else if (!showBooleanOperations && !showMarginToolbar) {
+      setIsContourEditMode(false);
+    }
+  }, [rt.selection.selectedForEdit, showBooleanOperations, showMarginToolbar]);
 
   useEffect(() => {
-    if (!manifestError) {
-      dismissedFusionErrorRef.current = null;
-      if (errorModal) {
-        setErrorModal(null);
-      }
-      return;
-    }
+    const currentImage = viewportRef.current?.getCurrentImage?.();
+    const byImage = typeof currentImage?.parsedSliceLocation === 'number' ? currentImage.parsedSliceLocation : null;
+    const byMetadata = typeof imageMetadata?.sliceLocation === 'number'
+      ? imageMetadata.sliceLocation
+      : Array.isArray(imageMetadata?.imagePositionPatient)
+        ? Number(imageMetadata?.imagePositionPatient?.[2])
+        : null;
+    const candidate = byImage ?? byMetadata ?? 0;
+    setCurrentSlicePosition(Number.isFinite(candidate) ? candidate : 0);
+  }, [imageMetadata, currentSliceIndex]);
 
-    if (!errorModal && manifestError !== dismissedFusionErrorRef.current) {
-      setErrorModal({
-        title: 'Fusion Overlay Error',
-        message: 'We were unable to prepare the fusion overlay for this series.',
-        details: manifestError,
-      });
+  useEffect(() => {
+    if (selectedRtSeriesId != null) {
+      setLoadedRtSeriesId(Number(selectedRtSeriesId));
     }
-  }, [errorModal, manifestError]);
+  }, [selectedRtSeriesId]);
 
   // Viewport control handlers
   const handleZoomIn = () => viewportRef.current?.zoomIn();
@@ -215,6 +388,23 @@ function ViewerV2Content({
     setIsContourEditMode(false);
     setShowBooleanOperations(false);
     setShowMarginToolbar(true);
+  };
+
+  const fusionOpacity = fusionPanelState?.opacity ?? fusion?.opacity ?? 0.5;
+  const showFusionPanel = fusionPanelState?.showPanel ?? fusion?.showFusionPanel ?? false;
+  const fusionSecondaryStatuses = fusionPanelState?.secondaryStatuses ?? new Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>();
+  const fusionSecondaryLoadingStates = fusionPanelState?.secondaryLoadingStates ?? new Map<number, { progress: number; isLoading: boolean }>();
+  const currentlyLoadingSecondary = fusionPanelState?.currentlyLoadingSecondary ?? fusion?.currentlyLoadingSecondary ?? null;
+  const selectedSecondaryId = fusionPanelState?.selectedSecondaryId ?? fusion?.selectedSecondaryId ?? null;
+
+  const handleSecondarySeriesSelect = (id: number | null) => {
+    if (fusionPanelState?.setSelectedSecondaryId) {
+      fusionPanelState.setSelectedSecondaryId(id);
+      return;
+    }
+    if (fusion?.setSelectedSecondaryId) {
+      fusion.setSelectedSecondaryId(id);
+    }
   };
 
   const handleMarginOperation = async (operation: {
@@ -333,24 +523,171 @@ function ViewerV2Content({
     }
   };
 
+  const handleRtStructureLoad = (rtStructData: any) => {
+    if (!rtStructData) return;
+    const cloned = structuredClone(rtStructData);
+    rt.setStructures(cloned);
+    rt.setAllStructuresVisible(true);
+    if (rtStructData?.id != null) {
+      setLoadedRtSeriesId(Number(rtStructData.id));
+    }
+    if (Array.isArray(cloned?.structures)) {
+      cloned.structures.forEach((structure: any) => {
+        if (structure?.roiNumber != null) {
+          rt.setStructureVisibility(structure.roiNumber, true);
+        }
+      });
+      const lastStructure = cloned.structures[cloned.structures.length - 1];
+      if (lastStructure?.roiNumber != null) {
+        rt.setSelectedForEdit(lastStructure.roiNumber);
+      }
+    }
+  };
+
+  const handleStructureColorChange = (structureId: number, color: [number, number, number]) => {
+    if (!rt.rtStructures) return;
+    const updated = structuredClone(rt.rtStructures);
+    const structure = updated.structures.find((s: any) => s.roiNumber === structureId);
+    if (structure) {
+      structure.color = color;
+      rt.setStructures(updated);
+    }
+  };
+
+  const handleAllStructuresVisibilityChange = (allVisible: boolean) => {
+    rt.setAllStructuresVisible(allVisible);
+    if (rt.rtStructures?.structures) {
+      rt.rtStructures.structures.forEach((structure: any) => {
+        if (structure?.roiNumber != null) {
+          rt.setStructureVisibility(structure.roiNumber, allVisible);
+        }
+      });
+    }
+  };
+
+  const handleLocalizationToggle = () => {
+    setShowLocalizationTool((prev) => !prev);
+  };
+
+  const handleStructureLocalization = useCallback((structureId: number) => {
+    const structures = rt.rtStructures?.structures;
+    if (!structures || !Array.isArray(structures)) {
+      console.warn('[ViewerV2] Localization skipped - structures unavailable');
+      return;
+    }
+
+    const structure = structures.find((s: any) => s?.roiNumber === structureId);
+    if (!structure || !Array.isArray(structure.contours) || structure.contours.length === 0) {
+      console.warn('[ViewerV2] Localization skipped - structure missing contours', structureId);
+      return;
+    }
+
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let totalX = 0;
+    let totalY = 0;
+    let totalZ = 0;
+    let totalPoints = 0;
+
+    structure.contours.forEach((contour: any) => {
+      if (!contour || !Array.isArray(contour.points)) return;
+
+      if (typeof contour.slicePosition === 'number' && Number.isFinite(contour.slicePosition)) {
+        minZ = Math.min(minZ, contour.slicePosition);
+        maxZ = Math.max(maxZ, contour.slicePosition);
+      }
+
+      for (let i = 0; i < contour.points.length; i += 3) {
+        const x = Number(contour.points[i]);
+        const y = Number(contour.points[i + 1]);
+        const z = Number(contour.points[i + 2]);
+        if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+          totalX += x;
+          totalY += y;
+          totalZ += z;
+          totalPoints += 1;
+        }
+      }
+    });
+
+    if (totalPoints === 0) {
+      console.warn('[ViewerV2] Localization skipped - contour points invalid', structureId);
+      return;
+    }
+
+    const centroidX = totalX / totalPoints;
+    const centroidY = totalY / totalPoints;
+    const centroidZ = totalZ / totalPoints;
+    const targetZ = Number.isFinite(minZ) && Number.isFinite(maxZ) && minZ <= maxZ
+      ? (minZ + maxZ) / 2
+      : centroidZ;
+
+    if (autoLocalizeTimeoutRef.current) {
+      clearTimeout(autoLocalizeTimeoutRef.current);
+    }
+
+    setAutoLocalizeTarget({ x: centroidX, y: centroidY, z: targetZ });
+    autoLocalizeTimeoutRef.current = setTimeout(() => {
+      setAutoLocalizeTarget(null);
+      autoLocalizeTimeoutRef.current = null;
+    }, 250);
+  }, [rt.rtStructures]);
+
+  const handleAutoZoomRequest = useCallback((zoom: number) => {
+    if (!Number.isFinite(zoom)) return;
+    if (autoZoomTimeoutRef.current) {
+      clearTimeout(autoZoomTimeoutRef.current);
+    }
+    setAutoZoomLevel(zoom);
+    autoZoomTimeoutRef.current = setTimeout(() => {
+      setAutoZoomLevel(null);
+      autoZoomTimeoutRef.current = null;
+    }, 200);
+  }, []);
+
+  const handleAutoLocalize = useCallback((x: number, y: number, z: number) => {
+    if (!showLocalizationTool) {
+      return;
+    }
+
+    if ([x, y, z].some((value) => !Number.isFinite(value))) {
+      console.warn('[ViewerV2] Auto-localize skipped - invalid centroid', { x, y, z });
+      return;
+    }
+
+    if (autoLocalizeTimeoutRef.current) {
+      clearTimeout(autoLocalizeTimeoutRef.current);
+    }
+
+    setAutoLocalizeTarget({ x, y, z });
+    autoLocalizeTimeoutRef.current = setTimeout(() => {
+      setAutoLocalizeTarget(null);
+      autoLocalizeTimeoutRef.current = null;
+    }, 200);
+  }, [showLocalizationTool]);
+
   // Wrap entire composition with RTProvider so all components can access useRT()
   return (
     <>
       <ViewerShell
         toolbar={null}
         viewport={
-        <PrimaryViewport
-          ref={viewportRef}
-          seriesId={seriesId}
-          studyId={studyId}
-          windowLevel={windowLevel}
-          onWindowLevelChange={setWindowLevel}
-          onImageMetadataChange={setImageMetadata}
-        >
+        <div className="relative h-full overflow-hidden">
+          <PrimaryViewport
+            ref={viewportRef}
+            seriesId={seriesId}
+            studyId={studyId}
+            windowLevel={windowLevel}
+            autoZoomLevel={autoZoomLevel ?? undefined}
+            autoLocalizeTarget={autoLocalizeTarget ?? undefined}
+            onWindowLevelChange={setWindowLevel}
+            onImageMetadataChange={setImageMetadata}
+            onSliceChange={(index) => setCurrentSliceIndex(index)}
+          >
             {/* Order: Fusion first (clears), RT second (strokes) */}
             {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
             <RTOverlayLayer />
-            
+
             {/* Brush Tool - Active when brush is enabled in RTProvider */}
             <SimpleBrushTool
               canvasRef={viewportRef}
@@ -358,7 +695,7 @@ function ViewerV2Content({
               brushSize={rt.brush.size}
               selectedStructure={rt.selection.selectedForEdit}
               rtStructures={rt.rtStructures}
-              currentSlicePosition={viewportRef.current?.currentImage?.parsedSliceLocation ?? 0}
+              currentSlicePosition={currentSlicePosition}
               onContourUpdate={async (payload: any) => {
                 if (!payload.action || !payload.structureId) return;
                 
@@ -449,6 +786,45 @@ function ViewerV2Content({
               }}
             />
           </PrimaryViewport>
+
+          {selectedStructureColors.length > 0 && (
+            <div
+              className="absolute inset-0 rounded-lg pointer-events-none border"
+              style={{ borderColor: selectedStructureColors[0] ?? 'rgba(59,130,246,0.6)' }}
+            />
+          )}
+
+          {selectedStructureIds.length > 0 && rt.rtStructures?.structures && (
+            <div className="absolute right-2 sm:right-4 top-2 sm:top-4 space-y-2 z-10 max-h-[calc(100vh-12rem)] overflow-y-auto">
+              <div className="space-y-2 max-w-[200px] sm:max-w-[250px]">
+                {selectedStructureIds.map((structureId) => {
+                  const structure = rt.rtStructures?.structures?.find((s: any) => s.roiNumber === structureId);
+                  if (!structure) return null;
+                  const color = Array.isArray(structure.color) ? `rgb(${structure.color.join(',')})` : 'rgb(59,130,246)';
+                  return (
+                    <div
+                      key={structureId}
+                      className="flex items-center space-x-2 bg-black/80 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 border"
+                      style={{ borderColor: color }}
+                    >
+                      <div
+                        className="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full border border-gray-400 flex-shrink-0"
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="text-xs sm:text-sm text-white font-medium truncate">
+                        {structure.structureName}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="absolute left-2 bottom-2 z-20 max-h-[60vh] overflow-y-auto hidden sm:block">
+            <RTControlPanel />
+          </div>
+        </div>
         }
         sidebar={
         <SeriesSelector
@@ -459,69 +835,45 @@ function ViewerV2Content({
           onWindowLevelChange={setWindowLevel}
           studyId={studyId}
           rtStructures={rt.rtStructures}
+          onRTStructureLoad={handleRtStructureLoad}
           onStructureVisibilityChange={(structureId, visible) => {
             rt.setStructureVisibility(structureId, visible);
           }}
+          onStructureColorChange={handleStructureColorChange}
+          onStructureSelection={(structureId, selected) => {
+            rt.selectStructure(structureId, selected);
+            if (selected && showLocalizationTool) {
+              handleStructureLocalization(structureId);
+            }
+          }}
           selectedForEdit={rt.selection.selectedForEdit}
           onSelectedForEditChange={rt.setSelectedForEdit}
-          onAllStructuresVisibilityChange={rt.setAllStructuresVisible}
+          onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
+          secondarySeriesId={selectedSecondaryId}
+          onSecondarySeriesSelect={handleSecondarySeriesSelect}
+          previewStructureInfo={previewStructureInfo}
+          highlightedStructures={highlightedStructures}
+          loadedRTSeriesId={loadedRtSeriesId}
+          secondaryLoadingStates={fusionSecondaryLoadingStates}
+          currentlyLoadingSecondary={currentlyLoadingSecondary}
+          fusionStatuses={fusionSecondaryStatuses}
+          fusionCandidatesByPrimary={fusionCandidatesByPrimary}
+          fusionSiblingMap={fusionSiblingMap}
+          onAutoZoom={handleAutoZoomRequest}
+          onAutoLocalize={handleAutoLocalize}
+          localizationMode={showLocalizationTool}
         />
       }
       panels={
-        <div className="absolute bottom-4 right-4 space-y-2">
-          {/* Debug badge */}
-          <div className="bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
-            <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
-            <div>Tool: {activeTool}</div>
-            <div className="text-gray-400 mt-2">Fusion: {showFusionPanel ? 'Ready' : 'N/A'}</div>
-            <div className="text-gray-400">RT: Provider Active</div>
-          </div>
-          
-          {/* Fusion Panel */}
-          {showFusionPanel && (
-            <div className="bg-black/80 border border-gray-700 rounded-md p-2">
-              <FusionPanel
-                minimized={fusionMinimized}
-                onToggleMinimized={setFusionMinimized}
-                state={fusionPanelState ?? undefined}
-              />
-            </div>
-          )}
-          
-          {/* RT Control Panel */}
-          <div className="bg-black/70 border border-gray-700 rounded-md p-2">
-            <RTControlPanel />
-          </div>
-        </div>
+        showFusionPanel ? (
+          <FusionPanel
+            minimized={fusionMinimized}
+            onToggleMinimized={setFusionMinimized}
+            state={fusionPanelState ?? undefined}
+          />
+        ) : null
       }
       />
-
-      <LoadingProgress
-        loadingStates={loadingStates}
-        className="animate-in slide-in-from-right-2 duration-300"
-      />
-
-      {errorModal && (
-        <ErrorModal
-          isOpen
-          onClose={() => {
-            dismissedFusionErrorRef.current = manifestError ?? dismissedFusionErrorRef.current;
-            setErrorModal(null);
-          }}
-          onRetry={fusionContext
-            ? async () => {
-                dismissedFusionErrorRef.current = null;
-                setErrorModal(null);
-                try {
-                  await fusionContext.refreshManifest(true);
-                } catch (err) {
-                  console.warn('[ViewerV2] Fusion manifest retry failed', err);
-                }
-              }
-            : undefined}
-          error={errorModal}
-        />
-      )}
 
       {/* Floating ViewerToolbar (positions itself at bottom center) */}
       <ViewerToolbar
@@ -540,6 +892,8 @@ function ViewerV2Content({
         isPanActive={isPanMode}
         isMeasureActive={isMeasureMode}
         isCrosshairsActive={isCrosshairMode}
+        onLocalization={handleLocalizationToggle}
+        isLocalizationActive={showLocalizationTool}
         onUndo={() => {
           const entry = rt.undoRedo?.undo();
           if (entry) rt.setStructures(entry.rtStructures);
@@ -628,7 +982,7 @@ function ViewerV2Content({
               rt.setBrushSize(toolState.brushSize);
             }
           }}
-          currentSlicePosition={0}
+          currentSlicePosition={currentSlicePosition}
           onContourUpdate={async (payload) => {
             console.log('[ViewerV2] Contour update:', payload);
             if (!rt.rtStructures) return;
@@ -686,7 +1040,7 @@ function ViewerV2Content({
             console.log('[ViewerV2] Target structure selected:', structureId);
           }}
           seriesId={seriesId}
-          imageMetadata={null}
+          imageMetadata={legacyImageMetadata}
           onOpenBooleanOperations={() => {
             setIsContourEditMode(false);
             setShowMarginToolbar(false);
@@ -707,6 +1061,8 @@ function ViewerV2Content({
           onClose={() => {
             setShowBooleanOperations(false);
             rt.clearPreview();
+            setPreviewStructureInfo(null);
+            setHighlightedStructures({ inputs: [], output: '' });
           }}
           availableStructures={rt.rtStructures.structures?.map((s: any) => s.structureName) || []}
           structures={rt.rtStructures.structures}
@@ -730,14 +1086,24 @@ function ViewerV2Content({
               ...c,
               color: [255, 223, 0]
             })));
+            setPreviewStructureInfo({
+              targetName: target.name ?? '',
+              isNewStructure: target.isNewStructure ?? false,
+            });
           }}
           onPreviewStateChange={(previewInfo) => {
             if (!previewInfo.targetName) {
               rt.clearPreview();
+              setPreviewStructureInfo(null);
+            } else {
+              setPreviewStructureInfo({
+                targetName: previewInfo.targetName,
+                isNewStructure: previewInfo.isNewStructure ?? false,
+              });
             }
           }}
           onHighlightStructures={(inputs, output) => {
-            console.log('[ViewerV2] Highlight structures:', inputs, output);
+            setHighlightedStructures({ inputs, output });
           }}
           onApply={(target, contours) => {
             if (!rt.rtStructures) return;
@@ -758,6 +1124,8 @@ function ViewerV2Content({
             rt.saveHistory('boolean_operation', targetStruct.roiNumber);
             rt.clearPreview();
             setShowBooleanOperations(false);
+            setPreviewStructureInfo(null);
+            setHighlightedStructures({ inputs: [], output: '' });
           }}
           onExecuteOperation={(expression) => {
             console.log('[ViewerV2] Execute boolean expression:', expression);
@@ -774,7 +1142,11 @@ function ViewerV2Content({
             color: `rgb(${rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.color?.join(',') || '255,255,255'})`
           } : null}
           isVisible={showMarginToolbar}
-          onClose={() => setShowMarginToolbar(false)}
+          onClose={() => {
+            setShowMarginToolbar(false);
+            rt.clearPreview();
+            setPreviewStructureInfo(null);
+          }}
           availableStructures={rt.rtStructures.structures?.map((s: any) => ({
             id: s.roiNumber,
             name: s.structureName
@@ -798,6 +1170,7 @@ function ViewerV2Content({
           onExecuteOperation={handleMarginOperation}
           onPreviewClear={() => {
             rt.clearPreview();
+            setPreviewStructureInfo(null);
           }}
         />
       )}
@@ -805,8 +1178,26 @@ function ViewerV2Content({
   );
 }
 
+function ViewerV2FusionContent(props: ViewerV2ContentProps) {
+  const fusionContext = useFusion();
+  const fusionPanelState = useFusionPanelState();
+  return (
+    <ViewerV2Content
+      {...props}
+      fusion={fusionContext}
+      fusionPanelState={fusionPanelState}
+    />
+  );
+}
+
 // Main component with conditional FusionProvider wrapper
-export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLoadedRtSeriesChange }: ViewerV2Props) {
+export function ViewerV2({
+  patientId,
+  seriesId,
+  studyId,
+  initialSeriesList,
+  onLoadedRtSeriesChange,
+}: ViewerV2Props) {
   const [activeSeriesId, setActiveSeriesId] = useState<number>(seriesId);
   const [activeStudyId, setActiveStudyId] = useState<number | undefined>(studyId);
 
@@ -828,7 +1219,6 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLo
     }
   }, [studyId, activeStudyId]);
 
-  // Fetch series metadata to check modality
   const { data: seriesData } = useQuery<any>({
     queryKey: ['series-metadata', activeSeriesId],
     queryFn: async () => {
@@ -842,49 +1232,40 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLo
   });
 
   useEffect(() => {
-    if (seriesData?.studyId != null) {
-      const nextStudyId = Number(seriesData.studyId);
-      if (Number.isFinite(nextStudyId) && nextStudyId !== activeStudyId) {
-        setActiveStudyId(nextStudyId);
-      }
+    if (seriesData?.studyId == null) return;
+    const nextStudyId = Number(seriesData.studyId);
+    if (Number.isFinite(nextStudyId) && nextStudyId !== activeStudyId) {
+      setActiveStudyId(nextStudyId);
     }
   }, [seriesData?.studyId, activeStudyId]);
 
-  // Determine if this is a CT series (required for fusion primary)
   const isCT = useMemo(() => {
     const modality = (seriesData?.modality || '').toUpperCase();
     return modality === 'CT';
   }, [seriesData?.modality]);
 
-  // Only compute fusion data if this is a CT series
   const fusionPrimarySeriesId = isCT ? activeSeriesId : null;
 
-  // Fetch series selection data (includes planning CT and fusion candidates)
   const { data: seriesSelectionData } = useSeriesSelection(activeStudyId);
 
-  // Only fetch fusion candidates if this is a CT series (optimization)
   const { data: directFusionCandidates = [] } = useFusionCandidates(
-    isCT ? activeSeriesId : undefined // Skip API call if not CT
+    isCT ? activeSeriesId : undefined,
   );
 
-  // Merge fusion candidates from series selection and direct API
   const candidateSecondaryIds = useMemo(() => {
     if (!fusionPrimarySeriesId) return [];
-    
-    // Prefer series selection data (includes relationship types and confidence)
     if (seriesSelectionData?.fusionCandidates?.length) {
       return seriesSelectionData.fusionCandidates.map((c: any) => c.seriesId);
     }
-    
-    // Fallback to direct API call (only happens for CT series)
-    return directFusionCandidates.map(c => c.seriesId);
+    return directFusionCandidates.map((c) => c.seriesId);
   }, [fusionPrimarySeriesId, seriesSelectionData?.fusionCandidates, directFusionCandidates]);
 
-  // Fetch registration associations for this patient/study
-  const studyIds = useMemo(() => (Number.isFinite(activeStudyId) ? [activeStudyId as number] : undefined), [activeStudyId]);
+  const studyIds = useMemo(
+    () => (Number.isFinite(activeStudyId) ? [activeStudyId as number] : undefined),
+    [activeStudyId],
+  );
   const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
 
-  // Fetch RT structure series for the study (mirrors legacy viewer flow)
   const { data: rtSeriesList = [] } = useQuery({
     queryKey: ['study-rt-series', activeStudyId],
     queryFn: async () => {
@@ -943,7 +1324,6 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLo
     onLoadedRtSeriesChange(Number.isFinite(selectedRtSeriesId) ? selectedRtSeriesId : null);
   }, [onLoadedRtSeriesChange, selectedRtSeriesId]);
 
-  // Fetch RT structures for the chosen RTSTRUCT series
   const { data: rtStructures } = useQuery({
     queryKey: ['rt-structures', selectedRtSeriesId],
     queryFn: async () => {
@@ -961,54 +1341,65 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList, onLo
 
   if (import.meta.env.DEV) {
     console.log('🔧 ViewerV2 Setup:', {
-      seriesId,
+      seriesId: activeSeriesId,
       modality: seriesData?.modality,
       isCT,
       fusionPrimarySeriesId,
       candidateCount: candidateSecondaryIds.length,
       registrationCount: registrationData?.size || 0,
-      candidatesSource: seriesSelectionData?.fusionCandidates?.length 
-        ? 'seriesSelection' 
+      candidatesSource: seriesSelectionData?.fusionCandidates?.length
+        ? 'seriesSelection'
         : (directFusionCandidates.length ? 'directAPI' : 'none'),
       skippedFusionCandidatesAPI: !isCT,
       rtSeriesCount: rtSeriesList?.length ?? 0,
       referencingRtSeriesCount: referencingRtSeries.length,
       selectedRtSeriesId,
-      rtStructures: rtStructures ? {
-        loaded: true,
-        structureCount: rtStructures.structures?.length || 0,
-        referencedSeriesId: selectedRtSeries?.referencedSeriesId ?? null,
-        referencedSeriesUID: selectedRtSeries?.referencedSeriesUID ?? null,
-      } : { loaded: false },
+      rtStructures: rtStructures
+        ? {
+            loaded: true,
+            structureCount: rtStructures.structures?.length || 0,
+            referencedSeriesId: selectedRtSeries?.referencedSeriesId ?? null,
+            referencedSeriesUID: selectedRtSeries?.referencedSeriesUID ?? null,
+          }
+        : { loaded: false },
     });
   }
 
+  const handleSeriesChange = useCallback((series: DICOMSeries) => {
+    const nextSeriesId = Number(series?.id);
+    if (Number.isFinite(nextSeriesId) && nextSeriesId !== activeSeriesId) {
+      setActiveSeriesId(nextSeriesId);
+    }
+    const nextStudyId = Number(series?.studyId);
+    if (Number.isFinite(nextStudyId) && nextStudyId !== activeStudyId) {
+      setActiveStudyId(nextStudyId);
+    }
+  }, [activeSeriesId, activeStudyId]);
+
   const rtProviderKey = `rt-${activeSeriesId}-${selectedRtSeriesId ?? 'none'}`;
 
-  // RTProvider wraps entire viewer composition so all components can access useRT()
-  // Pass fetched RT structures as initialStructures to avoid null state issues
+  const contentProps: ViewerV2ContentProps = {
+    patientId,
+    seriesId: activeSeriesId,
+    studyId: activeStudyId,
+    initialSeriesList,
+    candidateSecondaryIds,
+    seriesSelectionData,
+    registrationData: registrationData ?? null,
+    selectedRtSeriesId,
+    onSeriesChange: handleSeriesChange,
+  };
+
   const content = (
     <RTProvider key={rtProviderKey} initialStructures={rtStructures ?? null}>
-      <ViewerV2Content
-        patientId={patientId}
-        seriesId={activeSeriesId}
-        studyId={activeStudyId}
-        initialSeriesList={initialSeriesList}
-        onSeriesChange={(series) => {
-          const nextSeriesId = Number(series?.id);
-          if (Number.isFinite(nextSeriesId)) {
-            setActiveSeriesId(nextSeriesId);
-          }
-          const nextStudyId = Number(series?.studyId);
-          if (Number.isFinite(nextStudyId)) {
-            setActiveStudyId(nextStudyId);
-          }
-        }}
-      />
+      {isCT && fusionPrimarySeriesId ? (
+        <ViewerV2FusionContent {...contentProps} />
+      ) : (
+        <ViewerV2Content {...contentProps} />
+      )}
     </RTProvider>
   );
 
-  // Conditionally wrap with FusionProvider for CT series
   return isCT && fusionPrimarySeriesId ? (
     <FusionProvider
       primarySeriesId={fusionPrimarySeriesId}
