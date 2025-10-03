@@ -36,6 +36,7 @@ interface SeriesSelectorProps {
   onAutoLocalize?: (x: number, y: number, z: number) => void;
   secondarySeriesId?: number | null;
   onSecondarySeriesSelect?: (seriesId: number | null) => void;
+  onRebuildFusionManifest?: () => void;
   onAllStructuresVisibilityChange?: (allVisible: boolean) => void;
   preventRTLoading?: boolean;
   localizationMode?: boolean;
@@ -71,6 +72,7 @@ export function SeriesSelector({
   onAutoLocalize,
   secondarySeriesId,
   onSecondarySeriesSelect,
+  onRebuildFusionManifest,
   onAllStructuresVisibilityChange,
   preventRTLoading = false,
   localizationMode = false,
@@ -955,6 +957,9 @@ export function SeriesSelector({
                                                 onClick={(e) => {
                                                   e.stopPropagation();
                                                   if (!buttonDisabled) {
+                                                    if (onRebuildFusionManifest) {
+                                                      onRebuildFusionManifest();
+                                                    }
                                                     onSecondarySeriesSelect(ctS.id);
                                                   }
                                                 }}
@@ -1129,6 +1134,9 @@ export function SeriesSelector({
                                                     disabled={!isReady}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
+                                                      if (onRebuildFusionManifest) {
+                                                        onRebuildFusionManifest();
+                                                      }
                                                       if (onSecondarySeriesSelect) {
                                                         onSecondarySeriesSelect(mrS.id);
                                                       }
@@ -1306,6 +1314,9 @@ export function SeriesSelector({
                                                        disabled={!isReady}
                                                        onClick={(e) => {
                                                          e.stopPropagation();
+                                                         if (onRebuildFusionManifest) {
+                                                           onRebuildFusionManifest();
+                                                         }
                                                          if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id);
                                                        }}
                                                        title={statusLabel}
@@ -1417,6 +1428,9 @@ export function SeriesSelector({
                                                      disabled={!isReadyCt}
                                                      onClick={(e) => {
                                                        e.stopPropagation();
+                                                       if (onRebuildFusionManifest) {
+                                                         onRebuildFusionManifest();
+                                                       }
                                                        if (onSecondarySeriesSelect) onSecondarySeriesSelect(ctS.id);
                                                      }}
                                                      title={statusLabelCt}

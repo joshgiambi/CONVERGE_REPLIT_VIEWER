@@ -1119,6 +1119,24 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       const candidateIds = Array.from(results.values()).filter((id) => shouldIncludeSeries(id));
       if (import.meta.env.DEV) {
+        const candidateDetails = candidateIds.map(id => {
+          const entry = seriesById.get(id);
+          return {
+            id,
+            modality: entry?.modality || 'unknown',
+            description: entry?.seriesDescription || 'no desc'
+          };
+        });
+        const ptCandidates = candidateDetails.filter(c => c.modality?.toUpperCase() === 'PT' || c.modality?.toUpperCase() === 'PET');
+        
+        console.log('🔍 FUSION CANDIDATES DEBUG:', {
+          primarySeriesId,
+          totalCandidates: candidateIds.length,
+          ptCandidates: ptCandidates.length,
+          candidateDetails,
+          ptDetails: ptCandidates
+        });
+        
         log.debug(
           `Fusion candidates for primary ${primarySeriesId} (patient ${studyData?.patient?.id ?? 'unknown'}): ${candidateIds.join(', ')}`,
           'viewer-interface',
@@ -1888,40 +1906,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   return (
     <>
-      <div className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 transform flex-wrap items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/95 px-4 py-2 text-[11px] text-slate-200 shadow-lg shadow-black/40 backdrop-blur">
-        <div className="flex flex-col gap-0.5 pr-2">
-          <span className="font-semibold text-slate-100">Fusion Debug</span>
-          <span>Primary: {selectedSeries ? `${selectedSeries.id}` : '—'}</span>
-          <span>Secondary: {secondarySeriesId ?? '—'}</span>
-          <span>Status: {manifestActionStatus ?? 'idle'}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={handleRebuildManifest}>
-            Rebuild Manifest
-          </Button>
-          <Button size="sm" variant="secondary" onClick={captureFusionDebug}>
-            Capture Debug
-          </Button>
-          <Button size="sm" variant="secondary" onClick={triggerFusionDebug}>
-            Open Viewer Debug
-          </Button>
-        </div>
-      </div>
-
-      {fusionDebugSnapshot && (
-        <div className="fixed top-20 right-4 z-40 max-h-80 w-[420px] overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-950/95 p-3 text-[11px] text-slate-200 shadow-xl shadow-black/50 backdrop-blur">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-semibold">Captured Debug Snapshot</span>
-            <Button size="sm" variant="ghost" onClick={() => setFusionDebugSnapshot(null)}>
-              Dismiss
-            </Button>
-          </div>
-          <pre className="max-h-64 whitespace-pre-wrap break-all text-[10px] leading-snug">
-            {fusionDebugSnapshot}
-          </pre>
-        </div>
-      )}
-
       <div className="animate-in fade-in-50 duration-500">
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
@@ -1966,6 +1950,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }}
             secondarySeriesId={secondarySeriesId}
             onSecondarySeriesSelect={setSecondarySeriesId}
+            onRebuildFusionManifest={handleRebuildManifest}
             preventRTLoading={false}
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
             // Pass localization mode to highlight when active
@@ -2578,7 +2563,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           secondaryStatuses={fusionSecondaryStatuses}
           manifestLoading={fusionManifestLoading}
           manifestError={fusionManifestError}
-          onOpenDebug={triggerFusionDebug}
           minimized={!showFusionPanel}
           onToggleMinimized={(minimized) => setShowFusionPanel(!minimized)}
           windowLevel={fusionWindowLevel}

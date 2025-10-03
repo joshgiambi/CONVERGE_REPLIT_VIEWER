@@ -229,7 +229,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   
   const secondarySeriesId = externalSecondarySeriesId; // Use external prop directly instead of local state
   const fusionOpacity = externalFusionOpacity !== undefined ? externalFusionOpacity : 0.5;
-  const fusionOpacityRef = useRef(fusionOpacity);
   const [registrationMatrix, setRegistrationMatrix] = useState<number[] | null>(null);
   const registrationMatrixRef = useRef<number[] | null>(null);
   const [secondaryModality, setSecondaryModality] = useState<string>('MR');
@@ -759,11 +758,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const fusionRenderDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const isScrollingRef = useRef(false);
   
-  // Keep fusionOpacityRef in sync without triggering re-renders
-  useEffect(() => {
-    fusionOpacityRef.current = fusionOpacity;
-  }, [fusionOpacity]);
-  
   const scheduleRender = useCallback(() => {
     if (needsRenderRef.current) return;
     needsRenderRef.current = true;
@@ -799,13 +793,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         fusionRenderDebounceRef.current = setTimeout(() => {
           isScrollingRef.current = false;
           // Re-render with full quality fusion after scrolling stops
-          if (fusionOpacityRef.current > 0 && secondarySeriesId) {
+          if (fusionOpacity > 0 && secondarySeriesId) {
             scheduleRender();
           }
         }, 100);
       });
     }
-  }, [secondarySeriesId]);
+  }, [fusionOpacity, secondarySeriesId]);
 
   useEffect(() => {
     scheduleRenderRef.current = scheduleRender;
@@ -816,12 +810,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [scheduleRender]);
 
-  // Trigger re-render when fusion opacity changes
   useEffect(() => {
-    if (secondarySeriesId && fusionOpacity >= 0) {
-      scheduleRender();
-    }
-  }, [fusionOpacity, secondarySeriesId, scheduleRender]);
+    const overlay = fusionOverlayCanvasRef.current;
+    if (!overlay) return;
+    const clamped = Math.max(0, Math.min(1, fusionOpacity));
+    overlay.style.opacity = `${clamped}`;
+    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
+  }, [fusionOpacity]);
+
+  useEffect(() => {
+    const overlay = fusionOverlayCanvasRef.current;
+    if (!overlay) return;
+    const clamped = Math.max(0, Math.min(1, fusionOpacity));
+    overlay.style.opacity = `${clamped}`;
+    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
+  }, [fusionOpacity]);
 
   useEffect(() => {
     if (!secondarySeriesId) {
@@ -4206,7 +4209,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       const cacheKey = currentImage.sopInstanceUID;
 
-      // Always start with black background - transparency is handled by CT opacity
+      // Clear canvas
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -4252,13 +4255,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       canvas.width = 1024;
       canvas.height = 1024;
 
-      // Calculate CT opacity based on fusion opacity (inverse: when fusion is high, CT is low)
-      // This allows the fusion canvas below to show through
-      // Use ref to avoid re-render flicker when opacity changes
-      const ctOpacity = secondarySeriesId && fusionOpacityRef.current > 0 ? (1 - fusionOpacityRef.current) : 1.0;
-
       // Always use CPU rendering for now - GPU integration needs more work
-      render16BitImage(ctx, imageData.data, imageData.width, imageData.height, ctOpacity);
+      render16BitImage(ctx, imageData.data, imageData.width, imageData.height);
       
       // Render secondary image overlay for fusion if available
       if (secondarySeriesId) {
@@ -4376,7 +4374,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     pixelArray: Float32Array,
     width: number,
     height: number,
-    ctOpacity: number = 1.0,
   ) => {
     // Get rescale parameters for proper HU conversion
     const { slope, intercept } = getRescaleParams(imageMetadata);
@@ -4468,12 +4465,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Enable smooth scaling for better zoom quality while preserving medical image integrity
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    
-    // Apply CT opacity for fusion blending (only affects CT, not RT structures)
-    ctx.save();
-    ctx.globalAlpha = ctOpacity;
     ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
-    ctx.restore();
   };
 
   const render8BitImage = (
@@ -5736,15 +5728,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 </span>
               </div>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2 text-xs hover:bg-gray-700/40"
-              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-              title="Open Fusion Debug"
-            >
-              Fusion Debug
-            </Button>
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -5818,7 +5801,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
         <div className="relative w-full h-full flex items-center justify-center">
-          {/* Main canvas with CT and RT structures - in normal flow to establish position */}
           <canvas
             ref={canvasRef}
             width={1280}
@@ -5843,27 +5825,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 : "cursor-move"
             }`}
             style={{
+              backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
-              position: "relative",
-              zIndex: 1,
             }}
           />
 
-          {/* Fusion overlay canvas - positioned absolutely to match main canvas exactly */}
           <canvas
             ref={fusionOverlayCanvasRef}
             width={1280}
             height={1280}
-            className="pointer-events-none absolute max-w-full max-h-full object-contain rounded"
+            className="pointer-events-none absolute inset-0"
             style={{
-              imageRendering: "auto",
-              opacity: 1.0,
+              opacity: fusionOpacity,
               visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 0,
+              transition: 'opacity 120ms ease-out',
             }}
           />
 
