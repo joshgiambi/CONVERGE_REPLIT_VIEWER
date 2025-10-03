@@ -54,4 +54,4 @@ coverage/
 
 # Temporary files
 tmp/
-temp/
+temp/scripts/__pycache__/

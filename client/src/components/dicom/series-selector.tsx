@@ -956,7 +956,8 @@ export function SeriesSelector({
                                                 className={`h-6 w-6 ${isLoading ? 'cursor-wait' : hasError ? 'hover:bg-amber-700/30' : 'hover:bg-green-700/30'}`}
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  if (onRebuildFusionManifest) {
+                                                  // Only rebuild manifest if not ready yet
+                                                  if (!isReady && onRebuildFusionManifest) {
                                                     onRebuildFusionManifest();
                                                   }
                                                   onSecondarySeriesSelect(ctS.id);
@@ -1132,7 +1133,8 @@ export function SeriesSelector({
                                                     disabled={false}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
-                                                      if (onRebuildFusionManifest) {
+                                                      // Only rebuild manifest if not ready yet
+                                                      if (!isReady && onRebuildFusionManifest) {
                                                         onRebuildFusionManifest();
                                                       }
                                                       if (onSecondarySeriesSelect) {
@@ -1312,7 +1314,8 @@ export function SeriesSelector({
                                                        disabled={false}
                                                        onClick={(e) => {
                                                          e.stopPropagation();
-                                                         if (onRebuildFusionManifest) {
+                                                         // Only rebuild manifest if not ready yet
+                                                         if (!isReady && onRebuildFusionManifest) {
                                                            onRebuildFusionManifest();
                                                          }
                                                          if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id);

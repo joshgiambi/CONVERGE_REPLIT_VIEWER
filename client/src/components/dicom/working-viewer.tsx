@@ -4272,84 +4272,76 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
-      // Render RT structure overlays on separate canvas above fusion
-      if (rtStructures) {
-        try {
-          const contoursCanvas = contoursOverlayCanvasRef.current;
-          if (contoursCanvas) {
-            const contoursCtx = contoursCanvas.getContext('2d');
-            if (contoursCtx) {
-              // Clear the contours overlay canvas
-              contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
-              
+      // Render RT structures and crosshairs on separate canvas above fusion
+      const contoursCanvas = contoursOverlayCanvasRef.current;
+      if (contoursCanvas) {
+        const contoursCtx = contoursCanvas.getContext('2d');
+        if (contoursCtx) {
+          // Clear the contours overlay canvas
+          contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
+          
+          // Draw RT structures if available
+          if (rtStructures) {
+            try {
               // Pass currentImage with its metadata attached
               const imageWithMetadata = {
                 ...currentImage,
                 imageMetadata: imageMetadata // Use the actual imageMetadata state variable
               };
               renderRTStructures(contoursCtx, contoursCanvas, imageWithMetadata);
+            } catch (rtError) {
+              console.warn("Error drawing RT structures:", rtError);
+              // Don't let RT structure errors prevent image display
             }
           }
-        } catch (rtError) {
-          console.warn("Error drawing RT structures:", rtError);
-          // Don't let RT structure errors prevent image display
-        }
-      } else {
-        // Clear contours overlay if no RT structures
-        const contoursCanvas = contoursOverlayCanvasRef.current;
-        if (contoursCanvas) {
-          const contoursCtx = contoursCanvas.getContext('2d');
-          if (contoursCtx) {
-            contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
+          
+          // Draw crosshairs on contours overlay if in axial view
+          if (orientation === 'axial') {
+            // Convert crosshair pixel coordinates to canvas coordinates
+            const imageWidth = currentImage.columns || currentImage.width || 512;
+            const imageHeight = currentImage.rows || currentImage.height || 512;
+            
+            // Calculate scale with zoom factor (same as render16BitImage)
+            const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+            const totalScale = baseScale * zoom;
+            const scaledWidth = imageWidth * totalScale;
+            const scaledHeight = imageHeight * totalScale;
+            
+            // Center position with pan offset
+            const imageX = (canvas.width - scaledWidth) / 2 + panX;
+            const imageY = (canvas.height - scaledHeight) / 2 + panY;
+            
+            // Convert crosshair pixel position to canvas position
+            const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
+            const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
+            
+            // Draw crosshairs on contours overlay
+            contoursCtx.save();
+            contoursCtx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
+            contoursCtx.lineWidth = 1;
+            contoursCtx.setLineDash([5, 5]); // Dashed line
+            
+            // Vertical line
+            contoursCtx.beginPath();
+            contoursCtx.moveTo(crosshairCanvasX, 0);
+            contoursCtx.lineTo(crosshairCanvasX, canvas.height);
+            contoursCtx.stroke();
+            
+            // Horizontal line
+            contoursCtx.beginPath();
+            contoursCtx.moveTo(0, crosshairCanvasY);
+            contoursCtx.lineTo(canvas.width, crosshairCanvasY);
+            contoursCtx.stroke();
+            
+            // Draw center point
+            contoursCtx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+            contoursCtx.beginPath();
+            contoursCtx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
+            contoursCtx.fill();
+            
+            contoursCtx.restore();
           }
         }
-      }
-      
-      // Draw crosshairs if in axial view
-      if (orientation === 'axial') {
-        // Convert crosshair pixel coordinates to canvas coordinates
-        const imageWidth = currentImage.columns || currentImage.width || 512;
-        const imageHeight = currentImage.rows || currentImage.height || 512;
-        
-        // Calculate scale with zoom factor (same as render16BitImage)
-        const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
-        const totalScale = baseScale * zoom;
-        const scaledWidth = imageWidth * totalScale;
-        const scaledHeight = imageHeight * totalScale;
-        
-        // Center position with pan offset
-        const imageX = (canvas.width - scaledWidth) / 2 + panX;
-        const imageY = (canvas.height - scaledHeight) / 2 + panY;
-        
-        // Convert crosshair pixel position to canvas position
-        const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
-        const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
-        
-        // Draw crosshairs
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 5]); // Dashed line
-        
-        // Vertical line
-        ctx.beginPath();
-        ctx.moveTo(crosshairCanvasX, 0);
-        ctx.lineTo(crosshairCanvasX, canvas.height);
-        ctx.stroke();
-        
-        // Horizontal line
-        ctx.beginPath();
-        ctx.moveTo(0, crosshairCanvasY);
-        ctx.lineTo(canvas.width, crosshairCanvasY);
-        ctx.stroke();
-        
-        // Draw center point
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
-        ctx.beginPath();
-        ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
-        ctx.fill();
-        
-        ctx.restore();
       }
       
       // Render MPR views if canvases are available
@@ -5822,8 +5814,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         <div className="relative w-full h-full flex items-center justify-center">
           <canvas
             ref={canvasRef}
-            width={1280}
-            height={1280}
+            width={1024}
+            height={1024}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={(e) => {
               handleCanvasMouseMove(e);
@@ -5847,18 +5839,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
+              opacity: secondarySeriesId ? (1 - fusionOpacity) : 1,
+              transition: 'opacity 120ms ease-out',
             }}
           />
 
           <canvas
             ref={fusionOverlayCanvasRef}
-            width={1280}
-            height={1280}
+            width={1024}
+            height={1024}
             className="pointer-events-none absolute max-w-full max-h-full object-contain"
             style={{
-              opacity: fusionOpacity,
               visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
-              transition: 'opacity 120ms ease-out',
               top: '50%',
               left: '50%',
               transform: 'translate(-50%, -50%)',
@@ -5868,8 +5860,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
           <canvas
             ref={contoursOverlayCanvasRef}
-            width={1280}
-            height={1280}
+            width={1024}
+            height={1024}
             className="pointer-events-none absolute max-w-full max-h-full object-contain"
             style={{
               top: '50%',

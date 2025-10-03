@@ -930,8 +930,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         return { window: 80, level: 40 };
       case 'PT':
       case 'PET':
-        // Standard PET SUV windowing per DICOM: 0-10 SUV range (window: 10, center: 5)
-        return { window: 10, level: 5 };
+        // Standard PET SUV windowing: 0-5 SUV range (common clinical setting)
+        // Many DICOM PET files store SUV scaled by 1000
+        return { window: 5000, level: 2500 };
       case 'CT':
         return { window: 400, level: 40 };
       default:
