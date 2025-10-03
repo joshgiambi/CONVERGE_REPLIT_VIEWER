@@ -123,6 +123,7 @@ interface WorkingViewerProps {
   onSlicePositionChange?: (slicePosition: number) => void;
   secondarySeriesId?: number | null;
   fusionOpacity?: number;
+  fusionDisplayMode?: 'overlay' | 'side-by-side';
   onSecondarySeriesSelect?: (id: number | null) => void;
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
@@ -171,6 +172,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onSlicePositionChange,
     secondarySeriesId: externalSecondarySeriesId,
     fusionOpacity: externalFusionOpacity = 0.5,
+    fusionDisplayMode = 'overlay',
     onSecondarySeriesSelect,
     onFusionOpacityChange,
     hasSecondarySeriesForFusion,
@@ -3300,7 +3302,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       scheduleRender();
     }
-  }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading]);
+  }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading, fusionDisplayMode]);
 
   const loadImages = async () => {
     try {
@@ -5811,66 +5813,129 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
-        <div className="relative w-full h-full flex items-center justify-center">
-          <canvas
-            ref={canvasRef}
-            width={1024}
-            height={1024}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={(e) => {
-              handleCanvasMouseMove(e);
-              // Crosshair position is only updated on click in crosshair mode
-              // Not on mouse move
-            }}
-            onMouseUp={handleCanvasMouseUp}
-            onWheel={(e) => {
-              // Always handle wheel events for scrolling, even when pen tool is active
-              handleCanvasWheel(e);
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`max-w-full max-h-full object-contain rounded ${
-              brushToolState?.isActive && brushToolState?.tool === "brush"
-                ? "cursor-none"
-                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                ? ""
-                : "cursor-move"
-            }`}
-            style={{
-              backgroundColor: "black",
-              imageRendering: "auto",
-              userSelect: "none",
-              opacity: secondarySeriesId ? (1 - fusionOpacity) : 1,
-              transition: 'opacity 120ms ease-out',
-            }}
-          />
+        {fusionDisplayMode === 'side-by-side' && secondarySeriesId ? (
+          /* Side-by-Side Layout */
+          <div className="w-full h-full flex gap-2">
+            {/* Primary Canvas Container */}
+            <div className="relative flex-1 flex items-center justify-center">
+              <canvas
+                ref={canvasRef}
+                width={1024}
+                height={1024}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={(e) => {
+                  handleCanvasMouseMove(e);
+                }}
+                onMouseUp={handleCanvasMouseUp}
+                onWheel={(e) => {
+                  handleCanvasWheel(e);
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                className={`max-w-full max-h-full object-contain rounded ${
+                  brushToolState?.isActive && brushToolState?.tool === "brush"
+                    ? "cursor-none"
+                    : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                    ? ""
+                    : "cursor-move"
+                }`}
+                style={{
+                  backgroundColor: "black",
+                  imageRendering: "auto",
+                  userSelect: "none",
+                }}
+              />
+              <canvas
+                ref={contoursOverlayCanvasRef}
+                width={1024}
+                height={1024}
+                className="pointer-events-none absolute max-w-full max-h-full object-contain"
+                style={{
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 2,
+                }}
+              />
+            </div>
+            
+            {/* Secondary/Fusion Canvas Container */}
+            <div className="relative flex-1 flex items-center justify-center">
+              <canvas
+                ref={fusionOverlayCanvasRef}
+                width={1024}
+                height={1024}
+                className="max-w-full max-h-full object-contain rounded"
+                style={{
+                  backgroundColor: "black",
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          /* Overlay Layout */
+          <div className="relative w-full h-full flex items-center justify-center">
+            <canvas
+              ref={canvasRef}
+              width={1024}
+              height={1024}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={(e) => {
+                handleCanvasMouseMove(e);
+                // Crosshair position is only updated on click in crosshair mode
+                // Not on mouse move
+              }}
+              onMouseUp={handleCanvasMouseUp}
+              onWheel={(e) => {
+                // Always handle wheel events for scrolling, even when pen tool is active
+                handleCanvasWheel(e);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`max-w-full max-h-full object-contain rounded ${
+                brushToolState?.isActive && brushToolState?.tool === "brush"
+                  ? "cursor-none"
+                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                  ? ""
+                  : "cursor-move"
+              }`}
+              style={{
+                backgroundColor: "black",
+                imageRendering: "auto",
+                userSelect: "none",
+                opacity: secondarySeriesId && fusionDisplayMode === 'overlay' ? (1 - fusionOpacity) : 1,
+                transition: 'opacity 120ms ease-out',
+              }}
+            />
 
-          <canvas
-            ref={fusionOverlayCanvasRef}
-            width={1024}
-            height={1024}
-            className="pointer-events-none absolute max-w-full max-h-full object-contain"
-            style={{
-              visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 1,
-            }}
-          />
+            <canvas
+              ref={fusionOverlayCanvasRef}
+              width={1024}
+              height={1024}
+              className="pointer-events-none absolute max-w-full max-h-full object-contain"
+              style={{
+                visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 1,
+              }}
+            />
 
-          <canvas
-            ref={contoursOverlayCanvasRef}
-            width={1024}
-            height={1024}
-            className="pointer-events-none absolute max-w-full max-h-full object-contain"
-            style={{
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 2,
-            }}
-          />
+            <canvas
+              ref={contoursOverlayCanvasRef}
+              width={1024}
+              height={1024}
+              className="pointer-events-none absolute max-w-full max-h-full object-contain"
+              style={{
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 2,
+              }}
+            />
+          </div>
+        )}
 
+        <div>
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "brush" && (

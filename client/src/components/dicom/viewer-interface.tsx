@@ -4,7 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
-import { FusionControlPanel } from './fusion-control-panel';
+import { FusionControlPanelV2 } from './fusion-control-panel-v2';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
@@ -73,6 +73,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showFusionPanel, setShowFusionPanel] = useState(false);
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
   const [fusionOpacity, setFusionOpacity] = useState(0.5);
+  const [fusionDisplayMode, setFusionDisplayMode] = useState<'overlay' | 'side-by-side'>('overlay');
   // Secondary loading states for visual feedback
   const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
   const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
@@ -2011,6 +2012,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   autoLocalizeTarget={autoLocalizeTarget}
                   secondarySeriesId={secondarySeriesId}
                   fusionOpacity={fusionOpacity}
+                  fusionDisplayMode={fusionDisplayMode}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
                   hasSecondarySeriesForFusion={fusionDescriptorMap.size > 0}
@@ -2538,22 +2540,22 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {fusionManifest && fusionManifest.secondaries.length > 0 && (
-        <FusionControlPanel
+      {(fusionManifest && fusionManifest.secondaries.length > 0) || fusionManifestLoading || fusionManifestError ? (
+        <FusionControlPanelV2
           opacity={fusionOpacity}
           onOpacityChange={setFusionOpacity}
-          secondaryOptions={fusionManifest.secondaries}
+          secondaryOptions={fusionManifest?.secondaries || []}
           selectedSecondaryId={secondarySeriesId}
           onSecondarySeriesSelect={setSecondarySeriesId}
           secondaryStatuses={fusionSecondaryStatuses}
           manifestLoading={fusionManifestLoading}
           manifestError={fusionManifestError}
-          minimized={!showFusionPanel}
-          onToggleMinimized={(minimized) => setShowFusionPanel(!minimized)}
           windowLevel={fusionWindowLevel}
           onWindowLevelPreset={(preset) => setFusionWindowLevel(preset)}
+          displayMode={fusionDisplayMode}
+          onDisplayModeChange={setFusionDisplayMode}
         />
-      )}
+      ) : null}
 
       {/* Margin Toolbar */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (
