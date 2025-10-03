@@ -310,6 +310,24 @@ export async function resolveFuseboxTransform(
   const primaryFoR = primaryMeta?.frameOfReference || null;
   const secondaryFoR = secondaryMeta?.frameOfReference || null;
 
+  if (primaryFoR && secondaryFoR && primaryFoR === secondaryFoR) {
+    logHelper(logger, 'info', 'Using identity transform for matching Frame of Reference', {
+      primarySeriesId,
+      secondarySeriesId,
+      frameOfReferenceUID: primaryFoR,
+    });
+    return {
+      matrix: [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+      ],
+      transformSource: 'matrix',
+      registrationId: 'identity-frame-of-reference',
+    };
+  }
+
   const { parseDicomRegistrationFromFile } = await import('../registration/reg-parser.ts');
   const { findRegFileForStudy, findAllRegFilesForPatient } = await import('../registration/reg-resolver.ts');
 

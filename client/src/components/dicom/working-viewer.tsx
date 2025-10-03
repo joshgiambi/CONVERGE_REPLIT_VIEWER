@@ -186,6 +186,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionManifestPrimarySeriesId = null,
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fusionOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -398,39 +399,56 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [],
   );
 
-  const drawFusionOverlay = useCallback(
+  const clearFusionOverlayCanvas = useCallback(() => {
+    const overlayCanvas = fusionOverlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }, []);
+
+  const updateFusionOverlayCanvas = useCallback(
     (
-      ctx: CanvasRenderingContext2D,
-      overlayCanvas: HTMLCanvasElement,
-      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number },
-      alpha: number,
+      overlaySource: HTMLCanvasElement | null,
+      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number } | null,
+      hasSignal: boolean,
     ) => {
-      if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
+      const overlayCanvas = fusionOverlayCanvasRef.current;
+      const baseCanvas = canvasRef.current;
+      if (!overlayCanvas || !baseCanvas) return;
+      const ctx = overlayCanvas.getContext('2d');
+      if (!ctx) return;
+
+      if (overlayCanvas.width !== baseCanvas.width || overlayCanvas.height !== baseCanvas.height) {
+        overlayCanvas.width = baseCanvas.width;
+        overlayCanvas.height = baseCanvas.height;
+      }
+
+      ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      if (!overlaySource || !transform || !hasSignal) return;
+
       const targetWidth = transform.imageWidth * transform.scale;
       const targetHeight = transform.imageHeight * transform.scale;
       if (targetWidth === 0 || targetHeight === 0) return;
 
-      const widthScale = targetWidth / overlayCanvas.width;
-      const heightScale = targetHeight / overlayCanvas.height;
+      const widthScale = targetWidth / overlaySource.width;
+      const heightScale = targetHeight / overlaySource.height;
 
-      ctx.save();
-      ctx.globalAlpha = alpha;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(
-        overlayCanvas,
+        overlaySource,
         0,
         0,
-        overlayCanvas.width,
-        overlayCanvas.height,
+        overlaySource.width,
+        overlaySource.height,
         transform.offsetX,
         transform.offsetY,
-        overlayCanvas.width * widthScale,
-        overlayCanvas.height * heightScale,
+        overlaySource.width * widthScale,
+        overlaySource.height * heightScale,
       );
-      ctx.restore();
     },
-    [],
+    [canvasRef, fusionOverlayCanvasRef],
   );
 
   const convertSliceToCanvas = useCallback(
@@ -792,102 +810,27 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [scheduleRender]);
 
-  // When fusion opacity changes, redraw base CT from offscreen + cached overlay only (no full CT re-render)
   useEffect(() => {
-    try {
-      if (!canvasRef.current) return;
-      if (!secondarySeriesId) return;
-      const currentImage = images[currentIndex];
-      if (!currentImage) return;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    const overlay = fusionOverlayCanvasRef.current;
+    if (!overlay) return;
+    const clamped = Math.max(0, Math.min(1, fusionOpacity));
+    overlay.style.opacity = `${clamped}`;
+    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
+  }, [fusionOpacity]);
 
-      const cacheKey = buildFuseboxCacheKey(
-        currentImage.sopInstanceUID,
-        secondarySeriesId,
-        selectedRegistrationId ?? null,
-      );
-      const cached = fuseboxCacheRef.current.get(cacheKey);
-      const t = ctTransform.current;
-      const src = offscreenCanvasRef.current;
+  useEffect(() => {
+    const overlay = fusionOverlayCanvasRef.current;
+    if (!overlay) return;
+    const clamped = Math.max(0, Math.min(1, fusionOpacity));
+    overlay.style.opacity = `${clamped}`;
+    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
+  }, [fusionOpacity]);
 
-      if (cached && t && src) {
-        if (!cached.hasSignal) {
-          fusionIssueRef.current = 'empty-fusebox-slice';
-          return;
-        }
-        // Redraw CT from offscreen canvas with existing transform
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
-
-        // Draw cached fusion overlay with new opacity
-        drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
-
-        // Redraw RT structures on top
-        try {
-          const imageWithMetadata = { ...currentImage, imageMetadata };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
-        } catch {}
-
-        // Redraw crosshairs if axial
-        try {
-          if (orientation === 'axial') {
-            const imageWidth = currentImage.columns || currentImage.width || 512;
-            const imageHeight = currentImage.rows || currentImage.height || 512;
-            const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
-            const totalScale = baseScale * zoom;
-            const scaledWidth = imageWidth * totalScale;
-            const scaledHeight = imageHeight * totalScale;
-            const imageX = (canvas.width - scaledWidth) / 2 + panX;
-            const imageY = (canvas.height - scaledHeight) / 2 + panY;
-            const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
-            const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
-            ctx.save();
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(crosshairCanvasX, 0);
-            ctx.lineTo(crosshairCanvasX, canvas.height);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(0, crosshairCanvasY);
-            ctx.lineTo(canvas.width, crosshairCanvasY);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
-            ctx.beginPath();
-            ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.restore();
-          }
-        } catch {}
-      } else {
-        // Fallback to scheduled render if no cache/base available
-        scheduleRender();
-      }
-    } catch {
-      // Ignore errors and let scheduled render handle it
-      scheduleRender();
+  useEffect(() => {
+    if (!secondarySeriesId) {
+      clearFusionOverlayCanvas();
     }
-  }, [
-    buildFuseboxCacheKey,
-    drawFusionOverlay,
-    fusionOpacity,
-    secondarySeriesId,
-    selectedRegistrationId,
-    currentIndex,
-    images,
-    scheduleRender,
-    imageMetadata,
-    orientation,
-    crosshairPos,
-    panX,
-    panY,
-    zoom,
-  ]);
+  }, [secondarySeriesId, clearFusionOverlayCanvas]);
   
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
@@ -4570,12 +4513,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionPrefetchSetRef.current.clear();
   }, [secondarySeriesId]);
 
-  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
+  const renderFusionOverlayNew = async (_ctx: CanvasRenderingContext2D, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
     const ensureActive = () => requestToken === fusionRequestTokenRef.current;
 
     if (!secondarySeriesId || fusionOpacity === 0) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+      if (ensureActive()) {
+        clearFusionOverlayCanvas();
+        setFuseboxTransformSource(null);
+      }
       return;
     }
 
@@ -4596,6 +4542,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (status?.status !== 'ready' || !manifestMatches || !localReady) {
       if (ensureActive()) {
         fusionIssueRef.current = 'manifest-not-ready';
+        clearFusionOverlayCanvas();
         setFuseboxTransformSource(null);
       }
       return;
@@ -4604,12 +4551,16 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
 
     if (!primaryImage?.sopInstanceUID) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+      if (ensureActive()) {
+        clearFusionOverlayCanvas();
+        setFuseboxTransformSource(null);
+      }
       return;
     }
 
     const transform = ctTransform.current;
     if (!transform) {
+      clearFusionOverlayCanvas();
       return;
     }
 
@@ -4663,6 +4614,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (!prepared) {
           if (ensureActive()) {
             fusionIssueRef.current = 'overlay-canvas-error';
+            clearFusionOverlayCanvas();
             setFuseboxTransformSource(null);
           }
           return;
@@ -4680,6 +4632,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (ensureActive()) {
           console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';
+          clearFusionOverlayCanvas();
           setFuseboxTransformSource(null);
         }
         return;
@@ -4687,13 +4640,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (!cached) {
-      if (ensureActive()) setFuseboxTransformSource(null);
+      if (ensureActive()) {
+        clearFusionOverlayCanvas();
+        setFuseboxTransformSource(null);
+      }
       return;
     }
 
     if (!cached.hasSignal) {
       if (ensureActive()) {
         fusionIssueRef.current = 'empty-fusebox-slice';
+        clearFusionOverlayCanvas();
         setFuseboxTransformSource(cached.slice.transformSource ?? null);
       }
       return;
@@ -4705,7 +4662,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     setFuseboxTransformSource(source);
     fusionIssueRef.current = null;
 
-    drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
+    updateFusionOverlayCanvas(cached.canvas, transform, cached.hasSignal);
     prefetchFusionSlices(currentIndex);
   };
 
@@ -5880,6 +5837,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               backgroundColor: "black",
               imageRendering: "auto",
               userSelect: "none",
+            }}
+          />
+
+          <canvas
+            ref={fusionOverlayCanvasRef}
+            width={1280}
+            height={1280}
+            className="pointer-events-none absolute inset-0"
+            style={{
+              opacity: fusionOpacity,
+              visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
+              transition: 'opacity 120ms ease-out',
             }}
           />
 

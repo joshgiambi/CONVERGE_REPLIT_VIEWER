@@ -3632,6 +3632,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/fusion/secondary/:primarySeriesId/:secondarySeriesId/:sopInstanceUID", async (req: Request, res: Response) => {
+    try {
+      const primarySeriesId = Number(req.params.primarySeriesId);
+      const secondarySeriesId = Number(req.params.secondarySeriesId);
+      const sopInstanceUID = String(req.params.sopInstanceUID || '').trim();
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId) || !sopInstanceUID) {
+        return res.status(400).json({ error: 'primarySeriesId, secondarySeriesId, and sopInstanceUID are required' });
+      }
+
+      const buffer = fusionManifestService.getSliceBuffer(primarySeriesId, secondarySeriesId, sopInstanceUID);
+      if (!buffer) {
+        return res.status(404).json({ error: 'Fused slice not available' });
+      }
+
+      res.setHeader('Content-Type', 'application/dicom');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(buffer);
+    } catch (err: any) {
+      logger.error(`fusion slice fetch failed: ${err?.message || String(err)}`);
+      res.status(500).json({ error: 'fused-slice fetch failed', details: err?.message || String(err) });
+    }
+  });
+
+  app.delete("/api/fusion/cache", (req: Request, res: Response) => {
+    try {
+      const primaryParam = req.query.primarySeriesId;
+      const secondaryParam = req.query.secondarySeriesId;
+
+      if (primaryParam == null) {
+        fusionManifestService.clearAll();
+        res.status(204).end();
+        return;
+      }
+
+      const primarySeriesId = Number(primaryParam);
+      if (!Number.isFinite(primarySeriesId)) {
+        res.status(400).json({ error: 'primarySeriesId must be numeric' });
+        return;
+      }
+
+      let secondarySeriesId: number | undefined;
+      if (secondaryParam != null) {
+        secondarySeriesId = Number(secondaryParam);
+        if (!Number.isFinite(secondarySeriesId)) {
+          res.status(400).json({ error: 'secondarySeriesId must be numeric when provided' });
+          return;
+        }
+      }
+
+      fusionManifestService.clearCache(primarySeriesId, secondarySeriesId);
+      res.status(204).end();
+    } catch (err: any) {
+      logger.error(`fusion cache clear failed: ${err?.message || String(err)}`);
+      res.status(500).json({ error: 'fusion-cache clear failed', details: err?.message || String(err) });
+    }
+  });
+
   // Legacy compatibility: return PNG frame using Fusebox resampling so existing UI keeps working
   app.get("/api/fusion/resampled-frame", async (req: Request, res: Response) => {
     try {

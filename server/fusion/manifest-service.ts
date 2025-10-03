@@ -1,14 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { storage } from '../storage.ts';
-import { db } from '../db.ts';
-import { images as imagesTable, series as seriesTable } from '@shared/schema';
-import { eq } from 'drizzle-orm';
-import { logger } from '../logger.ts';
-import { fusionManifestPath, fusionDicomPath, fusionMetadataPath, ensureFusionDirectories, fusionPairRoot } from './path-utils.ts';
 import { loadDicomMetadata } from './dicom-metadata.ts';
 import type { FusionManifest, FusionSecondaryDescriptor, FusionInstanceDescriptor } from './types.ts';
-import { FuseboxVolumeResampler, type VolumeResampleRequest, type InterpolationMode, type VolumeResampleResponse } from './resampler.ts';
+import {
+  FuseboxVolumeResampler,
+  type VolumeResampleRequest,
+  type InterpolationMode,
+  type VolumeResampleResponse,
+} from './resampler.ts';
 import { collectSeriesFiles, resolveFuseboxTransform, sortImagesByInstance } from './fusebox.ts';
 import { markFuseboxRunFailed, markFuseboxRunReady, markFuseboxRunStarted } from './fusebox-run-store.ts';
 import type { FuseboxLogEmitter } from './fusebox.ts';
@@ -29,8 +29,14 @@ interface SeriesInfo {
   patientDicomId: string | null;
 }
 
+interface SecondaryCacheEntry {
+  descriptor: FusionSecondaryDescriptor;
+  buffers: Map<string, Buffer>;
+}
+
 const DEFAULT_INTERPOLATION: InterpolationMode = 'linear';
 const CURRENT_MANIFEST_VERSION = 2;
+const TMP_FUSEBOX_PREFIX = path.join(process.cwd(), 'tmp', 'fusebox-volume-');
 
 const resolvePatientInfo = async (primarySeriesId: number): Promise<SeriesInfo> => {
   const primarySeries = await storage.getSeriesById(primarySeriesId);
@@ -54,114 +60,272 @@ const resolvePatientInfo = async (primarySeriesId: number): Promise<SeriesInfo> 
   };
 };
 
-const readManifestFromDisk = async (manifestPath: string): Promise<FusionManifest | null> => {
-  try {
-    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      return parsed as FusionManifest;
-    }
-    return null;
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') return null;
-    logger.warn(`Failed to read fusion manifest at ${manifestPath}: ${err?.message || err}`);
-    return null;
-  }
-};
+const toInstanceDescriptor = (
+  instance: any,
+  primarySopInstanceUID: string | null,
+  defaultPixelSpacing: [number, number] | null,
+  primarySeriesId: number,
+  secondarySeriesId: number,
+): FusionInstanceDescriptor => {
+  const pixelSpacing = Array.isArray(instance.pixelSpacing) && instance.pixelSpacing.length >= 2
+    ? [Number(instance.pixelSpacing[0]), Number(instance.pixelSpacing[1])] as [number, number]
+    : defaultPixelSpacing;
 
-const writeManifestToDisk = async (manifestPath: string, manifest: FusionManifest) => {
-  await fs.promises.mkdir(path.dirname(manifestPath), { recursive: true });
-  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
-};
+  const orientation = Array.isArray(instance.imageOrientationPatient) && instance.imageOrientationPatient.length >= 6
+    ? [
+        Number(instance.imageOrientationPatient[0]),
+        Number(instance.imageOrientationPatient[1]),
+        Number(instance.imageOrientationPatient[2]),
+        Number(instance.imageOrientationPatient[3]),
+        Number(instance.imageOrientationPatient[4]),
+        Number(instance.imageOrientationPatient[5]),
+      ] as [number, number, number, number, number, number]
+    : null;
 
-const fileExists = (filePath: string): boolean => {
-  try {
-    fs.accessSync(filePath, fs.constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-};
+  const position = Array.isArray(instance.imagePositionPatient) && instance.imagePositionPatient.length >= 3
+    ? [
+        Number(instance.imagePositionPatient[0]),
+        Number(instance.imagePositionPatient[1]),
+        Number(instance.imagePositionPatient[2]),
+      ] as [number, number, number]
+    : null;
 
-const toInstanceDescriptor = (instance: any, primarySopInstanceUID?: string | null): FusionInstanceDescriptor => {
+  const windowCenter = Array.isArray(instance.windowCenter) ? instance.windowCenter.map((v: any) => Number(v)) : null;
+  const windowWidth = Array.isArray(instance.windowWidth) ? instance.windowWidth.map((v: any) => Number(v)) : null;
+
+  const sliceLocation = typeof instance.sliceLocation === 'number'
+    ? instance.sliceLocation
+    : position?.[2] ?? null;
+
   return {
     sopInstanceUID: instance.sopInstanceUID,
-    instanceNumber: instance.instanceNumber,
-    fileName: instance.fileName,
-    filePath: instance.filePath,
-    imagePositionPatient: Array.isArray(instance.imagePositionPatient) ? instance.imagePositionPatient : null,
-    imageOrientationPatient: Array.isArray(instance.imageOrientationPatient) ? instance.imageOrientationPatient : null,
-    pixelSpacing: Array.isArray(instance.pixelSpacing) ? instance.pixelSpacing as [number, number] : null,
-    sliceLocation: typeof instance.sliceLocation === 'number' ? instance.sliceLocation : null,
-    windowCenter: Array.isArray(instance.windowCenter) ? instance.windowCenter : null,
-    windowWidth: Array.isArray(instance.windowWidth) ? instance.windowWidth : null,
-    primarySopInstanceUID: primarySopInstanceUID ?? null,
+    instanceNumber: Number(instance.instanceNumber ?? 0),
+    fileName: instance.fileName ?? `slice_${instance.instanceNumber ?? 0}.dcm`,
+    filePath: `memory://${primarySeriesId}/${secondarySeriesId}/${instance.sopInstanceUID}`,
+    imagePositionPatient: position,
+    imageOrientationPatient: orientation,
+    pixelSpacing,
+    sliceLocation,
+    windowCenter,
+    windowWidth,
+    primarySopInstanceUID,
   };
 };
 
 const createSecondaryDescriptor = (
   base: Partial<FusionSecondaryDescriptor>,
   overrides: Partial<FusionSecondaryDescriptor>,
-): FusionSecondaryDescriptor => {
+): FusionSecondaryDescriptor => ({
+  secondarySeriesId: overrides.secondarySeriesId ?? base.secondarySeriesId!,
+  secondarySeriesInstanceUID: overrides.secondarySeriesInstanceUID ?? base.secondarySeriesInstanceUID ?? '',
+  secondarySeriesDescription: overrides.secondarySeriesDescription ?? base.secondarySeriesDescription ?? null,
+  secondaryModality: overrides.secondaryModality ?? base.secondaryModality ?? null,
+  registrationId: overrides.registrationId ?? base.registrationId ?? null,
+  status: overrides.status ?? base.status ?? 'pending',
+  generatedAt: overrides.generatedAt ?? base.generatedAt ?? null,
+  frameOfReferenceUID: overrides.frameOfReferenceUID ?? base.frameOfReferenceUID ?? null,
+  sliceCount: overrides.sliceCount ?? base.sliceCount ?? 0,
+  rows: overrides.rows ?? base.rows ?? null,
+  columns: overrides.columns ?? base.columns ?? null,
+  pixelSpacing: overrides.pixelSpacing ?? base.pixelSpacing ?? null,
+  imageOrientationPatient: overrides.imageOrientationPatient ?? base.imageOrientationPatient ?? null,
+  imagePositionPatientFirst: overrides.imagePositionPatientFirst ?? base.imagePositionPatientFirst ?? null,
+  imagePositionPatientLast: overrides.imagePositionPatientLast ?? base.imagePositionPatientLast ?? null,
+  windowCenter: overrides.windowCenter ?? base.windowCenter ?? null,
+  windowWidth: overrides.windowWidth ?? base.windowWidth ?? null,
+  outputDirectory: overrides.outputDirectory ?? base.outputDirectory ?? '',
+  manifestPath: overrides.manifestPath ?? base.manifestPath ?? '',
+  instances: overrides.instances ?? base.instances ?? [],
+  error: overrides.error ?? base.error,
+});
+
+const cloneInstanceDescriptor = (instance: FusionInstanceDescriptor): FusionInstanceDescriptor => ({
+  ...instance,
+  imagePositionPatient: instance.imagePositionPatient ? [...instance.imagePositionPatient] as [number, number, number] : null,
+  imageOrientationPatient: instance.imageOrientationPatient ? [...instance.imageOrientationPatient] as [number, number, number, number, number, number] : null,
+  pixelSpacing: instance.pixelSpacing ? [...instance.pixelSpacing] as [number, number] : null,
+  windowCenter: instance.windowCenter ? [...instance.windowCenter] : null,
+  windowWidth: instance.windowWidth ? [...instance.windowWidth] : null,
+});
+
+const cloneDescriptor = (descriptor: FusionSecondaryDescriptor): FusionSecondaryDescriptor => ({
+  ...descriptor,
+  pixelSpacing: descriptor.pixelSpacing ? [...descriptor.pixelSpacing] as [number, number] : null,
+  imageOrientationPatient: descriptor.imageOrientationPatient ? [...descriptor.imageOrientationPatient] as [number, number, number, number, number, number] : null,
+  imagePositionPatientFirst: descriptor.imagePositionPatientFirst ? [...descriptor.imagePositionPatientFirst] as [number, number, number] : null,
+  imagePositionPatientLast: descriptor.imagePositionPatientLast ? [...descriptor.imagePositionPatientLast] as [number, number, number] : null,
+  windowCenter: descriptor.windowCenter ? [...descriptor.windowCenter] : null,
+  windowWidth: descriptor.windowWidth ? [...descriptor.windowWidth] : null,
+  instances: descriptor.instances.map(cloneInstanceDescriptor),
+});
+
+const buildResampleMetadata = (input: {
+  primarySeries: any;
+  secondarySeries: any;
+  primaryMeta: ReturnType<typeof loadDicomMetadata>;
+  secondaryMeta: ReturnType<typeof loadDicomMetadata>;
+  transformInfo: any;
+}) => {
+  const { primarySeries, secondarySeries, primaryMeta, secondaryMeta, transformInfo } = input;
+
+  const imageType = ['DERIVED', 'SECONDARY', 'FUSED'];
+  const derivationDescription = `Resampled ${secondarySeries.seriesDescription || secondarySeries.modality || 'secondary'} into ${primarySeries.seriesDescription || primarySeries.modality || 'primary'} frame of reference`;
+
   return {
-    secondarySeriesId: base.secondarySeriesId ?? overrides.secondarySeriesId!,
-    secondarySeriesInstanceUID: overrides.secondarySeriesInstanceUID ?? base.secondarySeriesInstanceUID ?? '',
-    secondarySeriesDescription: overrides.secondarySeriesDescription ?? base.secondarySeriesDescription ?? null,
-    secondaryModality: overrides.secondaryModality ?? base.secondaryModality ?? null,
-    registrationId: overrides.registrationId ?? base.registrationId ?? null,
-    status: overrides.status ?? base.status ?? 'pending',
-    generatedAt: overrides.generatedAt ?? base.generatedAt ?? null,
-    frameOfReferenceUID: overrides.frameOfReferenceUID ?? base.frameOfReferenceUID ?? null,
-    sliceCount: overrides.sliceCount ?? base.sliceCount ?? 0,
-    rows: overrides.rows ?? base.rows ?? null,
-    columns: overrides.columns ?? base.columns ?? null,
-    pixelSpacing: overrides.pixelSpacing ?? base.pixelSpacing ?? null,
-    imageOrientationPatient: overrides.imageOrientationPatient ?? base.imageOrientationPatient ?? null,
-    imagePositionPatientFirst: overrides.imagePositionPatientFirst ?? base.imagePositionPatientFirst ?? null,
-    imagePositionPatientLast: overrides.imagePositionPatientLast ?? base.imagePositionPatientLast ?? null,
-    windowCenter: overrides.windowCenter ?? base.windowCenter ?? null,
-    windowWidth: overrides.windowWidth ?? base.windowWidth ?? null,
-    outputDirectory: overrides.outputDirectory ?? base.outputDirectory ?? '',
-    manifestPath: overrides.manifestPath ?? base.manifestPath ?? '',
-    instances: overrides.instances ?? base.instances ?? [],
-    error: overrides.error ?? base.error,
+    patient: {
+      PatientID: primaryMeta.patientID ?? secondaryMeta.patientID ?? null,
+      PatientName: primaryMeta.patientName ?? secondaryMeta.patientName ?? null,
+      PatientBirthDate: primaryMeta.patientBirthDate ?? secondaryMeta.patientBirthDate ?? null,
+      PatientSex: primaryMeta.patientSex ?? secondaryMeta.patientSex ?? null,
+      PatientAge: primaryMeta.patientAge ?? secondaryMeta.patientAge ?? null,
+    },
+    study: {
+      StudyInstanceUID: primaryMeta.studyInstanceUID ?? secondaryMeta.studyInstanceUID ?? null,
+      StudyDescription: primaryMeta.studyDescription ?? secondaryMeta.studyDescription ?? null,
+      StudyDate: primaryMeta.studyDate ?? secondaryMeta.studyDate ?? null,
+      StudyTime: primaryMeta.studyTime ?? secondaryMeta.studyTime ?? null,
+      AccessionNumber: primaryMeta.accessionNumber ?? secondaryMeta.accessionNumber ?? null,
+    },
+    primarySeries: {
+      SeriesInstanceUID: primarySeries.seriesInstanceUID,
+      SeriesDescription: primarySeries.seriesDescription,
+      SeriesNumber: primarySeries.seriesNumber,
+      Modality: primarySeries.modality,
+      FrameOfReferenceUID: primaryMeta.frameOfReferenceUID,
+      ImageOrientationPatient: primaryMeta.imageOrientationPatient,
+      PixelSpacing: primaryMeta.pixelSpacing,
+      SliceThickness: primaryMeta.sliceThickness,
+      SpacingBetweenSlices: primaryMeta.spacingBetweenSlices,
+      WindowCenter: primaryMeta.windowCenter,
+      WindowWidth: primaryMeta.windowWidth,
+    },
+    secondarySeries: {
+      SeriesInstanceUID: secondarySeries.seriesInstanceUID,
+      SeriesDescription: secondarySeries.seriesDescription,
+      SeriesNumber: secondarySeries.seriesNumber,
+      Modality: secondarySeries.modality,
+      WindowCenter: secondaryMeta.windowCenter,
+      WindowWidth: secondaryMeta.windowWidth,
+      RescaleIntercept: secondaryMeta.rescaleIntercept,
+      RescaleSlope: secondaryMeta.rescaleSlope,
+      PhotometricInterpretation: secondaryMeta.photometricInterpretation,
+      SamplesPerPixel: secondaryMeta.samplesPerPixel,
+      BitsAllocated: secondaryMeta.bitsAllocated,
+      BitsStored: secondaryMeta.bitsStored,
+      HighBit: secondaryMeta.highBit,
+      PixelRepresentation: secondaryMeta.pixelRepresentation,
+    },
+    derivedSeries: {
+      SeriesDescription: `Fused ${secondarySeries.seriesDescription ?? secondarySeries.modality ?? 'Secondary'}`,
+      ImageType: imageType,
+      DerivationDescription: derivationDescription,
+      ReferencedSeriesInstanceUID: primarySeries.seriesInstanceUID,
+      RegistrationId: transformInfo.registrationId,
+      WindowCenter: secondaryMeta.windowCenter,
+      WindowWidth: secondaryMeta.windowWidth,
+    },
   };
 };
 
-export class FusionManifestService {
-  private readonly cache = new Map<string, FusionManifest>();
-  private readonly pending = new Map<string, Promise<FusionManifest>>();
-  private readonly resampler = new FuseboxVolumeResampler();
+const parsePosition = (value: unknown): [number, number, number] | null => {
+  if (!value) return null;
+  if (Array.isArray(value) && value.length >= 3) {
+    const coords = value.map((component) => Number(component)) as [number, number, number];
+    if (coords.every((component) => Number.isFinite(component))) return coords;
+  }
+  if (typeof value === 'string') {
+    const parts = value.split('\\').map((part) => Number(part.trim()));
+    if (parts.length >= 3 && parts.every((component) => Number.isFinite(component))) {
+      return [parts[0], parts[1], parts[2]];
+    }
+  }
+  return null;
+};
 
-  private cacheKey(primarySeriesId: number): string {
-    return String(primarySeriesId);
+export class FusionManifestService {
+  private readonly manifestCache = new Map<number, FusionManifest>();
+  private readonly pending = new Map<number, Promise<FusionManifest>>();
+  private readonly resampler = new FuseboxVolumeResampler();
+  private readonly overlays = new Map<number, Map<number, SecondaryCacheEntry>>();
+
+  private getOverlayMap(primarySeriesId: number): Map<number, SecondaryCacheEntry> {
+    let map = this.overlays.get(primarySeriesId);
+    if (!map) {
+      map = new Map();
+      this.overlays.set(primarySeriesId, map);
+    }
+    return map;
   }
 
   async getManifest(options: ManifestRequestOptions): Promise<FusionManifest> {
     const { primarySeriesId, secondarySeriesIds = [], force = false } = options;
-    const cacheKey = this.cacheKey(primarySeriesId);
 
-    if (!force && this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey)!;
+    if (!force && this.manifestCache.has(primarySeriesId)) {
+      const cached = this.manifestCache.get(primarySeriesId)!;
       const requestedSet = new Set(secondarySeriesIds);
-      const hasAllSecondaries = secondarySeriesIds.length === 0 || cached.secondaries.some(sec => requestedSet.has(sec.secondarySeriesId));
-      if (hasAllSecondaries) return cached;
+      const hasAllSecondaries = secondarySeriesIds.length === 0
+        || secondarySeriesIds.every((id) => cached.secondaries.some((sec) => sec.secondarySeriesId === id));
+      if (hasAllSecondaries) {
+        return cloneManifest(cached);
+      }
     }
 
-    if (!force && this.pending.has(cacheKey)) {
-      return this.pending.get(cacheKey)!;
+    if (!force && this.pending.has(primarySeriesId)) {
+      return cloneManifest(await this.pending.get(primarySeriesId)!);
     }
 
-    const promise = this.buildManifest(options).finally(() => {
-      this.pending.delete(cacheKey);
+    const previous = this.manifestCache.get(primarySeriesId);
+    const promise = this.buildManifest(options, previous).finally(() => {
+      this.pending.delete(primarySeriesId);
     });
-    this.pending.set(cacheKey, promise);
+    this.pending.set(primarySeriesId, promise);
     const manifest = await promise;
-    this.cache.set(cacheKey, manifest);
-    return manifest;
+    this.manifestCache.set(primarySeriesId, manifest);
+    return cloneManifest(manifest);
   }
 
-  private async buildManifest(options: ManifestRequestOptions): Promise<FusionManifest> {
+  getSliceBuffer(primarySeriesId: number, secondarySeriesId: number, sopInstanceUID: string): Buffer | null {
+    const map = this.overlays.get(primarySeriesId);
+    if (!map) return null;
+    const entry = map.get(secondarySeriesId);
+    if (!entry) return null;
+    return entry.buffers.get(sopInstanceUID) ?? null;
+  }
+
+  clearCache(primarySeriesId: number, secondarySeriesId?: number): void {
+    if (secondarySeriesId == null) {
+      this.manifestCache.delete(primarySeriesId);
+      this.pending.delete(primarySeriesId);
+      this.overlays.delete(primarySeriesId);
+      return;
+    }
+
+    const overlayMap = this.overlays.get(primarySeriesId);
+    overlayMap?.delete(secondarySeriesId);
+    if (overlayMap && overlayMap.size === 0) {
+      this.overlays.delete(primarySeriesId);
+    }
+
+    const manifest = this.manifestCache.get(primarySeriesId);
+    if (manifest) {
+      const filtered = manifest.secondaries.filter((sec) => sec.secondarySeriesId !== secondarySeriesId);
+      this.manifestCache.set(primarySeriesId, {
+        ...manifest,
+        secondaries: filtered,
+      });
+    }
+  }
+
+  clearAll(): void {
+    this.manifestCache.clear();
+    this.pending.clear();
+    this.overlays.clear();
+  }
+
+  private async buildManifest(
+    options: ManifestRequestOptions,
+    previous: FusionManifest | undefined,
+  ): Promise<FusionManifest> {
     const { primarySeriesId, secondarySeriesIds = [], force = false } = options;
     const interpolation = options.interpolation ?? DEFAULT_INTERPOLATION;
     const preload = options.preload ?? true;
@@ -170,23 +334,13 @@ export class FusionManifestService {
     const primarySeries = await storage.getSeriesById(primarySeriesId);
     if (!primarySeries) throw new Error(`Primary series ${primarySeriesId} not found`);
 
-    const { studyId, studyInstanceUID, patientId, patientDicomId } = await resolvePatientInfo(primarySeriesId);
-    const manifestPath = fusionManifestPath({
-      patientId: patientDicomId ?? String(patientId ?? 'unknown'),
-      studyInstanceUID,
-      primarySeriesInstanceUID: primarySeries.seriesInstanceUID,
-      secondarySeriesInstanceUID: 'manifest-root',
-    });
+    const { studyId, patientId } = await resolvePatientInfo(primarySeriesId);
 
-    const manifestDir = path.dirname(path.dirname(manifestPath));
-    await fs.promises.mkdir(manifestDir, { recursive: true });
-
-    const existingManifest = await readManifestFromDisk(manifestPath).catch(() => null);
-    const manifestVersionMismatch = existingManifest?.manifestVersion !== CURRENT_MANIFEST_VERSION;
-    const persistedManifest = manifestVersionMismatch ? null : existingManifest;
+    const previousSettings = previous?.settings ?? null;
+    const interpolationChanged = previousSettings?.interpolation && previousSettings.interpolation !== interpolation;
 
     const nowIso = new Date().toISOString();
-    const manifest: FusionManifest = persistedManifest ?? {
+    const manifest: FusionManifest = {
       manifestVersion: CURRENT_MANIFEST_VERSION,
       studyId,
       patientId,
@@ -194,7 +348,7 @@ export class FusionManifestService {
       primarySeriesInstanceUID: primarySeries.seriesInstanceUID,
       primarySeriesDescription: primarySeries.seriesDescription ?? null,
       primaryModality: primarySeries.modality ?? null,
-      createdAt: existingManifest?.createdAt ?? nowIso,
+      createdAt: previous?.createdAt ?? nowIso,
       updatedAt: nowIso,
       settings: {
         interpolation,
@@ -203,20 +357,21 @@ export class FusionManifestService {
       secondaries: [],
     };
 
-    manifest.manifestVersion = CURRENT_MANIFEST_VERSION;
-    manifest.updatedAt = nowIso;
-    manifest.settings = { interpolation, preload };
+    const overlayMap = this.overlays.get(primarySeriesId);
+    let existingIds: number[] = [];
+    if (overlayMap) {
+      existingIds = Array.from(overlayMap.keys());
+    } else if (previous) {
+      existingIds = previous.secondaries.map((sec) => sec.secondarySeriesId);
+    }
 
-    const secondarySource = existingManifest ?? null;
-    const secondaryIdsToProcess = secondarySeriesIds.length
-      ? secondarySeriesIds
-      : (secondarySource?.secondaries.map(sec => sec.secondarySeriesId) ?? []);
+    const secondaryIdsToProcess = secondarySeriesIds.length ? secondarySeriesIds : existingIds;
 
-    const updatedSecondaries: FusionSecondaryDescriptor[] = [];
-    const effectiveForce = force || manifestVersionMismatch;
+    const processedDescriptors: FusionSecondaryDescriptor[] = [];
+    const processedIds = new Set<number>();
+    const effectiveForce = force || interpolationChanged;
 
     for (const secondarySeriesId of secondaryIdsToProcess) {
-      const existing = existingManifest?.secondaries.find(sec => sec.secondarySeriesId === secondarySeriesId);
       try {
         const descriptor = await this.ensureSecondary({
           primarySeries,
@@ -224,61 +379,71 @@ export class FusionManifestService {
           secondarySeriesId,
           interpolation,
           force: effectiveForce,
-          resetCache: manifestVersionMismatch,
+          resetCache: interpolationChanged,
           logger,
-          aggregatedManifestPath: manifestPath,
         });
-        updatedSecondaries.push(descriptor);
+        processedDescriptors.push(descriptor);
+        processedIds.add(secondarySeriesId);
       } catch (err: any) {
+        const existing = previous?.secondaries.find((sec) => sec.secondarySeriesId === secondarySeriesId);
         const message = err?.message || String(err);
-        const stderr = err?.context?.stderr ?? null;
-        const stdout = err?.context?.stdout ?? null;
-        const code = err?.context?.code ?? null;
-        logger?.('warn', 'Fusion secondary generation failed', {
-          primarySeriesId,
+        processedDescriptors.push(createSecondaryDescriptor(existing ?? {
           secondarySeriesId,
+          secondarySeriesInstanceUID: '',
+          secondarySeriesDescription: null,
+          secondaryModality: null,
+          registrationId: null,
+          status: 'error',
+          generatedAt: null,
+          frameOfReferenceUID: null,
+          sliceCount: 0,
+          rows: null,
+          columns: null,
+          pixelSpacing: null,
+          imageOrientationPatient: null,
+          imagePositionPatientFirst: null,
+          imagePositionPatientLast: null,
+          windowCenter: null,
+          windowWidth: null,
+          outputDirectory: '',
+          manifestPath: '',
+          instances: [],
           error: message,
-          code,
-          stderr,
-          stdout,
-        });
-        if (existing) {
-          updatedSecondaries.push(createSecondaryDescriptor(existing, {
-            status: 'error',
-            error: message,
-            generatedAt: existing.generatedAt ?? nowIso,
-          }));
-        } else {
-          updatedSecondaries.push({
-            secondarySeriesId,
-            secondarySeriesInstanceUID: '',
-            secondarySeriesDescription: null,
-            secondaryModality: null,
-            registrationId: null,
-            status: 'error',
-            generatedAt: null,
-            frameOfReferenceUID: null,
-            sliceCount: 0,
-            rows: null,
-            columns: null,
-            pixelSpacing: null,
-            imageOrientationPatient: null,
-            imagePositionPatientFirst: null,
-            imagePositionPatientLast: null,
-            windowCenter: null,
-            windowWidth: null,
-            outputDirectory: '',
-            manifestPath: '',
-            instances: [],
-            error: message,
-          });
-        }
+        }, {
+          status: 'error',
+          error: message,
+          generatedAt: new Date().toISOString(),
+        }));
+        processedIds.add(secondarySeriesId);
       }
     }
 
-    manifest.secondaries = updatedSecondaries;
+    if (overlayMap) {
+      overlayMap.forEach((entry, secondaryId) => {
+        if (!processedIds.has(secondaryId)) {
+          processedDescriptors.push(cloneDescriptor(entry.descriptor));
+        }
+      });
+    } else if (previous) {
+      previous.secondaries.forEach((entry) => {
+        if (!processedIds.has(entry.secondarySeriesId)) {
+          processedDescriptors.push(cloneDescriptor(entry));
+        }
+      });
+    }
 
-    await writeManifestToDisk(manifestPath, manifest);
+    const order = previous?.secondaries.map((sec) => sec.secondarySeriesId) ?? [];
+    const orderIndex = new Map(order.map((id, idx) => [id, idx] as const));
+    processedDescriptors.sort((a, b) => {
+      const aIdx = orderIndex.get(a.secondarySeriesId);
+      const bIdx = orderIndex.get(b.secondarySeriesId);
+      if (aIdx != null && bIdx != null && aIdx !== bIdx) return aIdx - bIdx;
+      if (aIdx != null) return -1;
+      if (bIdx != null) return 1;
+      return a.secondarySeriesId - b.secondarySeriesId;
+    });
+
+    manifest.secondaries = processedDescriptors.map(cloneDescriptor);
     return manifest;
   }
 
@@ -290,32 +455,22 @@ export class FusionManifestService {
     force: boolean;
     resetCache: boolean;
     logger?: FuseboxLogEmitter;
-    aggregatedManifestPath: string;
   }): Promise<FusionSecondaryDescriptor> {
-    const { primarySeries, primarySeriesId, secondarySeriesId, interpolation, force, resetCache, logger, aggregatedManifestPath } = options;
+    const { primarySeries, primarySeriesId, secondarySeriesId, interpolation, force, resetCache, logger } = options;
+
+    const overlayMap = this.getOverlayMap(primarySeriesId);
+    if (!force && !resetCache && overlayMap.has(secondarySeriesId)) {
+      return cloneDescriptor(overlayMap.get(secondarySeriesId)!.descriptor);
+    }
+
+    if (resetCache || force) {
+      overlayMap.delete(secondarySeriesId);
+    }
+
     const secondarySeries = await storage.getSeriesById(secondarySeriesId);
     if (!secondarySeries) {
       throw new Error(`Secondary series ${secondarySeriesId} not found`);
     }
-
-    const { studyId, studyInstanceUID, patientId, patientDicomId } = await resolvePatientInfo(primarySeriesId);
-
-    const pathInput = {
-      patientId: patientDicomId ?? String(patientId ?? 'unknown'),
-      studyInstanceUID,
-      primarySeriesInstanceUID: primarySeries.seriesInstanceUID,
-      secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
-    };
-
-    const pairRoot = fusionPairRoot(pathInput);
-    if (force || resetCache) {
-      await fs.promises.rm(pairRoot, { recursive: true, force: true }).catch(() => {});
-    }
-
-    ensureFusionDirectories(pathInput);
-
-    const dicomOutputDir = fusionDicomPath(pathInput);
-    const metadataPath = fusionMetadataPath(pathInput);
 
     const primaryFiles = await collectSeriesFiles(primarySeriesId);
     const secondaryFiles = await collectSeriesFiles(secondarySeriesId);
@@ -323,10 +478,15 @@ export class FusionManifestService {
       throw new Error('Primary or secondary series missing DICOM files');
     }
 
-    const primaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(primarySeriesId));
-    const secondaryImages = sortImagesByInstance(await storage.getImagesBySeriesId(secondarySeriesId));
-    const primaryFirstFile = primaryImages[0]?.filePath || primaryFiles[0];
-    const secondaryFirstFile = secondaryImages[0]?.filePath || secondaryFiles[0];
+    const [primaryImages, secondaryImages] = await Promise.all([
+      storage.getImagesBySeriesId(primarySeriesId),
+      storage.getImagesBySeriesId(secondarySeriesId),
+    ]);
+
+    const sortedPrimaryImages = sortImagesByInstance(primaryImages || []);
+    const sortedSecondaryImages = sortImagesByInstance(secondaryImages || []);
+    const primaryFirstFile = sortedPrimaryImages[0]?.filePath || primaryFiles[0];
+    const secondaryFirstFile = sortedSecondaryImages[0]?.filePath || secondaryFiles[0];
 
     const primaryMeta = loadDicomMetadata(primaryFirstFile);
     const secondaryMeta = loadDicomMetadata(secondaryFirstFile);
@@ -336,47 +496,17 @@ export class FusionManifestService {
       throw new Error('Registration transform unavailable for series pair');
     }
 
-    const registrationId = transformInfo.registrationId ?? null;
-    const baseRunContext = {
-      primarySeriesId,
-      secondarySeriesId,
-      registrationId,
-      transformSource: transformInfo.transformSource ?? null,
-      outputDirectory: dicomOutputDir,
-      manifestPath: aggregatedManifestPath,
-    } as const;
+    const outputBase = path.join(process.cwd(), 'tmp');
+    await fs.promises.mkdir(outputBase, { recursive: true });
+    const pairRoot = await fs.promises.mkdtemp(TMP_FUSEBOX_PREFIX);
 
-    if (!force) {
-      const expectedFirstInstance = path.join(dicomOutputDir, 'slice_0000.dcm');
-      if (fileExists(expectedFirstInstance) && fileExists(aggregatedManifestPath)) {
-        const descriptor = await this.buildDescriptorFromExisting({
-          secondarySeries,
-          aggregatedManifestPath,
-          dicomOutputDir,
-        });
-        if (descriptor) {
-          await markFuseboxRunReady({
-            ...baseRunContext,
-            manifestPath: descriptor.manifestPath || aggregatedManifestPath,
-            outputDirectory: descriptor.outputDirectory,
-            sliceCount: descriptor.sliceCount ?? null,
-            rows: descriptor.rows ?? null,
-            columns: descriptor.columns ?? null,
-          });
-          return descriptor;
-        }
-      }
-    }
-
-    const metadataPayload = this.buildResampleMetadata({
+    const metadataPayload = buildResampleMetadata({
       primarySeries,
       secondarySeries,
       primaryMeta,
       secondaryMeta,
       transformInfo,
     });
-
-    await fs.promises.writeFile(metadataPath, JSON.stringify(metadataPayload, null, 2), 'utf-8').catch(() => {});
 
     const invertTransformFile = transformInfo.transformFile ? true : undefined;
     const request: VolumeResampleRequest = {
@@ -390,46 +520,35 @@ export class FusionManifestService {
       metadata: metadataPayload,
     };
 
+    const baseRunContext = {
+      primarySeriesId,
+      secondarySeriesId,
+      registrationId: transformInfo.registrationId ?? null,
+      transformSource: transformInfo.transformSource ?? null,
+      outputDirectory: 'memory',
+      manifestPath: 'memory',
+    } as const;
+
     await markFuseboxRunStarted(baseRunContext);
 
     let response: VolumeResampleResponse | null = null;
+    const buffers = new Map<string, Buffer>();
 
     try {
-      // Use a single authoritative path: the Python helper decides orientation/flattening.
       response = await this.resampler.execute(request);
-
       if (!response) {
         throw new Error('Fusebox resample failed');
       }
 
-      const seriesInstanceUID = response.seriesInstanceUID || transformInfo.registrationId || secondarySeries.seriesInstanceUID + '.fused';
-      const frameOfReferenceUID = response.frameOfReferenceUID || primaryMeta.frameOfReferenceUID || null;
-
-      const fusedSeries = await this.ensureSeriesRecord({
-        primarySeries,
-        secondarySeries,
-        studyId,
-        seriesInstanceUID,
-        modality: response.modality ?? secondarySeries.modality,
-        description: response.seriesDescription ?? `Fused ${secondarySeries.seriesDescription || secondarySeries.modality}`,
-        sliceCount: response.sliceCount,
-        transformInfo,
-        interpolation,
-      });
-
-      await this.replaceSeriesImages({
-        seriesId: fusedSeries.id,
-        instances: response.instances,
-        frameOfReferenceUID,
-        pixelSpacing: response.pixelSpacing,
-        imageOrientationPatient: response.imageOrientationPatient,
-        primaryMeta,
-        secondaryMeta,
-      });
+      const frameOfReferenceUID = response.frameOfReferenceUID
+        || primaryMeta.frameOfReferenceUID
+        || secondaryMeta.frameOfReferenceUID
+        || null;
 
       const pixelSpacing = Array.isArray(response.pixelSpacing) && response.pixelSpacing.length >= 2
         ? [Number(response.pixelSpacing[0]), Number(response.pixelSpacing[1])] as [number, number]
         : null;
+
       const orientation = Array.isArray(response.imageOrientationPatient) && response.imageOrientationPatient.length >= 6
         ? [
             Number(response.imageOrientationPatient[0]),
@@ -440,6 +559,7 @@ export class FusionManifestService {
             Number(response.imageOrientationPatient[5]),
           ] as [number, number, number, number, number, number]
         : null;
+
       const positionFirst = Array.isArray(response.imagePositionPatientFirst) && response.imagePositionPatientFirst.length >= 3
         ? [
             Number(response.imagePositionPatientFirst[0]),
@@ -447,6 +567,7 @@ export class FusionManifestService {
             Number(response.imagePositionPatientFirst[2]),
           ] as [number, number, number]
         : null;
+
       const positionLast = Array.isArray(response.imagePositionPatientLast) && response.imagePositionPatientLast.length >= 3
         ? [
             Number(response.imagePositionPatientLast[0]),
@@ -455,299 +576,104 @@ export class FusionManifestService {
           ] as [number, number, number]
         : null;
 
-    const parsePosition = (value: unknown): [number, number, number] | null => {
-      if (!value) return null;
-      if (Array.isArray(value) && value.length >= 3) {
-        const coords = value.map((component) => Number(component)) as [number, number, number];
-        if (coords.every((component) => Number.isFinite(component))) return coords;
-      }
-      if (typeof value === 'string') {
-        const parts = value.split('\\').map((part) => Number(part.trim()));
-        if (parts.length >= 3 && parts.every((component) => Number.isFinite(component))) {
-          return [parts[0], parts[1], parts[2]];
-        }
-      }
-      return null;
-    };
-
-    const primaryPositionMap = primaryImages.map((image, index) => {
-      const position = parsePosition(
-        image?.imagePositionPatient ??
-        image?.imagePosition ??
-        image?.metadata?.imagePositionPatient ??
-        image?.metadata?.imagePosition,
-      );
-      return {
+      const primaryPositionMap = sortedPrimaryImages.map((image, index) => ({
         sopInstanceUID: image?.sopInstanceUID ?? null,
         index,
-        position,
-      };
-    });
+        position: parsePosition(
+          image?.imagePositionPatient
+            ?? image?.imagePosition
+            ?? image?.metadata?.imagePositionPatient
+            ?? image?.metadata?.imagePosition,
+        ),
+      }));
 
-    const resolvePrimarySopForInstance = (inst: any, fallbackIndex: number): string | null => {
-      const instPosition = parsePosition(inst?.imagePositionPatient);
-      if (instPosition) {
-        const instZ = instPosition[2];
-        if (Number.isFinite(instZ)) {
-          let bestMatch: { sop: string | null; distance: number } | null = null;
-          primaryPositionMap.forEach((candidate) => {
-            if (!candidate.position || candidate.sopInstanceUID == null) return;
-            const distance = Math.abs(candidate.position[2] - instZ);
-            if (!bestMatch || distance < bestMatch.distance) {
-              bestMatch = { sop: candidate.sopInstanceUID, distance };
-            }
-          });
-          if (bestMatch?.sop) return bestMatch.sop;
+      const resolvePrimarySopForInstance = (inst: any, fallbackIndex: number): string | null => {
+        const instPosition = parsePosition(inst?.imagePositionPatient);
+        if (instPosition) {
+          const instZ = instPosition[2];
+          if (Number.isFinite(instZ)) {
+            let bestMatch: { sop: string | null; distance: number } | null = null;
+            primaryPositionMap.forEach((candidate) => {
+              if (!candidate.position || candidate.sopInstanceUID == null) return;
+              const distance = Math.abs(candidate.position[2] - instZ);
+              if (!bestMatch || distance < bestMatch.distance) {
+                bestMatch = { sop: candidate.sopInstanceUID, distance };
+              }
+            });
+            if (bestMatch?.sop) return bestMatch.sop;
+          }
         }
+
+        const fallback = sortedPrimaryImages[fallbackIndex];
+        if (fallback?.sopInstanceUID) return fallback.sopInstanceUID;
+        const candidate = primaryPositionMap[fallbackIndex];
+        return candidate?.sopInstanceUID ?? null;
+      };
+
+      const responseInstances = Array.isArray(response.instances) ? response.instances : [];
+
+      for (const inst of responseInstances) {
+        if (!inst?.filePath) continue;
+        const buffer = await fs.promises.readFile(inst.filePath);
+        buffers.set(inst.sopInstanceUID, buffer);
       }
 
-      const fallback = primaryImages[fallbackIndex];
-      if (fallback?.sopInstanceUID) return fallback.sopInstanceUID;
-      const candidate = primaryPositionMap[fallbackIndex];
-      return candidate?.sopInstanceUID ?? null;
-    };
+      const descriptor: FusionSecondaryDescriptor = {
+        secondarySeriesId,
+        secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
+        secondarySeriesDescription: secondarySeries.seriesDescription ?? null,
+        secondaryModality: secondarySeries.modality ?? null,
+        registrationId: transformInfo.registrationId ?? null,
+        status: 'ready',
+        generatedAt: new Date().toISOString(),
+        frameOfReferenceUID,
+        sliceCount: response.sliceCount,
+        rows: response.rows,
+        columns: response.columns,
+        pixelSpacing,
+        imageOrientationPatient: orientation,
+        imagePositionPatientFirst: positionFirst,
+        imagePositionPatientLast: positionLast,
+        windowCenter: Array.isArray(response.windowCenter) ? response.windowCenter.map((v) => Number(v)) : null,
+        windowWidth: Array.isArray(response.windowWidth) ? response.windowWidth.map((v) => Number(v)) : null,
+        outputDirectory: 'memory',
+        manifestPath: 'memory',
+        instances: responseInstances.map((inst, idx) => {
+          return toInstanceDescriptor(inst, resolvePrimarySopForInstance(inst, idx), pixelSpacing, primarySeriesId, secondarySeriesId);
+        }),
+      };
 
-    const descriptor: FusionSecondaryDescriptor = {
-      secondarySeriesId,
-      secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
-      secondarySeriesDescription: secondarySeries.seriesDescription ?? null,
-      secondaryModality: secondarySeries.modality ?? null,
-      registrationId: transformInfo.registrationId ?? null,
-      status: 'ready',
-      generatedAt: new Date().toISOString(),
-      frameOfReferenceUID,
-      sliceCount: response.sliceCount,
-      rows: response.rows,
-      columns: response.columns,
-      pixelSpacing,
-      imageOrientationPatient: orientation,
-      imagePositionPatientFirst: positionFirst,
-      imagePositionPatientLast: positionLast,
-      windowCenter: Array.isArray(response.windowCenter) ? response.windowCenter : null,
-      windowWidth: Array.isArray(response.windowWidth) ? response.windowWidth : null,
-      outputDirectory: response.outputDirectory,
-      manifestPath: response.manifestPath ?? path.join(dicomOutputDir, 'manifest.json'),
-      instances: response.instances.map((inst, idx) => {
-        const mappedPrimarySop = resolvePrimarySopForInstance(inst, idx);
-        return toInstanceDescriptor(inst, mappedPrimarySop);
-      }),
-    };
+      overlayMap.set(secondarySeriesId, {
+        descriptor,
+        buffers,
+      });
 
       await markFuseboxRunReady({
         ...baseRunContext,
-        manifestPath: descriptor.manifestPath || response.manifestPath || aggregatedManifestPath,
-        outputDirectory: descriptor.outputDirectory,
-        sliceCount: descriptor.sliceCount ?? null,
-        rows: descriptor.rows ?? null,
-        columns: descriptor.columns ?? null,
+        sliceCount: descriptor.sliceCount,
+        rows: descriptor.rows,
+        columns: descriptor.columns,
       });
 
-      return descriptor;
+      return cloneDescriptor(descriptor);
     } catch (err: any) {
       const message = err?.message || String(err);
       await markFuseboxRunFailed({
         ...baseRunContext,
         error: message,
       });
+      overlayMap.delete(secondarySeriesId);
       throw err;
+    } finally {
+      await fs.promises.rm(pairRoot, { recursive: true, force: true }).catch(() => {});
     }
-  }
-
-  private buildResampleMetadata(input: {
-    primarySeries: any;
-    secondarySeries: any;
-    primaryMeta: ReturnType<typeof loadDicomMetadata>;
-    secondaryMeta: ReturnType<typeof loadDicomMetadata>;
-    transformInfo: any;
-  }): any {
-    const { primarySeries, secondarySeries, primaryMeta, secondaryMeta, transformInfo } = input;
-
-    const imageType = ['DERIVED', 'SECONDARY', 'FUSED'];
-    const derivationDescription = `Resampled ${secondarySeries.seriesDescription || secondarySeries.modality || 'secondary'} into ${primarySeries.seriesDescription || primarySeries.modality || 'primary'} frame of reference`;
-
-    return {
-      patient: {
-        PatientID: primaryMeta.patientID ?? secondaryMeta.patientID ?? null,
-        PatientName: primaryMeta.patientName ?? secondaryMeta.patientName ?? null,
-        PatientBirthDate: primaryMeta.patientBirthDate ?? secondaryMeta.patientBirthDate ?? null,
-        PatientSex: primaryMeta.patientSex ?? secondaryMeta.patientSex ?? null,
-        PatientAge: primaryMeta.patientAge ?? secondaryMeta.patientAge ?? null,
-      },
-      study: {
-        StudyInstanceUID: primaryMeta.studyInstanceUID ?? secondaryMeta.studyInstanceUID ?? null,
-        StudyDescription: primaryMeta.studyDescription ?? secondaryMeta.studyDescription ?? null,
-        StudyDate: primaryMeta.studyDate ?? secondaryMeta.studyDate ?? null,
-        StudyTime: primaryMeta.studyTime ?? secondaryMeta.studyTime ?? null,
-        AccessionNumber: primaryMeta.accessionNumber ?? secondaryMeta.accessionNumber ?? null,
-      },
-      primarySeries: {
-        SeriesInstanceUID: primarySeries.seriesInstanceUID,
-        SeriesDescription: primarySeries.seriesDescription,
-        SeriesNumber: primarySeries.seriesNumber,
-        Modality: primarySeries.modality,
-        FrameOfReferenceUID: primaryMeta.frameOfReferenceUID,
-        ImageOrientationPatient: primaryMeta.imageOrientationPatient,
-        PixelSpacing: primaryMeta.pixelSpacing,
-        SliceThickness: primaryMeta.sliceThickness,
-        SpacingBetweenSlices: primaryMeta.spacingBetweenSlices,
-        WindowCenter: primaryMeta.windowCenter,
-        WindowWidth: primaryMeta.windowWidth,
-      },
-      secondarySeries: {
-        SeriesInstanceUID: secondarySeries.seriesInstanceUID,
-        SeriesDescription: secondarySeries.seriesDescription,
-        SeriesNumber: secondarySeries.seriesNumber,
-        Modality: secondarySeries.modality,
-        WindowCenter: secondaryMeta.windowCenter,
-        WindowWidth: secondaryMeta.windowWidth,
-        RescaleIntercept: secondaryMeta.rescaleIntercept,
-        RescaleSlope: secondaryMeta.rescaleSlope,
-        PhotometricInterpretation: secondaryMeta.photometricInterpretation,
-        SamplesPerPixel: secondaryMeta.samplesPerPixel,
-        BitsAllocated: secondaryMeta.bitsAllocated,
-        BitsStored: secondaryMeta.bitsStored,
-        HighBit: secondaryMeta.highBit,
-        PixelRepresentation: secondaryMeta.pixelRepresentation,
-      },
-      derivedSeries: {
-        SeriesDescription: `Fused ${secondarySeries.seriesDescription ?? secondarySeries.modality ?? 'Secondary'}`,
-        ImageType: imageType,
-        DerivationDescription: derivationDescription,
-        ReferencedSeriesInstanceUID: primarySeries.seriesInstanceUID,
-        RegistrationId: transformInfo.registrationId,
-        WindowCenter: secondaryMeta.windowCenter,
-        WindowWidth: secondaryMeta.windowWidth,
-      },
-    };
-  }
-
-  private async ensureSeriesRecord(input: {
-    primarySeries: any;
-    secondarySeries: any;
-    studyId: number;
-    seriesInstanceUID: string;
-    modality: string | null;
-    description: string | null;
-    sliceCount: number;
-    transformInfo: any;
-    interpolation: InterpolationMode;
-  }) {
-    const { primarySeries, secondarySeries, studyId, seriesInstanceUID, modality, description, sliceCount, transformInfo, interpolation } = input;
-
-    let existing = await storage.getSeriesByUID(seriesInstanceUID);
-    if (!existing) {
-      existing = await storage.createSeries({
-        studyId,
-        seriesInstanceUID,
-        seriesDescription: description,
-        modality: modality ?? secondarySeries.modality ?? primarySeries.modality,
-        seriesNumber: (secondarySeries.seriesNumber ?? primarySeries.seriesNumber ?? 9901) + 1000,
-        imageCount: sliceCount,
-        sliceThickness: secondarySeries.sliceThickness ?? primarySeries.sliceThickness ?? null,
-        metadata: {
-          fusion: {
-            primarySeriesId: primarySeries.id,
-            secondarySeriesId: secondarySeries.id,
-            registrationId: transformInfo.registrationId ?? null,
-            transformSource: transformInfo.transformSource ?? null,
-            interpolation,
-            generatedAt: new Date().toISOString(),
-          },
-        },
-      });
-    } else {
-      const existingMetadata = (existing.metadata ?? {}) as Record<string, unknown>;
-      await db
-        .update(seriesTable)
-        .set({
-          seriesDescription: description,
-          modality: modality ?? existing.modality,
-          imageCount: sliceCount,
-          metadata: {
-            ...existingMetadata,
-            fusion: {
-              primarySeriesId: primarySeries.id,
-              secondarySeriesId: secondarySeries.id,
-              registrationId: transformInfo.registrationId ?? null,
-              transformSource: transformInfo.transformSource ?? null,
-              interpolation,
-              generatedAt: new Date().toISOString(),
-            },
-          },
-        })
-        .where(eq(seriesTable.id, existing.id));
-      const refreshed = await storage.getSeriesById(existing.id);
-      if (refreshed) existing = refreshed;
-    }
-
-    return existing;
-  }
-
-  private async replaceSeriesImages(input: {
-    seriesId: number;
-    instances: any[];
-    frameOfReferenceUID: string | null;
-    pixelSpacing: number[] | null;
-    imageOrientationPatient: number[] | null;
-    primaryMeta: ReturnType<typeof loadDicomMetadata>;
-    secondaryMeta: ReturnType<typeof loadDicomMetadata>;
-  }) {
-    const { seriesId, instances, frameOfReferenceUID, pixelSpacing, imageOrientationPatient, primaryMeta, secondaryMeta } = input;
-
-    await db.delete(imagesTable).where(eq(imagesTable.seriesId, seriesId));
-
-    for (const instance of instances) {
-      const stats = await fs.promises.stat(instance.filePath);
-      const fileSize = stats.size;
-      const imageOrientation = imageOrientationPatient ?? primaryMeta.imageOrientationPatient ?? null;
-
-      await storage.createImage({
-        seriesId,
-        sopInstanceUID: instance.sopInstanceUID,
-        instanceNumber: instance.instanceNumber,
-        filePath: instance.filePath,
-        fileName: instance.fileName,
-        fileSize,
-        imagePosition: instance.imagePositionPatient ?? null,
-        imageOrientation: imageOrientation,
-        pixelSpacing: pixelSpacing ?? primaryMeta.pixelSpacing ?? null,
-        sliceLocation: instance.sliceLocation != null ? String(instance.sliceLocation) : null,
-        windowCenter: instance.windowCenter ? instance.windowCenter.join('\\') : null,
-        windowWidth: instance.windowWidth ? instance.windowWidth.join('\\') : null,
-        metadata: {
-          frameOfReferenceUID,
-          source: {
-            primary: primaryMeta.seriesInstanceUID,
-            secondary: secondaryMeta.seriesInstanceUID,
-          },
-        },
-      });
-    }
-  }
-
-  private async buildDescriptorFromExisting(input: {
-    secondarySeries: any;
-    aggregatedManifestPath: string;
-    dicomOutputDir: string;
-  }): Promise<FusionSecondaryDescriptor | null> {
-    const { secondarySeries, aggregatedManifestPath, dicomOutputDir } = input;
-    const manifest = await readManifestFromDisk(aggregatedManifestPath);
-    if (!manifest) return null;
-    const descriptor = manifest.secondaries?.find(sec => sec.secondarySeriesId === secondarySeries.id);
-    if (!descriptor) return null;
-
-    const sampleFile = path.join(dicomOutputDir, 'slice_0000.dcm');
-    if (!fileExists(sampleFile)) return null;
-
-    return createSecondaryDescriptor(descriptor, {
-      secondarySeriesId: secondarySeries.id,
-      secondarySeriesInstanceUID: secondarySeries.seriesInstanceUID,
-      secondarySeriesDescription: secondarySeries.seriesDescription ?? descriptor.secondarySeriesDescription ?? null,
-      secondaryModality: secondarySeries.modality ?? descriptor.secondaryModality ?? null,
-      status: 'ready',
-      error: undefined,
-    });
   }
 }
+
+const cloneManifest = (manifest: FusionManifest): FusionManifest => ({
+  ...manifest,
+  settings: { ...manifest.settings },
+  secondaries: manifest.secondaries.map(cloneDescriptor),
+});
 
 export const fusionManifestService = new FusionManifestService();

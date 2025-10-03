@@ -855,6 +855,7 @@ export function SeriesSelector({
                             if (modalityOf(s) !== 'CT') return false;
                             if (!candidateSet.has(s.id)) return false;
                             if (ctIdsLinkedToPet.has(s.id)) return false;
+                            if (ptAssoc.length && ptAssoc.some((pet) => Number(pet.studyId) === Number(s.studyId))) return false;
                             return true;
                           });
                           return (
@@ -1214,16 +1215,19 @@ export function SeriesSelector({
                                          .filter((ctEntry) => ctEntry.id !== seriesItem.id);
                                      }
 
-                                     if (!ctSiblings.length && hasExplicitPetCandidates) {
+                                     if (!ctSiblings.length) {
                                        ctSiblings = series.filter((ctCandidate) => {
                                          if (modalityOf(ctCandidate) !== 'CT') return false;
                                          if (ctCandidate.id === seriesItem.id) return false;
-                                         if (!candidateSetWithPrimary.has(ctCandidate.id)) return false;
                                          const ctStudyIdNumber = Number(ctCandidate?.studyId);
                                          if (!Number.isFinite(ptStudyIdNumber) || !Number.isFinite(ctStudyIdNumber)) {
                                            return false;
                                          }
-                                         return ctStudyIdNumber === ptStudyIdNumber;
+                                         if (ctStudyIdNumber !== ptStudyIdNumber) return false;
+                                         if (petMapForPrimary && petMapForPrimary.size && !candidateSetWithPrimary.has(ctCandidate.id)) {
+                                           return false;
+                                         }
+                                         return true;
                                        });
                                      }
                                      const loadingState = secondaryLoadingStates?.get(ptS.id);

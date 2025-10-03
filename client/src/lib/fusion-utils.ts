@@ -206,14 +206,17 @@ function createSliceFromDicom(
 async function loadSlice(
   cache: SecondaryCacheEntry,
   instance: FusionInstanceDescriptor,
+  primarySeriesId: number,
+  secondarySeriesId: number,
 ): Promise<FuseboxSlice> {
   const cached = cache.slices.get(instance.sopInstanceUID);
   if (cached) return cached;
 
   const promise = (async () => {
-    const response = await fetch(`/api/images/${encodeURIComponent(instance.sopInstanceUID)}`, {
-      cache: 'force-cache',
-    });
+    const response = await fetch(
+      `/api/fusion/secondary/${primarySeriesId}/${secondarySeriesId}/${encodeURIComponent(instance.sopInstanceUID)}`,
+      { cache: 'no-store' },
+    );
     if (!response.ok) {
       throw new Error(`Failed to load fused image ${instance.sopInstanceUID} (${response.status} ${response.statusText})`);
     }
@@ -292,7 +295,7 @@ export async function preloadFusionSecondary(
     const total = instances.length;
     let completed = 0;
     for (const instance of instances) {
-      await loadSlice(cache, instance);
+      await loadSlice(cache, instance, primarySeriesId, secondarySeriesId);
       completed += 1;
       onProgress?.({ completed, total });
     }
@@ -323,7 +326,7 @@ export async function getFusedSlice(
     throw new Error(`Fusion SOP ${sopInstanceUID} not found in manifest`);
   }
 
-  return loadSlice(cache, instance);
+  return loadSlice(cache, instance, primarySeriesId, secondarySeriesId);
 }
 
 // More tolerant lookup that falls back when SOP UIDs differ between primary and fused instances
@@ -378,7 +381,7 @@ export async function getFusedSliceSmart(
     target = descriptor.instances[Math.floor(descriptor.instances.length / 2)];
   }
   if (!target) throw new Error('Fusion instance not found');
-  return loadSlice(cache, target);
+  return loadSlice(cache, target, primarySeriesId, secondarySeriesId);
 }
 
 export function fuseboxSliceToImageData(
@@ -485,11 +488,36 @@ export function getFusionSecondaryStatus(primarySeriesId: number, secondarySerie
   return manifestCache.get(primarySeriesId)?.secondaries.get(secondarySeriesId)?.status;
 }
 
-export function clearFusionCaches(primarySeriesId?: number) {
+export function clearFusionCaches(primarySeriesId?: number, secondarySeriesId?: number) {
   if (typeof primarySeriesId === 'number' && Number.isFinite(primarySeriesId)) {
-    manifestCache.delete(primarySeriesId);
+    const entry = manifestCache.get(primarySeriesId);
+    if (entry) {
+      if (typeof secondarySeriesId === 'number' && Number.isFinite(secondarySeriesId)) {
+        entry.secondaries.delete(secondarySeriesId);
+        entry.manifest.secondaries = entry.manifest.secondaries.filter(
+          (sec) => sec.secondarySeriesId !== secondarySeriesId,
+        );
+      } else {
+        manifestCache.delete(primarySeriesId);
+      }
+    }
   } else {
     manifestCache.clear();
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const url = new URL('/api/fusion/cache', window.location.origin);
+      if (typeof primarySeriesId === 'number' && Number.isFinite(primarySeriesId)) {
+        url.searchParams.set('primarySeriesId', String(primarySeriesId));
+        if (typeof secondarySeriesId === 'number' && Number.isFinite(secondarySeriesId)) {
+          url.searchParams.set('secondarySeriesId', String(secondarySeriesId));
+        }
+      }
+      fetch(url.toString(), { method: 'DELETE', keepalive: true }).catch(() => {});
+    } catch (error) {
+      console.warn('Failed to clear fusion cache on server', error);
+    }
   }
 }
 
