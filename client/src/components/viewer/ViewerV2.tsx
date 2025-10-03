@@ -9,9 +9,9 @@
  * Agent 5: Integration (updated to mount legacy UI components)
  */
 
-import { useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo, useCallback } from 'react';
 import { ViewerShell } from './ViewerShell';
-import { PrimaryViewport } from './PrimaryViewport';
+import { PrimaryViewport, useViewport } from './PrimaryViewport';
 import { useViewportTools } from '@/hooks/useViewportTools';
 import { RTProvider, useRT } from '@/rt-structures/RTProvider';
 import RTOverlayLayer from '@/rt-structures/components/RTOverlayLayer';
@@ -40,8 +40,474 @@ interface ViewerV2Props {
   initialSeriesList?: DICOMSeries[];
 }
 
+type FusionContextLike = ReturnType<typeof useFusion>;
+
+interface ViewerV2ContentProps extends ViewerV2Props {
+  fusionCandidatesByPrimary?: Map<number, number[]>;
+  fusionSiblingMap?: Map<number, Map<'PET' | 'MR', Map<number, number[]>>>;
+  regAssociationsRecord?: Record<number, number[]>;
+  registrationCtacIds?: number[];
+}
+
+interface ViewerV2OverlayContentProps {
+  fusion: FusionContextLike | null;
+  fusionOpacity: number;
+  showFusionPanel: boolean;
+  fusionMinimized: boolean;
+  onFusionMinimizedChange: (value: boolean) => void;
+  rt: ReturnType<typeof useRT>;
+  isContourEditMode: boolean;
+  setIsContourEditMode: (value: boolean) => void;
+  showBooleanOperations: boolean;
+  setShowBooleanOperations: (value: boolean) => void;
+  showMarginToolbar: boolean;
+  setShowMarginToolbar: (value: boolean) => void;
+  handleMarginOperation: (operation: {
+    type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
+    parameters: any;
+    structureId: number;
+    targetStructureId?: number | 'new';
+    preview?: boolean;
+  }) => Promise<void>;
+  legacyImageMetadata: any;
+  seriesId: number;
+}
+
+function ViewerV2OverlayContent({
+  fusion,
+  fusionOpacity,
+  showFusionPanel,
+  fusionMinimized,
+  onFusionMinimizedChange,
+  rt,
+  isContourEditMode,
+  setIsContourEditMode,
+  showBooleanOperations,
+  setShowBooleanOperations,
+  showMarginToolbar,
+  setShowMarginToolbar,
+  handleMarginOperation,
+  legacyImageMetadata,
+  seriesId,
+}: ViewerV2OverlayContentProps) {
+  const viewport = useViewport();
+
+  const currentImage = viewport.currentImage as any;
+  const currentSlicePosition = useMemo(() => {
+    if (!currentImage) return viewport.currentIndex + 1;
+    if (currentImage.parsedSliceLocation != null) return currentImage.parsedSliceLocation;
+    if (currentImage.parsedZPosition != null) return currentImage.parsedZPosition;
+    const sliceLocation = currentImage.imageMetadata?.sliceLocation;
+    if (sliceLocation != null) {
+      const parsed = Number(sliceLocation);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const position = currentImage.imageMetadata?.imagePosition ?? currentImage.imagePositionPatient;
+    if (position) {
+      const values = Array.isArray(position)
+        ? position
+        : typeof position === 'string'
+          ? position.split('\\')
+          : [];
+      if (values.length >= 3) {
+        const parsed = Number(values[2]);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    return viewport.currentIndex + 1;
+  }, [currentImage, viewport.currentIndex]);
+
+  const worldToCanvas = useCallback(
+    (worldX: number, worldY: number): [number, number] => {
+      const transform = viewport.viewportTransform;
+      const metadata = viewport.imageMetadata;
+      if (!transform || !metadata) return [worldX, worldY];
+      const [rowSpacing, colSpacing] = metadata.pixelSpacing ?? [1, 1];
+      const [originX, originY] = metadata.imagePositionPatient ?? [0, 0, 0];
+      const pixelX = (worldX - originX) / (colSpacing || 1);
+      const pixelY = (worldY - originY) / (rowSpacing || 1);
+      return [
+        pixelX * transform.scale + transform.offsetX,
+        pixelY * transform.scale + transform.offsetY,
+      ];
+    },
+    [viewport.imageMetadata, viewport.viewportTransform],
+  );
+
+  const canvasToWorld = useCallback(
+    (canvasX: number, canvasY: number): [number, number] => {
+      const transform = viewport.viewportTransform;
+      const metadata = viewport.imageMetadata;
+      if (!transform || !metadata) return [canvasX, canvasY];
+      const [rowSpacing, colSpacing] = metadata.pixelSpacing ?? [1, 1];
+      const [originX, originY] = metadata.imagePositionPatient ?? [0, 0, 0];
+      const pixelX = (canvasX - transform.offsetX) / (transform.scale || 1);
+      const pixelY = (canvasY - transform.offsetY) / (transform.scale || 1);
+      return [
+        originX + pixelX * (colSpacing || 1),
+        originY + pixelY * (rowSpacing || 1),
+      ];
+    },
+    [viewport.imageMetadata, viewport.viewportTransform],
+  );
+
+  return (
+    <>
+      {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
+      <RTOverlayLayer />
+
+      <SimpleBrushTool
+        canvasRef={viewport.canvasRef}
+        isActive={rt.brush.enabled}
+        brushSize={rt.brush.size}
+        selectedStructure={rt.selection.selectedForEdit}
+        rtStructures={rt.rtStructures}
+        currentSlicePosition={currentSlicePosition}
+        onContourUpdate={async (payload: any) => {
+          if (!payload.action || !payload.structureId) return;
+
+          try {
+            rt.setBusy(true);
+            const service = createContourOperationsService();
+
+            let updatedStructures = rt.rtStructures;
+            if (payload.action === 'brush_stroke' || payload.action === 'smart_brush_stroke') {
+              updatedStructures = await service.addBrushStroke(
+                rt.rtStructures,
+                payload.structureId,
+                payload.slicePosition,
+                payload.points,
+              );
+            } else if (payload.action === 'erase_stroke') {
+              updatedStructures = await service.eraseBrushStroke(
+                rt.rtStructures,
+                payload.structureId,
+                payload.slicePosition,
+                payload.points,
+              );
+            }
+
+            rt.setStructures(updatedStructures);
+            rt.saveHistory(payload.action, payload.structureId);
+          } catch (err) {
+            console.error('[SimpleBrushTool] Error:', err);
+          } finally {
+            rt.setBusy(false);
+          }
+        }}
+        zoom={viewport.zoom}
+        panX={viewport.panX}
+        panY={viewport.panY}
+        imageMetadata={legacyImageMetadata}
+        isEraseMode={rt.brush.mode === 'erase'}
+        onBrushSizeChange={(size: number) => rt.setBrushSize(size)}
+        ctTransform={viewport.ctTransformRef}
+        dicomImage={currentImage}
+      />
+
+      <PenToolUnifiedV2
+        isActive={rt.pen.enabled}
+        canvasRef={viewport.canvasRef}
+        imageMetadata={legacyImageMetadata}
+        worldToCanvas={worldToCanvas}
+        canvasToWorld={canvasToWorld}
+        rtStructures={rt.rtStructures}
+        selectedStructure={rt.selection.selectedForEdit}
+        onContourUpdate={async (action: string, payload: any) => {
+          if (!payload.structureId) return;
+
+          try {
+            rt.setBusy(true);
+            const service = createContourOperationsService();
+
+            let updatedStructures = rt.rtStructures;
+            if (action === 'add_pen_stroke') {
+              updatedStructures = await service.addPenStroke(
+                rt.rtStructures,
+                payload.structureId,
+                payload.slicePosition,
+                payload.points,
+              );
+            } else if (action === 'cut_pen_stroke') {
+              updatedStructures = await service.cutPenStroke(
+                rt.rtStructures,
+                payload.structureId,
+                payload.slicePosition,
+                payload.points,
+              );
+            }
+
+            rt.setStructures(updatedStructures);
+            rt.saveHistory(action, payload.structureId);
+          } catch (err) {
+            console.error('[PenToolUnifiedV2] Error:', err);
+          } finally {
+            rt.setBusy(false);
+          }
+        }}
+      />
+
+      <div className="absolute bottom-4 right-4 space-y-2">
+        <div className="bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
+          <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
+          <div>Tool: {rt.activeTool ?? 'unknown'}</div>
+          <div className="text-gray-400 mt-2">Fusion: {showFusionPanel ? 'Ready' : 'N/A'}</div>
+          <div className="text-gray-400">RT: Provider Active</div>
+        </div>
+
+        {showFusionPanel && fusion && (
+          <div className="bg-black/80 border border-gray-700 rounded-md p-2">
+            <FusionPanel
+              minimized={fusionMinimized}
+              onToggleMinimized={onFusionMinimizedChange}
+            />
+          </div>
+        )}
+
+        <div className="bg-black/70 border border-gray-700 rounded-md p-2">
+          <RTControlPanel />
+        </div>
+      </div>
+
+      {isContourEditMode && rt.selection.selectedForEdit && rt.rtStructures && (
+        <ContourEditToolbar
+          selectedStructure={rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) || null}
+          isVisible={isContourEditMode}
+          onClose={() => {
+            setIsContourEditMode(false);
+            rt.setSelectedForEdit(null);
+          }}
+          onStructureNameChange={(name: string) => {
+            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
+            const updated = structuredClone(rt.rtStructures);
+            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
+            if (structure) {
+              structure.structureName = name;
+              rt.setStructures(updated);
+            }
+          }}
+          onStructureColorChange={(color: string) => {
+            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const rgb: [number, number, number] = [
+              Number.isFinite(r) ? r : 255,
+              Number.isFinite(g) ? g : 255,
+              Number.isFinite(b) ? b : 255,
+            ];
+            const updated = structuredClone(rt.rtStructures);
+            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
+            if (structure) {
+              structure.color = rgb;
+              rt.setStructures(updated);
+            }
+          }}
+          onToolChange={(toolState) => {
+            if (toolState.tool === 'brush') {
+              rt.setBrushMode('add');
+              rt.setBrushEnabled(true);
+              rt.setPenEnabled(false);
+            } else if (toolState.tool === 'eraser') {
+              rt.setBrushMode('erase');
+              rt.setBrushEnabled(true);
+              rt.setPenEnabled(false);
+            } else if (toolState.tool === 'pen') {
+              rt.setPenMode('add');
+              rt.setPenEnabled(true);
+              rt.setBrushEnabled(false);
+            } else if (toolState.tool === 'scissors') {
+              rt.setPenMode('cut');
+              rt.setPenEnabled(true);
+              rt.setBrushEnabled(false);
+            } else {
+              rt.setBrushEnabled(false);
+              rt.setPenEnabled(false);
+            }
+
+            if (toolState.brushSize !== undefined) {
+              rt.setBrushSize(toolState.brushSize);
+            }
+          }}
+          currentSlicePosition={currentSlicePosition}
+          onContourUpdate={async (payload) => {
+            if (!rt.rtStructures) return;
+
+            try {
+              rt.setBusy(true);
+              const { createContourOperationsService } = await import('@/rt-structures/services/ContourOperationsService');
+              const service = createContourOperationsService();
+
+              let updated = rt.rtStructures;
+
+              if (payload.action === 'smart_brush_stroke' || payload.action === 'brush_add') {
+                updated = await service.addBrushStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points,
+                );
+              } else if (payload.action === 'erase_stroke') {
+                updated = await service.eraseBrushStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points,
+                );
+              } else if (payload.action === 'add_pen_stroke') {
+                updated = await service.addPenStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points,
+                );
+              } else if (payload.action === 'cut_pen_stroke') {
+                updated = await service.cutPenStroke(
+                  rt.rtStructures,
+                  payload.structureId,
+                  payload.slicePosition,
+                  payload.points,
+                );
+              }
+
+              if (updated !== rt.rtStructures) {
+                rt.setStructures(updated);
+                rt.saveHistory(payload.action, payload.structureId);
+              }
+            } catch (err) {
+              console.error('[ViewerV2] Contour operation failed:', err);
+            } finally {
+              rt.setBusy(false);
+            }
+          }}
+          availableStructures={rt.rtStructures.structures}
+          onTargetStructureSelect={() => {}}
+          seriesId={seriesId}
+          imageMetadata={legacyImageMetadata}
+          onOpenBooleanOperations={() => {
+            setIsContourEditMode(false);
+            setShowMarginToolbar(false);
+            setShowBooleanOperations(true);
+          }}
+          onOpenAdvancedMarginTool={() => {
+            setIsContourEditMode(false);
+            setShowBooleanOperations(false);
+            setShowMarginToolbar(true);
+          }}
+        />
+      )}
+
+      {showBooleanOperations && rt.rtStructures && (
+        <BooleanOperationsToolbar
+          isVisible={showBooleanOperations}
+          onClose={() => {
+            setShowBooleanOperations(false);
+            rt.clearPreview();
+          }}
+          availableStructures={rt.rtStructures.structures?.map((s: any) => s.structureName) || []}
+          structures={rt.rtStructures.structures}
+          grid={{
+            xSize: 512,
+            ySize: 512,
+            zSize: 1,
+            xRes: 1,
+            yRes: 1,
+            zRes: 1,
+            origin: { x: 0, y: 0, z: 0 },
+          }}
+          structureColors={(rt.rtStructures.structures || []).reduce((acc: Record<string, string>, s: any) => {
+            if (s?.structureName && Array.isArray(s?.color)) {
+              acc[s.structureName] = `rgb(${s.color.join(',')})`;
+            }
+            return acc;
+          }, {})}
+          onPreview={(target, contours) => {
+            rt.setPreviewContours(contours.map((c: any) => ({
+              ...c,
+              color: [255, 223, 0],
+            })));
+          }}
+          onPreviewStateChange={(previewInfo) => {
+            if (!previewInfo.targetName) {
+              rt.clearPreview();
+            }
+          }}
+          onHighlightStructures={() => {}}
+          onApply={(target, contours) => {
+            if (!rt.rtStructures) return;
+            const updated = structuredClone(rt.rtStructures);
+            let targetStruct = updated.structures.find((s: any) => s.structureName?.toLowerCase() === (target.name || '').toLowerCase());
+            if (!targetStruct) {
+              const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+              targetStruct = {
+                roiNumber: maxRoi + 1,
+                structureName: target.name,
+                color: target.color || [59, 130, 246],
+                contours: [],
+              };
+              updated.structures.push(targetStruct);
+            }
+            targetStruct.contours = contours;
+            rt.setStructures(updated);
+            rt.saveHistory('boolean_operation', targetStruct.roiNumber);
+            rt.clearPreview();
+            setShowBooleanOperations(false);
+          }}
+          onExecuteOperation={() => {}}
+        />
+      )}
+
+      {showMarginToolbar && rt.selection.selectedForEdit && rt.rtStructures && (
+        <MarginToolbar
+          selectedStructure={rt.rtStructures.structures?.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) ? {
+            id: rt.selection.selectedForEdit!,
+            structureName: rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.structureName || 'Unknown',
+            color: `rgb(${rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.color?.join(',') || '255,255,255'})`,
+          } : null}
+          isVisible={showMarginToolbar}
+          onClose={() => setShowMarginToolbar(false)}
+          availableStructures={rt.rtStructures.structures?.map((s: any) => ({
+            id: s.roiNumber,
+            name: s.structureName,
+          })) || []}
+          onCreateNewStructure={(basedOnId) => {
+            const baseStructure = rt.rtStructures?.structures?.find((s: any) => s.roiNumber === basedOnId);
+            if (baseStructure && rt.rtStructures) {
+              const newName = `${baseStructure.structureName}_margin`;
+              const maxRoi = Math.max(0, ...rt.rtStructures.structures.map((s: any) => s.roiNumber || 0));
+              const updated = structuredClone(rt.rtStructures);
+              updated.structures.push({
+                roiNumber: maxRoi + 1,
+                structureName: newName,
+                color: baseStructure.color,
+                contours: [],
+              });
+              rt.setStructures(updated);
+              rt.saveHistory('create_structure', maxRoi + 1);
+            }
+          }}
+          onExecuteOperation={handleMarginOperation}
+          onPreviewClear={() => {
+            rt.clearPreview();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 // Inner component that uses both fusion and RT contexts
-function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: ViewerV2Props) {
+function ViewerV2Content({
+  patientId,
+  seriesId,
+  studyId,
+  initialSeriesList,
+  fusionCandidatesByPrimary,
+  fusionSiblingMap,
+  regAssociationsRecord,
+  registrationCtacIds,
+}: ViewerV2ContentProps) {
   const viewportRef = useRef<any>(null);
   const { activeTool, setMode, isPanMode, isCrosshairMode, isMeasureMode } = useViewportTools();
   const [fusionMinimized, setFusionMinimized] = useState(false);
@@ -57,10 +523,16 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const legacyImageMetadata = useMemo(() => {
     if (!imageMetadata) return null;
+    const pixelSpacing = Array.isArray(imageMetadata.pixelSpacing)
+      ? imageMetadata.pixelSpacing
+      : [1, 1];
+    const position = Array.isArray(imageMetadata.imagePositionPatient)
+      ? imageMetadata.imagePositionPatient
+      : [0, 0, 0];
     return {
       ...imageMetadata,
-      pixelSpacing: `${imageMetadata.pixelSpacing[0]}\\${imageMetadata.pixelSpacing[1]}`,
-      imagePosition: `${imageMetadata.imagePositionPatient[0]}\\${imageMetadata.imagePositionPatient[1]}\\${imageMetadata.imagePositionPatient[2]}`,
+      pixelSpacing: `${pixelSpacing[0] ?? 1}\\${pixelSpacing[1] ?? 1}`,
+      imagePosition: `${position[0] ?? 0}\\${position[1] ?? 0}\\${position[2] ?? 0}`,
       Columns: imageMetadata.columns,
       Rows: imageMetadata.rows,
       sliceThickness: imageMetadata.sliceThickness,
@@ -146,6 +618,50 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
 
   const fusionOpacity = fusion?.opacity ?? 0.5;
   const showFusionPanel = fusion?.showFusionPanel ?? false;
+  const fusionStatuses = useMemo(() => {
+    if (!fusion?.manifest?.secondaries) return undefined;
+    const statusMap = new Map<number, { status: 'idle' | 'loading' | 'ready' | 'error'; error?: string | null }>();
+    fusion.manifest.secondaries.forEach((descriptor: any) => {
+      const state = descriptor?.status;
+      let normalized: 'idle' | 'loading' | 'ready' | 'error';
+      switch (state) {
+        case 'ready':
+          normalized = 'ready';
+          break;
+        case 'error':
+          normalized = 'error';
+          break;
+        case 'pending':
+        case 'generating':
+          normalized = 'loading';
+          break;
+        default:
+          normalized = 'idle';
+          break;
+      }
+      statusMap.set(descriptor.secondarySeriesId, { status: normalized, error: descriptor.error ?? null });
+    });
+    fusion.secondaryStateMap?.forEach((value, key) => {
+      if (value.status === 'loading') {
+        statusMap.set(key, { status: 'loading', error: statusMap.get(key)?.error ?? null });
+      } else if (value.status === 'error') {
+        statusMap.set(key, { status: 'error', error: value.error ?? statusMap.get(key)?.error ?? null });
+      }
+    });
+    return statusMap;
+  }, [fusion?.manifest?.secondaries, fusion?.secondaryStateMap]);
+
+  const secondaryLoadingStates = useMemo(() => {
+    if (!fusion?.secondaryStateMap) return undefined;
+    const map = new Map<number, { progress: number; isLoading: boolean }>();
+    fusion.secondaryStateMap.forEach((value, key) => {
+      map.set(key, {
+        progress: value.progress ?? 0,
+        isLoading: value.status === 'loading',
+      });
+    });
+    return map;
+  }, [fusion?.secondaryStateMap]);
 
   const handleMarginOperation = async (operation: {
     type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
@@ -275,108 +791,24 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
           studyId={studyId}
           onImageMetadataChange={setImageMetadata}
         >
-            {/* Order: Fusion first (clears), RT second (strokes) */}
-            {fusion && <FusionOverlayLayer opacity={fusionOpacity} />}
-            <RTOverlayLayer />
-            
-            {/* Brush Tool - Active when brush is enabled in RTProvider */}
-            <SimpleBrushTool
-              canvasRef={viewportRef}
-              isActive={rt.brush.enabled}
-              brushSize={rt.brush.size}
-              selectedStructure={rt.selection.selectedForEdit}
-              rtStructures={rt.rtStructures}
-              currentSlicePosition={viewportRef.current?.currentImage?.parsedSliceLocation ?? 0}
-              onContourUpdate={async (payload: any) => {
-                if (!payload.action || !payload.structureId) return;
-                
-                try {
-                  rt.setBusy(true);
-                  const service = createContourOperationsService();
-                  
-                  let updatedStructures = rt.rtStructures;
-                  if (payload.action === 'brush_stroke' || payload.action === 'smart_brush_stroke') {
-                    updatedStructures = await service.addBrushStroke(
-                      rt.rtStructures,
-                      payload.structureId,
-                      payload.slicePosition,
-                      payload.points
-                    );
-                  } else if (payload.action === 'erase_stroke') {
-                    updatedStructures = await service.eraseBrushStroke(
-                      rt.rtStructures,
-                      payload.structureId,
-                      payload.slicePosition,
-                      payload.points
-                    );
-                  }
-                  
-                  rt.setStructures(updatedStructures);
-                  rt.saveHistory(payload.action, payload.structureId);
-                } catch (err) {
-                  console.error('[SimpleBrushTool] Error:', err);
-                } finally {
-                  rt.setBusy(false);
-                }
-              }}
-              zoom={viewportRef.current?.zoom ?? 1}
-              panX={viewportRef.current?.panX ?? 0}
-              panY={viewportRef.current?.panY ?? 0}
-              imageMetadata={legacyImageMetadata}
-              isEraseMode={rt.brush.mode === 'erase'}
-              onBrushSizeChange={(size: number) => rt.setBrushSize(size)}
-              ctTransform={null}
-            />
-            
-            {/* Pen Tool - Active when pen is enabled in RTProvider */}
-            <PenToolUnifiedV2
-              isActive={rt.pen.enabled}
-              canvasRef={viewportRef}
-              imageMetadata={legacyImageMetadata}
-              worldToCanvas={(x: number, y: number): [number, number] => {
-                // TODO: Implement proper world-to-canvas transform using viewport zoom/pan
-                return [x, y];
-              }}
-              canvasToWorld={(x: number, y: number): [number, number] => {
-                // TODO: Implement proper canvas-to-world transform using viewport zoom/pan
-                return [x, y];
-              }}
-              rtStructures={rt.rtStructures}
-              selectedStructure={rt.selection.selectedForEdit}
-              onContourUpdate={async (action: string, payload: any) => {
-                if (!payload.structureId) return;
-                
-                try {
-                  rt.setBusy(true);
-                  const service = createContourOperationsService();
-                  
-                  let updatedStructures = rt.rtStructures;
-                  if (action === 'add_pen_stroke') {
-                    updatedStructures = await service.addPenStroke(
-                      rt.rtStructures,
-                      payload.structureId,
-                      payload.slicePosition,
-                      payload.points
-                    );
-                  } else if (action === 'cut_pen_stroke') {
-                    updatedStructures = await service.cutPenStroke(
-                      rt.rtStructures,
-                      payload.structureId,
-                      payload.slicePosition,
-                      payload.points
-                    );
-                  }
-                  
-                  rt.setStructures(updatedStructures);
-                  rt.saveHistory(action, payload.structureId);
-                } catch (err) {
-                  console.error('[PenToolUnifiedV2] Error:', err);
-                } finally {
-                  rt.setBusy(false);
-                }
-              }}
-            />
-          </PrimaryViewport>
+          <ViewerV2OverlayContent
+            fusion={fusion}
+            fusionOpacity={fusionOpacity}
+            showFusionPanel={showFusionPanel}
+            fusionMinimized={fusionMinimized}
+            onFusionMinimizedChange={setFusionMinimized}
+            rt={rt}
+            isContourEditMode={isContourEditMode}
+            setIsContourEditMode={setIsContourEditMode}
+            showBooleanOperations={showBooleanOperations}
+            setShowBooleanOperations={setShowBooleanOperations}
+            showMarginToolbar={showMarginToolbar}
+            setShowMarginToolbar={setShowMarginToolbar}
+            handleMarginOperation={handleMarginOperation}
+            legacyImageMetadata={legacyImageMetadata}
+            seriesId={seriesId}
+          />
+        </PrimaryViewport>
         }
         sidebar={
         <SeriesSelector
@@ -386,6 +818,8 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
           windowLevel={windowLevel}
           onWindowLevelChange={setWindowLevel}
           studyId={studyId}
+          regAssociations={regAssociationsRecord}
+          regCtacSeriesIds={registrationCtacIds ?? []}
           rtStructures={rt.rtStructures}
           onStructureVisibilityChange={(structureId, visible) => {
             rt.setStructureVisibility(structureId, visible);
@@ -393,36 +827,18 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
           selectedForEdit={rt.selection.selectedForEdit}
           onSelectedForEditChange={rt.setSelectedForEdit}
           onAllStructuresVisibilityChange={rt.setAllStructuresVisible}
+          secondarySeriesId={fusion?.selectedSecondaryId ?? null}
+          onSecondarySeriesSelect={fusion ? fusion.setSelectedSecondaryId : undefined}
+          currentlyLoadingSecondary={fusion?.currentlyLoadingSecondary ?? null}
+          secondaryLoadingStates={secondaryLoadingStates}
+          fusionStatuses={fusionStatuses}
+          fusionCandidatesByPrimary={fusionCandidatesByPrimary}
+          fusionSiblingMap={fusionSiblingMap}
         />
       }
-      panels={
-        <div className="absolute bottom-4 right-4 space-y-2">
-          {/* Debug badge */}
-          <div className="bg-gray-900/90 backdrop-blur-sm p-3 rounded text-white text-xs font-mono">
-            <div className="text-green-400 font-bold mb-1">✓ ViewerV2 Active</div>
-            <div>Tool: {activeTool}</div>
-            <div className="text-gray-400 mt-2">Fusion: {showFusionPanel ? 'Ready' : 'N/A'}</div>
-            <div className="text-gray-400">RT: Provider Active</div>
-          </div>
-          
-          {/* Fusion Panel */}
-          {showFusionPanel && (
-            <div className="bg-black/80 border border-gray-700 rounded-md p-2">
-              <FusionPanel 
-                minimized={fusionMinimized}
-                onToggleMinimized={setFusionMinimized}
-              />
-            </div>
-          )}
-          
-          {/* RT Control Panel */}
-          <div className="bg-black/70 border border-gray-700 rounded-md p-2">
-            <RTControlPanel />
-          </div>
-        </div>
-      }
+      panels={null}
       />
-      
+
       {/* Floating ViewerToolbar (positions itself at bottom center) */}
       <ViewerToolbar
         onZoomIn={handleZoomIn}
@@ -462,245 +878,6 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
         }}
       />
 
-      {/* Contour Edit Toolbar - wired to RTProvider */}
-      {isContourEditMode && rt.selection.selectedForEdit && rt.rtStructures && (
-        <ContourEditToolbar
-          selectedStructure={rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) || null}
-          isVisible={isContourEditMode}
-          onClose={() => {
-            setIsContourEditMode(false);
-            rt.setSelectedForEdit(null);
-          }}
-          onStructureNameChange={(name: string) => {
-            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
-            const updated = structuredClone(rt.rtStructures);
-            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
-            if (structure) {
-              structure.structureName = name;
-              rt.setStructures(updated);
-            }
-          }}
-          onStructureColorChange={(color: string) => {
-            if (!rt.rtStructures || !rt.selection.selectedForEdit) return;
-            const hex = color.replace('#', '');
-            const r = parseInt(hex.substring(0, 2), 16);
-            const g = parseInt(hex.substring(2, 4), 16);
-            const b = parseInt(hex.substring(4, 6), 16);
-            const rgb: [number, number, number] = [
-              Number.isFinite(r) ? r : 255,
-              Number.isFinite(g) ? g : 255,
-              Number.isFinite(b) ? b : 255,
-            ];
-            const updated = structuredClone(rt.rtStructures);
-            const structure = updated.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit);
-            if (structure) {
-              structure.color = rgb;
-              rt.setStructures(updated);
-            }
-          }}
-          onToolChange={(toolState) => {
-            console.log('[ViewerV2] Tool change:', toolState);
-            // Wire tool changes to RTProvider
-            if (toolState.tool === 'brush') {
-              rt.setBrushMode('add');
-              rt.setBrushEnabled(true);
-              rt.setPenEnabled(false);
-            } else if (toolState.tool === 'eraser') {
-              rt.setBrushMode('erase');
-              rt.setBrushEnabled(true);
-              rt.setPenEnabled(false);
-            } else if (toolState.tool === 'pen') {
-              rt.setPenMode('add');
-              rt.setPenEnabled(true);
-              rt.setBrushEnabled(false);
-            } else if (toolState.tool === 'scissors') {
-              rt.setPenMode('cut');
-              rt.setPenEnabled(true);
-              rt.setBrushEnabled(false);
-            } else {
-              // Other tools - disable brush/pen
-              rt.setBrushEnabled(false);
-              rt.setPenEnabled(false);
-            }
-            
-            // Update brush size if provided
-            if (toolState.brushSize !== undefined) {
-              rt.setBrushSize(toolState.brushSize);
-            }
-          }}
-          currentSlicePosition={0}
-          onContourUpdate={async (payload) => {
-            console.log('[ViewerV2] Contour update:', payload);
-            if (!rt.rtStructures) return;
-            
-            try {
-              rt.setBusy(true);
-              const { createContourOperationsService } = await import('@/rt-structures/services/ContourOperationsService');
-              const service = createContourOperationsService();
-              
-              let updated = rt.rtStructures;
-              
-              // Handle different contour operations
-              if (payload.action === 'smart_brush_stroke' || payload.action === 'brush_add') {
-                updated = await service.addBrushStroke(
-                  rt.rtStructures,
-                  payload.structureId,
-                  payload.slicePosition,
-                  payload.points
-                );
-              } else if (payload.action === 'erase_stroke') {
-                updated = await service.eraseBrushStroke(
-                  rt.rtStructures,
-                  payload.structureId,
-                  payload.slicePosition,
-                  payload.points
-                );
-              } else if (payload.action === 'add_pen_stroke') {
-                updated = await service.addPenStroke(
-                  rt.rtStructures,
-                  payload.structureId,
-                  payload.slicePosition,
-                  payload.points
-                );
-              } else if (payload.action === 'cut_pen_stroke') {
-                updated = await service.cutPenStroke(
-                  rt.rtStructures,
-                  payload.structureId,
-                  payload.slicePosition,
-                  payload.points
-                );
-              }
-              
-              if (updated !== rt.rtStructures) {
-                rt.setStructures(updated);
-                rt.saveHistory(payload.action, payload.structureId);
-              }
-            } catch (err) {
-              console.error('[ViewerV2] Contour operation failed:', err);
-            } finally {
-              rt.setBusy(false);
-            }
-          }}
-          availableStructures={rt.rtStructures.structures}
-          onTargetStructureSelect={(structureId) => {
-            console.log('[ViewerV2] Target structure selected:', structureId);
-          }}
-          seriesId={seriesId}
-          imageMetadata={null}
-          onOpenBooleanOperations={() => {
-            setIsContourEditMode(false);
-            setShowMarginToolbar(false);
-            setShowBooleanOperations(true);
-          }}
-          onOpenAdvancedMarginTool={() => {
-            setIsContourEditMode(false);
-            setShowBooleanOperations(false);
-            setShowMarginToolbar(true);
-          }}
-        />
-      )}
-
-      {/* Boolean Operations Toolbar - wired to RTProvider */}
-      {showBooleanOperations && rt.rtStructures && (
-        <BooleanOperationsToolbar
-          isVisible={showBooleanOperations}
-          onClose={() => {
-            setShowBooleanOperations(false);
-            rt.clearPreview();
-          }}
-          availableStructures={rt.rtStructures.structures?.map((s: any) => s.structureName) || []}
-          structures={rt.rtStructures.structures}
-          grid={{
-            xSize: 512,
-            ySize: 512,
-            zSize: 1,
-            xRes: 1,
-            yRes: 1,
-            zRes: 1,
-            origin: { x: 0, y: 0, z: 0 }
-          }}
-          structureColors={(rt.rtStructures.structures || []).reduce((acc: Record<string, string>, s: any) => {
-            if (s?.structureName && Array.isArray(s?.color)) {
-              acc[s.structureName] = `rgb(${s.color.join(',')})`;
-            }
-            return acc;
-          }, {})}
-          onPreview={(target, contours) => {
-            rt.setPreviewContours(contours.map((c: any) => ({
-              ...c,
-              color: [255, 223, 0]
-            })));
-          }}
-          onPreviewStateChange={(previewInfo) => {
-            if (!previewInfo.targetName) {
-              rt.clearPreview();
-            }
-          }}
-          onHighlightStructures={(inputs, output) => {
-            console.log('[ViewerV2] Highlight structures:', inputs, output);
-          }}
-          onApply={(target, contours) => {
-            if (!rt.rtStructures) return;
-            const updated = structuredClone(rt.rtStructures);
-            let targetStruct = updated.structures.find((s: any) => s.structureName?.toLowerCase() === (target.name || '').toLowerCase());
-            if (!targetStruct) {
-              const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
-              targetStruct = {
-                roiNumber: maxRoi + 1,
-                structureName: target.name,
-                color: target.color || [59, 130, 246],
-                contours: []
-              };
-              updated.structures.push(targetStruct);
-            }
-            targetStruct.contours = contours;
-            rt.setStructures(updated);
-            rt.saveHistory('boolean_operation', targetStruct.roiNumber);
-            rt.clearPreview();
-            setShowBooleanOperations(false);
-          }}
-          onExecuteOperation={(expression) => {
-            console.log('[ViewerV2] Execute boolean expression:', expression);
-          }}
-        />
-      )}
-
-      {/* Margin Toolbar - wired to RTProvider */}
-      {showMarginToolbar && rt.selection.selectedForEdit && rt.rtStructures && (
-        <MarginToolbar
-          selectedStructure={rt.rtStructures.structures?.find((s: any) => s.roiNumber === rt.selection.selectedForEdit) ? {
-            id: rt.selection.selectedForEdit!,
-            structureName: rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.structureName || 'Unknown',
-            color: `rgb(${rt.rtStructures.structures.find((s: any) => s.roiNumber === rt.selection.selectedForEdit)?.color?.join(',') || '255,255,255'})`
-          } : null}
-          isVisible={showMarginToolbar}
-          onClose={() => setShowMarginToolbar(false)}
-          availableStructures={rt.rtStructures.structures?.map((s: any) => ({
-            id: s.roiNumber,
-            name: s.structureName
-          })) || []}
-          onCreateNewStructure={(basedOnId) => {
-            const baseStructure = rt.rtStructures?.structures?.find((s: any) => s.roiNumber === basedOnId);
-            if (baseStructure && rt.rtStructures) {
-              const newName = `${baseStructure.structureName}_margin`;
-              const maxRoi = Math.max(0, ...rt.rtStructures.structures.map((s: any) => s.roiNumber || 0));
-              const updated = structuredClone(rt.rtStructures);
-              updated.structures.push({
-                roiNumber: maxRoi + 1,
-                structureName: newName,
-                color: baseStructure.color,
-                contours: []
-              });
-              rt.setStructures(updated);
-              rt.saveHistory('create_structure', maxRoi + 1);
-            }
-          }}
-          onExecuteOperation={handleMarginOperation}
-          onPreviewClear={() => {
-            rt.clearPreview();
-          }}
-        />
-      )}
     </>
   );
 }
@@ -751,7 +928,9 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
 
   // Fetch registration associations for this patient/study
   const studyIds = useMemo(() => studyId ? [studyId] : undefined, [studyId]);
-  const { data: registrationData } = useRegistrationAssociations(patientId, studyIds);
+  const { data: registrationResult } = useRegistrationAssociations(patientId, studyIds);
+  const registrationAssociationsMap = useMemo(() => registrationResult?.associationMap ?? new Map<number, any[]>(), [registrationResult]);
+  const registrationCtacIds = registrationResult?.ctacSeriesIds ?? [];
 
   // Fetch RT structure series for the study (mirrors legacy viewer flow)
   const { data: rtSeriesList = [] } = useQuery({
@@ -830,9 +1009,9 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
       isCT,
       fusionPrimarySeriesId,
       candidateCount: candidateSecondaryIds.length,
-      registrationCount: registrationData?.size || 0,
-      candidatesSource: seriesSelectionData?.fusionCandidates?.length 
-        ? 'seriesSelection' 
+      registrationCount: registrationAssociationsMap.size,
+      candidatesSource: seriesSelectionData?.fusionCandidates?.length
+        ? 'seriesSelection'
         : (directFusionCandidates.length ? 'directAPI' : 'none'),
       skippedFusionCandidatesAPI: !isCT,
       rtSeriesCount: rtSeriesList?.length ?? 0,
@@ -849,13 +1028,118 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
 
   // RTProvider wraps entire viewer composition so all components can access useRT()
   // Pass fetched RT structures as initialStructures to avoid null state issues
+  const fusionCandidatesByPrimary = useMemo(() => {
+    const map = new Map<number, number[]>();
+    registrationAssociationsMap.forEach((associations: any[], primaryId: number) => {
+      const candidates = new Set<number>();
+      associations.forEach((association) => {
+        const sourceIds = Array.isArray(association?.sourcesSeriesIds)
+          ? association.sourcesSeriesIds
+          : association?.sourceSeriesIds;
+        if (Array.isArray(sourceIds)) {
+          sourceIds.forEach((id: unknown) => {
+            const numeric = Number(id);
+            if (Number.isFinite(numeric)) candidates.add(numeric);
+          });
+        }
+        if (Array.isArray(association?.sourceSeriesDetails)) {
+          association.sourceSeriesDetails.forEach((detail: any) => {
+            const numeric = Number(detail?.id);
+            if (Number.isFinite(numeric)) candidates.add(numeric);
+          });
+        }
+      });
+      if (candidates.size) {
+        map.set(primaryId, Array.from(candidates.values()));
+      }
+    });
+    return map;
+  }, [registrationAssociationsMap]);
+
+  const regAssociationsRecord = useMemo(() => {
+    const record: Record<number, number[]> = {};
+    fusionCandidatesByPrimary.forEach((ids, primaryId) => {
+      record[primaryId] = ids;
+    });
+    return record;
+  }, [fusionCandidatesByPrimary]);
+
+  const fusionSiblingMap = useMemo(() => {
+    const map = new Map<number, Map<'PET' | 'MR', Map<number, number[]>>>();
+    registrationAssociationsMap.forEach((associations: any[], primaryId: number) => {
+      const modalityMap = new Map<'PET' | 'MR', Map<number, number[]>>();
+      associations.forEach((association) => {
+        const ctIds = new Set<number>();
+        if (Array.isArray(association?.sourceSeriesDetails)) {
+          association.sourceSeriesDetails.forEach((detail: any) => {
+            const modality = detail?.modality?.toUpperCase?.();
+            const numeric = Number(detail?.id);
+            if (Number.isFinite(numeric) && modality === 'CT') {
+              ctIds.add(numeric);
+            }
+          });
+        }
+
+        const siblingIds = new Set<number>();
+        if (Array.isArray(association?.siblingSeriesIds)) {
+          association.siblingSeriesIds.forEach((id: unknown) => {
+            const numeric = Number(id);
+            if (Number.isFinite(numeric)) siblingIds.add(numeric);
+          });
+        }
+
+        if (Array.isArray(association?.sourceSeriesDetails)) {
+          association.sourceSeriesDetails.forEach((detail: any) => {
+            const modality = detail?.modality?.toUpperCase?.() ?? '';
+            const numeric = Number(detail?.id);
+            if (!Number.isFinite(numeric)) return;
+
+            if (modality === 'PT' || modality === 'PET') {
+              if (!modalityMap.has('PET')) modalityMap.set('PET', new Map());
+              const petMap = modalityMap.get('PET')!;
+              const existing = petMap.get(numeric) ?? [];
+              const merged = new Set<number>(existing);
+              ctIds.forEach((ctId) => merged.add(ctId));
+              petMap.set(numeric, Array.from(merged));
+            } else if (modality === 'MR') {
+              if (!modalityMap.has('MR')) modalityMap.set('MR', new Map());
+              const mrMap = modalityMap.get('MR')!;
+              const linkedIds = association.sourceSeriesDetails
+                .filter((other: any) => {
+                  const otherId = Number(other?.id);
+                  if (!Number.isFinite(otherId)) return false;
+                  if (otherId === numeric) return false;
+                  const otherModality = other?.modality?.toUpperCase?.() ?? '';
+                  return otherModality === 'MR' || otherModality === 'PT' || otherModality === 'PET';
+                })
+                .map((other: any) => Number(other.id));
+              const merged = new Set<number>(mrMap.get(numeric) ?? []);
+              linkedIds.forEach((id) => merged.add(id));
+              siblingIds.forEach((id) => merged.add(id));
+              mrMap.set(numeric, Array.from(merged));
+            }
+          });
+        }
+      });
+
+      if (modalityMap.size > 0) {
+        map.set(primaryId, modalityMap);
+      }
+    });
+    return map;
+  }, [registrationAssociationsMap]);
+
   const content = (
     <RTProvider initialStructures={rtStructures ?? null}>
-      <ViewerV2Content 
+      <ViewerV2Content
         patientId={patientId}
         seriesId={seriesId}
         studyId={studyId}
         initialSeriesList={initialSeriesList}
+        fusionCandidatesByPrimary={fusionCandidatesByPrimary}
+        fusionSiblingMap={fusionSiblingMap}
+        regAssociationsRecord={regAssociationsRecord}
+        registrationCtacIds={registrationCtacIds}
       />
     </RTProvider>
   );
@@ -865,7 +1149,7 @@ export function ViewerV2({ patientId, seriesId, studyId, initialSeriesList }: Vi
     <FusionProvider
       primarySeriesId={fusionPrimarySeriesId}
       candidateSecondaryIds={candidateSecondaryIds}
-      registrationAssociations={registrationData || new Map()}
+      registrationAssociations={registrationAssociationsMap}
     >
       {content}
     </FusionProvider>
