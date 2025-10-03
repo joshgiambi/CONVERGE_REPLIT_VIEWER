@@ -182,7 +182,8 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       seriesId,
       studyId,
       windowLevel: initialWindowLevel,
-      autoZoomLevel = 1,
+      autoZoomLevel,
+      autoLocalizeTarget,
       onWindowLevelChange,
       onSliceChange,
       onImageMetadataChange,
@@ -200,7 +201,7 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
     const [windowLevel, setWindowLevel] = useState<WindowLevel>(
       initialWindowLevel || { window: 350, level: 40 }
     );
-    const [zoom, setZoom] = useState(autoZoomLevel);
+    const [zoom, setZoom] = useState(autoZoomLevel ?? 1);
     const [panX, setPanX] = useState(0);
     const [panY, setPanY] = useState(0);
 
@@ -250,6 +251,45 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       getMetadata: () => metadata,
       getImages: () => images,
     }));
+
+    useEffect(() => {
+      if (typeof autoZoomLevel !== 'number' || !Number.isFinite(autoZoomLevel)) {
+        return;
+      }
+      setZoom(autoZoomLevel);
+      setPanX(0);
+      setPanY(0);
+    }, [autoZoomLevel]);
+
+    useEffect(() => {
+      if (!autoLocalizeTarget) {
+        return;
+      }
+
+      const { x, y, z } = autoLocalizeTarget;
+      const scaleFactor = 0.1;
+      setPanX(-x * scaleFactor);
+      setPanY(-y * scaleFactor);
+
+      if (images.length > 0) {
+        let closestIndex = currentIndex;
+        let closestDistance = Number.POSITIVE_INFINITY;
+
+        images.forEach((image, index) => {
+          const position = parseImagePosition(image);
+          if (!position) return;
+          const distance = Math.abs(position[2] - z);
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestIndex = index;
+          }
+        });
+
+        if (closestIndex !== currentIndex) {
+          setCurrentIndex(closestIndex);
+        }
+      }
+    }, [autoLocalizeTarget, images, currentIndex, setCurrentIndex]);
 
     // ============================================================================
     // Image Rendering (using pixel data from useDICOMImages)
