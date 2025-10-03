@@ -52,8 +52,31 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
   const CONTOUR_HOVER_DISTANCE = 5; // Only show vertices when very close to boundary
   
   // Get current Z position
-  const currentZ = imageMetadata?.imagePosition ? 
-    parseFloat(imageMetadata.imagePosition.split("\\")[2]) : 0;
+  const sliceThickness = (() => {
+    const value = Number(imageMetadata?.sliceThickness);
+    if (!Number.isFinite(value) || value <= 0) {
+      return 1; // safe default tolerance when metadata is missing
+    }
+    return value;
+  })();
+
+  const currentZ = (() => {
+    if (imageMetadata?.imagePosition) {
+      const parts = String(imageMetadata.imagePosition).split('\\');
+      if (parts.length >= 3) {
+        const parsed = Number(parts[2]);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    if (Array.isArray(imageMetadata?.imagePositionPatient) && imageMetadata.imagePositionPatient.length >= 3) {
+      const parsed = Number(imageMetadata.imagePositionPatient[2]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    if (typeof imageMetadata?.sliceLocation === 'number') {
+      return imageMetadata.sliceLocation;
+    }
+    return 0;
+  })();
     
   // Track previous Z to detect slice changes  
   const prevZRef = useRef<number>(currentZ);
@@ -104,12 +127,12 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     if (!structure?.contours) return [];
     
     // Eclipse-style slice-thickness tolerance
-    const tol = (imageMetadata.sliceThickness ?? 1) / 2;   // mm
+    const tol = sliceThickness / 2;   // mm
     const sameSlice = (z1: number, z2: number) => Math.abs(z1 - z2) < tol;
     
     console.log('🔍 Pen Tool Z-Debug:', {
       currentZ,
-      sliceThickness: imageMetadata.sliceThickness,
+      sliceThickness,
       tolerance: tol,
       totalContours: structure.contours.length,
       structureId: selectedStructure
@@ -129,7 +152,7 @@ export const PenToolUnifiedV2: React.FC<PenToolUnifiedV2Props> = ({
     
     console.log(`✅ Found ${contoursAtSlice.length} contours at current slice (tolerance: ${tol}mm)`);
     return contoursAtSlice;
-  }, [rtStructures, selectedStructure, currentZ, imageMetadata.sliceThickness]);
+  }, [rtStructures, selectedStructure, currentZ, sliceThickness]);
   
   // Check if point is inside any contour
   const isPointInsideContour = useCallback((x: number, y: number, contour: number[]) => {
