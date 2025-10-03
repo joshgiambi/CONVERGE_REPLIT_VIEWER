@@ -9,7 +9,7 @@
  * Agent 5: Integration (updated to mount legacy UI components)
  */
 
-import { useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import { ViewerShell } from './ViewerShell';
 import { PrimaryViewport } from './PrimaryViewport';
 import { useViewportTools } from '@/hooks/useViewportTools';
@@ -19,6 +19,7 @@ import RTControlPanel from '@/rt-structures/components/RTControlPanel';
 import FusionOverlayLayer from '@/fusion/components/FusionOverlayLayer';
 import { FusionProvider, useFusion } from '@/fusion/fusion-context';
 import { FusionPanel } from '@/fusion/components/FusionPanel';
+import { useFusionPanelState } from '@/fusion/hooks/useFusionPanel';
 import { useFusionCandidates, useSeriesSelection } from '@/hooks/use-series-selection';
 import { useRegistrationAssociations } from '@/hooks/useRegistrationAssociations';
 import { useQuery } from '@tanstack/react-query';
@@ -29,9 +30,12 @@ import { BooleanOperationsToolbar } from '@/components/dicom/boolean-operations-
 import { MarginToolbar } from '@/components/dicom/margin-toolbar';
 import { SimpleBrushTool } from '@/components/dicom/simple-brush-tool';
 import { PenToolUnifiedV2 } from '@/components/dicom/pen-tool-unified-v2';
+import { ErrorModal } from '@/components/dicom/error-modal';
+import { LoadingProgress } from '@/components/dicom/loading-progress';
 import { WINDOW_LEVEL_PRESETS, type WindowLevel, type DICOMSeries } from '@/lib/dicom-utils';
 import type { ImageMetadata } from '@/types/viewer';
 import { createContourOperationsService } from '@/rt-structures/services/ContourOperationsService';
+import type { UseFusionPanelStateResult } from '@/types/fusion';
 
 interface ViewerV2Props {
   patientId: string;
@@ -50,6 +54,16 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
   const [isContourEditMode, setIsContourEditMode] = useState(false);
   const [showBooleanOperations, setShowBooleanOperations] = useState(false);
   const [showMarginToolbar, setShowMarginToolbar] = useState(false);
+  const [errorModal, setErrorModal] = useState<{
+    title: string;
+    message: string;
+    details?: string;
+  } | null>(null);
+  const dismissedFusionErrorRef = useRef<string | null>(null);
+  const emptyLoadingStates = useMemo(
+    () => new Map<number, { progress: number; isLoading: boolean }>(),
+    [],
+  );
 
   // State for series selector
   const [windowLevel, setWindowLevel] = useState<WindowLevel>(WINDOW_LEVEL_PRESETS.abdomen);
@@ -96,11 +110,14 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
   };
 
   // Try to get fusion context - may not exist if not a CT series
-  let fusion: any = null;
+  let fusionContext: ReturnType<typeof useFusion> | null = null;
+  let fusionPanelState: UseFusionPanelStateResult | null = null;
   try {
-    fusion = useFusion();
+    fusionContext = useFusion();
+    fusionPanelState = useFusionPanelState();
   } catch {
-    // FusionProvider not present - this is expected for non-CT series
+    fusionContext = null;
+    fusionPanelState = null;
   }
 
   // Get RT context - now safe because RTProvider wraps this component
@@ -109,6 +126,29 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
   if (!contourServiceRef.current) {
     contourServiceRef.current = createContourOperationsService();
   }
+
+  const fusionOpacity = fusionPanelState?.opacity ?? fusionContext?.opacity ?? 0.5;
+  const showFusionPanel = fusionPanelState?.showPanel ?? fusionContext?.showFusionPanel ?? false;
+  const loadingStates = fusionPanelState?.secondaryLoadingStates ?? emptyLoadingStates;
+  const manifestError = fusionPanelState?.manifestError ?? fusionContext?.manifestError ?? null;
+
+  useEffect(() => {
+    if (!manifestError) {
+      dismissedFusionErrorRef.current = null;
+      if (errorModal) {
+        setErrorModal(null);
+      }
+      return;
+    }
+
+    if (!errorModal && manifestError !== dismissedFusionErrorRef.current) {
+      setErrorModal({
+        title: 'Fusion Overlay Error',
+        message: 'We were unable to prepare the fusion overlay for this series.',
+        details: manifestError,
+      });
+    }
+  }, [errorModal, manifestError]);
 
   // Viewport control handlers
   const handleZoomIn = () => viewportRef.current?.zoomIn();
@@ -143,9 +183,6 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
     setShowBooleanOperations(false);
     setShowMarginToolbar(true);
   };
-
-  const fusionOpacity = fusion?.opacity ?? 0.5;
-  const showFusionPanel = fusion?.showFusionPanel ?? false;
 
   const handleMarginOperation = async (operation: {
     type: 'uniform_margin' | 'directional_margin' | 'morphological_margin' | 'anisotropic_margin';
@@ -408,9 +445,10 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
           {/* Fusion Panel */}
           {showFusionPanel && (
             <div className="bg-black/80 border border-gray-700 rounded-md p-2">
-              <FusionPanel 
+              <FusionPanel
                 minimized={fusionMinimized}
                 onToggleMinimized={setFusionMinimized}
+                state={fusionPanelState ?? undefined}
               />
             </div>
           )}
@@ -422,7 +460,34 @@ function ViewerV2Content({ patientId, seriesId, studyId, initialSeriesList }: Vi
         </div>
       }
       />
-      
+
+      <LoadingProgress
+        loadingStates={loadingStates}
+        className="animate-in slide-in-from-right-2 duration-300"
+      />
+
+      {errorModal && (
+        <ErrorModal
+          isOpen
+          onClose={() => {
+            dismissedFusionErrorRef.current = manifestError ?? dismissedFusionErrorRef.current;
+            setErrorModal(null);
+          }}
+          onRetry={fusionContext
+            ? async () => {
+                dismissedFusionErrorRef.current = null;
+                setErrorModal(null);
+                try {
+                  await fusionContext.refreshManifest(true);
+                } catch (err) {
+                  console.warn('[ViewerV2] Fusion manifest retry failed', err);
+                }
+              }
+            : undefined}
+          error={errorModal}
+        />
+      )}
+
       {/* Floating ViewerToolbar (positions itself at bottom center) */}
       <ViewerToolbar
         onZoomIn={handleZoomIn}
