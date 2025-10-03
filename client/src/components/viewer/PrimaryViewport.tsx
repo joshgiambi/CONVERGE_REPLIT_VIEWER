@@ -9,7 +9,17 @@
  * REVISED: Based on Agent 1 feedback (rounds 1 & 2)
  */
 
-import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle, createContext, useContext, useMemo } from 'react';
+import {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+  createContext,
+  useContext,
+  useMemo,
+} from 'react';
 import { useDICOMImages } from '@/hooks/useDICOMImages';
 import { useViewportInteractions } from '@/hooks/useViewportInteractions';
 import { DICOMMetadataService } from '@/services/DICOMMetadataService';
@@ -25,10 +35,30 @@ import type {
 // EXTRACTED FROM working-viewer.tsx - Core rendering functions
 // ============================================================================
 
+type ViewportRenderTransform = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  imageWidth: number;
+  imageHeight: number;
+  canvasWidth: number;
+  canvasHeight: number;
+};
+
+const DEFAULT_TRANSFORM: ViewportRenderTransform = {
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  imageWidth: 0,
+  imageHeight: 0,
+  canvasWidth: 0,
+  canvasHeight: 0,
+};
+
 /**
  * Render 16-bit DICOM image data to canvas with window/level
  * EXTRACTED FROM: working-viewer.tsx (render16BitImage function)
- * 
+ *
  * NOTE: This function works in CSS pixel space (not physical pixels)
  * The canvas context should be scaled by devicePixelRatio before calling this
  */
@@ -44,7 +74,7 @@ function render16BitImage(
   zoom: number = 1,
   panX: number = 0,
   panY: number = 0,
-): void {
+): ViewportRenderTransform {
   const canvas = ctx.canvas;
   
   // Convert to Int16Array if needed
@@ -108,15 +138,25 @@ function render16BitImage(
   tempCanvas.width = width;
   tempCanvas.height = height;
   const tempCtx = tempCanvas.getContext('2d');
-  if (!tempCtx) return;
-  
-  tempCtx.putImageData(imageData, 0, 0);
+  if (tempCtx) {
+    tempCtx.putImageData(imageData, 0, 0);
 
-  // Clear and draw scaled image (in CSS pixel space)
-  ctx.fillStyle = 'black';
-  ctx.fillRect(0, 0, cssWidth, cssHeight);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+    // Clear and draw scaled image (in CSS pixel space)
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+  }
+
+  return {
+    scale: totalScale,
+    offsetX: x,
+    offsetY: y,
+    imageWidth: width,
+    imageHeight: height,
+    canvasWidth: cssWidth,
+    canvasHeight: cssHeight,
+  };
 }
 
 /**
@@ -162,6 +202,8 @@ interface ViewportContextValue {
   windowLevel: WindowLevel;
   // FIXED: Added metadata for Agent 2/3
   imageMetadata: ImageMetadata | null;
+  viewportTransform: ViewportRenderTransform;
+  ctTransformRef: React.MutableRefObject<ViewportRenderTransform>;
 }
 
 const ViewportContext = createContext<ViewportContextValue | null>(null);
@@ -195,6 +237,8 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+    const ctTransformRef = useRef<ViewportRenderTransform>({ ...DEFAULT_TRANSFORM });
+    const [transformVersion, setTransformVersion] = useState(0);
 
     // Viewport state
     const [windowLevel, setWindowLevel] = useState<WindowLevel>(
@@ -249,6 +293,21 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       getCurrentImage: () => currentImage,
       getMetadata: () => metadata,
       getImages: () => images,
+      getCTTransform: () => ctTransformRef.current,
+      getViewportState: (): ViewportState => ({
+        zoom,
+        panX,
+        panY,
+        rotation: 0,
+        flipH: false,
+        flipV: false,
+        windowLevel,
+        currentIndex,
+        crosshairPos: { x: 0, y: 0 },
+        crosshairMode: false,
+        isPanMode: true,
+        activeTool: 'pan',
+      }),
     }));
 
     // ============================================================================
@@ -281,7 +340,7 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
         }
 
         // Render image with window/level, zoom, pan (in CSS pixel space)
-        render16BitImage(
+        const transform = render16BitImage(
           ctx,
           pixelData,
           currentImage.columns,
@@ -295,6 +354,9 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
           panY,
         );
 
+        ctTransformRef.current = transform;
+        setTransformVersion((version) => version + 1);
+
         // Notify parent of slice change
         if (onSliceChange) {
           onSliceChange(currentIndex);
@@ -305,8 +367,28 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('Error rendering DICOM', cssWidth / 2, cssHeight / 2);
+        ctTransformRef.current = {
+          ...DEFAULT_TRANSFORM,
+          canvasWidth: cssWidth,
+          canvasHeight: cssHeight,
+        };
+        setTransformVersion((version) => version + 1);
       }
     }, [currentImage, currentIndex, windowLevel, zoom, panX, panY, onSliceChange]);
+
+    useEffect(() => {
+      if (!currentImage) {
+        const canvas = canvasRef.current;
+        const cssWidth = canvas ? canvas.width / (window.devicePixelRatio || 1) : 0;
+        const cssHeight = canvas ? canvas.height / (window.devicePixelRatio || 1) : 0;
+        ctTransformRef.current = {
+          ...DEFAULT_TRANSFORM,
+          canvasWidth: cssWidth,
+          canvasHeight: cssHeight,
+        };
+        setTransformVersion((version) => version + 1);
+      }
+    }, [currentImage]);
 
     // Trigger render when dependencies change
     useEffect(() => {
@@ -389,7 +471,9 @@ export const PrimaryViewport = forwardRef<any, PrimaryViewportProps>(
       panY,
       windowLevel,
       imageMetadata: metadata,  // FIXED: Include metadata
-    }), [canvasRef, overlayCanvasRef, currentImage, currentIndex, images, zoom, panX, panY, windowLevel, metadata]);
+      viewportTransform: ctTransformRef.current,
+      ctTransformRef,
+    }), [canvasRef, overlayCanvasRef, currentImage, currentIndex, images, zoom, panX, panY, windowLevel, metadata, transformVersion]);
 
     // ============================================================================
     // Render

@@ -44,7 +44,7 @@ const ensureString = (val: unknown): string | null => {
  * Fetch registration associations for a patient or study
  */
 export function useRegistrationAssociations(patientId?: string | number, studyIds?: number[]) {
-  return useQuery<Map<number, RegistrationAssociation[]>>({
+  return useQuery<{ associationMap: Map<number, RegistrationAssociation[]>; ctacSeriesIds: number[] }>({
     queryKey: ['registration-associations', patientId, studyIds],
     enabled: !!(patientId || (studyIds && studyIds.length > 0)),
     staleTime: 5 * 60 * 1000,
@@ -180,7 +180,10 @@ export function useRegistrationAssociations(patientId?: string | number, studyId
         });
       }
 
-      return associationMap;
+      return {
+        associationMap,
+        ctacSeriesIds: Array.from(ctacUnion.values()),
+      };
     },
   });
 }

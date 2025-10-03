@@ -228,6 +228,8 @@ export function FusionProvider({ primarySeriesId, candidateSecondaryIds, registr
   const previousPrimaryRef = useRef<number | null>(null);
   const previousCandidateKeyRef = useRef<string>('');
   const secondaryMapRef = useRef<Map<number, SecondaryState>>(state.secondaryMap);
+  const manifestCacheRef = useRef<Map<string, FusionManifest>>(new Map());
+  const inflightManifestRef = useRef<Map<string, Promise<FusionManifest>>>(new Map());
 
   const normalizedCandidateIds = useMemo(
     () => dedupeAndSort(candidateSecondaryIds),
@@ -262,31 +264,76 @@ export function FusionProvider({ primarySeriesId, candidateSecondaryIds, registr
     manifestRef.current = state.manifest;
   }, [state.manifest]);
 
+  const buildManifestCacheKey = useCallback(
+    (primaryId: number) => `${primaryId}|${candidateKey}`,
+    [candidateKey],
+  );
+
   const loadManifest = useCallback(
     async (
       primaryId: number,
       { force = false, suppressLoading = false }: { force?: boolean; suppressLoading?: boolean } = {},
     ) => {
+      const cacheKey = buildManifestCacheKey(primaryId);
+
+      if (!force) {
+        const cachedManifest = manifestCacheRef.current.get(cacheKey);
+        if (cachedManifest) {
+          dispatch({ type: 'setManifest', manifest: cachedManifest });
+          dispatch({ type: 'setManifestStatus', status: 'ready' });
+          const mergedMap = mergeSecondaryMap(cachedManifest, secondaryMapRef.current);
+          dispatch({ type: 'setSecondaryMap', map: mergedMap });
+          return;
+        }
+
+        const inflightManifest = inflightManifestRef.current.get(cacheKey);
+        if (inflightManifest) {
+          const token = ++requestTokenRef.current;
+          dispatch({ type: 'setManifestStatus', status: suppressLoading ? 'refreshing' : 'loading' });
+          try {
+            const manifest = await inflightManifest;
+            if (requestTokenRef.current !== token) return;
+            dispatch({ type: 'setManifest', manifest });
+            dispatch({ type: 'setManifestStatus', status: 'ready' });
+            const mergedMap = mergeSecondaryMap(manifest, secondaryMapRef.current);
+            dispatch({ type: 'setSecondaryMap', map: mergedMap });
+          } catch (error: any) {
+            if (requestTokenRef.current !== token) return;
+            const message = error?.message || 'Fusion manifest request failed';
+            dispatch({ type: 'setManifestError', error: message });
+          }
+          return;
+        }
+      } else {
+        manifestCacheRef.current.delete(cacheKey);
+        inflightManifestRef.current.delete(cacheKey);
+      }
+
       const token = ++requestTokenRef.current;
       dispatch({ type: 'setManifestStatus', status: suppressLoading ? 'refreshing' : 'loading' });
       try {
-        const manifest = await fetchFusionManifest(primaryId, {
+        const manifestPromise = fetchFusionManifest(primaryId, {
           secondarySeriesIds: normalizedCandidateIds.length ? normalizedCandidateIds : undefined,
           preload: true,
           force,
         });
+        inflightManifestRef.current.set(cacheKey, manifestPromise);
+        const manifest = await manifestPromise;
+        manifestCacheRef.current.set(cacheKey, manifest);
+        inflightManifestRef.current.delete(cacheKey);
         if (requestTokenRef.current !== token) return;
         dispatch({ type: 'setManifest', manifest });
         dispatch({ type: 'setManifestStatus', status: 'ready' });
         const mergedMap = mergeSecondaryMap(manifest, secondaryMapRef.current);
         dispatch({ type: 'setSecondaryMap', map: mergedMap });
       } catch (error: any) {
+        inflightManifestRef.current.delete(cacheKey);
         if (requestTokenRef.current !== token) return;
         const message = error?.message || 'Fusion manifest request failed';
         dispatch({ type: 'setManifestError', error: message });
       }
     },
-    [normalizedCandidateIds],
+    [buildManifestCacheKey, normalizedCandidateIds],
   );
 
   useEffect(() => {
