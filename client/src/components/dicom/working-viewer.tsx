@@ -5741,6 +5741,15 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 </span>
               </div>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2 text-xs hover:bg-gray-700/40"
+              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
+              title="Open Fusion Debug"
+            >
+              Fusion Debug
+            </Button>
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -5817,7 +5826,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           /* Side-by-Side Layout */
           <div className="w-full h-full flex gap-2">
             {/* Primary Canvas Container */}
-            <div className="relative flex-1 flex items-center justify-center">
+            <div className="relative flex-1 flex items-center justify-center bg-black">
               <canvas
                 ref={canvasRef}
                 width={1024}
@@ -5859,7 +5868,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             </div>
             
             {/* Secondary/Fusion Canvas Container */}
-            <div className="relative flex-1 flex items-center justify-center">
+            <div className="relative flex-1 flex items-center justify-center bg-black">
               <canvas
                 ref={fusionOverlayCanvasRef}
                 width={1024}

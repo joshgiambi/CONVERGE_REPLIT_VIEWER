@@ -3744,8 +3744,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const max = typeof result.max === 'number' ? result.max : 1;
       const range = Math.max(1e-6, max - min);
       for (let i = 0; i < bytes.length; i++) {
-        const v = (float[i] - min) / range;
-        bytes[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
+        const pixelValue = float[i];
+        // Values below -1000 are considered background/border pixels - render as black
+        if (pixelValue < -1000) {
+          bytes[i] = 0;
+        } else {
+          const v = Math.max(0, Math.min(1, (pixelValue - min) / range));
+          bytes[i] = Math.round(v * 255);
+        }
       }
 
       const sharpMod = await import('sharp');

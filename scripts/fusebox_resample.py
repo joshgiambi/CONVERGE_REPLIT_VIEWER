@@ -245,7 +245,9 @@ def resample(primary: sitk.Image, secondary: sitk.Image, xform: sitk.Transform, 
         resample_filter.SetInterpolator(sitk.sitkNearestNeighbor)
     else:
         resample_filter.SetInterpolator(sitk.sitkLinear)
-    resample_filter.SetDefaultPixelValue(0.0)
+    # Use a very negative value that's clearly outside valid data range
+    # This will be clamped to black during rendering
+    resample_filter.SetDefaultPixelValue(-10000.0)
     resample_filter.SetOutputPixelType(sitk.sitkFloat32)
     return resample_filter.Execute(secondary)
 
