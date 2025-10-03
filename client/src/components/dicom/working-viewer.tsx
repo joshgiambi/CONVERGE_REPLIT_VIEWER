@@ -187,6 +187,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fusionOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const contoursOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -4271,18 +4272,36 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
-      // Render RT structure overlays if available
+      // Render RT structure overlays on separate canvas above fusion
       if (rtStructures) {
         try {
-          // Pass currentImage with its metadata attached
-          const imageWithMetadata = {
-            ...currentImage,
-            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-          };
-          renderRTStructures(ctx, canvas, imageWithMetadata);
+          const contoursCanvas = contoursOverlayCanvasRef.current;
+          if (contoursCanvas) {
+            const contoursCtx = contoursCanvas.getContext('2d');
+            if (contoursCtx) {
+              // Clear the contours overlay canvas
+              contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
+              
+              // Pass currentImage with its metadata attached
+              const imageWithMetadata = {
+                ...currentImage,
+                imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+              };
+              renderRTStructures(contoursCtx, contoursCanvas, imageWithMetadata);
+            }
+          }
         } catch (rtError) {
           console.warn("Error drawing RT structures:", rtError);
           // Don't let RT structure errors prevent image display
+        }
+      } else {
+        // Clear contours overlay if no RT structures
+        const contoursCanvas = contoursOverlayCanvasRef.current;
+        if (contoursCanvas) {
+          const contoursCtx = contoursCanvas.getContext('2d');
+          if (contoursCtx) {
+            contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
+          }
         }
       }
       
@@ -5835,11 +5854,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             ref={fusionOverlayCanvasRef}
             width={1280}
             height={1280}
-            className="pointer-events-none absolute inset-0"
+            className="pointer-events-none absolute max-w-full max-h-full object-contain"
             style={{
               opacity: fusionOpacity,
               visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
               transition: 'opacity 120ms ease-out',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 1,
+            }}
+          />
+
+          <canvas
+            ref={contoursOverlayCanvasRef}
+            width={1280}
+            height={1280}
+            className="pointer-events-none absolute max-w-full max-h-full object-contain"
+            style={{
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 2,
             }}
           />
 

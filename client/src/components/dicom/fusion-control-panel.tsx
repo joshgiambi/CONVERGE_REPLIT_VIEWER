@@ -44,7 +44,7 @@ export function FusionControlPanel({
     const center = activeDescriptor?.windowCenter?.[0];
     const width = activeDescriptor?.windowWidth?.[0];
     if (!Number.isFinite(center) || !Number.isFinite(width)) return null;
-    return { label: 'Manifest', window: width, level: center };
+    return { label: 'DICOM', window: width, level: center };
   }, [activeDescriptor?.windowCenter, activeDescriptor?.windowWidth]);
 
   const modalityPresets = useMemo(() => {
@@ -60,16 +60,9 @@ export function FusionControlPanel({
         { label: 'Lung', window: 1500, level: -600 },
         { label: 'Bone', window: 2000, level: 300 },
       ],
-      PT: [
-        { label: 'SUV 0-5', window: 5, level: 2.5 },
-        { label: 'Tumor', window: 4, level: 2 },
-        { label: 'Low Dose', window: 3, level: 1.5 },
-      ],
-      PET: [
-        { label: 'SUV 0-5', window: 5, level: 2.5 },
-        { label: 'Tumor', window: 4, level: 2 },
-        { label: 'Low Dose', window: 3, level: 1.5 },
-      ],
+      // PT/PET: Use Auto (manifest) settings only
+      PT: [],
+      PET: [],
     };
     const base = presetsByModality[modality] ?? [];
     if (manifestPreset) {

@@ -930,7 +930,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         return { window: 80, level: 40 };
       case 'PT':
       case 'PET':
-        return { window: 5, level: 2.5 };
+        // Standard PET SUV windowing per DICOM: 0-10 SUV range (window: 10, center: 5)
+        return { window: 10, level: 5 };
       case 'CT':
         return { window: 400, level: 40 };
       default:
@@ -1688,37 +1689,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       return;
     }
 
-    setManifestActionStatus('Rebuilding manifest…');
+    setManifestActionStatus('Initializing fusion…');
     setFusionDebugSnapshot(null);
 
     try {
-      const response = await fetch(
-        `/api/fusion/manifest?primarySeriesId=${selectedSeries.id}&force=true&preload=true`,
-        { cache: 'no-store' },
-      );
-
-      let payload: any = null;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok) {
-        const message = payload?.error || payload?.details || response.statusText;
-        setManifestActionStatus(`Manifest rebuild failed: ${message}`);
-        if (payload) setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
-        return;
-      }
-
-      setManifestActionStatus(`Manifest rebuilt at ${new Date().toLocaleTimeString()}`);
-      if (payload) setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
-
+      // Trigger full fusion initialization for current series
       await initializeFusionForSeries(selectedSeries);
+      setManifestActionStatus('Fusion initialized successfully');
+      setTimeout(() => setManifestActionStatus(null), 3000);
+      return;
     } catch (error: any) {
-      setManifestActionStatus(`Manifest rebuild threw: ${error?.message || String(error)}`);
+      setManifestActionStatus(`Failed: ${error?.message || String(error)}`);
+      setTimeout(() => setManifestActionStatus(null), 5000);
     }
-  }, [initializeFusionForSeries, selectedSeries]);
+  }, [selectedSeries, initializeFusionForSeries]);
 
   // Subscribe to undo manager changes to refresh toolbar state
   const [historyState, setHistoryState] = useState({

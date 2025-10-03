@@ -953,18 +953,16 @@ export function SeriesSelector({
                                               <Button
                                                 size="icon"
                                                 variant="ghost"
-                                                className={`h-6 w-6 ${buttonDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-green-700/30'}`}
+                                                className={`h-6 w-6 ${isLoading ? 'cursor-wait' : hasError ? 'hover:bg-amber-700/30' : 'hover:bg-green-700/30'}`}
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  if (!buttonDisabled) {
-                                                    if (onRebuildFusionManifest) {
-                                                      onRebuildFusionManifest();
-                                                    }
-                                                    onSecondarySeriesSelect(ctS.id);
+                                                  if (onRebuildFusionManifest) {
+                                                    onRebuildFusionManifest();
                                                   }
+                                                  onSecondarySeriesSelect(ctS.id);
                                                 }}
-                                                title={statusLabel}
-                                                disabled={buttonDisabled}
+                                                title={isReady ? statusLabel : 'Click to initialize fusion'}
+                                                disabled={false}
                                               >
                                                 {isLoading ? (
                                                   <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
@@ -1130,8 +1128,8 @@ export function SeriesSelector({
                                                  <Button
                                                    size="icon"
                                                    variant="ghost"
-                                                    className={`h-6 w-6 ${isReady ? 'hover:bg-green-700/30' : 'cursor-not-allowed opacity-60'}`}
-                                                    disabled={!isReady}
+                                                    className={`h-6 w-6 ${isLoading ? 'cursor-wait' : hasError ? 'hover:bg-amber-700/30' : 'hover:bg-green-700/30'}`}
+                                                    disabled={false}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       if (onRebuildFusionManifest) {
@@ -1141,7 +1139,7 @@ export function SeriesSelector({
                                                         onSecondarySeriesSelect(mrS.id);
                                                       }
                                                     }}
-                                                    title={statusLabel}
+                                                    title={isReady ? statusLabel : 'Click to initialize fusion'}
                                                   >
                                                     {isLoading ? (
                                                       <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />
@@ -1310,8 +1308,8 @@ export function SeriesSelector({
                                                      <Button
                                                        size="icon"
                                                        variant="ghost"
-                                                       className={`h-6 w-6 ${isReady ? 'hover:bg-green-700/30' : 'cursor-not-allowed opacity-60'}`}
-                                                       disabled={!isReady}
+                                                       className={`h-6 w-6 ${isLoading ? 'cursor-wait' : hasError ? 'hover:bg-amber-700/30' : 'hover:bg-green-700/30'}`}
+                                                       disabled={false}
                                                        onClick={(e) => {
                                                          e.stopPropagation();
                                                          if (onRebuildFusionManifest) {
@@ -1319,7 +1317,7 @@ export function SeriesSelector({
                                                          }
                                                          if (onSecondarySeriesSelect) onSecondarySeriesSelect(ptS.id);
                                                        }}
-                                                       title={statusLabel}
+                                                       title={isReady ? statusLabel : 'Click to initialize fusion'}
                                                      >
                                                        {isLoading ? (
                                                          <Loader2 className="h-3.5 w-3.5 animate-spin text-green-200" />

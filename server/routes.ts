@@ -4598,7 +4598,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         } catch {}
+        
+        // Build sibling FoR map: find all series sharing FoR with target OR any source
         const siblingFoRIds = new Set<number>();
+        
+        // Add siblings of target
         if (Number.isFinite(targetSeriesId as any)) {
           try {
             const targetFo = await getFo(targetSeriesId as number);
@@ -4611,6 +4615,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           } catch {}
         }
+        
+        // Add siblings of each source series (e.g., PT sharing FoR with PETCT, or multiple MRI sharing FoR)
+        const expandedSourceIds = new Set<number>(sourcesSeriesIds);
+        for (const srcId of sourcesSeriesIds) {
+          try {
+            const srcFo = await getFo(srcId);
+            if (srcFo) {
+              for (const s of allSeries) {
+                if (s.id === targetSeriesId) continue; // Never include target as a source
+                if (s.id === srcId) continue; // Already in sources
+                const fo = await getFo(s.id);
+                if (fo && fo === srcFo) {
+                  // Found a FoR sibling of this source
+                  siblingFoRIds.add(s.id);
+                  expandedSourceIds.add(s.id);
+                }
+              }
+            }
+          } catch {}
+        }
+        
+        // Update sources to include FoR siblings
+        sourcesSeriesIds = Array.from(expandedSourceIds);
+        sources = sourcesSeriesIds
+          .map(id => allSeries.find(s => s.id === id)?.seriesInstanceUID)
+          .filter((uid): uid is string => typeof uid === 'string' && !!uid);
 
         const transformCandidates = (parsed.candidates?.length
           ? parsed.candidates
