@@ -31,8 +31,8 @@ export function createAdaptivePreview(
     const centerIntensity = pixelData[cy * width + cx] || 0;
     
     // A more sensitive threshold that adapts to the local tissue density.
-    // A lower multiplier makes it more sensitive to subtle edges.
-    const adaptiveThreshold = Math.max(8, Math.abs(centerIntensity) * 0.08);
+    // Increased multiplier to reduce bleeding into surrounding structures
+    const adaptiveThreshold = Math.max(12, Math.abs(centerIntensity) * 0.15);
     
     const numRays = 48; // Increased for a smoother initial shape.
     const shapePoints: Point[] = [];

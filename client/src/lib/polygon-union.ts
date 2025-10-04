@@ -39,9 +39,26 @@ export function polygonUnion(polygons: number[][], brushRadiusInMm?: number): nu
   const zValue = polygons[0][2]; // Assume all on same slice
   
   // Create a grid for rasterization
-  const gridSize = 0.25; // mm resolution. Tuned for performance. A smaller value (e.g., 0.1) is more accurate but slower.
+  // Use adaptive grid size based on complexity: coarser for many polygons (faster), finer for few (more accurate)
+  const gridSize = polygons.length > 20 ? 0.4 : 0.25; // mm resolution
   const width = Math.ceil((maxX - minX) / gridSize) + 2;
   const height = Math.ceil((maxY - minY) / gridSize) + 2;
+  
+  // Safety check to prevent excessive memory allocation
+  const maxGridCells = 2000 * 2000; // 4 million cells max
+  if (width * height > maxGridCells) {
+    console.warn(`Grid too large (${width}x${height}), using coarser resolution`);
+    const scaleFactor = Math.sqrt((width * height) / maxGridCells);
+    const adjustedGridSize = gridSize * scaleFactor;
+    const adjustedWidth = Math.ceil((maxX - minX) / adjustedGridSize) + 2;
+    const adjustedHeight = Math.ceil((maxY - minY) / adjustedGridSize) + 2;
+    const grid = new Uint8Array(adjustedWidth * adjustedHeight);
+    for (const polygon of polygons) {
+      fillPolygonOnGrid(polygon, grid, adjustedWidth, adjustedHeight, minX, minY, adjustedGridSize);
+    }
+    return extractBoundaryFromGrid(grid, adjustedWidth, adjustedHeight, minX, minY, adjustedGridSize, zValue);
+  }
+  
   const grid = new Uint8Array(width * height);
   
   // Rasterize all polygons onto the grid
