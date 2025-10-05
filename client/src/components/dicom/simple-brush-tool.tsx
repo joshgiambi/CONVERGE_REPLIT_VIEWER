@@ -63,7 +63,6 @@ export function SimpleBrushTool({
   } | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
-  const animationFrameRef = useRef<number | null>(null);
   
   // For smart brush - collect adaptive shapes while drawing
   const adaptiveShapesRef = useRef<Array<{ x: number; y: number }[]>>([]);
@@ -189,12 +188,6 @@ export function SimpleBrushTool({
       overlayCanvasRef.current.style.top = `${mainRect.top - parentRect.top}px`;
       overlayCanvasRef.current.style.left = `${mainRect.left - parentRect.left}px`;
     }
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
   }, [isActive, canvasRef]);
 
   // Get structure color - red for erase modes, structure color for normal mode
@@ -317,22 +310,12 @@ export function SimpleBrushTool({
     }
   };
 
-  // Use requestAnimationFrame for smooth drawing
+  // Draw overlay when state changes (no continuous loop - saves CPU/GPU)
   useEffect(() => {
-    const animate = () => {
-      drawOverlay();
-      animationFrameRef.current = requestAnimationFrame(animate);
-    };
-
-    if (isActive) {
-      animate();
-    }
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
+    if (!isActive) return;
+    
+    // Single render on state change, not continuous loop
+    drawOverlay();
   }, [
     cursorPosition,
     isActive,
@@ -347,6 +330,7 @@ export function SimpleBrushTool({
     adaptivePreviewPoints,
     smartBrushEnabled,
     dicomImage,
+    drawOverlay,
   ]);
 
   // Handle mouse events

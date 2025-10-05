@@ -889,24 +889,11 @@ export default function PenToolV2({
     }
   }, [isActive, vertices, mousePosition, firstPointMode, hasCrossedBoundary, getStructureColor, isNearFirstVertex]);
 
-  // Animation loop for smooth visual feedback
+  // Draw overlay when state changes (no continuous loop - saves CPU/GPU)
   useEffect(() => {
-    let animationId: number;
-    
-    const animate = () => {
-      drawOverlay();
-      animationId = requestAnimationFrame(animate);
-    };
-
     if (isActive && (vertices.length > 0 || mousePosition)) {
-      animate();
+      drawOverlay();
     }
-
-    return () => {
-      if (animationId) {
-        cancelAnimationFrame(animationId);
-      }
-    };
   }, [isActive, drawOverlay, vertices.length, mousePosition]);
 
   // Reset when switching structures or becoming inactive
