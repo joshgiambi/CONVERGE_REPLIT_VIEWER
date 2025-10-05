@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Anchor, Loader2, ChevronDown, ChevronUp, SplitSquareHorizontal, Layers2 } from 'lucide-react';
+import { Zap, Loader2, ChevronDown, ChevronUp, SplitSquareHorizontal, Layers2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FusionSecondaryDescriptor } from '@/types/fusion';
 
@@ -158,7 +158,7 @@ export function FusionControlPanelV2({
           {/* Header row */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Anchor className="w-4 h-4 text-cyan-400" />
+              <Zap className="w-4 h-4 text-cyan-400" />
               <span className="text-xs font-semibold text-slate-200">Fusion</span>
             </div>
             <div className="flex items-center gap-1">
@@ -241,7 +241,7 @@ export function FusionControlPanelV2({
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Anchor className="w-5 h-5 text-cyan-400" />
+            <Zap className="w-5 h-5 text-cyan-400" />
             <span className="text-sm font-semibold text-slate-100">Fusion Control</span>
             <Badge variant="outline" className="bg-slate-800/60 border-slate-600/50 text-[10px] text-slate-300">
               {secondaryOptions.length} available

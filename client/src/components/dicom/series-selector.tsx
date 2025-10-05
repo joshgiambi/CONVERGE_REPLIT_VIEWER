@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Anchor, ExternalLink, Bug, Loader2, AlertTriangle } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Zap, ExternalLink, Bug, Loader2, AlertTriangle } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -970,7 +970,7 @@ export function SeriesSelector({
                                                 ) : hasError ? (
                                                   <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
                                                 ) : (
-                                                  <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                  <Zap className="h-3.5 w-3.5 text-green-300" />
                                                 )}
                                               </Button>
                                             )}
@@ -1102,20 +1102,20 @@ export function SeriesSelector({
                                              <TooltipProvider delayDuration={0}>
                                                <Tooltip>
                                                  <TooltipTrigger asChild>
-                                                   <Button
-                                                     size="icon"
-                                                     variant="ghost"
-                                                     className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
-                                                     onClick={(e) => {
-                                                       e.stopPropagation();
-                                                       // Toggle fusion off
-                                                       if (onSecondarySeriesSelect) {
-                                                         onSecondarySeriesSelect(null);
-                                                       }
-                                                     }}
-                                                   >
-                                                     <Anchor className="h-3.5 w-3.5 text-white" />
-                                                   </Button>
+                                                  <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-6 w-6 bg-green-600 hover:bg-green-700 animate-pulse"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      // Toggle fusion off
+                                                      if (onSecondarySeriesSelect) {
+                                                        onSecondarySeriesSelect(null);
+                                                      }
+                                                    }}
+                                                  >
+                                                    <Zap className="h-3.5 w-3.5 text-white" />
+                                                  </Button>
                                                  </TooltipTrigger>
                                                  <TooltipContent className="bg-gradient-to-r from-green-500/90 to-emerald-500/90 backdrop-blur-xl border-green-400/50 text-white">
                                                    <p className="font-medium">Fusion Active - Click to disable</p>
@@ -1148,7 +1148,7 @@ export function SeriesSelector({
                                                     ) : hasError ? (
                                                       <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
                                                     ) : (
-                                                      <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                      <Zap className="h-3.5 w-3.5 text-green-300" />
                                                     )}
                                                   </Button>
                                                 </TooltipTrigger>
@@ -1301,7 +1301,7 @@ export function SeriesSelector({
                                                  onClick={(e) => { e.stopPropagation(); if (onSecondarySeriesSelect) onSecondarySeriesSelect(null); }}
                                                  title="Disable fusion"
                                                >
-                                                 <Anchor className="h-3.5 w-3.5 text-white" />
+                                                 <Zap className="h-3.5 w-3.5 text-white" />
                                                </Button>
                                              ) : (
                                                <TooltipProvider delayDuration={0}>
@@ -1327,7 +1327,7 @@ export function SeriesSelector({
                                                        ) : hasError ? (
                                                          <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
                                                        ) : (
-                                                         <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                         <Zap className="h-3.5 w-3.5 text-green-300" />
                                                        )}
                                                      </Button>
                                                    </TooltipTrigger>
@@ -1419,7 +1419,7 @@ export function SeriesSelector({
                                                      }}
                                                      title="Disable fusion"
                                                    >
-                                                     <Anchor className="h-3.5 w-3.5 text-white" />
+                                                     <Zap className="h-3.5 w-3.5 text-white" />
                                                    </Button>
                                                  ) : (
                                                    <Button
@@ -1441,7 +1441,7 @@ export function SeriesSelector({
                                                      ) : hasErrorCt ? (
                                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
                                                      ) : (
-                                                       <Anchor className="h-3.5 w-3.5 text-green-300" />
+                                                       <Zap className="h-3.5 w-3.5 text-green-300" />
                                                      )}
                                                    </Button>
                                                  )}
