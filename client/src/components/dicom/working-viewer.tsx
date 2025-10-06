@@ -822,14 +822,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   }, [fusionOpacity]);
 
   useEffect(() => {
-    const overlay = fusionOverlayCanvasRef.current;
-    if (!overlay) return;
-    const clamped = Math.max(0, Math.min(1, fusionOpacity));
-    overlay.style.opacity = `${clamped}`;
-    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
-  }, [fusionOpacity]);
-
-  useEffect(() => {
     if (!secondarySeriesId) {
       clearFusionOverlayCanvas();
     }
@@ -5941,6 +5933,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 left: '50%',
                 transform: 'translate(-50%, -50%)',
                 zIndex: 1,
+                opacity: Math.max(0, Math.min(1, fusionOpacity)),
               }}
             />
 
