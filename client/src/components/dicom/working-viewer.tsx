@@ -851,6 +851,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
     props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
   );
+
+  // Keep internal window/level in sync with prop changes from sidebar sliders/presets
+  useEffect(() => {
+    if (props.windowLevel) {
+      const nextWidth = props.windowLevel.window;
+      const nextCenter = props.windowLevel.level;
+      // Only update if values actually changed to avoid unnecessary renders
+      if (
+        nextWidth !== currentWindowLevel.width ||
+        nextCenter !== currentWindowLevel.center
+      ) {
+        setCurrentWindowLevel({ width: nextWidth, center: nextCenter });
+      }
+    }
+  }, [props.windowLevel?.window, props.windowLevel?.level]);
   const updateWindowLevel = ({ width, center }: { width: number; center: number }) => {
     setCurrentWindowLevel({ width, center });
     onWindowLevelChange && onWindowLevelChange({ window: width, level: center });
