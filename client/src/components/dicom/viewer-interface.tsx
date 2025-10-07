@@ -2554,6 +2554,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           onWindowLevelPreset={(preset) => setFusionWindowLevel(preset)}
           displayMode={fusionDisplayMode}
           onDisplayModeChange={setFusionDisplayMode}
+          primarySeriesId={selectedSeries?.id}
         />
       ) : null}
 

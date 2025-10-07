@@ -192,14 +192,30 @@ def write_dicom_series(
 
     window_center = derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter")
     window_width = derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth")
-    rescale_intercept = secondary_meta.get("RescaleIntercept")
-    rescale_slope = secondary_meta.get("RescaleSlope")
+    # Prefer derived rescale params if provided; fall back to secondary
+    rescale_intercept = derived_meta.get("RescaleIntercept", secondary_meta.get("RescaleIntercept"))
+    rescale_slope = derived_meta.get("RescaleSlope", secondary_meta.get("RescaleSlope"))
     photometric = secondary_meta.get("PhotometricInterpretation") or "MONOCHROME2"
     samples_per_pixel = secondary_meta.get("SamplesPerPixel") or 1
-    bits_allocated = secondary_meta.get("BitsAllocated") or 32
-    bits_stored = secondary_meta.get("BitsStored") or 32
-    high_bit = secondary_meta.get("HighBit") or (bits_stored - 1)
-    pixel_representation = secondary_meta.get("PixelRepresentation") or 0
+
+    # Choose bit depth based on actual image pixel type
+    pixel_id = image.GetPixelID()
+    if pixel_id == sitk.sitkUInt16:
+        bits_allocated = 16
+        bits_stored = 16
+        high_bit = 15
+        pixel_representation = 0
+    elif pixel_id == sitk.sitkFloat32:
+        bits_allocated = 32
+        bits_stored = 32
+        high_bit = 31
+        pixel_representation = 0
+    else:
+        # Fallback: try to derive from secondary meta or default to 16
+        bits_allocated = int(secondary_meta.get("BitsAllocated") or 16)
+        bits_stored = int(secondary_meta.get("BitsStored") or bits_allocated)
+        high_bit = int(secondary_meta.get("HighBit") or (bits_stored - 1))
+        pixel_representation = int(secondary_meta.get("PixelRepresentation") or 0)
 
     shared_tags = {
         "0008|0008": image_type_str,
@@ -253,7 +269,6 @@ def write_dicom_series(
     depth_range = range(depth)
     for idx in depth_range:
         slice_img = sitk.Extract(image, [size[0], size[1], 0], [0, 0, idx])
-        slice_img = cast_to_float(slice_img)
         sop_uid = dicom_uid()
         position = transform_index_to_position(image, (0, 0, idx))
 
@@ -321,7 +336,10 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     resample_filter.SetReferenceImage(primary)
     resample_filter.SetTransform(transform_for_resample)
     resample_filter.SetInterpolator(interpolator)
-    resample_filter.SetDefaultPixelValue(0.0)
+    # Choose outside-of-FOV value by modality: CT→air(-1000), PET/MR→0
+    sec_mod = str(metadata.get("secondarySeries", {}).get("Modality") or "").upper()
+    default_outside = -1000.0 if sec_mod in {"CT"} else 0.0
+    resample_filter.SetDefaultPixelValue(float(default_outside))
     resample_filter.SetOutputPixelType(sitk.sitkFloat32)
     resampled = resample_filter.Execute(secondary)
 
@@ -332,8 +350,41 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     metadata = cfg.get("metadata", {})
 
+    # Optional scaling to UInt16 for export mode only
+    scale_to_uint16 = bool(cfg.get("scaleToUInt16", False))
+    write_image = resampled
+    if scale_to_uint16:
+        try:
+            arr = sitk.GetArrayFromImage(resampled).astype(np.float32)
+            finite = np.isfinite(arr)
+            if finite.any():
+                valid = arr[finite]
+                vmin = float(np.min(valid))
+                vmax = float(np.max(valid))
+            else:
+                vmin, vmax = 0.0, 1.0
+            if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
+                vmin, vmax = 0.0, 1.0
+        except Exception:
+            vmin, vmax = 0.0, 1.0
+
+        scale = (vmax - vmin) / 65535.0
+        if scale <= 0 or not np.isfinite(scale):
+            scale = 1.0
+        intercept = vmin
+
+        shifted = sitk.ShiftScale(resampled, shift=-intercept, scale=1.0 / scale)
+        write_image = sitk.Cast(shifted, sitk.sitkUInt16)
+
+        # Inject Rescale and WL into derived metadata so writers pick them up
+        derived_meta = metadata.setdefault("derivedSeries", {})
+        derived_meta.setdefault("WindowCenter", [(vmin + vmax) / 2.0])
+        derived_meta.setdefault("WindowWidth", [max(1e-3, (vmax - vmin))])
+        derived_meta["RescaleIntercept"] = float(intercept)
+        derived_meta["RescaleSlope"] = float(scale)
+
     instances: List[Dict[str, Any]] = []
-    series_info = write_dicom_series(resampled, dicom_dir, metadata, instances)
+    series_info = write_dicom_series(write_image, dicom_dir, metadata, instances)
 
     rows = resampled.GetSize()[1]
     cols = resampled.GetSize()[0]
@@ -346,6 +397,26 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     derived_meta = metadata.get("derivedSeries", {})
     secondary_meta = metadata.get("secondarySeries", {})
+
+    # Compute robust WL defaults from resampled image if metadata lacks them
+    try:
+        arr_stats = sitk.GetArrayFromImage(resampled).astype(np.float32)
+        finite_mask = np.isfinite(arr_stats)
+        if finite_mask.any():
+            vals = arr_stats[finite_mask]
+            p1 = float(np.percentile(vals, 1.0))
+            p99 = float(np.percentile(vals, 99.0))
+            if not np.isfinite(p1) or not np.isfinite(p99) or p1 == p99:
+                p1, p99 = float(np.min(vals)), float(np.max(vals))
+        else:
+            p1, p99 = 0.0, 1.0
+    except Exception:
+        p1, p99 = 0.0, 1.0
+
+    wl_center_default = (p1 + p99) / 2.0
+    wl_width_default = max(1e-3, (p99 - p1))
+    wl_center_out = derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter") or [wl_center_default]
+    wl_width_out = derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth") or [wl_width_default]
 
     summary = {
         "ok": True,
@@ -361,8 +432,8 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "imageOrientationPatient": row_cos + col_cos,
         "imagePositionPatientFirst": first_pos,
         "imagePositionPatientLast": last_pos,
-        "windowCenter": derived_meta.get("WindowCenter") or secondary_meta.get("WindowCenter"),
-        "windowWidth": derived_meta.get("WindowWidth") or secondary_meta.get("WindowWidth"),
+        "windowCenter": wl_center_out,
+        "windowWidth": wl_width_out,
         "outputDirectory": str(dicom_dir),
         "manifestPath": str(output_root / "manifest.json"),
         "instances": instances,

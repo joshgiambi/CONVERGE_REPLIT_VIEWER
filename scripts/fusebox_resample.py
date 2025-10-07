@@ -245,9 +245,9 @@ def resample(primary: sitk.Image, secondary: sitk.Image, xform: sitk.Transform, 
         resample_filter.SetInterpolator(sitk.sitkNearestNeighbor)
     else:
         resample_filter.SetInterpolator(sitk.sitkLinear)
-    # Use a very negative value that's clearly outside valid data range
-    # This will be clamped to black during rendering
-    resample_filter.SetDefaultPixelValue(-10000.0)
+    # Outside-of-FOV value: use 0 for PET-like (positive-only) data, -1000 for CT-like.
+    # We cannot easily detect modality here; default to 0 to avoid white borders in hot colormaps.
+    resample_filter.SetDefaultPixelValue(0.0)
     resample_filter.SetOutputPixelType(sitk.sitkFloat32)
     return resample_filter.Execute(secondary)
 

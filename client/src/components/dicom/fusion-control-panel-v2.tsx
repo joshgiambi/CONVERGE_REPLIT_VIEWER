@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Zap, Loader2, ChevronDown, ChevronUp, SplitSquareHorizontal, Layers2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FusionSecondaryDescriptor } from '@/types/fusion';
+import { useToast } from '@/hooks/use-toast';
 
 interface FusionControlPanelV2Props {
   opacity: number;
@@ -19,6 +20,7 @@ interface FusionControlPanelV2Props {
   onWindowLevelPreset?: (preset: { window: number; level: number } | null) => void;
   displayMode?: 'overlay' | 'side-by-side';
   onDisplayModeChange?: (mode: 'overlay' | 'side-by-side') => void;
+  primarySeriesId?: number | null;
 }
 
 export function FusionControlPanelV2({
@@ -34,8 +36,10 @@ export function FusionControlPanelV2({
   onWindowLevelPreset,
   displayMode = 'overlay',
   onDisplayModeChange,
+  primarySeriesId,
 }: FusionControlPanelV2Props) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { toast } = useToast();
 
   const activeDescriptor = useMemo(() => {
     return secondaryOptions.find((sec) => sec.secondarySeriesId === selectedSecondaryId) ?? null;
@@ -103,6 +107,43 @@ export function FusionControlPanelV2({
         : 'bg-slate-800/40 border-slate-600/40 text-slate-200 hover:bg-slate-700/50',
     };
     return colorMap[color as keyof typeof colorMap];
+  };
+
+  const handleExport = async () => {
+    try {
+      const active = activeDescriptor;
+      if (!active) {
+        toast({ title: 'Select overlay', description: 'Choose a fused overlay to export', variant: 'destructive' });
+        return;
+      }
+      if (!primarySeriesId) {
+        toast({ title: 'Missing primary', description: 'Select a primary CT series first', variant: 'destructive' });
+        return;
+      }
+      toast({ title: 'Preparing export…', description: `Fused ${active.secondaryModality} → CT` });
+      const res = await fetch('/api/fusion/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ primarySeriesId, secondarySeriesId: active.secondarySeriesId }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fused_${primarySeriesId}_${active.secondarySeriesId}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Export ready', description: 'Downloading fused ZIP...' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: 'Export failed', description: message || 'Could not export fused series', variant: 'destructive' });
+    }
   };
 
   const renderStatusIndicator = (status: { status: string; error?: string | null }) => {
@@ -247,14 +288,24 @@ export function FusionControlPanelV2({
               {secondaryOptions.length} available
             </Badge>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-slate-400 hover:text-slate-200"
-            onClick={() => setIsExpanded(false)}
-          >
-            <ChevronUp className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleExport}
+              disabled={!activeDescriptor || !primarySeriesId}
+              className="h-7 text-[10px] px-2"
+            >
+              Export
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-slate-400 hover:text-slate-200"
+              onClick={() => setIsExpanded(false)}
+            >
+              <ChevronUp className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Display mode toggle */}

@@ -76,6 +76,7 @@ export interface VolumeResampleRequest {
   interpolation?: InterpolationMode;
   outputDirectory: string;
   metadata: VolumeResampleMetadata;
+  scaleToUInt16?: boolean;
 }
 
 export interface VolumeResampleInstance {
@@ -127,6 +128,8 @@ export class FuseboxVolumeResampler {
       interpolation: request.interpolation ?? 'linear',
       outputDirectory: request.outputDirectory,
       metadata: request.metadata,
+      // Keep viewer rendering unchanged by default; enable scaling only for explicit export workflows
+      scaleToUInt16: Boolean(request.scaleToUInt16),
     };
 
     const response = await runFuseboxScript<VolumeResampleResponse>('fusebox_resample_volume.py', config);

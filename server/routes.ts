@@ -25,6 +25,8 @@ import {
   type FuseboxLogEmitter,
 } from './fusion/fusebox';
 import { fusionManifestService } from './fusion/manifest-service';
+import { FuseboxVolumeResampler } from './fusion/resampler.ts';
+import { loadDicomMetadata } from './fusion/dicom-metadata.ts';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -3653,6 +3655,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       logger.error(`fusion slice fetch failed: ${err?.message || String(err)}`);
       res.status(500).json({ error: 'fused-slice fetch failed', details: err?.message || String(err) });
+    }
+  });
+
+  // Export fused DICOM series (in-memory) for a given primary/secondary pair as a ZIP
+  app.post("/api/fusion/export", async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const primarySeriesId = Number(body.primarySeriesId);
+      const secondarySeriesId = Number(body.secondarySeriesId);
+
+      if (!Number.isFinite(primarySeriesId) || !Number.isFinite(secondarySeriesId)) {
+        return res.status(400).json({ error: 'primarySeriesId and secondarySeriesId are required' });
+      }
+
+      // Ensure manifest exists and includes this secondary
+      const manifest = await fusionManifestService.getManifest({
+        primarySeriesId,
+        secondarySeriesIds: [secondarySeriesId],
+        preload: true,
+        logger: fuseboxEmit,
+      });
+
+      const secondary = manifest.secondaries.find((s) => s.secondarySeriesId === secondarySeriesId && s.status === 'ready');
+      if (!secondary) {
+        return res.status(404).json({ error: 'Fused secondary not available for export' });
+      }
+
+      // Lazy import archiver to keep startup fast
+      const archiver = (await import('archiver')).default;
+      res.setHeader('Content-Type', 'application/zip');
+      const filename = `fused_${primarySeriesId}_${secondarySeriesId}_${Date.now()}.zip`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.on('error', (err: any) => {
+        logger.error(`Fused export archive error: ${err?.message || String(err)}`);
+        if (!res.headersSent) res.status(500);
+        res.end();
+      });
+      archive.pipe(res);
+
+      const subdir = `FUSED_${secondarySeriesId}`;
+      for (const inst of secondary.instances) {
+        const sop = inst.sopInstanceUID;
+        if (!sop) continue;
+        let buffer = fusionManifestService.getSliceBuffer(primarySeriesId, secondarySeriesId, sop);
+        if (!buffer) continue;
+
+        // As a safety net: if the instance lacks windowing/rescale tags, rewrite with scaling
+        const needsScale = (secondary.windowCenter == null || secondary.windowWidth == null);
+        if (needsScale) {
+          try {
+            // Re-run resampler with scaling to uint16 enabled; pull the new buffer
+            const { fusionManifestService: svc } = await import('./fusion/manifest-service.ts');
+            // Clear cache for this pair to force rebuild with scaling
+            svc.clearCache(primarySeriesId, secondarySeriesId);
+            await svc.getManifest({ primarySeriesId, secondarySeriesIds: [secondarySeriesId], force: true, preload: true });
+            buffer = svc.getSliceBuffer(primarySeriesId, secondarySeriesId, sop) || buffer;
+          } catch {
+            // fall back to existing buffer
+          }
+        }
+
+        const baseName = (inst.fileName && String(inst.fileName).trim()) || `slice_${inst.instanceNumber || 0}.dcm`;
+        archive.append(buffer, { name: path.posix.join(subdir, baseName.endsWith('.dcm') ? baseName : `${baseName}.dcm`) });
+      }
+
+      await archive.finalize();
+    } catch (err: any) {
+      logger.error(`Fused export failed: ${err?.message || String(err)}`);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to export fused series' });
+      }
     }
   });
 
