@@ -256,3 +256,16 @@ export function contoursMatch(c1: BlobContour, c2: BlobContour): boolean {
   return createContourKey(c1) === createContourKey(c2);
 }
 
+/**
+ * Quick check: does a structure have multiple disconnected blobs?
+ * Returns the number of blobs detected
+ */
+export function countStructureBlobs(structure: any, tolMm: number = 1.5): number {
+  if (!structure?.contours || !Array.isArray(structure.contours) || structure.contours.length === 0) {
+    return 0;
+  }
+  
+  const blobs = groupStructureBlobs(structure, tolMm);
+  return blobs.length;
+}
+

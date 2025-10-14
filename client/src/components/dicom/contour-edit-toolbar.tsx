@@ -44,6 +44,7 @@ import { undoRedoManager } from '@/lib/undo-system';
 import { growContourSimple } from '@/lib/simple-polygon-operations';
 import { log } from '@/lib/log';
 import { useToast } from '@/hooks/use-toast';
+import { countStructureBlobs } from '@/lib/blob-operations';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -73,6 +74,7 @@ interface ContourEditToolbarProps {
   imageMetadata?: any;
   onOpenBooleanOperations?: () => void;
   onOpenAdvancedMarginTool?: () => void;
+  rtStructures?: any; // Full RT structures for blob detection
 }
 
 export function ContourEditToolbar({ 
@@ -89,7 +91,8 @@ export function ContourEditToolbar({
   seriesId,
   imageMetadata,
   onOpenBooleanOperations,
-  onOpenAdvancedMarginTool
+  onOpenAdvancedMarginTool,
+  rtStructures
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<string | null>(null);
@@ -480,6 +483,11 @@ export function ContourEditToolbar({
   };
 
   if (!isVisible || !selectedStructure) return null;
+
+  // Check if selected structure has multiple blobs
+  const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
+  const blobCount = structure ? countStructureBlobs(structure) : 0;
+  const hasMultipleBlobs = blobCount > 1;
 
   const rgbToHex = (rgb: number[]) => {
     return '#' + rgb.map(x => x.toString(16).padStart(2, '0')).join('');
