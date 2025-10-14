@@ -14,13 +14,6 @@ import { MPRFloating } from './mpr-floating';
 import { BrushOperation } from "@shared/schema";
 import { growContour } from "@/lib/contour-grow";
 import { gaussianSmoothContour as smoothContour } from "@/lib/contour-smooth-simple";
-import { 
-  applyRippleAnimation, 
-  createDefaultAnimationState, 
-  isAnimationActive, 
-  getAnimationProgress,
-  type RippleAnimationState 
-} from "@/lib/smooth-ripple-animation";
 import {
   addBrushToContour,
   eraseBrushFromContour,
@@ -48,8 +41,6 @@ import { getSliceZ, sameSlice, getSpacing, getRescaleParams, SLICE_TOL_MM } from
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import type { RegistrationAssociation, RegistrationTransformCandidate, RegistrationSeriesDetail } from '@/types/fusion';
 import { useToast } from '@/hooks/use-toast';
-import { BlobManagementDialog } from './blob-management-dialog';
-import { groupStructureBlobs, computeBlobVolumeCc, createContourKey, type Blob, type BlobContour } from '@/lib/blob-operations';
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
@@ -133,7 +124,6 @@ interface WorkingViewerProps {
   onSlicePositionChange?: (slicePosition: number) => void;
   secondarySeriesId?: number | null;
   fusionOpacity?: number;
-  fusionDisplayMode?: 'overlay' | 'side-by-side';
   onSecondarySeriesSelect?: (id: number | null) => void;
   onFusionOpacityChange?: (opacity: number) => void;
   hasSecondarySeriesForFusion?: boolean;
@@ -182,7 +172,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     onSlicePositionChange,
     secondarySeriesId: externalSecondarySeriesId,
     fusionOpacity: externalFusionOpacity = 0.5,
-    fusionDisplayMode = 'overlay',
     onSecondarySeriesSelect,
     onFusionOpacityChange,
     hasSecondarySeriesForFusion,
@@ -199,8 +188,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   } = props;
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fusionOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const contoursOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const sagittalCanvasRef = useRef<HTMLCanvasElement>(null);
   const coronalCanvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<any[]>([]);
@@ -222,11 +209,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [dicomPixelData, setDicomPixelData] = useState<any>(null);
   
-  // Smooth animation state - using clean animation module
-  const [smoothAnimation, setSmoothAnimation] = useState<RippleAnimationState>(
-    createDefaultAnimationState()
-  );
-  
   // GPU acceleration state for hybrid rendering
   const [isGPUMode, setIsGPUMode] = useState(false);
   const [gpuCheckComplete, setGpuCheckComplete] = useState(false);
@@ -236,8 +218,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [blobDialogOpen, setBlobDialogOpen] = useState(false);
   const [blobDialogData, setBlobDialogData] = useState<null | {
     structureId: number;
-    blobs: Blob[];
+    blobs: Array<{ id: number; volumeCc: number; contours: Array<{ slicePosition: number; points: number[]; numberOfPoints: number }> }>;
   }>(null);
+  const [selectedBlobIdsToDelete, setSelectedBlobIdsToDelete] = useState<Set<number>>(new Set());
   const [highlightedBlobId, setHighlightedBlobId] = useState<number | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -255,8 +238,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string | null>(null);
   const [registrationAssociationsForPrimary, setRegistrationAssociationsForPrimary] = useState<RegistrationAssociation[]>([]);
   // Fusion debug support
-  const [showFusionDebug, setShowFusionDebug] = useState(false);
-  const [fusionDebugText, setFusionDebugText] = useState('');
   const [fusionLogs, setFusionLogs] = useState<string[]>([]);
   const [showRegDetails, setShowRegDetails] = useState(false);
   const [regDetailsText, setRegDetailsText] = useState('');
@@ -273,6 +254,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const ctTransform = useRef<{scale: number, offsetX: number, offsetY: number, imageWidth: number, imageHeight: number} | null>(null);
   const scheduleRenderRef = useRef<(() => void) | null>(null);
   const fusionRequestTokenRef = useRef(0);
+  const fusionAbortControllerRef = useRef<AbortController | null>(null);
   const fusionPrefetchSetRef = useRef<Set<string>>(new Set());
 
   const parseImagePosition = useCallback((image: any): [number, number, number] | null => {
@@ -418,58 +400,39 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [],
   );
 
-  const clearFusionOverlayCanvas = useCallback(() => {
-    const overlayCanvas = fusionOverlayCanvasRef.current;
-    if (!overlayCanvas) return;
-    const ctx = overlayCanvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  }, []);
-
-  const updateFusionOverlayCanvas = useCallback(
+  const drawFusionOverlay = useCallback(
     (
-      overlaySource: HTMLCanvasElement | null,
-      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number } | null,
-      hasSignal: boolean,
+      ctx: CanvasRenderingContext2D,
+      overlayCanvas: HTMLCanvasElement,
+      transform: { scale: number; offsetX: number; offsetY: number; imageWidth: number; imageHeight: number },
+      alpha: number,
     ) => {
-      const overlayCanvas = fusionOverlayCanvasRef.current;
-      const baseCanvas = canvasRef.current;
-      if (!overlayCanvas || !baseCanvas) return;
-      const ctx = overlayCanvas.getContext('2d');
-      if (!ctx) return;
-
-      if (overlayCanvas.width !== baseCanvas.width || overlayCanvas.height !== baseCanvas.height) {
-        overlayCanvas.width = baseCanvas.width;
-        overlayCanvas.height = baseCanvas.height;
-      }
-
-      ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-      if (!overlaySource || !transform || !hasSignal) return;
-
-      // IMPROVED: Use the exact same positioning logic as primary image
-      // This ensures perfect 1:1 alignment between primary CT and fusion overlay
+      if (!overlayCanvas || overlayCanvas.width === 0 || overlayCanvas.height === 0) return;
       const targetWidth = transform.imageWidth * transform.scale;
       const targetHeight = transform.imageHeight * transform.scale;
       if (targetWidth === 0 || targetHeight === 0) return;
 
+      const widthScale = targetWidth / overlayCanvas.width;
+      const heightScale = targetHeight / overlayCanvas.height;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      
-      // Draw overlay using same position and size as primary image
-      // This guarantees pixel-perfect alignment
       ctx.drawImage(
-        overlaySource,
+        overlayCanvas,
         0,
         0,
-        overlaySource.width,
-        overlaySource.height,
+        overlayCanvas.width,
+        overlayCanvas.height,
         transform.offsetX,
         transform.offsetY,
-        targetWidth,
-        targetHeight,
+        overlayCanvas.width * widthScale,
+        overlayCanvas.height * heightScale,
       );
+      ctx.restore();
     },
-    [canvasRef, fusionOverlayCanvasRef],
+    [],
   );
 
   const convertSliceToCanvas = useCallback(
@@ -506,8 +469,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   }, [convertSliceToCanvas, secondaryModality]);
 
-  const FUSION_CACHE_MAX_AGE_MS = 45000;
-  const FUSION_PREFETCH_RADIUS = 3;
+  // Aggressive caching for smooth rapid scrolling
+  const FUSION_CACHE_MAX_AGE_MS = 300000; // 5 minutes (increased from 45s)
+  const FUSION_PREFETCH_RADIUS = 15; // 15 slices ahead/behind (increased from 3)
+  const FUSION_PARALLEL_FETCH_LIMIT = 6; // Fetch up to 6 slices in parallel
 
   const prefetchFusionSlices = useCallback(
     (centerIndex: number) => {
@@ -523,6 +488,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       const registrationId = selectedRegistrationId ?? null;
 
+      // Collect slices to prefetch (prioritize by distance from current slice)
+      const fetchQueue: Array<{ index: number; distance: number; image: any }> = [];
+
       for (let offset = -FUSION_PREFETCH_RADIUS; offset <= FUSION_PREFETCH_RADIUS; offset += 1) {
         const targetIndex = centerIndex + offset;
         if (targetIndex < 0 || targetIndex >= images.length) continue;
@@ -532,39 +500,71 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const key = buildFuseboxCacheKey(sop, secondarySeriesId, registrationId);
         if (fuseboxCacheRef.current.has(key) || fusionPrefetchSetRef.current.has(key)) continue;
 
-        fusionPrefetchSetRef.current.add(key);
-        const instNumber = Number(targetImage.instanceNumber ?? targetImage.metadata?.instanceNumber ?? NaN);
-        const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : targetIndex;
-        const preferredPosition = parseImagePosition(targetImage);
-        getFusedSlice(seriesId, secondarySeriesId, sop)
-          .catch((error) => {
-            if (error instanceof Error && error.message.includes('not found in manifest')) {
-              return getFusedSliceSmart(
-                seriesId,
-                secondarySeriesId,
-                sop,
-                Number.isFinite(instNumber) ? instNumber : null,
-                preferredIndex,
-                preferredPosition,
-              );
-            }
-            throw error;
-          })
-          .then((slice) => {
-            const prepared = convertSliceToCanvas(slice, secondaryModality);
-            if (prepared) {
-              fuseboxCacheRef.current.set(key, { ...prepared, timestamp: Date.now() });
-            }
-          })
-          .catch((error) => {
-            if (import.meta.env.DEV) {
-              console.warn('Fusion prefetch failed', error);
-            }
-          })
-          .finally(() => {
-            fusionPrefetchSetRef.current.delete(key);
-          });
+        fetchQueue.push({
+          index: targetIndex,
+          distance: Math.abs(offset),
+          image: targetImage
+        });
       }
+
+      // Sort by distance (closest slices first for smooth scrolling)
+      fetchQueue.sort((a, b) => a.distance - b.distance);
+
+      // Batch fetch with concurrency limit
+      const fetchBatch = async () => {
+        const batch = fetchQueue.splice(0, FUSION_PARALLEL_FETCH_LIMIT);
+        if (!batch.length) return;
+
+        await Promise.allSettled(
+          batch.map(async ({ image }) => {
+            const sop = image.sopInstanceUID;
+            const key = buildFuseboxCacheKey(sop, secondarySeriesId, registrationId);
+            fusionPrefetchSetRef.current.add(key);
+
+            try {
+              const instNumber = Number(image.instanceNumber ?? image.metadata?.instanceNumber ?? NaN);
+              const preferredIndex = Number.isFinite(instNumber) ? instNumber - 1 : centerIndex;
+              const preferredPosition = parseImagePosition(image);
+
+              let slice;
+              try {
+                slice = await getFusedSlice(seriesId, secondarySeriesId, sop);
+              } catch (error) {
+                if (error instanceof Error && error.message.includes('not found in manifest')) {
+                  slice = await getFusedSliceSmart(
+                    seriesId,
+                    secondarySeriesId,
+                    sop,
+                    Number.isFinite(instNumber) ? instNumber : null,
+                    preferredIndex,
+                    preferredPosition,
+                  );
+                } else {
+                  throw error;
+                }
+              }
+
+              const prepared = convertSliceToCanvas(slice, secondaryModality);
+              if (prepared) {
+                fuseboxCacheRef.current.set(key, { ...prepared, timestamp: Date.now() });
+              }
+            } catch (error) {
+              if (import.meta.env.DEV) {
+                console.warn('Fusion prefetch failed for', sop, error);
+              }
+            } finally {
+              fusionPrefetchSetRef.current.delete(key);
+            }
+          })
+        );
+
+        // Continue fetching remaining batches
+        if (fetchQueue.length > 0) {
+          await fetchBatch();
+        }
+      };
+
+      fetchBatch();
     },
     [
       buildFuseboxCacheKey,
@@ -577,6 +577,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       fusionManifestLoading,
       fusionSecondaryStatuses,
       fusionManifestPrimarySeriesId,
+      parseImagePosition,
     ],
   );
 
@@ -587,6 +588,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       clearFusionSlices(activeSeriesId);
     };
   }, [seriesId]);
+
+  // Aggressive prefetch when secondary series is selected
+  useEffect(() => {
+    if (!secondarySeriesId || !images.length || currentIndex < 0) return;
+
+    // Immediately prefetch visible slice and surrounding slices
+    const timer = setTimeout(() => {
+      prefetchFusionSlices(currentIndex);
+    }, 50); // Small delay to let manifest settle
+
+    return () => clearTimeout(timer);
+  }, [secondarySeriesId, currentIndex, images.length, prefetchFusionSlices]);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -809,15 +822,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           await displayCurrentImageRef.current();
         }
         lastRenderTimeRef.current = performance.now();
-        
+
         // Debounce fusion rendering for smoother scrolling
+        // Only re-render if we were actively scrolling (prevents contour popping)
         fusionRenderDebounceRef.current = setTimeout(() => {
+          const wasScrolling = isScrollingRef.current;
           isScrollingRef.current = false;
-          // Re-render with full quality fusion after scrolling stops
-          if (fusionOpacity > 0 && secondarySeriesId) {
-            scheduleRender();
+          // Re-render with full quality fusion only if we were scrolling AND fusion is active
+          // This prevents unnecessary re-renders that cause contours to pop
+          if (wasScrolling && fusionOpacity > 0 && secondarySeriesId && !needsRenderRef.current) {
+            needsRenderRef.current = true;
+            if (displayCurrentImageRef.current) {
+              displayCurrentImageRef.current();
+            }
           }
-        }, 100);
+        }, 200); // Increased from 100ms to 200ms for better stability
       });
     }
   }, [fusionOpacity, secondarySeriesId]);
@@ -831,20 +850,111 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [scheduleRender]);
 
+  // When fusion opacity changes, redraw base CT from offscreen + cached overlay only (no full CT re-render)
   useEffect(() => {
-    const overlay = fusionOverlayCanvasRef.current;
-    if (!overlay) return;
-    const clamped = Math.max(0, Math.min(1, fusionOpacity));
-    overlay.style.opacity = `${clamped}`;
-    overlay.style.visibility = clamped === 0 ? 'hidden' : 'visible';
-  }, [fusionOpacity]);
+    try {
+      if (!canvasRef.current) return;
+      if (!secondarySeriesId) return;
+      const currentImage = images[currentIndex];
+      if (!currentImage) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-  useEffect(() => {
-    if (!secondarySeriesId) {
-      clearFusionOverlayCanvas();
+      const cacheKey = buildFuseboxCacheKey(
+        currentImage.sopInstanceUID,
+        secondarySeriesId,
+        selectedRegistrationId ?? null,
+      );
+      const cached = fuseboxCacheRef.current.get(cacheKey);
+      const t = ctTransform.current;
+      const src = offscreenCanvasRef.current;
+
+      if (cached && t && src) {
+        if (!cached.hasSignal) {
+          fusionIssueRef.current = 'empty-fusebox-slice';
+          return;
+        }
+        // Redraw CT from offscreen canvas with existing transform
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(src, t.offsetX, t.offsetY, t.imageWidth * t.scale, t.imageHeight * t.scale);
+
+        // Draw cached fusion overlay with new opacity
+        drawFusionOverlay(ctx, cached.canvas, t, fusionOpacity);
+
+        // Redraw RT structures on top
+        try {
+          const imageWithMetadata = { ...currentImage, imageMetadata };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
+        } catch {}
+
+        // Redraw crosshairs if axial
+        try {
+          if (orientation === 'axial') {
+            const imageWidth = currentImage.columns || currentImage.width || 512;
+            const imageHeight = currentImage.rows || currentImage.height || 512;
+            const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+            const totalScale = baseScale * zoom;
+            const scaledWidth = imageWidth * totalScale;
+            const scaledHeight = imageHeight * totalScale;
+            const imageX = (canvas.width - scaledWidth) / 2 + panX;
+            const imageY = (canvas.height - scaledHeight) / 2 + panY;
+            const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
+            const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(crosshairCanvasX, 0);
+            ctx.lineTo(crosshairCanvasX, canvas.height);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, crosshairCanvasY);
+            ctx.lineTo(canvas.width, crosshairCanvasY);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+          }
+        } catch {}
+      } else {
+        // Fallback to scheduled render if no cache/base available
+        scheduleRender();
+      }
+    } catch {
+      // Ignore errors and let scheduled render handle it
+      scheduleRender();
     }
-  }, [secondarySeriesId, clearFusionOverlayCanvas]);
-  
+  }, [
+    buildFuseboxCacheKey,
+    drawFusionOverlay,
+    fusionOpacity,
+    secondarySeriesId,
+    selectedRegistrationId,
+    currentIndex,
+    images,
+    scheduleRender,
+    imageMetadata,
+    orientation,
+    crosshairPos,
+    panX,
+    panY,
+    zoom,
+    // RT structure dependencies - critical for preventing contour flickering during opacity changes
+    rtStructures,
+    structureVisibility,
+    selectedForEdit,
+    previewContours,
+    contourSettings,
+    allStructuresVisible,
+    selectedStructures,
+  ]);
+
   // Abort controller for series changes
   const seriesAbortRef = useRef<AbortController | null>(null);
   
@@ -861,21 +971,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
     props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
   );
-
-  // Keep internal window/level in sync with prop changes from sidebar sliders/presets
-  useEffect(() => {
-    if (props.windowLevel) {
-      const nextWidth = props.windowLevel.window;
-      const nextCenter = props.windowLevel.level;
-      // Only update if values actually changed to avoid unnecessary renders
-      if (
-        nextWidth !== currentWindowLevel.width ||
-        nextCenter !== currentWindowLevel.center
-      ) {
-        setCurrentWindowLevel({ width: nextWidth, center: nextCenter });
-      }
-    }
-  }, [props.windowLevel?.window, props.windowLevel?.level]);
   const updateWindowLevel = ({ width, center }: { width: number; center: number }) => {
     setCurrentWindowLevel({ width, center });
     onWindowLevelChange && onWindowLevelChange({ window: width, level: center });
@@ -2116,7 +2211,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Perform union of intersecting polygons using simple operations
         const unionResults = unionMultipleContoursSimple(polygonsToUnion);
         
-        // FIX #1: Only modify structure if union succeeded
+        // Only remove existing contours AFTER confirming union succeeded
         if (unionResults && unionResults.length > 0) {
           // Union succeeded - remove ALL existing contours at this slice and replace with union result
           structure.contours = structure.contours.filter(
@@ -2143,23 +2238,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
             });
           }
         } else {
-          // FIX #1: DEFENSIVE FALLBACK - union failed, don't remove anything
-          // Just add the brush polygon as a separate blob, all existing contours remain untouched
-          console.warn('🔸 BRUSH FIX: Union failed - adding brush as separate blob, preserving all existing contours');
+          // Fallback: if union failed/returned empty, preserve ALL existing contours
+          // Just add the brush polygon as a separate blob without removing anything
+          console.warn('🔸 BRUSH FIX: Union failed - preserving existing contours to prevent disappearing blobs');
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: brushPolygon,
             numberOfPoints: brushPolygon.length / 3,
           });
-          // Note: existingOnSlice contours remain in structure.contours, no removal happened
         }
       } else {
-        // FIX #2: No intersection - remove old contours from slice first, then add new + existing
-        // This prevents duplicates that were created by the old logic
-        structure.contours = structure.contours.filter(
-          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-        );
-        
+        // Brush doesn't intersect - create separate blob
         // Add brush as new separate contour
         structure.contours.push({
           slicePosition: payload.slicePosition,
@@ -2179,21 +2268,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       console.log(`Structure now has ${structure.contours.length} contours`);
       setLocalRTStructures(updatedStructures);
-      
-      // Save state to undo system
-      if (seriesId) {
-        undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
-      }
-      saveContourUpdates(updatedStructures, 'add_brush_stroke');
-      
-      // FIX #7: Delay render to allow React state update to complete
-      // Without this delay, canvas renders with OLD contours before setLocalRTStructures completes
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 BRUSH FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
       
       // Handle next slice prediction if enabled
       if (payload.predictionEnabled) {
@@ -2266,15 +2340,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           
           // Update the structures again with predictions
           setLocalRTStructures(updatedStructures);
-          // Re-trigger render for predictions with same delay
-          setTimeout(() => {
-            try { 
-              scheduleRender(); 
-              console.log('🎯 BRUSH FIX: Render triggered after prediction update');
-            } catch {}
-          }, 10);
         }
       }
+      // Save state to new undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
+      }
+      saveContourUpdates(updatedStructures, 'add_brush_stroke');
+      // Trigger immediate render to show contours
+      try { 
+        scheduleRender(); 
+        // Temporary debugging notification
+        console.log('🎯 CONTOUR FIX: Immediate render triggered after brush stroke');
+      } catch {}
     } else if (payload.action === "smart_brush_stroke") {
       // Handle smart brush stroke - add already processed contour points
       if (false) console.log("🎯 Processing smart brush stroke:", payload);
@@ -2314,20 +2392,18 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         }
       }
 
-      // FIX #3: Apply defensive pattern - don't remove contours until operation succeeds
+      // Remove all existing contours at this slice; we will add them back.
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
+      );
+
       if (intersectsWithExisting) {
         // If the new stroke intersects, union it with all intersecting contours
         const polygonsToUnion = [brushPolygon, ...intersectingContours.map(c => c.points)];
         const unionResults = unionMultipleContoursSimple(polygonsToUnion);
         
-        // FIX #3: Only modify structure if union succeeded
+        // Add the new unified contour(s)
         if (unionResults && unionResults.length > 0) {
-          // Union succeeded - remove existing contours and add union results
-          structure.contours = structure.contours.filter(
-            (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-          );
-          
-          // Add the new unified contour(s)
           unionResults.forEach((polygonPoints: number[]) => {
             if (polygonPoints.length >= 9) {
               structure.contours.push({
@@ -2337,36 +2413,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
               });
             }
           });
-          
-          // Re-add the contours that did not intersect
-          for (const contour of nonIntersectingContours) {
-            structure.contours.push(contour);
-          }
-        } else {
-          // FIX #3: DEFENSIVE FALLBACK - union failed, don't remove anything
-          // Just add the brush polygon as a separate blob
-          console.warn('🔸 SMART BRUSH FIX: Union failed - adding as separate blob, preserving all existing contours');
-          structure.contours.push({
-            slicePosition: payload.slicePosition,
-            points: brushPolygon,
-            numberOfPoints: brushPolygon.length / 3,
-          });
-          // Note: existingOnSlice contours remain in structure.contours, no removal happened
+        }
+        
+        // Re-add the contours that did not intersect
+        for (const contour of nonIntersectingContours) {
+          structure.contours.push(contour);
         }
       } else {
-        // No intersection - remove old contours from slice first, then add new + existing
-        structure.contours = structure.contours.filter(
-          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-        );
-        
-        // Add the new brush stroke as a new contour
+        // If there's no intersection, add the new brush stroke as a new contour
         structure.contours.push({
           slicePosition: payload.slicePosition,
           points: brushPolygon,
           numberOfPoints: brushPolygon.length / 3,
         });
         
-        // Re-add all the other existing contours as they were
+        // And re-add all the other existing contours as they were
         for (const contour of existingOnSlice) {
           structure.contours.push(contour);
         }
@@ -2380,15 +2441,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'smart_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'smart_brush_stroke');
-      
-      // FIX #7: Delay render to allow React state update to complete
-      // This is the CRITICAL fix for contours not appearing until slice change
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 SMART BRUSH FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "erase_stroke") {
       // Handle erase stroke - subtract points from contour
       console.log("🔹 Processing erase stroke:", payload);
@@ -2410,95 +2464,48 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       console.log(`Erase polygon created with ${erasePolygon.length / 3} points`);
 
-      // FIX #4: Use consistent tolerance constant
+      // Collect all contours on this slice
+      const tol = 0.5;
       const existingOnSlice = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= SLICE_TOL_MM
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tol
       );
 
-      // FIX #4: DEFENSIVE - Don't remove contours until we process them all
-      const newContours: any[] = [];
+      // Remove all existing contours at this slice
+      structure.contours = structure.contours.filter(
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tol
+      );
 
       // Process each existing contour - subtract the erase area
       for (const contour of existingOnSlice) {
         if (contour.points && contour.points.length >= 9) {
           // Check if erase polygon intersects with this contour
-          // For erase operations, we want to be more aggressive in detecting intersections
-          // to ensure quick delete strokes work properly
-          let intersects = doPolygonsIntersectSimple(erasePolygon, contour.points);
-          
-          // IMPROVED: If polygon intersection fails, fall back to point-in-polygon check
-          // This catches cases where quick strokes are inside the contour but bbox check fails
-          if (!intersects && erasePolygon.length >= 3) {
-            // Check if any erase polygon point is inside the contour
-            for (let i = 0; i < erasePolygon.length; i += 3) {
-              const testPoint = [erasePolygon[i], erasePolygon[i + 1]];
-              // Simple point-in-polygon test
-              let inside = false;
-              for (let j = 0, k = contour.points.length - 3; j < contour.points.length; k = j, j += 3) {
-                const xi = contour.points[j], yi = contour.points[j + 1];
-                const xj = contour.points[k], yj = contour.points[k + 1];
-                const intersectTest = ((yi > testPoint[1]) !== (yj > testPoint[1])) &&
-                  (testPoint[0] < (xj - xi) * (testPoint[1] - yi) / (yj - yi) + xi);
-                if (intersectTest) inside = !inside;
-              }
-              if (inside) {
-                intersects = true;
-                console.log(`🔹 ERASE: Point-in-polygon test found intersection (fallback)`);
-                break;
-              }
-            }
-          }
-          
-          console.log(`🔹 ERASE: Contour with ${contour.points.length / 3} points, intersects: ${intersects}`);
+          const intersects = doPolygonsIntersectSimple(erasePolygon, contour.points);
           
           if (intersects) {
             // Subtract erase area from this contour
             const { subtractContourSimple } = await import('@/lib/simple-polygon-operations');
             const subtractResults = subtractContourSimple(contour.points, erasePolygon);
             
-            console.log(`🔹 ERASE: Subtraction returned ${subtractResults.length} result contours`);
-            
-            // IMPROVED FIX: Empty result means contour was completely erased - that's SUCCESS!
-            if (subtractResults && subtractResults.length > 0) {
-              // Add resulting contours (there may be multiple after subtraction)
-              let validResultsAdded = 0;
-              for (const resultContour of subtractResults) {
-                if (resultContour.length >= 9) {
-                  newContours.push({
-                    slicePosition: payload.slicePosition,
-                    points: resultContour,
-                    numberOfPoints: resultContour.length / 3,
-                  });
-                  validResultsAdded++;
-                  console.log(`🔹 ERASE: Added result contour with ${resultContour.length / 3} points`);
-                } else {
-                  console.log(`🔹 ERASE: Skipped tiny result contour with ${resultContour.length / 3} points`);
-                }
+            // Add resulting contours (there may be multiple after subtraction)
+            for (const resultContour of subtractResults) {
+              if (resultContour.length >= 9) {
+                structure.contours.push({
+                  slicePosition: payload.slicePosition,
+                  points: resultContour,
+                  numberOfPoints: resultContour.length / 3,
+                });
               }
-              if (validResultsAdded === 0) {
-                console.log(`✅ ERASE: All result contours too small - contour completely erased`);
-              }
-            } else if (subtractResults && subtractResults.length === 0) {
-              // Empty result = contour was completely erased, don't add it back
-              console.log(`✅ ERASE: Subtraction returned empty - contour completely erased`);
-            } else {
-              // Only preserve if subtraction actually failed (returned null/undefined)
-              console.warn('🔸 ERASE: Subtraction operation failed - preserving original contour');
-              newContours.push(contour);
             }
           } else {
             // No intersection - keep original contour
-            console.log(`🔹 ERASE: No intersection, keeping original contour`);
-            newContours.push(contour);
+            structure.contours.push({
+              slicePosition: payload.slicePosition,
+              points: contour.points,
+              numberOfPoints: contour.numberOfPoints,
+            });
           }
         }
       }
-
-      // Only now update the structure with processed contours
-      structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
-      );
-      structure.contours.push(...newContours);
 
       console.log(`Erase completed - structure now has ${structure.contours.length} contours`);
 
@@ -2515,14 +2522,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         undoRedoManager.saveState(seriesId, 'erase_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'erase_brush_stroke');
-      
-      // FIX #7: Delay render to allow React state update to complete
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 ERASE FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (
       payload.action === "add_pen_stroke" ||
       payload.action === "cut_pen_stroke"
@@ -2533,48 +2534,22 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       );
       if (!structure) return;
 
-      // FIX #6: Use consistent tolerance across all tools
-      const tolerance = SLICE_TOL_MM; // Use same 0.5mm tolerance as brush tools
-      
+      // Find contour on current slice - use very tight tolerance to avoid affecting adjacent slices
+      const tolerance = 0.1; // 0.1mm tolerance - much tighter to prevent multi-slice issues
+      const sliceContour = structure.contours.find(
+        (c: any) =>
+          Math.abs(c.slicePosition - payload.slicePosition) <= tolerance,
+      );
+
       if (payload.action === "add_pen_stroke") {
-        // FIX #5: Use proper union instead of concatenation to avoid invalid multi-loop contours
-        const existingOnSlice = structure.contours.filter(
-          (c: any) => Math.abs(c.slicePosition - payload.slicePosition) <= tolerance
-        );
-        
-        if (existingOnSlice.length > 0) {
-          // PROPER UNION: Use polygon operations instead of concatenation
-          const polygonsToUnion = [payload.points, ...existingOnSlice.map(c => c.points)];
-          const unionResults = unionMultipleContoursSimple(polygonsToUnion);
-          
-          if (unionResults && unionResults.length > 0) {
-            // Remove old contours from this slice
-            structure.contours = structure.contours.filter(
-              (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > tolerance
-            );
-            
-            // Add union results
-            for (const polygon of unionResults) {
-              if (polygon && polygon.length >= 9) {
-                structure.contours.push({
-                  slicePosition: payload.slicePosition,
-                  points: polygon,
-                  numberOfPoints: polygon.length / 3,
-                });
-              }
-            }
-            console.log('🎯 PEN FIX: Union succeeded, merged pen stroke with existing contours');
-          } else {
-            // FIX #5: DEFENSIVE FALLBACK - union failed, add as separate blob
-            console.warn('🔸 PEN FIX: Union failed - adding pen stroke as separate blob');
-            structure.contours.push({
-              slicePosition: payload.slicePosition,
-              points: payload.points,
-              numberOfPoints: payload.points.length / 3,
-            });
-          }
+        if (sliceContour) {
+          // Just append the new pen stroke without connecting
+          // This creates a separate blob on the same slice
+          const mergedPoints = [...sliceContour.points, ...payload.points];
+          sliceContour.points = mergedPoints;
+          sliceContour.numberOfPoints = mergedPoints.length / 3;
         } else {
-          // No existing contour - just add new one
+          // Create new contour from pen stroke
           structure.contours.push({
             slicePosition: payload.slicePosition,
             points: payload.points,
@@ -2593,14 +2568,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       // Save contour updates to server
       saveContourUpdates(updatedStructures, payload.action);
-      
-      // FIX #7: Delay render to allow React state update to complete
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 PEN FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
+      // Trigger immediate render to show contours
+      try { 
+        scheduleRender(); 
+        // Temporary debugging notification
+        console.log('🎯 CONTOUR FIX: Immediate render triggered after pen tool operation:', payload.action);
+      } catch {}
     } else if (payload.action === "pen_boolean_operation") {
       // Handle pen tool boolean operations (union/subtract)
       const structure = updatedStructures.structures.find(
@@ -2751,14 +2724,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'pen_boolean_operation');
-      
-      // FIX #7: Delay render to allow React state update to complete
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 PEN BOOLEAN FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
@@ -2768,14 +2735,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       // Save to server
       saveContourUpdates(updatedStructures, 'pen_tool');
-      
-      // FIX #7: Delay render to allow React state update to complete
-      setTimeout(() => {
-        try { 
-          scheduleRender(); 
-          console.log('🎯 PEN UPDATE FIX: Render triggered after state update');
-        } catch {}
-      }, 10);
+      // Trigger immediate render to show contours
+      try { scheduleRender(); } catch {}
     } else if (payload.action === "replace_contour") {
       // Handle contour replacement (morphing)
       const structure = updatedStructures.structures.find(
@@ -3111,16 +3072,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       setLocalRTStructures(updatedStructures);
       
-      // Trigger ripple animation if requested
-      if (payload.triggerAnimation) {
-        setSmoothAnimation({
-          structureId: payload.structureId,
-          startTime: Date.now(),
-          duration: 350 // Fast, snappy glow pulse
-        });
-        console.log(`🌊 Smooth border glow animation triggered for structure ${payload.structureId}`);
-      }
-      
       // Pass the updated structures up to parent component
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
@@ -3147,10 +3098,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         return;
       }
       
-      // Sort blobs by volume (smallest first)
+      // Sort blobs by volume
       blobs.sort((a, b) => a.volumeCc - b.volumeCc);
       
-      console.log(`Opening blob dialog with ${blobs.length} blobs`);
+      // Auto-select smallest 80% by volume or those < 20% of largest blob
+      const largestVolume = blobs[blobs.length - 1].volumeCc;
+      const threshold = largestVolume * 0.2;
+      const autoSelectIds = new Set(
+        blobs
+          .filter(b => b.volumeCc < threshold)
+          .map(b => b.id)
+      );
+      
+      // If no blobs meet the 20% threshold, select the smallest 80% by count
+      if (autoSelectIds.size === 0) {
+        const smallBlobCount = Math.floor(blobs.length * 0.8);
+        for (let i = 0; i < smallBlobCount; i++) {
+          autoSelectIds.add(blobs[i].id);
+        }
+      }
+      
+      console.log(`Auto-selected ${autoSelectIds.size} small blobs out of ${blobs.length} total`);
+      setSelectedBlobIdsToDelete(autoSelectIds);
       setBlobDialogData({ structureId: payload.structureId, blobs });
       setBlobDialogOpen(true);
     } else if (payload.action === 'separate_blobs') {
@@ -3209,15 +3178,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setIsPanMode(false);
       setCrosshairMode(true);
       console.log('Crosshair mode activated');
-    },
-    forceRender: () => {
-      // Force immediate render - used for show/hide all structures
-      try {
-        scheduleRender();
-        console.log('🎯 Force render triggered');
-      } catch(e) {
-        console.warn('Force render failed:', e);
-      }
     },
     openFusionDebug,
     navigateToSlice: (targetZ: number) => {
@@ -3506,7 +3466,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
       scheduleRender();
     }
-  }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading, fusionDisplayMode]);
+  }, [currentWindowLevel, zoom, panX, panY, images.length, isPreloading]);
 
   const loadImages = async () => {
     try {
@@ -4478,76 +4438,66 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         console.log('🐟 FUSION: No secondarySeriesId in main render');
       }
 
-      // Render RT structures and crosshairs on separate canvas above fusion
-      const contoursCanvas = contoursOverlayCanvasRef.current;
-      if (contoursCanvas) {
-        const contoursCtx = contoursCanvas.getContext('2d');
-        if (contoursCtx) {
-          // Clear the contours overlay canvas
-          contoursCtx.clearRect(0, 0, contoursCanvas.width, contoursCanvas.height);
-          
-          // Draw RT structures if available
-          if (rtStructures) {
-            try {
-              // Pass currentImage with its metadata attached
-              const imageWithMetadata = {
-                ...currentImage,
-                imageMetadata: imageMetadata // Use the actual imageMetadata state variable
-              };
-              renderRTStructures(contoursCtx, contoursCanvas, imageWithMetadata);
-            } catch (rtError) {
-              console.warn("Error drawing RT structures:", rtError);
-              // Don't let RT structure errors prevent image display
-            }
-          }
-          
-          // Draw crosshairs on contours overlay if in axial view
-          if (orientation === 'axial') {
-            // Convert crosshair pixel coordinates to canvas coordinates
-            const imageWidth = currentImage.columns || currentImage.width || 512;
-            const imageHeight = currentImage.rows || currentImage.height || 512;
-            
-            // Calculate scale with zoom factor (same as render16BitImage)
-            const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
-            const totalScale = baseScale * zoom;
-            const scaledWidth = imageWidth * totalScale;
-            const scaledHeight = imageHeight * totalScale;
-            
-            // Center position with pan offset
-            const imageX = (canvas.width - scaledWidth) / 2 + panX;
-            const imageY = (canvas.height - scaledHeight) / 2 + panY;
-            
-            // Convert crosshair pixel position to canvas position
-            const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
-            const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
-            
-            // Draw crosshairs on contours overlay
-            contoursCtx.save();
-            contoursCtx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
-            contoursCtx.lineWidth = 1;
-            contoursCtx.setLineDash([5, 5]); // Dashed line
-            
-            // Vertical line
-            contoursCtx.beginPath();
-            contoursCtx.moveTo(crosshairCanvasX, 0);
-            contoursCtx.lineTo(crosshairCanvasX, canvas.height);
-            contoursCtx.stroke();
-            
-            // Horizontal line
-            contoursCtx.beginPath();
-            contoursCtx.moveTo(0, crosshairCanvasY);
-            contoursCtx.lineTo(canvas.width, crosshairCanvasY);
-            contoursCtx.stroke();
-            
-            // Draw center point
-            contoursCtx.fillStyle = 'rgba(0, 255, 255, 0.8)';
-            contoursCtx.beginPath();
-            contoursCtx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
-            contoursCtx.fill();
-            
-            contoursCtx.restore();
-          }
+      // Render RT structure overlays if available
+      if (rtStructures) {
+        try {
+          // Pass currentImage with its metadata attached
+          const imageWithMetadata = {
+            ...currentImage,
+            imageMetadata: imageMetadata // Use the actual imageMetadata state variable
+          };
+          renderRTStructures(ctx, canvas, imageWithMetadata);
+        } catch (rtError) {
+          console.warn("Error drawing RT structures:", rtError);
+          // Don't let RT structure errors prevent image display
         }
+      }
+      
+      // Draw crosshairs if in axial view
+      if (orientation === 'axial') {
+        // Convert crosshair pixel coordinates to canvas coordinates
+        const imageWidth = currentImage.columns || currentImage.width || 512;
+        const imageHeight = currentImage.rows || currentImage.height || 512;
+        
+        // Calculate scale with zoom factor (same as render16BitImage)
+        const baseScale = Math.min(canvas.width / imageWidth, canvas.height / imageHeight);
+        const totalScale = baseScale * zoom;
+        const scaledWidth = imageWidth * totalScale;
+        const scaledHeight = imageHeight * totalScale;
+        
+        // Center position with pan offset
+        const imageX = (canvas.width - scaledWidth) / 2 + panX;
+        const imageY = (canvas.height - scaledHeight) / 2 + panY;
+        
+        // Convert crosshair pixel position to canvas position
+        const crosshairCanvasX = imageX + (crosshairPos.x * totalScale);
+        const crosshairCanvasY = imageY + (crosshairPos.y * totalScale);
+        
+        // Draw crosshairs
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]); // Dashed line
+        
+        // Vertical line
+        ctx.beginPath();
+        ctx.moveTo(crosshairCanvasX, 0);
+        ctx.lineTo(crosshairCanvasX, canvas.height);
+        ctx.stroke();
+        
+        // Horizontal line
+        ctx.beginPath();
+        ctx.moveTo(0, crosshairCanvasY);
+        ctx.lineTo(canvas.width, crosshairCanvasY);
+        ctx.stroke();
+        
+        // Draw center point
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(crosshairCanvasX, crosshairCanvasY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        ctx.restore();
       }
       
       // Render MPR views if canvases are available
@@ -4730,15 +4680,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionPrefetchSetRef.current.clear();
   }, [secondarySeriesId]);
 
-  const renderFusionOverlayNew = async (_ctx: CanvasRenderingContext2D, primaryImage: any) => {
+  const renderFusionOverlayNew = async (ctx: CanvasRenderingContext2D, primaryImage: any) => {
     const requestToken = ++fusionRequestTokenRef.current;
-    const ensureActive = () => requestToken === fusionRequestTokenRef.current;
+
+    // Abort any previous fusion fetch to prevent race conditions during fast switching
+    if (fusionAbortControllerRef.current) {
+      fusionAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    fusionAbortControllerRef.current = abortController;
+
+    const ensureActive = () => {
+      const isActive = requestToken === fusionRequestTokenRef.current;
+      if (!isActive) {
+        abortController.abort(); // Abort if this request is no longer active
+      }
+      return isActive;
+    };
 
     if (!secondarySeriesId || fusionOpacity === 0) {
-      if (ensureActive()) {
-        clearFusionOverlayCanvas();
-        setFuseboxTransformSource(null);
-      }
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
@@ -4759,7 +4720,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (status?.status !== 'ready' || !manifestMatches || !localReady) {
       if (ensureActive()) {
         fusionIssueRef.current = 'manifest-not-ready';
-        clearFusionOverlayCanvas();
         setFuseboxTransformSource(null);
       }
       return;
@@ -4768,16 +4728,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const hasRegistrationMatrix = Array.isArray(registrationMatrix) && registrationMatrix.length === 16;
 
     if (!primaryImage?.sopInstanceUID) {
-      if (ensureActive()) {
-        clearFusionOverlayCanvas();
-        setFuseboxTransformSource(null);
-      }
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
     const transform = ctTransform.current;
     if (!transform) {
-      clearFusionOverlayCanvas();
       return;
     }
 
@@ -4831,7 +4787,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (!prepared) {
           if (ensureActive()) {
             fusionIssueRef.current = 'overlay-canvas-error';
-            clearFusionOverlayCanvas();
             setFuseboxTransformSource(null);
           }
           return;
@@ -4849,7 +4804,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         if (ensureActive()) {
           console.error('Fused overlay load failed:', error);
           fusionIssueRef.current = 'fusebox-fetch-error';
-          clearFusionOverlayCanvas();
           setFuseboxTransformSource(null);
         }
         return;
@@ -4857,17 +4811,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
 
     if (!cached) {
-      if (ensureActive()) {
-        clearFusionOverlayCanvas();
-        setFuseboxTransformSource(null);
-      }
+      if (ensureActive()) setFuseboxTransformSource(null);
       return;
     }
 
     if (!cached.hasSignal) {
       if (ensureActive()) {
         fusionIssueRef.current = 'empty-fusebox-slice';
-        clearFusionOverlayCanvas();
         setFuseboxTransformSource(cached.slice.transformSource ?? null);
       }
       return;
@@ -4879,7 +4829,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     setFuseboxTransformSource(source);
     fusionIssueRef.current = null;
 
-    updateFusionOverlayCanvas(cached.canvas, transform, cached.hasSignal);
+    drawFusionOverlay(ctx, cached.canvas, transform, fusionOpacity);
     prefetchFusionSlices(currentIndex);
   };
 
@@ -5049,32 +4999,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Use the structure's actual color, not hardcoded yellow
       const color = structure.color || [255, 255, 0]; // fallback to yellow only if no color
       const [r, g, b] = color;
-      
-      // Check if this structure is currently animating from smooth operation
-      const isAnimating = smoothAnimation.structureId === structure.roiNumber;
-      const animProgress = isAnimating ? 
-        Math.min(1, (Date.now() - smoothAnimation.startTime) / smoothAnimation.duration) : 0;
-      
-      // Default styles (will be overridden per-contour for animation)
       ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${fillOpacity})`;
-      
-      // Store animation state for use in drawContour
-      const rippleAnimationState = isAnimating && animProgress < 1 ? {
-        progress: animProgress,
-        structureColor: { r, g, b },
-        baseOpacity: fillOpacity
-      } : null;
-      
-      // Keep animating by triggering re-render
-      if (isAnimating && animProgress < 1) {
-        setTimeout(() => {
-          try { scheduleRender(); } catch(e) {}
-        }, 16); // ~60fps
-      } else if (isAnimating && animProgress >= 1) {
-        // Animation complete, clear it
-        setSmoothAnimation({ structureId: null, startTime: 0, duration: 400 });
-      }
 
       // Determine an effective slice tolerance based on metadata to prevent flicker
       const metaTol = (() => {
@@ -5092,33 +5018,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           contour.slicePosition - currentSlicePosition,
         );
         if (positionDiff <= metaTol) {
-          // Check if this contour belongs to the highlighted blob (using unique contour keys)
-          const contourKey = createContourKey(contour);
-          const highlightedBlob = highlightedBlobId !== null && 
-                                  blobDialogData?.structureId === structure.roiNumber ?
-                                  blobDialogData?.blobs?.find(b => b.id === highlightedBlobId) : null;
-          const isHighlightedBlob = highlightedBlob?.contours.some((c: any) => 
-            createContourKey(c) === contourKey
-          ) || false;
-          
-          if (isHighlightedBlob) {
-            // Override with red highlighting
-            ctx.save();
-            ctx.strokeStyle = 'rgb(255, 50, 50)'; // Bright red
-            ctx.fillStyle = 'rgba(255, 50, 50, 0.3)'; // Red fill
-            ctx.lineWidth = lineWidth * 2.5; // Much thicker
-            ctx.shadowColor = 'rgba(255, 50, 50, 0.9)';
-            ctx.shadowBlur = 20;
-            drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime, null);
-            ctx.restore();
-          } else {
-            if (RT_STRUCTURE_DEBUG) {
-              console.log(
-                `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
-              );
-            }
-            drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime, rippleAnimationState);
+          if (RT_STRUCTURE_DEBUG) {
+            console.log(
+              `✓ Drawing ${structure.structureName} contour at RT ${contour.slicePosition.toFixed(1)}mm (CT slice: ${currentSlicePosition.toFixed(1)}mm, diff: ${positionDiff.toFixed(1)}mm)`,
+            );
           }
+          drawContour(ctx, contour, canvas.width, canvas.height, currentImage, animationTime);
         }
       });
     });
@@ -5177,7 +5082,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     canvasHeight: number,
     currentImage: any,
     animationTime?: number,
-    rippleAnimationState?: { progress: number; structureColor: { r: number; g: number; b: number }; baseOpacity: number } | null,
   ) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
 
@@ -5265,38 +5169,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Close the contour
     ctx.closePath();
 
-    // Apply radial ripple animation if active
-    if (rippleAnimationState && !contour.isPreview && !contour.isPredicted) {
-      // Use clean animation module for ripple effect
-      applyRippleAnimation({
-        ctx,
-        contourPoints: contour.points,
-        structureColor: rippleAnimationState.structureColor,
-        baseOpacity: rippleAnimationState.baseOpacity,
-        progress: rippleAnimationState.progress,
-        imagePosition,
-        pixelSpacing,
-        imageX,
-        imageY,
-        totalScale
-      });
+    // Fill only for confirmed contours; skip fill for previews
+    // Also use reduced opacity for predictions
+    if (contour.isPreview) {
+      // No fill for preview to match thin dashed outline spec
+    } else if (contour.isPredicted) {
+      const originalAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
+      ctx.fill();
+      ctx.globalAlpha = originalAlpha;
     } else {
-      // Normal rendering (no animation)
-      // Fill only for confirmed contours; skip fill for previews
-      // Also use reduced opacity for predictions
-      if (contour.isPreview) {
-        // No fill for preview to match thin dashed outline spec
-      } else if (contour.isPredicted) {
-        const originalAlpha = ctx.globalAlpha;
-        ctx.globalAlpha = originalAlpha * 0.3; // Very subtle fill for predictions
-        ctx.fill();
-        ctx.globalAlpha = originalAlpha;
-      } else {
-        ctx.fill();
-      }
-      
-      ctx.stroke();
+      ctx.fill();
     }
+    
+    ctx.stroke();
 
     // Reset line dash for subsequent drawing operations
     ctx.setLineDash([]);
@@ -5794,73 +5680,150 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     }
   };
 
+  // Group contours into connected blobs (per-slice, same-slice contours considered disconnected unless polygons intersect)
+  function groupStructureBlobs(structure: any, tolMm: number): Array<Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>> {
+    const contours = Array.isArray(structure?.contours) ? structure.contours : [];
+    
+    // Step 1: Group contours by slice
+    const bySlice = new Map<number, Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>>();
+    for (const c of contours) {
+      const key = findExistingKeyWithinTolerance(bySlice, c.slicePosition, tolMm);
+      const list = bySlice.get(key) || [];
+      list.push(c);
+      bySlice.set(key, list);
+    }
+    
+    // Step 2: Group contours within each slice by intersection
+    const sliceGroups = new Map<number, Array<Array<typeof contours[number]>>>();
+    for (const [slicePos, sliceContours] of bySlice) {
+      const groups: Array<Array<typeof sliceContours[number]>> = [];
+      for (const c of sliceContours) {
+        let placed = false;
+        for (const g of groups) {
+          if (g.some((x) => doPolygonsIntersectSimple(x.points, c.points))) {
+            g.push(c);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) groups.push([c]);
+      }
+      sliceGroups.set(slicePos, groups);
+    }
+    
+    // Step 3: Connect slice groups across adjacent slices to form 3D blobs
+    // Each "blob" is a group of contours that are connected in 3D space
+    const blobs3D: Array<Array<{ slicePosition: number; points: number[]; numberOfPoints: number }>> = [];
+    const sortedSlices = Array.from(sliceGroups.keys()).sort((a, b) => a - b);
+    const processedGroups = new Set<string>();
+    
+    for (let i = 0; i < sortedSlices.length; i++) {
+      const currentSlice = sortedSlices[i];
+      const currentGroups = sliceGroups.get(currentSlice) || [];
+      
+      for (let groupIdx = 0; groupIdx < currentGroups.length; groupIdx++) {
+        const groupKey = `${currentSlice}:${groupIdx}`;
+        if (processedGroups.has(groupKey)) continue;
+        
+        // Start a new 3D blob with this group
+        const blob: Array<typeof contours[number]> = [...currentGroups[groupIdx]];
+        processedGroups.add(groupKey);
+        
+        // Recursively find connected groups on adjacent slices
+        const findConnected = (sliceIdx: number, prevContours: typeof contours) => {
+          // Check next slice
+          if (sliceIdx + 1 < sortedSlices.length) {
+            const nextSlice = sortedSlices[sliceIdx + 1];
+            const nextGroups = sliceGroups.get(nextSlice) || [];
+            
+            for (let nextGroupIdx = 0; nextGroupIdx < nextGroups.length; nextGroupIdx++) {
+              const nextGroupKey = `${nextSlice}:${nextGroupIdx}`;
+              if (processedGroups.has(nextGroupKey)) continue;
+              
+              const nextGroup = nextGroups[nextGroupIdx];
+              
+              // Check if any contour in nextGroup overlaps with any contour in prevContours
+              const overlaps = prevContours.some(prevC => 
+                nextGroup.some(nextC => contoursBoundingBoxOverlap(prevC.points, nextC.points))
+              );
+              
+              if (overlaps) {
+                blob.push(...nextGroup);
+                processedGroups.add(nextGroupKey);
+                findConnected(sliceIdx + 1, nextGroup);
+              }
+            }
+          }
+        };
+        
+        findConnected(i, currentGroups[groupIdx]);
+        
+        if (blob.length > 0) {
+          blobs3D.push(blob);
+        }
+      }
+    }
+    
+    return blobs3D;
+  }
+  
+  // Helper function to check if two contours' bounding boxes overlap in 2D
+  function contoursBoundingBoxOverlap(points1: number[], points2: number[]): boolean {
+    // Extract 2D bounding boxes
+    let min1X = Infinity, min1Y = Infinity, max1X = -Infinity, max1Y = -Infinity;
+    let min2X = Infinity, min2Y = Infinity, max2X = -Infinity, max2Y = -Infinity;
+    
+    for (let i = 0; i < points1.length; i += 3) {
+      min1X = Math.min(min1X, points1[i]);
+      max1X = Math.max(max1X, points1[i]);
+      min1Y = Math.min(min1Y, points1[i + 1]);
+      max1Y = Math.max(max1Y, points1[i + 1]);
+    }
+    
+    for (let i = 0; i < points2.length; i += 3) {
+      min2X = Math.min(min2X, points2[i]);
+      max2X = Math.max(max2X, points2[i]);
+      min2Y = Math.min(min2Y, points2[i + 1]);
+      max2Y = Math.max(max2Y, points2[i + 1]);
+    }
+    
+    // Check if bounding boxes overlap
+    return !(max1X < min2X || max2X < min1X || max1Y < min2Y || max2Y < min1Y);
+  }
 
-  // Store the last localized blob for window resize recalculation
-  const lastLocalizedBlobRef = useRef<{ blobId: number; contours: BlobContour[] } | null>(null);
-  
-  // Handle blob deletion from dialog
-  const handleBlobsDelete = (blobIds: number[]) => {
-    if (!blobDialogData || !blobDialogData.structureId) return;
-    
-    const structure = (localRTStructures || rtStructures)?.structures?.find(
-      (s: any) => s.roiNumber === blobDialogData.structureId
-    );
-    if (!structure) return;
-    
-    // Collect contour keys to remove
-    const keysToRemove = new Set<string>();
-    blobDialogData.blobs.forEach((b) => {
-      if (blobIds.includes(b.id)) {
-        b.contours.forEach((c) => {
-          keysToRemove.add(createContourKey(c));
-        });
-      }
-    });
-    
-    // Clone and filter
-    const updated = structuredClone ? structuredClone(localRTStructures || rtStructures) : JSON.parse(JSON.stringify(localRTStructures || rtStructures));
-    const s = updated.structures.find((x: any) => x.roiNumber === blobDialogData.structureId);
-    if (!s) return;
-    
-    s.contours = s.contours.filter((c: any) => !keysToRemove.has(createContourKey(c)));
-    
-    setLocalRTStructures(updated);
-    if (seriesId) {
-      undoRedoManager.saveState(seriesId, 'remove_blobs', blobDialogData.structureId, updated);
+  function findExistingKeyWithinTolerance(map: Map<number, any>, value: number, tol: number): number {
+    for (const k of map.keys()) {
+      if (Math.abs(k - value) <= tol) return k;
     }
-    saveContourUpdates(updated, 'remove_blobs');
-    
-    // Clear highlighted blob if it was deleted
-    if (highlightedBlobId && blobIds.includes(highlightedBlobId)) {
-      setHighlightedBlobId(null);
-      lastLocalizedBlobRef.current = null;
-    }
-    
-    // Force re-render
-    try { scheduleRender(); } catch (e) {}
-  };
-  
-  // Handle blob localization from dialog
-  const handleBlobLocalize = (blobId: number, contours: BlobContour[]) => {
-    setHighlightedBlobId(blobId);
-    lastLocalizedBlobRef.current = { blobId, contours };
-    localizeToBlobContours(contours);
-  };
-  
-  // Recalculate blob position on window resize
-  useEffect(() => {
-    const handleResize = () => {
-      if (lastLocalizedBlobRef.current && highlightedBlobId !== null) {
-        // Recalculate zoom and pan to keep blob centered
-        setTimeout(() => {
-          localizeToBlobContours(lastLocalizedBlobRef.current!.contours);
-        }, 100); // Small delay to ensure canvas has resized
+    return value;
+  }
+
+  function computeBlobVolumeCc(blobContours: Array<{ slicePosition: number; points: number[] }>, metadata: any): number {
+    if (!blobContours?.length) return 0;
+    const px = parseFloat(metadata?.pixelSpacing?.split?.("\\")?.[0]) || metadata?.pixelSpacing?.[0] || 1;
+    const py = parseFloat(metadata?.pixelSpacing?.split?.("\\")?.[1]) || metadata?.pixelSpacing?.[1] || px || 1;
+    const dz = parseFloat(metadata?.sliceThickness) || parseFloat(metadata?.spacingBetweenSlices) || 1;
+    const areaPerPixelMm2 = px * py;
+    // Polygon area in mm^2 from world points (assumed mm)
+    const areaOf = (pts: number[]) => {
+      let area = 0;
+      for (let i = 0; i < pts.length; i += 3) {
+        const j = (i + 3) % pts.length;
+        area += pts[i] * pts[j + 1] - pts[j] * pts[i + 1];
       }
+      return Math.abs(area / 2);
     };
-    
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [highlightedBlobId, imageMetadata]);
+    // Integrate per-slice area * dz
+    const slices = new Map<number, number>();
+    for (const c of blobContours) {
+      slices.set(c.slicePosition, (slices.get(c.slicePosition) || 0) + areaOf(c.points));
+    }
+    let volumeMm3 = 0;
+    for (const [, areaMm2] of slices) {
+      volumeMm3 += areaMm2 * dz;
+    }
+    return volumeMm3 / 1000; // cc
+  }
 
   // Localize to a specific blob by navigating to its middle slice, zooming, and centering view
   const localizeToBlobContours = (contours: Array<{slicePosition: number; points: number[]}>) => {
@@ -5873,7 +5836,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     // Get contours at middle slice for bounding box calculation
     const middleSliceContours = contours.filter(c => Math.abs(c.slicePosition - middleSlice) < 0.5);
     
-    // Calculate bounding box of the blob at middle slice (in world/mm coordinates)
+    // Calculate bounding box of the blob at middle slice
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     middleSliceContours.forEach(c => {
       for (let i = 0; i < c.points.length; i += 3) {
@@ -5892,8 +5855,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (targetIndex >= 0) {
       setCurrentIndex(targetIndex);
       
-      // Calculate zoom and pan to center blob at 50% of viewport
-      if (canvasRef.current && isFinite(minX) && isFinite(maxX) && isFinite(minY) && isFinite(maxY)) {
+      // Calculate zoom and pan to fit the blob with some padding
+      if (canvasRef.current && ctTransform.current && isFinite(minX) && isFinite(maxX) && isFinite(minY) && isFinite(maxY)) {
         const canvas = canvasRef.current;
         
         // Blob dimensions in world coordinates (mm)
@@ -5901,6 +5864,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const blobHeightMm = maxY - minY;
         const blobCenterX = (minX + maxX) / 2;
         const blobCenterY = (minY + maxY) / 2;
+        
+        // Get pixel spacing (mm per pixel)
+        const pixelSpacingX = parseFloat(imageMetadata?.pixelSpacing?.split?.('\\')[0]) || 1;
+        const pixelSpacingY = parseFloat(imageMetadata?.pixelSpacing?.split?.('\\')[1]) || 1;
         
         // Get pixel spacing (mm per pixel)
         const pixelSpacingX = parseFloat(imageMetadata?.pixelSpacing?.split?.('\\')[1]) || 1; // Column spacing
@@ -5943,7 +5910,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         
         // Target: center blob at 65% horizontal, 50% vertical (spotlight position)
         const targetX = canvas.width * 0.65;
-        const targetY = canvas.height * 0.50;
+        const targetY = canvas.width * 0.50;
         
         // Calculate pan offset needed to place blob center at target position
         const imageBaseX = (canvas.width - scaledWidth) / 2;
@@ -6085,19 +6052,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 }`} />
                 {secondaryModality === 'PT' ? 'PT' : secondaryModality === 'CT' ? 'CT' : 'MR'} Fusion
                 <span className={
-                  secondaryModality === 'PT' 
-                    ? 'text-yellow-300' 
+                  secondaryModality === 'PT'
+                    ? 'text-yellow-300'
                     : secondaryModality === 'CT'
                     ? 'text-blue-300'
                     : 'text-purple-300'
                 }>
                   ({Math.round(fusionOpacity * 100)}%)
                 </span>
-                <Button size="sm" variant="ghost" className="h-5 px-2 ml-2 text-[10px] hover:bg-gray-700/40"
-                  onClick={(e) => { e.stopPropagation(); setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-                  title="Show fusion debug info">
-                  Debug
-                </Button>
               </Badge>
             )}
           </div>
@@ -6105,11 +6067,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           <div className="flex items-center space-x-2">
             {rtStructures && (
               <div className="flex items-center gap-1 px-2 py-1 bg-gray-800/50 rounded-lg">
-                <Badge 
+                <Badge
                   variant={showStructures ? "default" : "secondary"}
                   className={`${
-                    showStructures 
-                      ? 'bg-green-600/80 text-white border-green-500/50' 
+                    showStructures
+                      ? 'bg-green-600/80 text-white border-green-500/50'
                       : 'bg-gray-700/50 text-gray-300'
                   }`}
                 >
@@ -6120,15 +6082,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 </span>
               </div>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2 text-xs hover:bg-gray-700/40"
-              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-              title="Open Fusion Debug"
-            >
-              Fusion Debug
-            </Button>
             
             {/* Background Loading Progress */}
             {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
@@ -6201,130 +6154,37 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
       {/* Canvas */}
       <div className="flex-1 p-4 flex items-center justify-center relative overflow-hidden">
-        {fusionDisplayMode === 'side-by-side' && secondarySeriesId ? (
-          /* Side-by-Side Layout */
-          <div className="w-full h-full flex gap-2">
-            {/* Primary Canvas Container */}
-            <div className="relative flex-1 flex items-center justify-center bg-black">
-              <canvas
-                ref={canvasRef}
-                width={1024}
-                height={1024}
-                onMouseDown={handleCanvasMouseDown}
-                onMouseMove={(e) => {
-                  handleCanvasMouseMove(e);
-                }}
-                onMouseUp={handleCanvasMouseUp}
-                onWheel={(e) => {
-                  handleCanvasWheel(e);
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`max-w-full max-h-full object-contain rounded ${
-                  brushToolState?.isActive && brushToolState?.tool === "brush"
-                    ? "cursor-none"
-                    : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                    ? ""
-                    : "cursor-move"
-                }`}
-                style={{
-                  backgroundColor: "black",
-                  imageRendering: "auto",
-                  userSelect: "none",
-                }}
-              />
-              <canvas
-                ref={contoursOverlayCanvasRef}
-                width={1024}
-                height={1024}
-                className="pointer-events-none absolute max-w-full max-h-full object-contain"
-                style={{
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 2,
-                }}
-              />
-            </div>
-            
-            {/* Secondary/Fusion Canvas Container */}
-            <div className="relative flex-1 flex items-center justify-center bg-black">
-              <canvas
-                ref={fusionOverlayCanvasRef}
-                width={1024}
-                height={1024}
-                className="max-w-full max-h-full object-contain rounded"
-                style={{
-                  backgroundColor: "black",
-                }}
-              />
-            </div>
-          </div>
-        ) : (
-          /* Overlay Layout */
-          <div className="relative w-full h-full flex items-center justify-center">
-            <canvas
-              ref={canvasRef}
-              width={1024}
-              height={1024}
-              onMouseDown={handleCanvasMouseDown}
-              onMouseMove={(e) => {
-                handleCanvasMouseMove(e);
-                // Crosshair position is only updated on click in crosshair mode
-                // Not on mouse move
-              }}
-              onMouseUp={handleCanvasMouseUp}
-              onWheel={(e) => {
-                // Always handle wheel events for scrolling, even when pen tool is active
-                handleCanvasWheel(e);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`max-w-full max-h-full object-contain rounded ${
-                brushToolState?.isActive && brushToolState?.tool === "brush"
-                  ? "cursor-none"
-                  : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
-                  ? ""
-                  : "cursor-move"
-              }`}
-              style={{
-                backgroundColor: "black",
-                imageRendering: "auto",
-                userSelect: "none",
-                opacity: secondarySeriesId && fusionDisplayMode === 'overlay' ? (1 - fusionOpacity) : 1,
-                transition: 'opacity 120ms ease-out',
-              }}
-            />
+        <div className="relative w-full h-full flex items-center justify-center">
+          <canvas
+            ref={canvasRef}
+            width={1280}
+            height={1280}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={(e) => {
+              handleCanvasMouseMove(e);
+              // Crosshair position is only updated on click in crosshair mode
+              // Not on mouse move
+            }}
+            onMouseUp={handleCanvasMouseUp}
+            onWheel={(e) => {
+              // Always handle wheel events for scrolling, even when pen tool is active
+              handleCanvasWheel(e);
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`max-w-full max-h-full object-contain rounded ${
+              brushToolState?.isActive && brushToolState?.tool === "brush"
+                ? "cursor-none"
+                : brushToolState?.isActive && (brushToolState?.tool === "pen" || brushToolState?.tool === "pen-original")
+                ? ""
+                : "cursor-move"
+            }`}
+            style={{
+              backgroundColor: "black",
+              imageRendering: "auto",
+              userSelect: "none",
+            }}
+          />
 
-            <canvas
-              ref={fusionOverlayCanvasRef}
-              width={1024}
-              height={1024}
-              className="pointer-events-none absolute max-w-full max-h-full object-contain"
-              style={{
-                visibility: fusionOpacity === 0 ? 'hidden' : 'visible',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 1,
-                opacity: Math.max(0, Math.min(1, fusionOpacity)),
-              }}
-            />
-
-            <canvas
-              ref={contoursOverlayCanvasRef}
-              width={1024}
-              height={1024}
-              className="pointer-events-none absolute max-w-full max-h-full object-contain"
-              style={{
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 2,
-              }}
-            />
-          </div>
-        )}
-
-        <div>
           {/* Simple Brush Tool overlay */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "brush" && (
@@ -6529,41 +6389,221 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           )}
 
           {/* Blob removal dialog */}
-          <BlobManagementDialog
-            isOpen={blobDialogOpen}
-            onClose={() => {
-              setBlobDialogOpen(false);
-              setHighlightedBlobId(null);
-              lastLocalizedBlobRef.current = null;
-            }}
-            blobs={blobDialogData?.blobs || []}
-            structureId={blobDialogData?.structureId || 0}
-            structureName={rtStructures?.structures?.find((s: any) => s.roiNumber === blobDialogData?.structureId)?.structureName || 'Structure'}
-            onDeleteBlobs={handleBlobsDelete}
-            onLocalize={handleBlobLocalize}
-            imageMetadata={imageMetadata}
-          />
-
-        {/* Fusion Debug Aid */}
-        <AlertDialog open={showFusionDebug} onOpenChange={(open) => setShowFusionDebug(open)}>
-          <AlertDialogContent className="max-w-2xl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Fusion Debug Info</AlertDialogTitle>
-            </AlertDialogHeader>
-            <div className="space-y-2">
-              <p className="text-sm text-gray-300">Copy and paste this back for analysis.</p>
-              <textarea
-                readOnly
-                value={fusionDebugText}
-                className="w-full h-64 p-2 text-xs bg-black/60 border border-gray-600 rounded-md text-gray-200 font-mono"
+          <AlertDialog open={blobDialogOpen} onOpenChange={(open) => setBlobDialogOpen(open)}>
+            {/* Custom spotlight overlay with golden magnifying glass effect */}
+            {blobDialogOpen && (
+              <div 
+                className="fixed inset-0 z-40 pointer-events-none"
+                style={{
+                  background: `
+                    radial-gradient(circle 550px at 60% 50%, 
+                      rgba(0, 0, 0, 0) 0%, 
+                      rgba(0, 0, 0, 0) 70%,
+                      rgba(255, 215, 0, 0.4) 70%,
+                      rgba(255, 200, 0, 0.5) 71%,
+                      rgba(255, 215, 0, 0.3) 72%,
+                      rgba(0, 0, 0, 0.4) 74%,
+                      rgba(0, 0, 0, 0.75) 85%,
+                      rgba(0, 0, 0, 0.9) 100%
+                    )
+                  `
+                }}
               />
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Close</AlertDialogCancel>
-              <AlertDialogAction onClick={() => { try { navigator.clipboard.writeText(fusionDebugText); } catch {} }}>Copy</AlertDialogAction>
-            </AlertDialogFooter>
+            )}
+            <AlertDialogContent className="max-w-md max-h-[80vh] overflow-y-auto fixed left-4 top-24 transform-none z-50">
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Remove blobs ({blobDialogData?.blobs?.length || 0} detected)
+                </AlertDialogTitle>
+              </AlertDialogHeader>
+              
+              {/* Selection helper buttons */}
+              <div className="flex gap-2 mb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (!blobDialogData?.blobs) return;
+                    // Sort and select smallest 80%
+                    const sorted = [...blobDialogData.blobs].sort((a, b) => a.volumeCc - b.volumeCc);
+                    const largestVolume = sorted[sorted.length - 1].volumeCc;
+                    const threshold = largestVolume * 0.2;
+                    const autoSelectIds = new Set(
+                      sorted.filter(b => b.volumeCc < threshold).map(b => b.id)
+                    );
+                    if (autoSelectIds.size === 0) {
+                      const smallBlobCount = Math.floor(sorted.length * 0.8);
+                      for (let i = 0; i < smallBlobCount; i++) {
+                        autoSelectIds.add(sorted[i].id);
+                      }
+                    }
+                    setSelectedBlobIdsToDelete(autoSelectIds);
+                  }}
+                  className="h-8 text-xs"
+                >
+                  Select Small Blobs
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedBlobIdsToDelete(new Set())}
+                  className="h-8 text-xs"
+                >
+                  Clear Selection
+                </Button>
+              </div>
+
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {blobDialogData?.blobs?.map((b) => (
+                  <div key={b.id} className="flex items-center gap-2 p-2 rounded border border-gray-700 hover:bg-gray-800/30">
+                    <input
+                      type="checkbox"
+                      checked={selectedBlobIdsToDelete.has(b.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedBlobIdsToDelete);
+                        if (e.target.checked) next.add(b.id); else next.delete(b.id);
+                        setSelectedBlobIdsToDelete(next);
+                      }}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-white/90 flex-1">
+                      Blob {b.id} - <span className="text-xs text-gray-400">{b.volumeCc.toFixed(2)} cc</span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setHighlightedBlobId(b.id);
+                        localizeToBlobContours(b.contours);
+                      }}
+                      className="h-7 px-2 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-900/20"
+                      title="Navigate to this blob"
+                    >
+                      <Target className="w-3.5 h-3.5 mr-1" />
+                      Locate
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Immediately delete this single blob
+                        try {
+                          if (!blobDialogData || !blobDialogData.structureId) return;
+                          const structure = (localRTStructures || rtStructures)?.structures?.find((s: any) => s.roiNumber === blobDialogData.structureId);
+                          if (!structure) return;
+
+                          const keysToRemove = new Set<string>();
+                          b.contours.forEach((c) => {
+                            const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                            keysToRemove.add(key);
+                          });
+
+                          const updated = structuredClone ? structuredClone(localRTStructures || rtStructures) : JSON.parse(JSON.stringify(localRTStructures || rtStructures));
+                          const s = updated.structures.find((x: any) => x.roiNumber === blobDialogData.structureId);
+                          if (!s) return;
+                          s.contours = s.contours.filter((c: any) => {
+                            const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                            return !keysToRemove.has(key);
+                          });
+
+                          setLocalRTStructures(updated);
+                          if (seriesId) {
+                            undoRedoManager.saveState(seriesId, 'remove_blob', blobDialogData.structureId, updated);
+                          }
+                          saveContourUpdates(updated, 'remove_blob');
+                          
+                          // Update dialog data
+                          const updatedBlobs = blobDialogData.blobs.filter(blob => blob.id !== b.id);
+                          if (updatedBlobs.length === 0) {
+                            setBlobDialogOpen(false);
+                            toast({ title: "All blobs removed", description: "No more blobs remaining" });
+                          } else {
+                            setBlobDialogData({ structureId: blobDialogData.structureId, blobs: updatedBlobs });
+                            toast({ title: "Blob deleted", description: `Blob ${b.id} removed` });
+                          }
+                          
+                          // Remove from selection
+                          const next = new Set(selectedBlobIdsToDelete);
+                          next.delete(b.id);
+                          setSelectedBlobIdsToDelete(next);
+                          
+                          // Force re-render
+                          try { scheduleRender(); } catch (e) {}
+                        } catch (error) {
+                          console.error('Failed to delete blob:', error);
+                          toast({ title: "Failed to delete blob", variant: "destructive" });
+                        }
+                      }}
+                      className="h-7 px-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                      title="Delete this blob immediately"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                {(!blobDialogData?.blobs?.length || blobDialogData.blobs.length <= 1) && (
+                  <div className="text-xs text-gray-400">Only one blob detected.</div>
+                )}
+              </div>
+              
+              {/* Selection summary */}
+              {blobDialogData?.blobs && selectedBlobIdsToDelete.size > 0 && (
+                <div className="mt-2 p-2 bg-blue-900/20 border border-blue-600/30 rounded text-xs text-blue-300">
+                  {selectedBlobIdsToDelete.size} blob{selectedBlobIdsToDelete.size !== 1 ? 's' : ''} selected for deletion 
+                  ({blobDialogData.blobs.filter(b => selectedBlobIdsToDelete.has(b.id)).reduce((sum, b) => sum + b.volumeCc, 0).toFixed(2)} cc total)
+                </div>
+              )}
+              
+              <AlertDialogFooter>
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={selectedBlobIdsToDelete.size === 0}
+                  onClick={() => {
+                    try {
+                      if (!blobDialogData || !blobDialogData.structureId) return;
+                      const structure = (localRTStructures || rtStructures)?.structures?.find((s: any) => s.roiNumber === blobDialogData.structureId);
+                      if (!structure) return;
+                      const toDelete = new Set(Array.from(selectedBlobIdsToDelete));
+                      if (toDelete.size === 0) return;
+
+                      const keysToRemove = new Set<string>();
+                      blobDialogData.blobs.forEach((b) => {
+                        if (!toDelete.has(b.id)) return;
+                        b.contours.forEach((c) => {
+                          const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                          keysToRemove.add(key);
+                        });
+                      });
+
+                      const updated = structuredClone ? structuredClone(localRTStructures || rtStructures) : JSON.parse(JSON.stringify(localRTStructures || rtStructures));
+                      const s = updated.structures.find((x: any) => x.roiNumber === blobDialogData.structureId);
+                      if (!s) return;
+                      s.contours = s.contours.filter((c: any) => {
+                        const key = `${c.slicePosition}|${c.points.length}|${c.points[0]}|${c.points[1]}`;
+                        return !keysToRemove.has(key);
+                      });
+
+                      setLocalRTStructures(updated);
+                      if (seriesId) {
+                        undoRedoManager.saveState(seriesId, 'remove_blobs', blobDialogData.structureId, updated);
+                      }
+                      saveContourUpdates(updated, 'remove_blobs');
+                      
+                      // Force re-render
+                      try { scheduleRender(); } catch (e) {}
+                      
+                      toast({ title: "Blobs removed", description: `Deleted ${toDelete.size} blob${toDelete.size !== 1 ? 's' : ''}` });
+                    } finally {
+                      setBlobDialogOpen(false);
+                    }
+                  }}
+                >
+                  Delete Selected ({selectedBlobIdsToDelete.size})
+                </AlertDialogAction>
+              </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
 
         {/* REG Details popup */}
         <AlertDialog open={showRegDetails} onOpenChange={(open) => setShowRegDetails(open)}>

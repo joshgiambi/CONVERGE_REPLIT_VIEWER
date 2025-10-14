@@ -4,7 +4,7 @@ import { SeriesSelector } from './series-selector';
 import { WorkingViewer } from './working-viewer';
 import { ViewerToolbar } from './viewer-toolbar';
 import { ContourEditToolbar } from './contour-edit-toolbar';
-import { FusionControlPanelV2 } from './fusion-control-panel-v2';
+import { FusionControlPanel } from './fusion-control-panel';
 import { ErrorModal } from './error-modal';
 import { BooleanOperationsToolbar } from './boolean-operations-toolbar-new';
 import { X, Target } from 'lucide-react';
@@ -21,6 +21,7 @@ import type { FusionManifest, FusionSecondaryDescriptor } from '@/types/fusion';
 import { fetchFusionManifest, preloadFusionSecondary, getFusionManifest, clearFusionCaches } from '@/lib/fusion-utils';
 import { cornerstoneConfig } from '@/lib/cornerstone-config';
 import { LoadingProgress } from './loading-progress';
+import { useSeriesSelection } from '@/hooks/use-series-selection';
 
 // TypeScript declaration for cornerstone
 declare global {
@@ -73,7 +74,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [showFusionPanel, setShowFusionPanel] = useState(false);
   const [secondarySeriesId, setSecondarySeriesId] = useState<number | null>(null);
   const [fusionOpacity, setFusionOpacity] = useState(0.5);
-  const [fusionDisplayMode, setFusionDisplayMode] = useState<'overlay' | 'side-by-side'>('overlay');
   // Secondary loading states for visual feedback
   const [secondaryLoadingStates, setSecondaryLoadingStates] = useState<Map<number, {progress: number, isLoading: boolean}>>(new Map());
   const [currentlyLoadingSecondary, setCurrentlyLoadingSecondary] = useState<number | null>(null);
@@ -82,9 +82,28 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [fusionManifestLoading, setFusionManifestLoading] = useState(false);
   const [fusionWindowLevel, setFusionWindowLevel] = useState<{ window: number; level: number } | null>(null);
   const fusionManifestRequestRef = useRef(0);
-  const [manifestActionStatus, setManifestActionStatus] = useState<string | null>(null);
-  const [fusionDebugSnapshot, setFusionDebugSnapshot] = useState<string | null>(null);
-  
+
+  const primaryStudyId = useMemo(() => {
+    if (selectedSeries?.studyId && Number.isFinite(selectedSeries.studyId)) {
+      return Number(selectedSeries.studyId);
+    }
+    const fallbackStudyId = studyData?.studies?.[0]?.id;
+    return Number.isFinite(fallbackStudyId) ? Number(fallbackStudyId) : undefined;
+  }, [selectedSeries?.studyId, studyData?.studies]);
+
+  const { data: seriesSelectionData } = useSeriesSelection(primaryStudyId);
+
+  // Debug log seriesSelectionData when it changes
+  useEffect(() => {
+    if (seriesSelectionData) {
+      console.log('🔍 Series Selection Data loaded:', {
+        planningCT: seriesSelectionData.planningCT,
+        fusionCandidates: seriesSelectionData.fusionCandidates,
+        allSeriesCount: seriesSelectionData.allSeries?.length,
+      });
+    }
+  }, [seriesSelectionData]);
+
   // All structures visibility state for syncing between RT button and hide all button
   const [allStructuresVisible, setAllStructuresVisible] = useState(true);
   
@@ -166,15 +185,32 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     (entry: any): boolean => {
       if (!entry) return true;
       const modality = (entry.modality || '').toUpperCase();
+      const seriesId = Number(entry.id);
 
-      if (['RTSTRUCT', 'RT', 'REG'].includes(modality)) {
+      // Always show RTSTRUCT - these get nested under their referenced series
+      if (['RTSTRUCT', 'RT'].includes(modality)) {
         return false;
       }
 
-      if (['DERIVED', 'SECONDARY', 'OT'].includes(modality)) {
+      // Hide REG files - these are internal registration metadata
+      if (modality === 'REG') {
         return true;
       }
 
+      // Check if this series is the planning CT from fusion manifest
+      if (seriesSelectionData?.planningCT?.id === seriesId) {
+        return false; // Always show planning CT
+      }
+
+      // Check if this series is a fusion candidate from fusion manifest
+      const isFusionCandidate = seriesSelectionData?.fusionCandidates?.some(
+        (candidate) => candidate.seriesId === seriesId
+      );
+      if (isFusionCandidate) {
+        return false; // Show fusion candidates
+      }
+
+      // Check if series is marked as derived/fusion output
       const metadata = (entry?.metadata ?? {}) as Record<string, any>;
       const description = (entry.seriesDescription || '').toLowerCase();
       const uid = (entry.seriesInstanceUID || '').toLowerCase();
@@ -182,20 +218,30 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const derivedByKeywords = DERIVED_DESCRIPTION_KEYWORDS.some((keyword) => description.includes(keyword));
       const derivedByUid = DERIVED_UID_MARKERS.some((marker) => uid.includes(marker));
       const flaggedFusion = Boolean(metadata?.fusion);
-      const fusionCandidateModality = ['PT', 'PET', 'MR', 'NM'].includes(modality);
+      const isDerived = Boolean(entry.isDerived);
 
-      if (flaggedFusion && !fusionCandidateModality) {
+      // Hide derived/resampled series (fusion outputs)
+      if (derivedByKeywords || derivedByUid || flaggedFusion || isDerived) {
         return true;
       }
 
-      if ((derivedByKeywords || derivedByUid) && !fusionCandidateModality) {
-        // Hide derived CT/resampled overlays, but keep PET/MR secondaries available.
+      // Hide SECONDARY/OT modalities unless they're fusion candidates
+      if (['DERIVED', 'SECONDARY', 'OT'].includes(modality)) {
         return true;
       }
 
+      // If seriesSelectionData is loaded and this series isn't in it, hide it (goes to "Other")
+      if (seriesSelectionData?.allSeries && seriesSelectionData.allSeries.length > 0) {
+        const isInManifest = seriesSelectionData.allSeries.some((s: any) => Number(s.id) === seriesId);
+        if (!isInManifest) {
+          return true; // Send to "Other" dropdown
+        }
+      }
+
+      // Default: show the series
       return false;
     },
-    [DERIVED_DESCRIPTION_KEYWORDS, DERIVED_UID_MARKERS],
+    [DERIVED_DESCRIPTION_KEYWORDS, DERIVED_UID_MARKERS, seriesSelectionData],
   );
 
   const { data: seriesData, isLoading } = useQuery({
@@ -624,35 +670,20 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     if (seriesData && Array.isArray(seriesData)) {
       setSeries(seriesData);
       setVisibleSeries(seriesData.filter((entry) => !shouldHideSeries(entry)));
-      
-      // Auto-select planning CT if no series is selected yet
-      if (!selectedSeries && seriesData.length > 0) {
-        // Use the same planning CT selection logic as in series-selector.tsx
-        const ctSeries = seriesData.filter((s) => s.modality === 'CT' && !shouldHideSeries(s));
-        
-        if (ctSeries.length > 0) {
-          // Score CT series to find the best planning CT
-          const scoreCT = (ct: any) => {
-            let score = 0;
-            // Prefer larger image counts (indicates comprehensive scan)
-            score += Math.min(200, (ct.imageCount || 0));
-            // Prefer series with certain keywords in description
-            const desc = (ct.seriesDescription || '').toLowerCase();
-            if (desc.includes('planning') || desc.includes('plan')) score += 100;
-            if (desc.includes('ctac')) score -= 200; // Avoid CTAC
-            return score;
-          };
-
-          // Pick best CT by score
-          const bestCT = [...ctSeries].sort((a, b) => scoreCT(b) - scoreCT(a))[0];
-          if (bestCT) {
-            console.log(`🎯 Auto-selecting planning CT: ${bestCT.seriesDescription} (ID: ${bestCT.id})`);
-            handleSeriesSelect(bestCT);
-          }
-        }
-      }
     }
-  }, [seriesData, selectedSeries, shouldHideSeries]);
+
+    if (seriesSelectionData?.planningCT) {
+      const planningId = Number(seriesSelectionData.planningCT.id);
+      if (!selectedSeries || Number(selectedSeries.id) !== planningId) {
+        handleSeriesSelect(seriesSelectionData.planningCT);
+      }
+      return;
+    }
+
+    if (!selectedSeries && Array.isArray(seriesData) && seriesData.length > 0) {
+      handleSeriesSelect(seriesData[0]);
+    }
+  }, [seriesData, selectedSeries, shouldHideSeries, seriesSelectionData?.planningCT]);
 
   const handleSeriesSelect = async (seriesData: DICOMSeries) => {
     try {
@@ -676,49 +707,11 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       }
       
-      // Auto-load most recent RT structure set if this is a CT series (primary series)
-      if (seriesData.modality === 'CT' && !rtStructures) {
-        try {
-          console.log(`🔄 Auto-loading RT structures for CT series ${seriesData.id}...`);
-          const rtResponse = await fetch(`/api/studies/${seriesData.studyId}/rt-structures`);
-          if (rtResponse.ok) {
-            const rtSeries = await rtResponse.json();
-            if (rtSeries && rtSeries.length > 0) {
-              // Find the most recent RT structure (by date or series number)
-              const mostRecentRT = rtSeries.reduce((latest: any, current: any) => {
-                // Prefer by series date/time first, then by series number
-                const latestDate = latest.seriesDate || latest.createdAt || '';
-                const currentDate = current.seriesDate || current.createdAt || '';
-                
-                if (currentDate > latestDate) return current;
-                if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
-                return latest;
-              });
-              
-              console.log(`🔄 Auto-loading most recent RT structure (ID: ${mostRecentRT.id}) for primary CT`);
-              
-              // Load the RT structure contours
-              const contourResponse = await fetch(`/api/rt-structures/${mostRecentRT.id}/contours`);
-              if (contourResponse.ok) {
-                const rtStructData = await contourResponse.json();
-                handleRTStructureLoad(rtStructData);
-                
-                // Notify parent about loaded RT series for selection state
-                if (onLoadedRTSeriesChange) {
-                  onLoadedRTSeriesChange(mostRecentRT.id);
-                }
-                
-                console.log(`✅ Auto-loaded RT structures with ${rtStructData.structures.length} ROIs`);
-              }
-            }
-          } else {
-            console.log('No RT structures available for this CT study');
-          }
-        } catch (rtError) {
-          console.log('No RT structures found for auto-loading:', rtError);
-          // Don't throw error - RT structures are optional
-        }
-      }
+      // NOTE: RT structure auto-loading is now handled by SeriesSelector component
+      // which properly filters by referencedSeriesId to select the correct RT.
+      // This duplicate logic was causing the wrong RT to be loaded (by most recent date
+      // instead of by CT reference), so it has been removed.
+      // See series-selector.tsx lines 354-433 for the correct implementation.
 
       await initializeFusionForSeries(seriesData);
       
@@ -911,12 +904,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   const handleAllStructuresVisibilityChange = (allVisible: boolean) => {
     setAllStructuresVisible(allVisible);
-    // FIX: Trigger immediate render to show visibility changes
-    setTimeout(() => {
-      if (workingViewerRef.current?.forceRender) {
-        workingViewerRef.current.forceRender();
-      }
-    }, 10);
   };
 
   const handleStructureColorChange = (structureId: number, color: [number, number, number]) => {
@@ -937,9 +924,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         return { window: 80, level: 40 };
       case 'PT':
       case 'PET':
-        // Standard PET SUV windowing: 0-5 SUV range (common clinical setting)
-        // Many DICOM PET files store SUV scaled by 1000
-        return { window: 5000, level: 2500 };
+        return { window: 5, level: 2.5 };
       case 'CT':
         return { window: 400, level: 40 };
       default:
@@ -1128,24 +1113,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
       const candidateIds = Array.from(results.values()).filter((id) => shouldIncludeSeries(id));
       if (import.meta.env.DEV) {
-        const candidateDetails = candidateIds.map(id => {
-          const entry = seriesById.get(id);
-          return {
-            id,
-            modality: entry?.modality || 'unknown',
-            description: entry?.seriesDescription || 'no desc'
-          };
-        });
-        const ptCandidates = candidateDetails.filter(c => c.modality?.toUpperCase() === 'PT' || c.modality?.toUpperCase() === 'PET');
-        
-        console.log('🔍 FUSION CANDIDATES DEBUG:', {
-          primarySeriesId,
-          totalCandidates: candidateIds.length,
-          ptCandidates: ptCandidates.length,
-          candidateDetails,
-          ptDetails: ptCandidates
-        });
-        
         log.debug(
           `Fusion candidates for primary ${primarySeriesId} (patient ${studyData?.patient?.id ?? 'unknown'}): ${candidateIds.join(', ')}`,
           'viewer-interface',
@@ -1163,7 +1130,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     ],
   );
 
-  const fusionCandidatesByPrimary = useMemo(() => {
+  const legacyFusionCandidates = useMemo(() => {
     const map = new Map<number, number[]>();
     series.forEach((entry) => {
       if (!entry) return;
@@ -1173,6 +1140,17 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     });
     return map;
   }, [series, getCandidateSecondaryIds]);
+
+  const fusionCandidatesByPrimary = useMemo(() => {
+    const merged = new Map<number, number[]>(legacyFusionCandidates);
+    if (seriesSelectionData?.planningCT && Array.isArray(seriesSelectionData.fusionCandidates)) {
+      merged.set(
+        seriesSelectionData.planningCT.id,
+        seriesSelectionData.fusionCandidates.map((candidate) => candidate.seriesId)
+      );
+    }
+    return merged;
+  }, [legacyFusionCandidates, seriesSelectionData?.fusionCandidates, seriesSelectionData?.planningCT]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !import.meta.env.DEV) return;
@@ -1377,16 +1355,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     const descriptor = fusionDescriptorMap.get(secondarySeriesId);
     if (!descriptor) return;
     const defaultWindow = getDefaultFusionWindow(descriptor.secondaryModality);
-    // FIX: Set window/level immediately to prevent bright flash on PT/PET
-    // Use direct state update instead of batched to ensure it applies before render
     setFusionWindowLevel(defaultWindow);
-    
-    // Force immediate render with correct windowing
-    setTimeout(() => {
-      if (workingViewerRef.current?.forceRender) {
-        workingViewerRef.current.forceRender();
-      }
-    }, 1);
   }, [fusionManifest, secondarySeriesId, getDefaultFusionWindow]);
 
   useEffect(() => {
@@ -1608,6 +1577,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   // Prevent manifest init deathloops by gating on candidate set changes and a short cooldown
   const prevCandidateKeyRef = useRef<string | null>(null);
   const lastInitAtRef = useRef<number>(0);
+  const initCountRef = useRef<number>(0);
+  const MAX_INIT_ATTEMPTS = 3; // Hard limit to prevent infinite loops
 
   useEffect(() => {
     if (!selectedSeries) return;
@@ -1625,15 +1596,38 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     const unchangedCandidates = prevCandidateKeyRef.current === candidateKey;
     const withinCooldown = Date.now() - lastInitAtRef.current < 5000; // 5s cooldown
 
+    // HARD STOP: If we've tried too many times, abort to prevent crashes
+    if (initCountRef.current >= MAX_INIT_ATTEMPTS) {
+      console.error('🛑 FUSION INIT ABORTED: Maximum attempts reached. Preventing infinite loop.');
+      return;
+    }
+
     // Only (re)initialize if:
     // - manifest is for a different series, or
     // - there are genuinely new candidates not in the current manifest
     // And avoid tight loops when candidates/associations flicker
     if (!manifestMatchesSeries || hasMissing) {
-      if (unchangedCandidates && withinCooldown) return;
+      if (unchangedCandidates && withinCooldown) {
+        console.log('⏸️ Fusion init skipped: within cooldown period');
+        return;
+      }
+
+      console.log('🔄 Initializing fusion manifest:', {
+        attempt: initCountRef.current + 1,
+        primarySeriesId: selectedSeries.id,
+        candidateIds: candidateSecondaryIds,
+      });
+
       prevCandidateKeyRef.current = candidateKey;
       lastInitAtRef.current = Date.now();
-      initializeFusionForSeries(selectedSeries);
+      initCountRef.current += 1;
+
+      try {
+        initializeFusionForSeries(selectedSeries);
+      } catch (error) {
+        console.error('❌ Fusion initialization failed:', error);
+        initCountRef.current = MAX_INIT_ATTEMPTS; // Stop trying on error
+      }
     }
   }, [getCandidateSecondaryIds, regAssociations, selectedSeries, fusionManifest, fusionManifestLoading, initializeFusionForSeries]);
 
@@ -1679,47 +1673,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
     }
   };
 
-  const triggerFusionDebug = useCallback(() => {
-    try {
-      workingViewerRef.current?.openFusionDebug?.('manual');
-    } catch (error) {
-      console.warn('Unable to open fusion debug panel', error);
-    }
-  }, []);
-
-  const captureFusionDebug = useCallback(() => {
-    try {
-      const payload = (window as any)?.__fusion;
-      if (!payload) {
-        setFusionDebugSnapshot('window.__fusion is empty');
-        return;
-      }
-      setFusionDebugSnapshot(JSON.stringify(payload, null, 2));
-    } catch (error: any) {
-      setFusionDebugSnapshot(`Failed to read window.__fusion: ${error?.message || String(error)}`);
-    }
-  }, []);
-
-  const handleRebuildManifest = useCallback(async () => {
-    if (!selectedSeries) {
-      setManifestActionStatus('Select a primary series first.');
-      return;
-    }
-
-    setManifestActionStatus('Initializing fusion…');
-    setFusionDebugSnapshot(null);
-
-    try {
-      // Trigger full fusion initialization for current series
-      await initializeFusionForSeries(selectedSeries);
-      setManifestActionStatus('Fusion initialized successfully');
-      setTimeout(() => setManifestActionStatus(null), 3000);
-      return;
-    } catch (error: any) {
-      setManifestActionStatus(`Failed: ${error?.message || String(error)}`);
-      setTimeout(() => setManifestActionStatus(null), 5000);
-    }
-  }, [selectedSeries, initializeFusionForSeries]);
 
   // Subscribe to undo manager changes to refresh toolbar state
   const [historyState, setHistoryState] = useState({
@@ -1907,6 +1860,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   return (
     <>
+
       <div className="animate-in fade-in-50 duration-500">
       <div className="flex gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
         
@@ -1922,6 +1876,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             studyIds={studyData.studies.map((s: any) => s.id)}
             regAssociations={regAssociations}
             regCtacSeriesIds={regCtacIds}
+            fusionCandidatesByPrimary={fusionCandidatesByPrimary}
             rtStructures={rtStructures}
             onRTStructureLoad={handleRTStructureLoad}
             onStructureVisibilityChange={handleStructureVisibilityChange}
@@ -1951,7 +1906,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             }}
             secondarySeriesId={secondarySeriesId}
             onSecondarySeriesSelect={setSecondarySeriesId}
-            onRebuildFusionManifest={handleRebuildManifest}
             preventRTLoading={false}
             onAllStructuresVisibilityChange={handleAllStructuresVisibilityChange}
             // Pass localization mode to highlight when active
@@ -1964,7 +1918,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             secondaryLoadingStates={secondaryLoadingStates}
             currentlyLoadingSecondary={currentlyLoadingSecondary}
             fusionStatuses={fusionSecondaryStatuses}
-            fusionCandidatesByPrimary={fusionCandidatesByPrimary}
             fusionSiblingMap={fusionSiblingMap}
           />
         </div>
@@ -2027,7 +1980,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   autoLocalizeTarget={autoLocalizeTarget}
                   secondarySeriesId={secondarySeriesId}
                   fusionOpacity={fusionOpacity}
-                  fusionDisplayMode={fusionDisplayMode}
                   onSecondarySeriesSelect={setSecondarySeriesId}
                   onFusionOpacityChange={setFusionOpacity}
                   hasSecondarySeriesForFusion={fusionDescriptorMap.size > 0}
@@ -2555,23 +2507,22 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         />
       )}
 
-      {(fusionManifest && fusionManifest.secondaries.length > 0) || fusionManifestLoading || fusionManifestError ? (
-        <FusionControlPanelV2
+      {fusionManifest && fusionManifest.secondaries.length > 0 && (
+        <FusionControlPanel
           opacity={fusionOpacity}
           onOpacityChange={setFusionOpacity}
-          secondaryOptions={fusionManifest?.secondaries || []}
+          secondaryOptions={fusionManifest.secondaries}
           selectedSecondaryId={secondarySeriesId}
           onSecondarySeriesSelect={setSecondarySeriesId}
           secondaryStatuses={fusionSecondaryStatuses}
           manifestLoading={fusionManifestLoading}
           manifestError={fusionManifestError}
+          minimized={!showFusionPanel}
+          onToggleMinimized={(minimized) => setShowFusionPanel(!minimized)}
           windowLevel={fusionWindowLevel}
           onWindowLevelPreset={(preset) => setFusionWindowLevel(preset)}
-          displayMode={fusionDisplayMode}
-          onDisplayModeChange={setFusionDisplayMode}
-          primarySeriesId={selectedSeries?.id}
         />
-      ) : null}
+      )}
 
       {/* Margin Toolbar */}
       {showMarginToolbar && rtStructures && selectedForEdit && !showBooleanOperations && !isContourEditMode && (

@@ -63,6 +63,7 @@ export function SimpleBrushTool({
   } | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const animationFrameRef = useRef<number | null>(null);
   
   // For smart brush - collect adaptive shapes while drawing
   const adaptiveShapesRef = useRef<Array<{ x: number; y: number }[]>>([]);
@@ -188,6 +189,12 @@ export function SimpleBrushTool({
       overlayCanvasRef.current.style.top = `${mainRect.top - parentRect.top}px`;
       overlayCanvasRef.current.style.left = `${mainRect.left - parentRect.left}px`;
     }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
   }, [isActive, canvasRef]);
 
   // Get structure color - red for erase modes, structure color for normal mode
@@ -310,12 +317,22 @@ export function SimpleBrushTool({
     }
   };
 
-  // Draw overlay when state changes (no continuous loop - saves CPU/GPU)
+  // Use requestAnimationFrame for smooth drawing
   useEffect(() => {
-    if (!isActive) return;
-    
-    // Single render on state change, not continuous loop
-    drawOverlay();
+    const animate = () => {
+      drawOverlay();
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    if (isActive) {
+      animate();
+    }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
   }, [
     cursorPosition,
     isActive,
@@ -330,7 +347,6 @@ export function SimpleBrushTool({
     adaptivePreviewPoints,
     smartBrushEnabled,
     dicomImage,
-    drawOverlay,
   ]);
 
   // Handle mouse events
@@ -467,12 +483,8 @@ export function SimpleBrushTool({
                         previousPreviewPointsRef.current = canvasPreviewPoints;
                         setAdaptivePreviewPoints(canvasPreviewPoints);
                         
-                        // Collect shapes during drawing but throttle to reduce processing time
                         if (isDrawingRef.current) {
-                            // Only collect every 3rd shape to reduce union complexity (faster finalization)
-                            if (adaptiveShapesRef.current.length === 0 || adaptiveShapesRef.current.length % 3 === 0) {
-                                adaptiveShapesRef.current.push(canvasPreviewPoints);
-                            }
+                            adaptiveShapesRef.current.push(canvasPreviewPoints);
                         }
                     }
                 }
@@ -558,18 +570,16 @@ export function SimpleBrushTool({
     const handleMouseUp = (e: MouseEvent) => {
       if (isDrawingRef.current) {
         log.debug(`🛑 Mouse up - finalizing stroke. Smart brush enabled: ${smartBrushEnabled}, Adaptive shapes collected: ${adaptiveShapesRef.current.length}`,'brush');
-        
-        // Set drawing state to false immediately for better responsiveness
-        setIsDrawing(false);
-        isDrawingRef.current = false;
-        
-        // Finalize the stroke (now async, won't block UI)
         finalizeBrushStroke();
+        setIsDrawing(false);
+        isDrawingRef.current = false; // Clear the ref too
         
-        // Keep preview visible during processing for smart brush
-        // It will be cleared after processing completes
-        if (!smartBrushEnabled && onPreviewUpdate) {
-          onPreviewUpdate(null);
+        // Clear adaptive preview points and preview after finalizing smart brush
+        if (smartBrushEnabled) {
+          setAdaptivePreviewPoints(null);
+          if (onPreviewUpdate) {
+            onPreviewUpdate(null);
+          }
         }
       }
       
@@ -693,72 +703,38 @@ export function SimpleBrushTool({
         const isInEraseMode = isEraseMode || isTemporaryEraseMode;
 
         if (smartBrushEnabled && adaptiveShapesRef.current.length > 0 && !isInEraseMode) {
-            const startTime = performance.now();
             console.log(`🎨 Finalizing smart brush with ${adaptiveShapesRef.current.length} adaptive shapes`);
-            
-            // Calculate the image position on canvas for proper coordinate transformation
-            const imageWidth = transform.imageWidth || imageMetadata?.Columns || 512;
-            const imageHeight = transform.imageHeight || imageMetadata?.Rows || 512;
-            const scaledWidth = imageWidth * transform.scale;
-            const scaledHeight = imageHeight * transform.scale;
-            const canvasWidth = canvasRef.current?.width || 512;
-            const canvasHeight = canvasRef.current?.height || 512;
-            const imageStartX = (canvasWidth - scaledWidth) / 2 + transform.offsetX;
-            const imageStartY = (canvasHeight - scaledHeight) / 2 + transform.offsetY;
-            
-            // Pre-calculate transformation constants for faster conversion
-            const imagePosition = imageMetadata.imagePosition.split('\\').map(Number);
-            const pixelSpacing = imageMetadata.pixelSpacing.split('\\').map(Number);
-            const [rowSpacing, colSpacing] = pixelSpacing;
-            const invScale = 1 / transform.scale;
             
             const adaptivePolygons: number[][] = [];
             adaptiveShapesRef.current.forEach((shape) => {
                 if (shape.length > 2) {
                     const worldPoints: number[] = [];
                     shape.forEach(p => {
-                        // Optimized coordinate transformation
-                        const pixelX = (p.x - imageStartX) * invScale;
-                        const pixelY = (p.y - imageStartY) * invScale;
-                        const worldX = imagePosition[0] + (pixelX * colSpacing);
-                        const worldY = imagePosition[1] + (pixelY * rowSpacing);
-                        worldPoints.push(worldX, worldY, currentSlicePosition);
+                        const pixelX = (p.x - transform.offsetX) / transform.scale;
+                        const pixelY = (p.y - transform.offsetY) / transform.scale;
+                        const worldPoint = pixelToWorld(pixelX, pixelY, imageMetadata, currentSlicePosition);
+                        worldPoints.push(worldPoint[0], worldPoint[1], worldPoint[2]);
                     });
                     adaptivePolygons.push(worldPoints);
                 }
             });
 
             if (adaptivePolygons.length === 0) {
-                log.debug("No valid adaptive shapes to create contour", 'brush');
+            log.debug("No valid adaptive shapes to create contour", 'brush');
                 return;
             }
             
-            // Process asynchronously to prevent UI blocking
-            // Use setTimeout to allow the UI to update first
-            setTimeout(async () => {
-                try {
-                    const { polygonUnion } = await import('@/lib/polygon-union');
-                    const unifiedPolygon = polygonUnion(adaptivePolygons);
-                    const processingTime = performance.now() - startTime;
-                    
-                    console.log(`🎨 Smart brush final polygon has ${unifiedPolygon.length / 3} points (took ${processingTime.toFixed(0)}ms)`);
+            const { polygonUnion } = await import('@/lib/polygon-union');
+            const unifiedPolygon = polygonUnion(adaptivePolygons);
 
-                    if (onContourUpdate && unifiedPolygon.length >= 9) {
-                        onContourUpdate({
-                            action: "smart_brush_stroke",
-                            structureId: selectedStructure,
-                            slicePosition: currentSlicePosition,
-                            points: unifiedPolygon,
-                        });
-                    }
-                } catch (error) {
-                    log.error(`Error processing smart brush union: ${String(error)}`, 'brush');
-                } finally {
-                    // Clear preview after processing completes
-                    setAdaptivePreviewPoints(null);
-                    previousPreviewPointsRef.current = null;
-                }
-            }, 0);
+            if (onContourUpdate) {
+                onContourUpdate({
+                    action: "smart_brush_stroke",
+                    structureId: selectedStructure,
+                    slicePosition: currentSlicePosition,
+                    points: unifiedPolygon,
+                });
+            }
         } else if (!smartBrushEnabled && brushPointsRef.current.length > 0) {
             log.debug(`Finalizing regular brush with ${brushPointsRef.current.length} points`, 'brush');
 

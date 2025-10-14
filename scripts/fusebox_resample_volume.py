@@ -332,6 +332,9 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         transform_for_resample = transform
 
+    # FIX: Load metadata BEFORE using it
+    metadata = cfg.get("metadata", {})
+    
     resample_filter = sitk.ResampleImageFilter()
     resample_filter.SetReferenceImage(primary)
     resample_filter.SetTransform(transform_for_resample)
@@ -347,8 +350,6 @@ def run_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     dicom_dir = output_root / "dicom"
     ensure_directory(output_root)
     ensure_directory(dicom_dir)
-
-    metadata = cfg.get("metadata", {})
 
     # Optional scaling to UInt16 for export mode only
     scale_to_uint16 = bool(cfg.get("scaleToUInt16", False))

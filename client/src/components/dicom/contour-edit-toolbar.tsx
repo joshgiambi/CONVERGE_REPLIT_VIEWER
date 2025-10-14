@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -109,6 +109,11 @@ export function ContourEditToolbar({
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
+  
+  // Refs for dropdown close timers
+  const nthMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const clearMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const blobMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isPreviewEnabled, setIsPreviewEnabled] = useState(true); // Preview mode for grow/shrink operations
   const [previewContours, setPreviewContours] = useState<number[][] | null>(null); // Store preview contours for rendering
   const [isShowingPreview, setIsShowingPreview] = useState(false); // Track if preview is currently shown
@@ -990,11 +995,24 @@ export function ContourEditToolbar({
             </Button>
             
             {/* Nth Slice Delete button with hover menu */}
-            <div className="relative" onMouseLeave={() => setShowNthSliceMenu(false)}>
+            <div 
+              className="relative" 
+              onMouseEnter={() => {
+                if (nthMenuTimerRef.current) {
+                  clearTimeout(nthMenuTimerRef.current);
+                  nthMenuTimerRef.current = null;
+                }
+                setShowNthSliceMenu(true);
+              }}
+              onMouseLeave={() => {
+                nthMenuTimerRef.current = setTimeout(() => {
+                  setShowNthSliceMenu(false);
+                }, 150);
+              }}
+            >
               <Button
                 variant="outline"
                 size="sm"
-                onMouseEnter={() => setShowNthSliceMenu(true)}
                 className="h-7 px-2 bg-orange-900/30 border-2 border-orange-400/60 text-orange-200 hover:text-orange-100 hover:bg-orange-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Delete every nth slice"
               >
@@ -1004,7 +1022,7 @@ export function ContourEditToolbar({
               </Button>
               
               {showNthSliceMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[140px]">
+                <div className="absolute top-full left-0 mt-0.5 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[140px]">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1045,26 +1063,43 @@ export function ContourEditToolbar({
                   const updatePayload = {
                     action: 'smooth',
                     structureId: selectedStructure.roiNumber,
-                    smoothingFactor: 0.15 // Minimal smoothing across all slices
+                    smoothingFactor: 0.35, // Increased from 0.15 for more noticeable effect
+                    triggerAnimation: true // Trigger the ripple animation
                   };
                   onContourUpdate(updatePayload);
                 }
                 
-                toast({ title: `Smoothing contours for ${selectedStructure.structureName}` });
+                toast({ 
+                  title: `Smoothed ${selectedStructure.structureName}`,
+                  description: 'Contours refined and polished'
+                });
               }}
               className="h-7 px-2 bg-green-900/30 border-2 border-green-400/60 text-green-200 hover:text-green-100 hover:bg-green-800/40 rounded-lg backdrop-blur-sm shadow-sm"
-              title="Smooth contours"
+              title="Smooth contours (increased strength)"
             >
               <Sparkles className="w-3 h-3 mr-1" />
               <span className="text-xs font-medium">Smooth</span>
             </Button>
 
             {/* Blob tools dropdown */}
-            <div className="relative" onMouseLeave={() => setShowBlobMenu(false)}>
+            <div 
+              className="relative" 
+              onMouseEnter={() => {
+                if (blobMenuTimerRef.current) {
+                  clearTimeout(blobMenuTimerRef.current);
+                  blobMenuTimerRef.current = null;
+                }
+                setShowBlobMenu(true);
+              }}
+              onMouseLeave={() => {
+                blobMenuTimerRef.current = setTimeout(() => {
+                  setShowBlobMenu(false);
+                }, 150);
+              }}
+            >
               <Button
                 variant="outline"
                 size="sm"
-                onMouseEnter={() => setShowBlobMenu(true)}
                 className="h-7 px-2 bg-purple-900/30 border-2 border-purple-400/60 text-purple-200 hover:text-purple-100 hover:bg-purple-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Blob tools"
               >
@@ -1074,7 +1109,7 @@ export function ContourEditToolbar({
               </Button>
 
               {showBlobMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[180px]">
+                <div className="absolute top-full left-0 mt-0.5 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[180px]">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1104,11 +1139,24 @@ export function ContourEditToolbar({
             </div>
 
             {/* Clear button with hover menu */}
-            <div className="relative" onMouseLeave={() => setShowClearMenu(false)}>
+            <div 
+              className="relative" 
+              onMouseEnter={() => {
+                if (clearMenuTimerRef.current) {
+                  clearTimeout(clearMenuTimerRef.current);
+                  clearMenuTimerRef.current = null;
+                }
+                setShowClearMenu(true);
+              }}
+              onMouseLeave={() => {
+                clearMenuTimerRef.current = setTimeout(() => {
+                  setShowClearMenu(false);
+                }, 150);
+              }}
+            >
               <Button
                 variant="outline"
                 size="sm"
-                onMouseEnter={() => setShowClearMenu(true)}
                 className="h-7 px-2 bg-red-900/30 border-2 border-red-400/60 text-red-200 hover:text-red-100 hover:bg-red-800/40 rounded-lg backdrop-blur-sm shadow-sm"
                 title="Clear contours"
               >
@@ -1118,7 +1166,7 @@ export function ContourEditToolbar({
               </Button>
               
               {showClearMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[160px]">
+                <div className="absolute top-full left-0 mt-0.5 bg-black/90 border border-gray-600 rounded-lg shadow-xl p-1 z-50 min-w-[160px]">
                   <Button
                     variant="ghost"
                     size="sm"
