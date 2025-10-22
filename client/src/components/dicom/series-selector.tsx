@@ -10,9 +10,11 @@ import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Zap, ExternalLink, Bug, Loader2, AlertTriangle } from 'lucide-react';
+import { Layers3, Palette, Settings, Search, Eye, EyeOff, Trash2, ChevronDown, ChevronRight, ChevronUp, Minimize2, FolderTree, X, Plus, Edit3, Link, Folder, ArrowUpDown, ArrowUp, ArrowDown, Zap, ExternalLink, Bug, Loader2, AlertTriangle, SplitSquareHorizontal } from 'lucide-react';
 import { DICOMSeries, WindowLevel, WINDOW_LEVEL_PRESETS } from '@/lib/dicom-utils';
 import { useToast } from '@/hooks/use-toast';
+import { StructureBlobList } from './structure-blob-list';
+import { groupStructureBlobs, computeBlobVolumeCc, createContourKey, type Blob } from '@/lib/blob-operations';
 
 interface SeriesSelectorProps {
   series: DICOMSeries[];
@@ -119,7 +121,37 @@ export function SeriesSelector({
   const [newStructureName, setNewStructureName] = useState('');
   const [newStructureColor, setNewStructureColor] = useState('#FF0000');
   const [sortMode, setSortMode] = useState<'az' | 'za' | 'position'>('az'); // Sorting mode: A-Z, Z-A, or by superior Z-slice
+  const [expandedBlobStructures, setExpandedBlobStructures] = useState<Set<number>>(new Set()); // Track which structures have blob list expanded
   const { toast } = useToast();
+  
+  // Detect blobs for all structures - recalculate when rtStructures object changes
+  // Uses JSON stringify to deep-compare the structures array
+  const structureBlobsMap = useMemo(() => {
+    const map = new Map<number, Blob[]>();
+    
+    if (!rtStructures?.structures) return map;
+    
+    rtStructures.structures.forEach((structure: any) => {
+      // Use exact same tolerance as blob dialog (SLICE_TOL_MM is default)
+      const blobContours = groupStructureBlobs(structure);
+      
+      // Only show blob features if >1 blob detected (same check as dialog)
+      if (blobContours.length > 1) {
+        const blobs: Blob[] = blobContours.map((contours, idx) => ({
+          id: idx + 1,
+          volumeCc: computeBlobVolumeCc(contours, { 
+            pixelSpacing: '1.171875\\1.171875',
+            sliceThickness: '3'
+          }),
+          contours
+        }));
+        map.set(structure.roiNumber, blobs);
+      }
+    });
+    
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rtStructures]);
 
   const seriesById = useMemo(() => {
     const map = new Map<number, DICOMSeries>();
@@ -332,32 +364,53 @@ export function SeriesSelector({
 
   // Auto-select most recent RT structure set and sync with loadedRTSeriesId
   useEffect(() => {
-    if (rtSeries.length > 0) {
-      // If loadedRTSeriesId is provided, prioritize that
-      if (loadedRTSeriesId) {
-        const loadedSeries = rtSeries.find(s => s.id === loadedRTSeriesId);
-        if (loadedSeries && (!selectedRTSeries || selectedRTSeries.id !== loadedRTSeriesId)) {
-          console.log('Setting selectedRTSeries based on loadedRTSeriesId:', loadedRTSeriesId);
-          setSelectedRTSeries(loadedSeries);
+    if (rtSeries.length > 0 && selectedSeries) {
+      // Filter RT series to only those that reference the currently selected primary series
+      const matchingRTSeries = rtSeries.filter((rtS: any) => 
+        rtS.referencedSeriesId === selectedSeries.id
+      );
+      
+      console.log(`🔍 RT series check for primary ${selectedSeries.id}:`, {
+        total: rtSeries.length,
+        matching: matchingRTSeries.length,
+        selectedRTSeriesId: selectedRTSeries?.id,
+        selectedRTReferencesCurrentSeries: selectedRTSeries?.referencedSeriesId === selectedSeries.id
+      });
+      
+      if (matchingRTSeries.length === 0) {
+        // No RT structure sets reference this series, clear selection
+        if (selectedRTSeries) {
+          console.log(`⚠️ No RT structure sets reference primary series ${selectedSeries.id}, clearing selection`);
+          setSelectedRTSeries(null);
         }
-      } 
-      // Otherwise, auto-select the most recent RT structure set
-      else if (!selectedRTSeries) {
-        const mostRecentRT = rtSeries.reduce((latest, current) => {
-          // Prefer by series date/time first, then by series number
-          const latestDate = latest.seriesDate || latest.createdAt || '';
-          const currentDate = current.seriesDate || current.createdAt || '';
-          
-          if (currentDate > latestDate) return current;
-          if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
-          return latest;
-        });
-        
-        console.log(`🎯 Auto-selecting most recent RT structure set: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
-        handleRTSeriesSelect(mostRecentRT);
+        return;
       }
+      
+      // Check if current selection is valid for this series
+      const currentSelectionValid = selectedRTSeries && 
+                                    selectedRTSeries.referencedSeriesId === selectedSeries.id;
+      
+      if (currentSelectionValid) {
+        // Current selection is valid, keep it
+        console.log(`✅ Current RT selection (${selectedRTSeries.id}) is valid for series ${selectedSeries.id}`);
+        return;
+      }
+      
+      // No valid selection, auto-select the most recent RT that references this series
+      const mostRecentRT = matchingRTSeries.reduce((latest, current) => {
+        // Prefer by series date/time first, then by series number
+        const latestDate = latest.seriesDate || latest.createdAt || '';
+        const currentDate = current.seriesDate || current.createdAt || '';
+        
+        if (currentDate > latestDate) return current;
+        if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
+        return latest;
+      });
+      
+      console.log(`🎯 Auto-selecting most recent RT structure set for series ${selectedSeries.id}: ${mostRecentRT.seriesDescription} (ID: ${mostRecentRT.id})`);
+      handleRTSeriesSelect(mostRecentRT);
     }
-  }, [loadedRTSeriesId, rtSeries, selectedRTSeries]);
+  }, [rtSeries, selectedSeries]);
 
   async function handleRTSeriesSelect(rtSeries: any) {
     try {
@@ -421,6 +474,141 @@ export function SeriesSelector({
   const handleDeleteStructure = (structureId: number) => {
     // Handle structure deletion
     console.log('Delete structure:', structureId);
+  };
+  
+  // Blob management handlers
+  const handleBlobLocalize = (structureId: number, blobId: number, contours: any[]) => {
+    console.log(`🎯 Sidebar: Localize blob ${blobId} of structure ${structureId}`);
+    
+    if (!contours.length) return;
+    
+    // Find middle slice
+    const slicePositions = contours.map(c => c.slicePosition).sort((a, b) => a - b);
+    const middleSlice = slicePositions[Math.floor(slicePositions.length / 2)];
+    const middleContours = contours.filter(c => Math.abs(c.slicePosition - middleSlice) < 0.5);
+    
+    // Calculate bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    middleContours.forEach(c => {
+      for (let i = 0; i < c.points.length; i += 3) {
+        minX = Math.min(minX, c.points[i]);
+        maxX = Math.max(maxX, c.points[i]);
+        minY = Math.min(minY, c.points[i + 1]);
+        maxY = Math.max(maxY, c.points[i + 1]);
+      }
+    });
+    
+    if (!isFinite(minX) || !isFinite(maxX)) {
+      // Fallback to simple center localization
+      if (onAutoLocalize) {
+        let sumX = 0, sumY = 0, count = 0;
+        middleContours.forEach(c => {
+          for (let i = 0; i < c.points.length; i += 3) {
+            sumX += c.points[i];
+            sumY += c.points[i + 1];
+            count++;
+          }
+        });
+        if (count > 0) {
+          onAutoLocalize(sumX / count, sumY / count, middleSlice);
+        }
+      }
+      return;
+    }
+    
+    // Calculate blob dimensions and zoom factor
+    const blobWidthMm = maxX - minX;
+    const blobHeightMm = maxY - minY;
+    const blobCenterX = (minX + maxX) / 2;
+    const blobCenterY = (minY + maxY) / 2;
+    
+    // Sidebar uses slightly less zoom than modal (10x vs 8x padding)
+    const paddingFactor = 10.0;
+    
+    // Estimate zoom based on blob size
+    // Assuming 512x512 image with ~1.17mm pixel spacing and ~1024px canvas
+    const pixelSpacing = 1.171875;
+    const imageSize = 512;
+    const canvasSize = 1024; // Approximate
+    const baseScale = canvasSize / imageSize;
+    
+    const blobWidthPixels = blobWidthMm / pixelSpacing;
+    const targetWidthPixels = blobWidthPixels * paddingFactor;
+    const estimatedZoom = (canvasSize / targetWidthPixels) / baseScale;
+    const finalZoom = Math.max(0.5, Math.min(estimatedZoom, 8));
+    
+    console.log(`   Blob size: ${blobWidthMm.toFixed(1)}x${blobHeightMm.toFixed(1)}mm, zoom: ${finalZoom.toFixed(2)}x`);
+    
+    // Call localize and zoom
+    if (onAutoLocalize) {
+      onAutoLocalize(blobCenterX, blobCenterY, middleSlice);
+    }
+    if (onAutoZoom) {
+      onAutoZoom(finalZoom);
+    }
+  };
+  
+  const handleBlobDelete = (structureId: number, blobId: number) => {
+    console.log(`🗑️ Delete blob ${blobId} of structure ${structureId}`);
+    
+    if (!rtStructures || !onRTStructureLoad) return;
+    
+    const blobs = structureBlobsMap.get(structureId);
+    if (!blobs) return;
+    
+    const blobToDelete = blobs.find(b => b.id === blobId);
+    if (!blobToDelete) return;
+    
+    // Remove contours belonging to this blob
+    const keysToRemove = new Set(blobToDelete.contours.map(c => createContourKey(c)));
+    
+    const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+    const structure = updated.structures.find((s: any) => s.roiNumber === structureId);
+    
+    if (structure) {
+      structure.contours = structure.contours.filter((c: any) => !keysToRemove.has(createContourKey(c)));
+      onRTStructureLoad(updated);
+      toast({ title: "Blob deleted", description: `Removed blob ${blobId}` });
+    }
+  };
+  
+  const handleBlobSeparate = (structureId: number, blobId: number) => {
+    console.log(`🔀 Separate blob ${blobId} of structure ${structureId}`);
+    
+    if (!rtStructures || !onRTStructureLoad) return;
+    
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    const blobs = structureBlobsMap.get(structureId);
+    if (!structure || !blobs) return;
+    
+    const blobToSeparate = blobs.find(b => b.id === blobId);
+    if (!blobToSeparate) return;
+    
+    // Create new structure from this blob
+    const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+    const maxRoi = Math.max(0, ...updated.structures.map((s: any) => s.roiNumber || 0));
+    const newStructure = {
+      roiNumber: maxRoi + 1,
+      structureName: `${structure.structureName}_${blobId}`,
+      color: structure.color,
+      contours: blobToSeparate.contours
+    };
+    
+    // Remove contours from original structure
+    const keysToRemove = new Set(blobToSeparate.contours.map(c => createContourKey(c)));
+    const origStructure = updated.structures.find((s: any) => s.roiNumber === structureId);
+    if (origStructure) {
+      origStructure.contours = origStructure.contours.filter((c: any) => !keysToRemove.has(createContourKey(c)));
+    }
+    
+    // Add new structure
+    updated.structures.push(newStructure);
+    
+    onRTStructureLoad(updated);
+    toast({ 
+      title: "Blob separated", 
+      description: `Created ${newStructure.structureName}` 
+    });
   };
 
   const handleCreateNewStructure = async () => {
@@ -2095,6 +2283,28 @@ export function SeriesSelector({
                                           >
                                             {structure.structureName}
                                           </span>
+                                          
+                                          {/* Blob indicator icon */}
+                                          {structureBlobsMap.has(structure.roiNumber) && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => {
+                                                const next = new Set(expandedBlobStructures);
+                                                if (next.has(structure.roiNumber)) {
+                                                  next.delete(structure.roiNumber);
+                                                } else {
+                                                  next.add(structure.roiNumber);
+                                                }
+                                                setExpandedBlobStructures(next);
+                                              }}
+                                              className="p-0.5 h-5 w-5 hover:bg-purple-500/30 rounded-lg opacity-70 hover:opacity-100"
+                                              title={`${structureBlobsMap.get(structure.roiNumber)?.length} blobs detected`}
+                                            >
+                                              <SplitSquareHorizontal className="w-3 h-3 text-purple-400" />
+                                            </Button>
+                                          )}
+                                          
                                           <Button
                                             variant="ghost"
                                             size="sm"
@@ -2104,6 +2314,18 @@ export function SeriesSelector({
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
                                         </div>
+                                        
+                                        {/* Expandable blob list */}
+                                        {expandedBlobStructures.has(structure.roiNumber) && structureBlobsMap.has(structure.roiNumber) && (
+                                          <StructureBlobList
+                                            structureId={structure.roiNumber}
+                                            structureName={structure.structureName}
+                                            blobs={structureBlobsMap.get(structure.roiNumber) || []}
+                                            onLocalize={(blobId, contours) => handleBlobLocalize(structure.roiNumber, blobId, contours)}
+                                            onDelete={(blobId) => handleBlobDelete(structure.roiNumber, blobId)}
+                                            onSeparate={(blobId) => handleBlobSeparate(structure.roiNumber, blobId)}
+                                          />
+                                        )}
                                         </div>
                                         );
                                       })}
@@ -2223,6 +2445,28 @@ export function SeriesSelector({
                                           >
                                             {structure.structureName}
                                           </span>
+                                          
+                                          {/* Blob indicator icon */}
+                                          {structureBlobsMap.has(structure.roiNumber) && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => {
+                                                const next = new Set(expandedBlobStructures);
+                                                if (next.has(structure.roiNumber)) {
+                                                  next.delete(structure.roiNumber);
+                                                } else {
+                                                  next.add(structure.roiNumber);
+                                                }
+                                                setExpandedBlobStructures(next);
+                                              }}
+                                              className="p-0.5 h-5 w-5 hover:bg-purple-500/30 rounded-lg opacity-70 hover:opacity-100"
+                                              title={`${structureBlobsMap.get(structure.roiNumber)?.length} blobs detected`}
+                                            >
+                                              <SplitSquareHorizontal className="w-3 h-3 text-purple-400" />
+                                            </Button>
+                                          )}
+                                          
                                           <Button
                                             variant="ghost"
                                             size="sm"
@@ -2232,6 +2476,18 @@ export function SeriesSelector({
                                             <Trash2 className="w-3 h-3 text-red-400" />
                                           </Button>
                                         </div>
+                                        
+                                        {/* Expandable blob list */}
+                                        {expandedBlobStructures.has(structure.roiNumber) && structureBlobsMap.has(structure.roiNumber) && (
+                                          <StructureBlobList
+                                            structureId={structure.roiNumber}
+                                            structureName={structure.structureName}
+                                            blobs={structureBlobsMap.get(structure.roiNumber) || []}
+                                            onLocalize={(blobId, contours) => handleBlobLocalize(structure.roiNumber, blobId, contours)}
+                                            onDelete={(blobId) => handleBlobDelete(structure.roiNumber, blobId)}
+                                            onSeparate={(blobId) => handleBlobSeparate(structure.roiNumber, blobId)}
+                                          />
+                                        )}
                                         </div>
                                         );
                                       })}
@@ -2254,58 +2510,95 @@ export function SeriesSelector({
                               const isOutput = highlightedStructures.output.toLowerCase() === structure.structureName.toLowerCase();
                               
                               return (
-                                <div 
-                                  key={structure.roiNumber}
-                                  className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
-                                    isInput
-                                      ? 'border-pink-500 bg-pink-500/20 shadow-lg shadow-pink-500/20'
-                                      : isOutput
-                                      ? 'border-yellow-400 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
-                                      : selectedForEdit === structure.roiNumber
-                                      ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
-                                      : selectedStructures.has(structure.roiNumber) 
-                                      ? 'border-yellow-500/60 bg-yellow-500/10' 
-                                      : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/50'
-                                  } ${
-                                    isInPreview ? 'preview-structure-highlight' : ''
-                                  }`}
-                                >
-                                <Checkbox
-                                  checked={selectedStructures.has(structure.roiNumber)}
-                                  onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
-                                  className="h-3 w-3 border-yellow-500/60 data-[state=checked]:bg-yellow-500"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
-                                  className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
-                                >
-                                  {structureVisibility.get(structure.roiNumber) ?? true ? (
-                                    <Eye className="w-3 h-3 text-blue-400" />
-                                  ) : (
-                                    <EyeOff className="w-3 h-3 text-gray-500" />
+                                <div key={structure.roiNumber}>
+                                  <div 
+                                    className={`flex items-center space-x-2 px-2 py-1.5 rounded-lg border-2 transition-all duration-200 backdrop-blur-sm ${
+                                      isInput
+                                        ? 'border-pink-500 bg-pink-500/20 shadow-lg shadow-pink-500/20'
+                                        : isOutput
+                                        ? 'border-yellow-400 bg-yellow-400/20 shadow-lg shadow-yellow-400/20'
+                                        : selectedForEdit === structure.roiNumber
+                                        ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20' 
+                                        : selectedStructures.has(structure.roiNumber) 
+                                        ? 'border-yellow-500/60 bg-yellow-500/10' 
+                                        : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/50'
+                                    } ${
+                                      isInPreview ? 'preview-structure-highlight' : ''
+                                    }`}
+                                  >
+                                  <Checkbox
+                                    checked={selectedStructures.has(structure.roiNumber)}
+                                    onCheckedChange={(checked) => handleStructureSelection(structure.roiNumber, !!checked)}
+                                    className="h-3 w-3 border-yellow-500/60 data-[state=checked]:bg-yellow-500"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleStructureVisibilityToggle(structure.roiNumber)}
+                                    className="p-0.5 h-5 w-5 hover:bg-gray-600/50 rounded-lg"
+                                  >
+                                    {structureVisibility.get(structure.roiNumber) ?? true ? (
+                                      <Eye className="w-3 h-3 text-blue-400" />
+                                    ) : (
+                                      <EyeOff className="w-3 h-3 text-gray-500" />
+                                    )}
+                                  </Button>
+                                  <div 
+                                    className="w-3 h-3 rounded border-2 border-gray-600/50"
+                                    style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
+                                  />
+                                  <span 
+                                    className="text-xs text-gray-100 font-medium flex-1 truncate cursor-pointer hover:text-green-400 transition-colors"
+                                    onClick={() => handleStructureEditSelection(structure.roiNumber)}
+                                  >
+                                    {structure.structureName}
+                                  </span>
+                                  
+                                  {/* Blob indicator icon */}
+                                  {structureBlobsMap.has(structure.roiNumber) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        const next = new Set(expandedBlobStructures);
+                                        if (next.has(structure.roiNumber)) {
+                                          next.delete(structure.roiNumber);
+                                        } else {
+                                          next.add(structure.roiNumber);
+                                        }
+                                        setExpandedBlobStructures(next);
+                                      }}
+                                      className="p-0.5 h-5 w-5 hover:bg-purple-500/30 rounded-lg opacity-70 hover:opacity-100"
+                                      title={`${structureBlobsMap.get(structure.roiNumber)?.length} blobs detected`}
+                                    >
+                                      <SplitSquareHorizontal className="w-3 h-3 text-purple-400" />
+                                    </Button>
                                   )}
-                                </Button>
-                                <div 
-                                  className="w-3 h-3 rounded border-2 border-gray-600/50"
-                                  style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                                />
-                                <span 
-                                  className="text-xs text-gray-100 font-medium flex-1 truncate cursor-pointer hover:text-green-400 transition-colors"
-                                  onClick={() => handleStructureEditSelection(structure.roiNumber)}
-                                >
-                                  {structure.structureName}
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteStructure(structure.roiNumber)}
-                                  className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
-                                >
-                                  <Trash2 className="w-3 h-3 text-red-400" />
-                                </Button>
-                              </div>
+                                  
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteStructure(structure.roiNumber)}
+                                    className="p-0.5 h-5 w-5 hover:bg-red-500/30 rounded-lg opacity-70 hover:opacity-100"
+                                  >
+                                    <Trash2 className="w-3 h-3 text-red-400" />
+                                  </Button>
+                                </div>
+                                
+                                {/* Expandable blob list */}
+                                {expandedBlobStructures.has(structure.roiNumber) && structureBlobsMap.has(structure.roiNumber) && (
+                                  <div className="mt-1">
+                                    <StructureBlobList
+                                      structureId={structure.roiNumber}
+                                      structureName={structure.structureName}
+                                      blobs={structureBlobsMap.get(structure.roiNumber) || []}
+                                      onLocalize={(blobId, contours) => handleBlobLocalize(structure.roiNumber, blobId, contours)}
+                                      onDelete={(blobId) => handleBlobDelete(structure.roiNumber, blobId)}
+                                      onSeparate={(blobId) => handleBlobSeparate(structure.roiNumber, blobId)}
+                                    />
+                                  </div>
+                                )}
+                                </div>
                               );
                             })}
                           </>

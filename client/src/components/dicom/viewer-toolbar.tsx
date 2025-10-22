@@ -204,22 +204,22 @@ export function ViewerToolbar({
             {/* Contour Edit Button */}
             {onContourEdit && (
               <div className="relative group">
-                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                <div className={`backdrop-blur-md border rounded-xl shadow-lg transition-all duration-300 ${
                   isContourEditActive 
-                    ? 'border-green-400/70 bg-green-600/20 shadow-green-500/20' 
-                    : 'border-green-500/50'
+                    ? 'border-green-400 bg-gradient-to-br from-green-500/30 to-green-600/20 shadow-green-500/40 scale-105' 
+                    : 'border-green-500/40 bg-white/5 hover:border-green-400/70 hover:bg-green-500/10 hover:shadow-green-500/20'
                 }`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                    className={`h-9 w-9 p-0 transition-all duration-300 hover:bg-transparent ${
                       isContourEditActive
-                        ? 'text-green-300 hover:text-green-200'
-                        : 'text-green-400 hover:text-green-300 hover:bg-white/20'
+                        ? 'text-green-200 hover:text-green-100'
+                        : 'text-green-300 hover:text-green-200'
                     }`}
                     onClick={onContourEdit}
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <Edit3 className={`transition-all duration-300 ${isContourEditActive ? 'w-5 h-5' : 'w-4 h-4'}`} />
                   </Button>
                 </div>
                 {/* Tooltip */}
@@ -232,22 +232,22 @@ export function ViewerToolbar({
             {/* Contour Operations Button */}
             {onContourOperations && (
               <div className="relative group">
-                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                <div className={`backdrop-blur-md border rounded-xl shadow-lg transition-all duration-300 ${
                   isContourOperationsActive 
-                    ? 'border-blue-400/70 bg-blue-600/20 shadow-blue-500/20' 
-                    : 'border-blue-500/50'
+                    ? 'border-blue-400 bg-gradient-to-br from-blue-500/30 to-blue-600/20 shadow-blue-500/40 scale-105' 
+                    : 'border-blue-500/40 bg-white/5 hover:border-blue-400/70 hover:bg-blue-500/10 hover:shadow-blue-500/20'
                 }`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                    className={`h-9 w-9 p-0 transition-all duration-300 hover:bg-transparent ${
                       isContourOperationsActive
-                        ? 'text-blue-300 hover:text-blue-200'
-                        : 'text-blue-400 hover:text-blue-300 hover:bg-white/20'
+                        ? 'text-blue-200 hover:text-blue-100'
+                        : 'text-blue-300 hover:text-blue-200'
                     }`}
                     onClick={onContourOperations}
                   >
-                    <Workflow className="w-4 h-4" />
+                    <Workflow className={`transition-all duration-300 ${isContourOperationsActive ? 'w-5 h-5' : 'w-4 h-4'}`} />
                   </Button>
                 </div>
                 {/* Tooltip */}
@@ -262,28 +262,28 @@ export function ViewerToolbar({
             {/* Advanced Margin Tool Button */}
             {onAdvancedMarginTool && (
               <div className="relative group">
-                <div className={`bg-white/10 backdrop-blur-md border rounded-lg shadow-lg transition-all duration-200 ${
+                <div className={`backdrop-blur-md border rounded-xl shadow-lg transition-all duration-300 ${
                   isAdvancedMarginToolActive 
-                    ? 'border-cyan-400/70 bg-cyan-600/20 shadow-cyan-500/20' 
-                    : 'border-cyan-500/50'
+                    ? 'border-cyan-400 bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 shadow-cyan-500/40 scale-105' 
+                    : 'border-cyan-500/40 bg-white/5 hover:border-cyan-400/70 hover:bg-cyan-500/10 hover:shadow-cyan-500/20'
                 }`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`h-8 w-8 p-0 transition-all duration-200 ${
+                    className={`h-9 w-9 p-0 transition-all duration-300 hover:bg-transparent ${
                       isAdvancedMarginToolActive
-                        ? 'text-cyan-300 hover:text-cyan-200'
-                        : 'text-cyan-400 hover:text-cyan-300 hover:bg-white/20'
+                        ? 'text-cyan-200 hover:text-cyan-100'
+                        : 'text-cyan-300 hover:text-cyan-200'
                     }`}
                     onClick={onAdvancedMarginTool}
                   >
-                    <Move3d className="w-4 h-4" />
+                    <Move3d className={`transition-all duration-300 ${isAdvancedMarginToolActive ? 'w-5 h-5' : 'w-4 h-4'}`} />
                   </Button>
                 </div>
                 {/* Tooltip */}
-                                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                   Margin Operations
-                 </div>
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  Margin Operations
+                </div>
               </div>
             )}
           </div>

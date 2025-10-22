@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +13,7 @@ import {
   Scissors,
   Settings,
   X,
+  Check,
   Trash2,
   Layers,
   RotateCcw,
@@ -37,14 +38,16 @@ import {
   Eye,
   Zap,
   Keyboard,
-  SplitSquareHorizontal
+  SplitSquareHorizontal,
+  Info
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
 import { growContourSimple } from '@/lib/simple-polygon-operations';
 import { log } from '@/lib/log';
 import { useToast } from '@/hooks/use-toast';
-import { countStructureBlobs } from '@/lib/blob-operations';
+import { SmartNthSettingsDialog } from './smart-nth-settings-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -74,7 +77,9 @@ interface ContourEditToolbarProps {
   imageMetadata?: any;
   onOpenBooleanOperations?: () => void;
   onOpenAdvancedMarginTool?: () => void;
-  rtStructures?: any; // Full RT structures for blob detection
+  activePredictions?: Map<number, any>;
+  propagationMode?: 'conservative' | 'moderate' | 'aggressive';
+  onPropagationModeChange?: (mode: 'conservative' | 'moderate' | 'aggressive') => void;
 }
 
 export function ContourEditToolbar({ 
@@ -92,10 +97,11 @@ export function ContourEditToolbar({
   imageMetadata,
   onOpenBooleanOperations,
   onOpenAdvancedMarginTool,
-  rtStructures
+  activePredictions,
+  propagationMode = 'moderate',
+  onPropagationModeChange
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState<string | null>(null);
   const [brushThickness, setBrushThickness] = useState([9]); // ~1cm at 1.171875mm pixel spacing
   const [is3D, setIs3D] = useState(false);
   const [smartBrush, setSmartBrush] = useState(false);
@@ -112,7 +118,70 @@ export function ContourEditToolbar({
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
+
+  // Keyboard shortcuts for Accept (A) and Reject (X) predictions
+  useEffect(() => {
+    if (!isVisible || !activePredictions || activePredictions.size === 0) return;
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Only trigger if not typing in an input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      
+      const key = e.key.toLowerCase();
+      
+      if (key === 'a') {
+        e.preventDefault();
+        if (onContourUpdate) {
+          onContourUpdate({ 
+            action: 'accept_predictions', 
+            structureId: selectedStructure?.roiNumber 
+          });
+        }
+        toast({ title: 'Prediction accepted' });
+      } else if (key === 'x') {
+        e.preventDefault();
+        if (onContourUpdate) {
+          onContourUpdate({ 
+            action: 'reject_predictions', 
+            structureId: selectedStructure?.roiNumber 
+          });
+        }
+        toast({ title: 'Prediction rejected' });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isVisible, activePredictions, onContourUpdate, selectedStructure]);
+  const [showInfoDialog, setShowInfoDialog] = useState(false);
+  const [showSmartNthDialog, setShowSmartNthDialog] = useState(false);
+  const [totalSlicesForSmartNth, setTotalSlicesForSmartNth] = useState(0);
   
+  const normalizedCurrentSlice = useMemo(() => {
+    if (currentSlicePosition == null || !Number.isFinite(currentSlicePosition)) return null;
+    return Math.round(currentSlicePosition * 1000) / 1000;
+  }, [currentSlicePosition]);
+
+  const sliceSpacing = useMemo(() => {
+    let spacing = 2.5;
+    const parsedSpacing = parseFloat(imageMetadata?.spacingBetweenSlices ?? imageMetadata?.sliceThickness);
+    if (!Number.isNaN(parsedSpacing) && parsedSpacing > 0) {
+      spacing = parsedSpacing;
+    }
+    return spacing;
+  }, [imageMetadata?.spacingBetweenSlices, imageMetadata?.sliceThickness]);
+
+  const hasPredictionForCurrentSlice = useMemo(() => {
+    if (!isPredictionEnabled || !activePredictions || activePredictions.size === 0) return false;
+    if (normalizedCurrentSlice == null) return false;
+    
+    const tolerance = sliceSpacing * 0.4;
+    
+    return Array.from(activePredictions.keys()).some(slicePos => 
+      Math.abs(slicePos - normalizedCurrentSlice) <= tolerance
+    );
+  }, [isPredictionEnabled, activePredictions, normalizedCurrentSlice, sliceSpacing]);
+
   // Refs for dropdown close timers
   const nthMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
   const clearMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -182,12 +251,8 @@ export function ContourEditToolbar({
       onToolChange(toolState);
     }
     
-    // Auto-expand settings for the active tool  
-    if (newTool && (newTool === 'brush' || newTool === 'pen' || newTool === 'pen-original' || newTool === 'erase')) {
-      setShowSettings(newTool);
-    } else if (!newTool) {
-      setShowSettings(null);
-    }
+    // Close info dialog when switching tools
+    setShowInfoDialog(false);
   };
 
   const queryClient = useQueryClient();
@@ -272,7 +337,7 @@ export function ContourEditToolbar({
 
   // Delete operations functions
   const handleDeleteCurrentSlice = () => {
-    if (!selectedStructure || !currentSlicePosition) return;
+    if (!selectedStructure || currentSlicePosition == null) return;
     
     log.debug(`Deleting contour for structure ${selectedStructure.roiNumber} at slice ${currentSlicePosition}`, 'toolbar');
     
@@ -343,7 +408,7 @@ export function ContourEditToolbar({
       onContourUpdate(updatePayload);
     }
     
-    toast({ title: `Interpolating missing slices for ${selectedStructure.structureName}` });
+    toast({ title: "Interpolating...", description: `Processing ${selectedStructure.structureName}` });
   };
   
   const handleDeleteEveryNthSlice = (n: number) => {
@@ -364,8 +429,47 @@ export function ContourEditToolbar({
     setShowNthSliceMenu(false);
   };
   
+  const handleOpenSmartNthDialog = () => {
+    if (!selectedStructure) return;
+    
+    // Request total slice count from viewer
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'get_slice_count',
+        structureId: selectedStructure.roiNumber,
+        callback: (count: number) => {
+          setTotalSlicesForSmartNth(count);
+          setShowSmartNthDialog(true);
+        }
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    setShowNthSliceMenu(false);
+  };
+  
+  const handleApplySmartNth = (threshold: number) => {
+    if (!selectedStructure) return;
+    
+    log.debug(`Applying SmartNth with threshold ${threshold}% for structure ${selectedStructure.roiNumber}`, 'toolbar');
+    
+    if (onContourUpdate) {
+      const updatePayload = {
+        action: 'smart_nth_slice',
+        structureId: selectedStructure.roiNumber,
+        threshold: threshold
+      };
+      onContourUpdate(updatePayload);
+    }
+    
+    toast({ 
+      title: `SmartNth applied to ${selectedStructure.structureName}`,
+      description: `Removed slices with <${threshold}% area change (max gap: 3)`
+    });
+  };
+  
   const handleClearBelowSlice = () => {
-    if (!selectedStructure || !currentSlicePosition) return;
+    if (!selectedStructure || currentSlicePosition == null) return;
     
     log.debug(`Clearing all contours below slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
@@ -383,7 +487,7 @@ export function ContourEditToolbar({
   };
   
   const handleClearAboveSlice = () => {
-    if (!selectedStructure || !currentSlicePosition) return;
+    if (!selectedStructure || currentSlicePosition == null) return;
     
     log.debug(`Clearing all contours above slice ${currentSlicePosition} for structure ${selectedStructure.roiNumber}`, 'toolbar');
     
@@ -402,7 +506,7 @@ export function ContourEditToolbar({
 
   // Preview grow/shrink operation
   const handlePreviewGrowContour = async () => {
-    if (!selectedStructure || !growDistance || !currentSlicePosition) return;
+    if (!selectedStructure || !growDistance || currentSlicePosition == null) return;
     
     const distanceCm = parseFloat(growDistance);
     if (isNaN(distanceCm) || distanceCm <= 0) {
@@ -446,7 +550,7 @@ export function ContourEditToolbar({
 
   // Grow/Shrink contour function - apply the previewed operation
   const handleGrowContour = () => {
-    if (!selectedStructure || !growDistance || !currentSlicePosition) return;
+    if (!selectedStructure || !growDistance || currentSlicePosition == null) return;
     
     const distanceCm = parseFloat(growDistance);
     if (isNaN(distanceCm) || distanceCm <= 0) {
@@ -483,11 +587,6 @@ export function ContourEditToolbar({
   };
 
   if (!isVisible || !selectedStructure) return null;
-
-  // Check if selected structure has multiple blobs
-  const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedStructure.roiNumber);
-  const blobCount = structure ? countStructureBlobs(structure) : 0;
-  const hasMultipleBlobs = blobCount > 1;
 
   const rgbToHex = (rgb: number[]) => {
     return '#' + rgb.map(x => x.toString(16).padStart(2, '0')).join('');
@@ -550,367 +649,237 @@ export function ContourEditToolbar({
     { id: 'margin', icon: Maximize2, label: 'Margin' }
   ];
 
-  const renderSettingsPanel = () => {
-    if (!showSettings) return null;
+  // Render inline settings on the bottom toolbar row
+  const renderInlineSettings = () => {
+    if (!activeTool) return null;
 
-    return (
-      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 bg-white/10 backdrop-blur-md border border-white/30 rounded-lg py-1.5 px-2.5 shadow-2xl z-50 w-max max-w-[90vw]">
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-medium text-gray-400 capitalize">{showSettings} Settings</h4>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowSettings(null)}
-            className="text-gray-400 hover:text-white h-5 w-5 p-0"
-          >
-            <X size={10} />
-          </Button>
-        </div>
-        
-        {showSettings === 'grow' ? (
-          <div className="space-y-3 w-full">
-            <div className="text-xs text-gray-400 text-center">
-              Use the Advanced Margin Tool in the toolbar for precise margin operations
-            </div>
-            <Button
-              onClick={() => {
-                onOpenAdvancedMarginTool?.();
-                setShowSettings(null);
-              }}
-              className="w-full h-8 bg-cyan-500/20 border border-cyan-500/60 text-cyan-300 hover:bg-cyan-500/30"
-            >
-              Open Advanced Margin Tool
-            </Button>
-          </div>
-        ) : showSettings === 'erase' ? (
-          <div className="space-y-3 w-full">
-            {/* Erase Tool Settings */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Erase Tool</Label>
-              <div className="text-xs text-gray-400 mb-3">
-                Click and drag to erase contour areas. Hold Shift while using brush tool for quick erase mode.
-              </div>
-            </div>
-
-            {/* Brush Size for Erase */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">
-                Erase Brush Size: {brushThickness[0]}px
-              </Label>
+    if (activeTool === 'brush') {
+      return (
+        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
+          {/* Brush Size Control - Compact */}
+          <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/20">
+            <Label className="text-[11px] text-gray-200 whitespace-nowrap">Size</Label>
+            <span className="text-[11px] font-semibold text-blue-300 min-w-[3.2rem] text-right">
+              {(() => {
+                const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
+                const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
+                const brushSizeMM = brushThickness[0] * avgPixelSpacing;
+                const brushSizeCM = brushSizeMM / 10;
+                return `${brushSizeCM.toFixed(2)} cm`;
+              })()}
+            </span>
+            <div className="w-28">
               <Slider
                 value={brushThickness}
-                onValueChange={setBrushThickness}
-                max={50}
-                min={5}
-                step={1}
-                className="w-full"
-              />
-            </div>
-
-            {/* Erase Mode Options */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Erase Mode</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs bg-red-900/20 hover:bg-red-900/30 border-red-600/50 text-red-400 hover:text-red-300"
-                >
-                  <Scissors className="w-3 h-3 mr-1" />
-                  Precise Erase
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs bg-orange-900/20 hover:bg-orange-900/30 border-orange-600/50 text-orange-400 hover:text-orange-300"
-                >
-                                     <Trash2 className="w-3 h-3 mr-1" />
-                  Area Erase
-                </Button>
-              </div>
-            </div>
-
-            {/* Quick Help */}
-            <div className="mt-3 p-2 bg-blue-900/20 border border-blue-600/30 rounded-lg">
-              <div className="text-xs text-blue-400">
-                <strong>Tip:</strong> While using brush tool, hold Shift to temporarily switch to erase mode
-              </div>
-            </div>
-          </div>
-        ) : showSettings === 'margin' ? (
-          <div className="space-y-3 w-full">
-            <div className="text-xs text-gray-400 text-center">
-              Use the Advanced Margin Tool in the toolbar for precise margin operations
-            </div>
-            <Button
-              onClick={() => {
-                onOpenAdvancedMarginTool?.();
-                setShowSettings(null);
-              }}
-              className="w-full h-8 bg-cyan-500/20 border border-cyan-500/60 text-cyan-300 hover:bg-cyan-500/30"
-            >
-              Open Advanced Margin Tool
-            </Button>
-          </div>
-        ) : showSettings === 'boolean' ? (
-          <div className="space-y-3 w-full">
-            {/* Boolean Operation Selection */}
-            <div className="flex gap-2">
-              <Button
-                variant={booleanOperation === 'combine' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setBooleanOperation('combine')}
-                className={`flex-1 h-8 ${booleanOperation === 'combine' ? 'bg-blue-600 hover:bg-blue-700' : ''}`}
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Combine
-              </Button>
-              <Button
-                variant={booleanOperation === 'subtract' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setBooleanOperation('subtract')}
-                className={`flex-1 h-8 ${booleanOperation === 'subtract' ? 'bg-orange-600 hover:bg-orange-700' : ''}`}
-              >
-                <Minus className="w-4 h-4 mr-1" />
-                Subtract
-              </Button>
-            </div>
-
-            {/* Target Structure Selection */}
-            <div>
-              <Label className="text-xs text-gray-300 mb-2 block">Target Structure</Label>
-              <p className="text-xs text-gray-500 mb-2">
-                Select another structure to {booleanOperation} with {selectedStructure.structureName}
-              </p>
-              <Select
-                value={targetStructure?.toString() || ''}
                 onValueChange={(value) => {
-                  const structureId = value ? parseInt(value) : null;
-                  setTargetStructure(structureId);
-                  if (onTargetStructureSelect) {
-                    onTargetStructureSelect(structureId);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full h-8 bg-gray-800/50 border-gray-600">
-                  <SelectValue placeholder="Choose a structure" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableStructures
-                    .filter(s => s.roiNumber !== selectedStructure.roiNumber)
-                    .map(structure => (
-                      <SelectItem key={structure.roiNumber} value={structure.roiNumber.toString()}>
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-sm" 
-                            style={{ backgroundColor: `rgb(${structure.color.join(',')})` }}
-                          />
-                          <span>{structure.structureName}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                // Handle boolean operation
-                if (!selectedStructure || !targetStructure || !currentSlicePosition) return;
-                
-                log.debug(`Performing ${booleanOperation} operation between structures ${selectedStructure.roiNumber} and ${targetStructure}`, 'toolbar');
-                
-                if (onContourUpdate) {
-                  const updatePayload = {
-                    action: 'boolean_operation',
-                    operation: booleanOperation, // 'combine' or 'subtract'
-                    sourceStructureId: selectedStructure.roiNumber,
-                    targetStructureId: targetStructure,
-                    slicePosition: currentSlicePosition
-                  };
-                  onContourUpdate(updatePayload);
-                }
-                
-                toast({ title: `${booleanOperation === 'combine' ? 'Combined' : 'Subtracted'} structures on current slice` });
-              }}
-              className={`w-full h-9 ${
-                booleanOperation === 'combine'
-                  ? 'bg-blue-900/20 hover:bg-blue-900/30 border-blue-600/50 text-blue-400 hover:text-blue-300'
-                  : 'bg-orange-900/20 hover:bg-orange-900/30 border-orange-600/50 text-orange-400 hover:text-orange-300'
-              }`}
-              disabled={!targetStructure}
-            >
-              <Layers className="w-4 h-4 mr-2" />
-              {booleanOperation === 'combine' ? 'Combine Structures' : 'Subtract Structure'}
-            </Button>
-          </div>
-        ) : showSettings === 'brush' ? (
-          <div className="flex items-center gap-2">
-            {/* Brush Size Control - Ultra Compact */}
-            <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/20">
-              <Brush className="w-3.5 h-3.5 text-blue-300" />
-              <Label className="text-[11px] text-gray-200 whitespace-nowrap">Size</Label>
-              <span className="text-[11px] font-semibold text-blue-300 min-w-[3.2rem] text-right">
-                {(() => {
-                  const pixelSpacing = imageMetadata?.pixelSpacing?.split('\\').map(Number) || [0.9765625, 0.9765625];
-                  const avgPixelSpacing = (pixelSpacing[0] + pixelSpacing[1]) / 2;
-                  const brushSizeMM = brushThickness[0] * avgPixelSpacing;
-                  const brushSizeCM = brushSizeMM / 10;
-                  return `${brushSizeCM.toFixed(2)} cm`;
-                })()}
-              </span>
-              <div className="w-28">
-                <Slider
-                  value={brushThickness}
-                  onValueChange={(value) => {
-                    setBrushThickness(value);
-                    if (onToolChange && activeTool === 'brush') {
-                      onToolChange({
-                        tool: 'brush',
-                        brushSize: value[0],
-                        isActive: true,
-                        predictionEnabled: isPredictionEnabled
-                      });
-                    }
-                  }}
-                  max={102}
-                  min={1}
-                  step={1}
-                  className="h-1 [&_[role=slider]]:h-3 [&_[role=slider]]:w-3 [&_[role=slider]]:bg-blue-500 [&_[role=slider]]:border-blue-400"
-                />
-              </div>
-              <span className="text-[11px] text-gray-400">({brushThickness[0]}px)</span>
-            </div>
-
-            {/* Mode Toggles - Icon Buttons */}
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const enabled = !smartBrush;
-                  setSmartBrush(enabled);
+                  setBrushThickness(value);
                   if (onToolChange && activeTool === 'brush') {
                     onToolChange({
                       tool: 'brush',
-                      brushSize: brushThickness[0],
+                      brushSize: value[0],
                       isActive: true,
-                      smartBrushEnabled: enabled,
                       predictionEnabled: isPredictionEnabled
                     });
                   }
                 }}
-                title="Smart Brush (edge-aware)"
-                className={`h-7 px-2 rounded-md border ${smartBrush ? 'border-green-400/60 bg-green-900/30 text-green-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-              </Button>
+                max={102}
+                min={1}
+                step={1}
+                className="h-1 [&_[role=slider]]:h-3 [&_[role=slider]]:w-3 [&_[role=slider]]:bg-blue-500 [&_[role=slider]]:border-blue-400"
+              />
+            </div>
+            <span className="text-[11px] text-gray-400">({brushThickness[0]}px)</span>
+          </div>
 
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const enabled = !isPredictionEnabled;
-                  setIsPredictionEnabled(enabled);
-                  if (onToolChange && activeTool === 'brush') {
-                    onToolChange({
-                      tool: 'brush',
-                      brushSize: brushThickness[0],
-                      isActive: true,
-                      smartBrushEnabled: smartBrush,
-                      predictionEnabled: enabled
-                    });
-                  }
-                }}
-                title="AI Predict next slice"
-                className={`h-7 px-2 rounded-md border ${isPredictionEnabled ? 'border-purple-400/60 bg-purple-900/30 text-purple-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          </div>
-        ) : showSettings === 'planar-contour' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <div className="text-sm text-gray-300 font-medium">Pen Tool</div>
-              <div className="text-xs text-gray-400">
-                Unified pen tool with automatic add/subtract based on starting position
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const enabled = !smartBrush;
+                setSmartBrush(enabled);
+                if (onToolChange && activeTool === 'brush') {
+                  onToolChange({
+                    tool: 'brush',
+                    brushSize: brushThickness[0],
+                    isActive: true,
+                    smartBrushEnabled: enabled,
+                    predictionEnabled: isPredictionEnabled
+                  });
+                }
+              }}
+              title="Smart Brush (edge-aware)"
+              className={`h-7 px-2 rounded-md border ${smartBrush ? 'border-green-400/60 bg-green-900/30 text-green-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const enabled = !isPredictionEnabled;
+                setIsPredictionEnabled(enabled);
+                if (onToolChange && activeTool === 'brush') {
+                  onToolChange({
+                    tool: 'brush',
+                    brushSize: brushThickness[0],
+                    isActive: true,
+                    smartBrushEnabled: smartBrush,
+                    predictionEnabled: enabled
+                  });
+                }
+              }}
+              title="AI Predict next slice"
+              className={`h-7 px-2 rounded-md border ${isPredictionEnabled ? 'border-purple-400/60 bg-purple-900/30 text-purple-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (onContourUpdate) {
+                  onContourUpdate({
+                    action: 'accept_predictions',
+                    structureId: selectedStructure?.roiNumber,
+                    slicePosition: normalizedCurrentSlice ?? undefined
+                  });
+                }
+                toast({ title: 'Prediction accepted (A)' });
+              }}
+              disabled={!hasPredictionForCurrentSlice}
+              title={hasPredictionForCurrentSlice ? "Accept prediction (A)" : "No prediction on current slice"}
+              className={`h-7 w-7 p-0 ${hasPredictionForCurrentSlice ? 'text-green-300 hover:bg-green-800/40' : 'text-gray-600 cursor-not-allowed'}`}
+            >
+              <Check className="w-3.5 h-3.5" />
+            </Button>
             
-            <div className="space-y-3">
-              <div className="text-xs text-gray-400">
-                • Left-click to place points
-              </div>
-              <div className="text-xs text-gray-400">
-                • Hold left mouse to draw continuously
-              </div>
-              <div className="text-xs text-gray-400">
-                • Right-click to close contour
-              </div>
-              <div className="text-xs text-gray-400">
-                • Hover near contours to highlight
-              </div>
-              <div className="text-xs text-gray-400">
-                • Click & drag vertices to morph
-              </div>
-              <div className="text-xs text-gray-400">
-                • Draw inside to add, outside to subtract
-              </div>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (onContourUpdate) {
+                  onContourUpdate({ 
+                    action: 'reject_predictions', 
+                    structureId: selectedStructure?.roiNumber,
+                    slicePosition: normalizedCurrentSlice ?? undefined
+                  });
+                }
+                toast({ title: 'Prediction rejected (X)' });
+              }}
+              disabled={!hasPredictionForCurrentSlice}
+              title={hasPredictionForCurrentSlice ? "Reject prediction (X)" : "No prediction on current slice"}
+              className={`h-7 w-7 p-0 ${hasPredictionForCurrentSlice ? 'text-red-300 hover:bg-red-800/40' : 'text-gray-600 cursor-not-allowed'}`}
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
           </div>
-        ) : showSettings === 'pen' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <div className="text-sm text-gray-300 font-medium">Eclipse Pen Tool V2</div>
-              <div className="text-xs text-gray-400">
-                Advanced pen tool with Eclipse-style boolean operations and vertex editing
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Auto-Close Threshold</Label>
-                <div className="text-xs text-gray-400">8px</div>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-gray-300">Vertex Snapping</Label>
-                <Switch
-                  checked={true}
-                  onCheckedChange={() => {}}
-                  className="data-[state=checked]:bg-blue-500"
-                />
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="text-xs text-gray-400">
-                • Click to place vertices or hold+drag for continuous drawing
-              </div>
-              <div className="text-xs text-gray-400">
-                • Right-click to complete polygon
-              </div>
-              <div className="text-xs text-gray-400">
-                • Draw inside structure: union operation
-              </div>
-              <div className="text-xs text-gray-400">
-                • Draw crossing boundary: subtract (carve hole)
-              </div>
-              <div className="text-xs text-gray-400">
-                • Draw outside: create new blob
-              </div>
-            </div>
+        </div>
+      );
+    }
+
+    if (activeTool === 'pen') {
+      return (
+        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
+          <span className="text-[11px] text-gray-300">Eclipse Pen Tool V2</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md border border-white/20">
+            <Label className="text-[10px] text-gray-300">Auto-close</Label>
+            <span className="text-[10px] text-gray-400">8px</span>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <div className="text-xs text-gray-500">
-                Select a tool to see its settings
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md border border-white/20">
+            <Label className="text-[10px] text-gray-300">Vertex Snap</Label>
+            <Switch
+              checked={true}
+              onCheckedChange={() => {}}
+              className="data-[state=checked]:bg-blue-500 scale-75"
+            />
           </div>
-        )}
+        </div>
+      );
+    }
+
+    if (activeTool === 'erase') {
+      return (
+        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
+          <span className="text-[11px] text-gray-300">Erase size uses brush settings</span>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // Info dialog content for the active tool
+  const renderInfoDialog = () => {
+    if (!showInfoDialog) return null;
+
+    let infoContent = null;
+
+    if (activeTool === 'brush') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white">Brush Tool</h3>
+          <ul className="text-xs text-gray-300 space-y-1 list-disc list-inside">
+            <li>Click and drag to paint contours</li>
+            <li>Hold Shift to temporarily switch to erase mode</li>
+            <li>Right-drag to adjust brush size on-the-fly</li>
+            <li>Smart Brush: edge-aware painting</li>
+            <li>AI Predict: auto-predict contour on next slice</li>
+          </ul>
+        </div>
+      );
+    } else if (activeTool === 'pen') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white">Eclipse Pen Tool V2</h3>
+          <ul className="text-xs text-gray-300 space-y-1 list-disc list-inside">
+            <li>Click to place vertices or hold+drag for continuous drawing</li>
+            <li>Right-click to complete polygon</li>
+            <li>Draw inside structure: union operation</li>
+            <li>Draw crossing boundary: subtract (carve hole)</li>
+            <li>Draw outside: create new blob</li>
+            <li>Click & drag vertices to morph existing contours</li>
+          </ul>
+        </div>
+      );
+    } else if (activeTool === 'erase') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white">Erase Tool</h3>
+          <ul className="text-xs text-gray-300 space-y-1 list-disc list-inside">
+            <li>Click and drag to erase contour areas</li>
+            <li>Uses the same size settings as the brush tool</li>
+            <li>Hold Shift while using brush tool for quick erase mode</li>
+          </ul>
+        </div>
+      );
+    } else if (activeTool === 'margin') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white">Margin Tool</h3>
+          <p className="text-xs text-gray-300">
+            Opens the Advanced Margin Tool for precise margin operations including grow, shrink, and directional expansions.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-md border border-white/30 rounded-lg p-3 shadow-2xl z-[60] w-80">
+        <div className="flex items-start justify-between mb-2">
+          <Info className="w-4 h-4 text-blue-400 mt-0.5" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowInfoDialog(false)}
+            className="text-gray-400 hover:text-white h-5 w-5 p-0 -mt-1"
+          >
+            <X size={12} />
+          </Button>
+        </div>
+        {infoContent}
       </div>
     );
   };
@@ -990,13 +959,13 @@ export function ContourEditToolbar({
               <span className="text-xs font-medium">Del Slice</span>
             </Button>
             
-            {/* Interpolate button (renamed to Interp) */}
+            {/* Interpolate button */}
             <Button
               variant="outline"
               size="sm"
               onClick={handleInterpolate}
               className="h-7 px-2 bg-blue-900/30 border-2 border-blue-400/60 text-blue-200 hover:text-blue-100 hover:bg-blue-800/40 rounded-lg backdrop-blur-sm shadow-sm"
-              title="Interpolate missing slices"
+              title="Interpolate missing slices (fast)"
             >
               <GitBranch className="w-3 h-3 mr-1" />
               <span className="text-xs font-medium">Interp</span>
@@ -1055,6 +1024,15 @@ export function ContourEditToolbar({
                   >
                     Every 4th slice
                   </Button>
+                  <div className="h-px bg-gray-600 my-1" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleOpenSmartNthDialog}
+                    className="w-full justify-start h-7 px-2 text-xs text-orange-300 hover:bg-orange-900/20 font-medium"
+                  >
+                    SmartNth...
+                  </Button>
                 </div>
               )}
             </div>
@@ -1089,7 +1067,7 @@ export function ContourEditToolbar({
               <span className="text-xs font-medium">Smooth</span>
             </Button>
 
-            {/* Blob tools dropdown */}
+            {/* Blob tools dropdown - always enabled, checks on click like original */}
             <div 
               className="relative" 
               onMouseEnter={() => {
@@ -1216,69 +1194,79 @@ export function ContourEditToolbar({
 
         <Separator className="my-2 bg-gray-700" />
 
-        {/* Tool Buttons */}
-        <div className="flex items-center space-x-1">
-          {/* Main tool buttons */}
-          {mainTools.map((tool) => {
-            const IconComponent = tool.icon;
-            const isActive = activeTool === tool.id || (tool.id === 'grow' && showSettings === 'grow');
-            const hasSettings = showSettings === tool.id;
-            return (
-              <div key={tool.id} className="relative group flex items-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleToolActivation(tool.id)}
-                  className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
-                    isActive 
-                      ? 'text-white border shadow-sm' 
-                      : 'hover:bg-gray-700/50 hover:text-white'
-                  }`}
-                  style={isActive ? (
-                    tool.id === 'grow' 
-                      ? { 
-                          borderColor: 'rgb(234, 179, 8)',
-                          backgroundColor: 'rgb(234, 179, 8, 0.2)',
-                          color: 'white'
-                        }
-                      : { 
-                          borderColor: `${structureColorRgb}`,
-                          backgroundColor: `${structureColorRgb}20`,
-                          color: 'white'
-                        }
-                  ) : {}}
-                >
-                  <IconComponent className="w-4 h-4 mr-2" />
-                  <span className="text-sm">{tool.label}</span>
-                </Button>
-                
-                {/* Settings expand button */}
-                {isActive && (
+        {/* Tool Buttons with Inline Settings */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-1">
+            {/* Main tool buttons */}
+            {mainTools.map((tool) => {
+              const IconComponent = tool.icon;
+              const isActive = activeTool === tool.id;
+              return (
+                <div key={tool.id} className="relative group">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setShowSettings(hasSettings ? null : tool.id)}
-                    className={`ml-1 h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700/50 transition-all duration-200 rounded-lg ${
-                      hasSettings ? 'bg-gray-700 text-white' : ''
+                    onClick={() => handleToolActivation(tool.id)}
+                    className={`h-8 px-3 transition-all duration-200 rounded-lg text-gray-300 ${
+                      isActive 
+                        ? 'text-white border shadow-sm' 
+                        : 'hover:bg-gray-700/50 hover:text-white'
                     }`}
+                    style={isActive ? { 
+                      borderColor: `${structureColorRgb}`,
+                      backgroundColor: `${structureColorRgb}20`,
+                      color: 'white'
+                    } : {}}
                   >
-                    <Settings size={12} />
+                    <IconComponent className="w-4 h-4 mr-2" />
+                    <span className="text-sm">{tool.label}</span>
                   </Button>
-                )}
 
-                {/* Tooltip */}
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  {tool.label}
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black bg-opacity-90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    {tool.label}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
 
-        {/* Settings Panel */}
-        {renderSettingsPanel()}
+            {/* Inline Settings Area */}
+            {renderInlineSettings()}
+          </div>
+
+          {/* Info Button */}
+          {activeTool && (
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowInfoDialog(!showInfoDialog)}
+                className={`h-8 w-8 p-0 rounded-lg transition-all duration-200 ${
+                  showInfoDialog 
+                    ? 'bg-blue-500/20 text-blue-300 border border-blue-400/60' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/10'
+                }`}
+                title="Tool help"
+              >
+                <Info className="w-4 h-4" />
+              </Button>
+              
+              {/* Info Dialog */}
+              {renderInfoDialog()}
+            </div>
+          )}
+        </div>
         </div>
       </div>
+      
+      {/* SmartNth Settings Dialog */}
+      <SmartNthSettingsDialog
+        isOpen={showSmartNthDialog}
+        onClose={() => setShowSmartNthDialog(false)}
+        onApply={handleApplySmartNth}
+        structureName={selectedStructure?.structureName || ''}
+        totalSlices={totalSlicesForSmartNth}
+      />
     </div>
   );
 }

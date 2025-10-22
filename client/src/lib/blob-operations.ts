@@ -50,6 +50,10 @@ export function groupStructureBlobs(
 ): BlobContour[][] {
   const contours = Array.isArray(structure?.contours) ? structure.contours : [];
   
+  if (contours.length === 0) {
+    return [];
+  }
+  
   // Step 1: Group contours by slice
   const bySlice = new Map<number, BlobContour[]>();
   for (const c of contours) {
@@ -259,8 +263,9 @@ export function contoursMatch(c1: BlobContour, c2: BlobContour): boolean {
 /**
  * Quick check: does a structure have multiple disconnected blobs?
  * Returns the number of blobs detected
+ * MUST use same tolerance as blob dialog for consistency
  */
-export function countStructureBlobs(structure: any, tolMm: number = 1.5): number {
+export function countStructureBlobs(structure: any, tolMm: number = SLICE_TOL_MM): number {
   if (!structure?.contours || !Array.isArray(structure.contours) || structure.contours.length === 0) {
     return 0;
   }

@@ -400,6 +400,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [],
   );
 
+  // Fusion QA (temporary): toggleable diagnostics for overlay alignment
+  const [fusionQAMode, setFusionQAMode] = useState(false);
+  const [fusionQAClamp, setFusionQAClamp] = useState(false);
+  const [fusionQAGrid, setFusionQAGrid] = useState(false);
+  const fusionQAInfoRef = useRef<{ baseW: number; baseH: number; overW: number; overH: number; offX: number; offY: number; tgtW: number; tgtH: number } | null>(null);
+
   const drawFusionOverlay = useCallback(
     (
       ctx: CanvasRenderingContext2D,
@@ -415,6 +421,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const widthScale = targetWidth / overlayCanvas.width;
       const heightScale = targetHeight / overlayCanvas.height;
 
+      // Optionally clamp to integers to test sub-pixel rounding effects
+      const drawOffsetX = fusionQAClamp ? Math.round(transform.offsetX) : transform.offsetX;
+      const drawOffsetY = fusionQAClamp ? Math.round(transform.offsetY) : transform.offsetY;
+      const drawWidth = fusionQAClamp ? Math.round(overlayCanvas.width * widthScale) : overlayCanvas.width * widthScale;
+      const drawHeight = fusionQAClamp ? Math.round(overlayCanvas.height * heightScale) : overlayCanvas.height * heightScale;
+
+      // Record QA info for popup
+      if (fusionQAMode) {
+        fusionQAInfoRef.current = {
+          baseW: Math.round(transform.imageWidth),
+          baseH: Math.round(transform.imageHeight),
+          overW: overlayCanvas.width,
+          overH: overlayCanvas.height,
+          offX: drawOffsetX,
+          offY: drawOffsetY,
+          tgtW: drawWidth,
+          tgtH: drawHeight,
+        };
+      }
+
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.imageSmoothingEnabled = true;
@@ -425,14 +451,38 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         0,
         overlayCanvas.width,
         overlayCanvas.height,
-        transform.offsetX,
-        transform.offsetY,
-        overlayCanvas.width * widthScale,
-        overlayCanvas.height * heightScale,
+        drawOffsetX,
+        drawOffsetY,
+        drawWidth,
+        drawHeight,
       );
+
+      // Optional QA grid overlay to verify alignment visually
+      if (fusionQAMode && fusionQAGrid) {
+        try {
+          const step = Math.max(16, Math.floor(Math.min(drawWidth, drawHeight) / 32));
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.strokeStyle = '#00ffd5';
+          ctx.lineWidth = 1;
+          for (let x = 0; x <= drawWidth; x += step) {
+            ctx.beginPath();
+            ctx.moveTo(drawOffsetX + x + 0.5, drawOffsetY + 0.5);
+            ctx.lineTo(drawOffsetX + x + 0.5, drawOffsetY + drawHeight + 0.5);
+            ctx.stroke();
+          }
+          for (let y = 0; y <= drawHeight; y += step) {
+            ctx.beginPath();
+            ctx.moveTo(drawOffsetX + 0.5, drawOffsetY + y + 0.5);
+            ctx.lineTo(drawOffsetX + drawWidth + 0.5, drawOffsetY + y + 0.5);
+            ctx.stroke();
+          }
+          ctx.restore();
+        } catch {}
+      }
       ctx.restore();
     },
-    [],
+    [fusionQAMode, fusionQAClamp, fusionQAGrid],
   );
 
   const convertSliceToCanvas = useCallback(
@@ -574,10 +624,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       secondarySeriesId,
       selectedRegistrationId,
       seriesId,
-      fusionManifestLoading,
-      fusionSecondaryStatuses,
-      fusionManifestPrimarySeriesId,
       parseImagePosition,
+      // NOTE: fusionManifestLoading, fusionSecondaryStatuses, and fusionManifestPrimarySeriesId
+      // are intentionally excluded from deps to avoid infinite loop during preload progress updates
     ],
   );
 
@@ -2999,6 +3048,96 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'delete_nth_slice');
+    } else if (payload.action === "get_slice_count") {
+      // Handle request for slice count (for SmartNth dialog)
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+      
+      if (payload.callback && typeof payload.callback === 'function') {
+        payload.callback(structure.contours.length);
+      }
+    } else if (payload.action === "smart_nth_slice") {
+      // Handle smart nth slice deletion
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Sort contours by slice position
+      const sortedContours = [...structure.contours].sort((a: any, b: any) => a.slicePosition - b.slicePosition);
+      
+      if (sortedContours.length <= 1) {
+        console.log('Not enough contours for SmartNth operation');
+        return;
+      }
+      
+      // Area calculation using shoelace formula
+      const areaOf = (pts: number[]) => {
+        let area = 0;
+        for (let i = 0; i < pts.length; i += 3) {
+          const j = (i + 3) % pts.length;
+          area += pts[i] * pts[j + 1] - pts[j] * pts[i + 1];
+        }
+        return Math.abs(area / 2);
+      };
+      
+      // Calculate areas for all contours
+      const contoursWithArea = sortedContours.map((contour: any) => ({
+        contour,
+        area: areaOf(contour.points)
+      }));
+      
+      // Determine which slices to keep
+      const keepFlags = new Array(contoursWithArea.length).fill(false);
+      keepFlags[0] = true; // Always keep first slice
+      
+      let consecutiveRemoved = 0;
+      const thresholdPercent = payload.threshold || 30;
+      
+      for (let i = 1; i < contoursWithArea.length; i++) {
+        const currentArea = contoursWithArea[i].area;
+        const prevArea = contoursWithArea[i - 1].area;
+        const nextArea = i < contoursWithArea.length - 1 ? contoursWithArea[i + 1].area : null;
+        
+        // Calculate percent change from previous
+        const changeFromPrev = prevArea > 0 ? Math.abs((currentArea - prevArea) / prevArea) * 100 : 0;
+        
+        // Calculate percent change to next (if exists)
+        const changeToNext = nextArea !== null && currentArea > 0 
+          ? Math.abs((nextArea - currentArea) / currentArea) * 100 
+          : 0;
+        
+        // Keep slice if:
+        // 1. Significant change from previous slice (this is the change point)
+        // 2. Significant change to next slice (before the change point)
+        // 3. Previous slice was a significant change (after the change point)
+        // 4. We've already removed 3 consecutive slices (max gap enforcement)
+        const isSignificantChange = changeFromPrev > thresholdPercent;
+        const nextIsSignificantChange = changeToNext > thresholdPercent;
+        const prevWasSignificantChange = i > 1 && prevArea > 0 && contoursWithArea[i - 2].area > 0
+          ? Math.abs((prevArea - contoursWithArea[i - 2].area) / contoursWithArea[i - 2].area) * 100 > thresholdPercent
+          : false;
+        
+        if (isSignificantChange || nextIsSignificantChange || prevWasSignificantChange || consecutiveRemoved >= 3) {
+          keepFlags[i] = true;
+          consecutiveRemoved = 0;
+        } else {
+          consecutiveRemoved++;
+        }
+      }
+      
+      // Filter contours based on keep flags
+      const filteredContours = sortedContours.filter((_: any, index: number) => keepFlags[index]);
+      
+      const deletedCount = sortedContours.length - filteredContours.length;
+      console.log(`SmartNth: Deleted ${deletedCount} contours (threshold: ${thresholdPercent}%) for structure ${payload.structureId}`);
+      console.log(`SmartNth: Kept ${filteredContours.length} out of ${sortedContours.length} slices`);
+      
+      structure.contours = filteredContours;
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'smart_nth_slice');
     } else if (payload.action === "clear_below") {
       // Handle clear below current slice
       const structure = updatedStructures.structures.find(
@@ -6238,6 +6377,57 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 }}
               />
             )}
+
+      {/* Fusion QA debug panel (temporary) */}
+      {fusionQAMode && (
+        <div
+          className="absolute bottom-3 left-3 z-[1000] text-xs text-white bg-black/80 rounded px-2 py-2 space-y-1 border border-white/30 shadow-lg"
+          style={{ pointerEvents: 'auto' }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-semibold">Fusion QA</div>
+            <button
+              onClick={() => setFusionQAMode(false)}
+              className="px-1 py-0.5 rounded bg-gray-700 hover:bg-gray-600"
+            >
+              Close
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={fusionQAClamp} onChange={(e) => setFusionQAClamp(e.target.checked)} />
+              <span>Clamp ints</span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={fusionQAGrid} onChange={(e) => setFusionQAGrid(e.target.checked)} />
+              <span>Show grid</span>
+            </label>
+          </div>
+          {fusionQAInfoRef.current && (
+            <div className="leading-snug">
+              <div>Base: {fusionQAInfoRef.current.baseW} × {fusionQAInfoRef.current.baseH}px</div>
+              <div>Overlay: {fusionQAInfoRef.current.overW} × {fusionQAInfoRef.current.overH}px</div>
+              <div>Draw at: ({fusionQAInfoRef.current.offX}, {fusionQAInfoRef.current.offY})</div>
+              <div>Draw size: {fusionQAInfoRef.current.tgtW} × {fusionQAInfoRef.current.tgtH}</div>
+              {selectedRegistrationId && (
+                <div>Reg: {selectedRegistrationId}</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* QA toggle floater (hidden when panel open) */}
+      {!fusionQAMode && (
+        <button
+          className="absolute bottom-3 left-3 z-[999] text-xs text-white bg-black/70 hover:bg-black/80 border border-white/30 rounded px-2 py-1 shadow"
+          onClick={() => setFusionQAMode(true)}
+          title="Toggle Fusion QA"
+          style={{ pointerEvents: 'auto' }}
+        >
+          Fusion QA
+        </button>
+      )}
 
           {/* Erase Tool overlay - works like brush but erases */}
           {brushToolState?.isActive &&

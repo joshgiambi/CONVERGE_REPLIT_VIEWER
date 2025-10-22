@@ -68,6 +68,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
   const [autoLocalizeTarget, setAutoLocalizeTarget] = useState<{ x: number; y: number; z: number } | undefined>(undefined);
   const workingViewerRef = useRef<any>(null);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
+  const [activePredictions, setActivePredictions] = useState<Map<number, any>>(new Map());
   
   // Fusion state
   const [showFusionPanel, setShowFusionPanel] = useState(false);
@@ -676,49 +677,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         }
       }
       
-      // Auto-load most recent RT structure set if this is a CT series (primary series)
-      if (seriesData.modality === 'CT' && !rtStructures) {
-        try {
-          console.log(`🔄 Auto-loading RT structures for CT series ${seriesData.id}...`);
-          const rtResponse = await fetch(`/api/studies/${seriesData.studyId}/rt-structures`);
-          if (rtResponse.ok) {
-            const rtSeries = await rtResponse.json();
-            if (rtSeries && rtSeries.length > 0) {
-              // Find the most recent RT structure (by date or series number)
-              const mostRecentRT = rtSeries.reduce((latest: any, current: any) => {
-                // Prefer by series date/time first, then by series number
-                const latestDate = latest.seriesDate || latest.createdAt || '';
-                const currentDate = current.seriesDate || current.createdAt || '';
-                
-                if (currentDate > latestDate) return current;
-                if (currentDate === latestDate && (current.seriesNumber || 0) > (latest.seriesNumber || 0)) return current;
-                return latest;
-              });
-              
-              console.log(`🔄 Auto-loading most recent RT structure (ID: ${mostRecentRT.id}) for primary CT`);
-              
-              // Load the RT structure contours
-              const contourResponse = await fetch(`/api/rt-structures/${mostRecentRT.id}/contours`);
-              if (contourResponse.ok) {
-                const rtStructData = await contourResponse.json();
-                handleRTStructureLoad(rtStructData);
-                
-                // Notify parent about loaded RT series for selection state
-                if (onLoadedRTSeriesChange) {
-                  onLoadedRTSeriesChange(mostRecentRT.id);
-                }
-                
-                console.log(`✅ Auto-loaded RT structures with ${rtStructData.structures.length} ROIs`);
-              }
-            }
-          } else {
-            console.log('No RT structures available for this CT study');
-          }
-        } catch (rtError) {
-          console.log('No RT structures found for auto-loading:', rtError);
-          // Don't throw error - RT structures are optional
-        }
-      }
+      // Note: RT structure auto-loading is now handled by SeriesSelector component
+      // which properly filters by referencedSeriesId to ensure the RT structure
+      // belongs to the selected primary CT series
 
       await initializeFusionForSeries(seriesData);
       
@@ -2044,6 +2005,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
                   fusionSecondaryStatuses={fusionSecondaryStatuses}
                   fusionManifestLoading={fusionManifestLoading}
                   fusionManifestPrimarySeriesId={fusionManifest?.primarySeriesId ?? null}
+                  onActivePredictionsChange={setActivePredictions}
                 />
               
               {/* Structure Tags on Right Side - Responsive */}
@@ -2219,6 +2181,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowBooleanOperations(false);
             setShowMarginToolbar(true);
           }}
+          activePredictions={activePredictions}
 
         />
       )}

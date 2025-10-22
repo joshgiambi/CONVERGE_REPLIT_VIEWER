@@ -4,6 +4,56 @@ import { createAdaptivePreview } from "@/lib/smart-brush-utils";
 import { combineContours } from "@/lib/clipper-boolean-operations";
 import { log } from '@/lib/log';
 
+/**
+ * Check if a canvas point is inside a predicted contour
+ */
+function isPointInPrediction(
+  canvasX: number,
+  canvasY: number,
+  predictionContour: number[],
+  imageMetadata: any,
+  ctTransform: { scale: number; offsetX: number; offsetY: number }
+): boolean {
+  if (!predictionContour || predictionContour.length < 9) return false;
+  if (!imageMetadata) return false;
+  
+  // Convert prediction world coords to canvas coords
+  const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
+  const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
+  
+  const canvasPoints: [number, number][] = [];
+  for (let i = 0; i < predictionContour.length; i += 3) {
+    const worldX = predictionContour[i];
+    const worldY = predictionContour[i + 1];
+    
+    // Convert to pixel
+    const pixelX = (worldX - imagePositionX) / colSpacing;
+    const pixelY = (worldY - imagePositionY) / rowSpacing;
+    
+    // Apply CT transform
+    const canvasX = pixelX * ctTransform.scale + ctTransform.offsetX;
+    const canvasY = pixelY * ctTransform.scale + ctTransform.offsetY;
+    
+    canvasPoints.push([canvasX, canvasY]);
+  }
+  
+  // Ray casting algorithm for point-in-polygon test
+  let inside = false;
+  for (let i = 0, j = canvasPoints.length - 1; i < canvasPoints.length; j = i++) {
+    const xi = canvasPoints[i][0];
+    const yi = canvasPoints[i][1];
+    const xj = canvasPoints[j][0];
+    const yj = canvasPoints[j][1];
+    
+    const intersect = ((yi > canvasY) !== (yj > canvasY)) &&
+      (canvasX < (xj - xi) * (canvasY - yi) / (yj - yi) + xi);
+    
+    if (intersect) inside = !inside;
+  }
+  
+  return inside;
+}
+
 interface SimpleBrushToolProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   isActive: boolean;
@@ -32,6 +82,7 @@ interface SimpleBrushToolProps {
   isEraseMode?: boolean; // New prop for erase mode
   dicomImage?: any; // For accessing pixel data
   onPreviewUpdate?: (previewContours: any[] | null) => void; // New prop for smart brush preview
+  activePredictions?: Map<number, any>; // Active predictions for smart click behavior
 }
 
 export function SimpleBrushTool({
@@ -53,6 +104,7 @@ export function SimpleBrushTool({
   isEraseMode = false,
   dicomImage = null,
   onPreviewUpdate,
+  activePredictions,
 }: SimpleBrushToolProps) {
   log.debug(`SimpleBrushTool render: active=${isActive} selected=${selectedStructure} erase=${isEraseMode}`, 'brush');
   const [isDrawing, setIsDrawing] = useState(false);
@@ -416,6 +468,47 @@ export function SimpleBrushTool({
 
         const coords = getCanvasCoords(e);
         setCursorPosition(coords);
+        
+        // Update cursor style based on prediction hover
+        if (predictionEnabled && activePredictions && activePredictions.size > 0 && canvasRef.current) {
+          // Calculate adaptive tolerance
+          let sliceSpacing = 2.5;
+          if (imageMetadata?.spacingBetweenSlices) {
+            sliceSpacing = parseFloat(imageMetadata.spacingBetweenSlices);
+          } else if (imageMetadata?.sliceThickness) {
+            sliceSpacing = parseFloat(imageMetadata.sliceThickness);
+          }
+          const tolerance = sliceSpacing * 0.4;
+          
+          let currentPrediction = null;
+          for (const [slicePos, prediction] of activePredictions.entries()) {
+            if (Math.abs(slicePos - currentSlicePosition) <= tolerance) {
+              currentPrediction = prediction;
+              break;
+            }
+          }
+          
+          if (currentPrediction && currentPrediction.predictedContour) {
+            const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+            const isInside = isPointInPrediction(
+              coords.x,
+              coords.y,
+              currentPrediction.predictedContour,
+              imageMetadata,
+              transform
+            );
+            
+            // Change cursor to indicate accept/reject behavior
+            if (isInside) {
+              canvasRef.current.style.cursor = 'pointer'; // Click to accept
+            } else {
+              canvasRef.current.style.cursor = 'not-allowed'; // Click to reject
+            }
+          }
+        } else if (canvasRef.current && !isAdjustingSize) {
+          // Reset to default crosshair
+          canvasRef.current.style.cursor = 'crosshair';
+        }
 
         if (smartBrushEnabled && !isEraseMode && !isTemporaryEraseMode && canvasRef.current) {
             try {
@@ -522,6 +615,68 @@ export function SimpleBrushTool({
     const handleMouseDown = (e: MouseEvent) => {
       log.debug(`🖱️ Mouse down event triggered, button:${e.button} selected:${selectedStructure} adjusting:${isAdjustingSize}`, 'brush');
       if (e.button === 0 && selectedStructure && !isAdjustingSize) {
+        // Check if predictions are active and handle smart click behavior
+        if (predictionEnabled && activePredictions && activePredictions.size > 0) {
+          const coords = getCanvasCoords(e);
+          
+          // Calculate adaptive tolerance based on slice spacing
+          let sliceSpacing = 2.5;
+          if (imageMetadata?.spacingBetweenSlices) {
+            sliceSpacing = parseFloat(imageMetadata.spacingBetweenSlices);
+          } else if (imageMetadata?.sliceThickness) {
+            sliceSpacing = parseFloat(imageMetadata.sliceThickness);
+          }
+          const tolerance = sliceSpacing * 0.4;
+          
+          // Find prediction for current slice
+          let currentPrediction = null;
+          for (const [slicePos, prediction] of activePredictions.entries()) {
+            if (Math.abs(slicePos - currentSlicePosition) <= tolerance) {
+              currentPrediction = prediction;
+              break;
+            }
+          }
+          
+          if (currentPrediction && currentPrediction.predictedContour) {
+            // Convert prediction to canvas coordinates for hit testing
+            const transform = ctTransform?.current || { scale: 1, offsetX: 0, offsetY: 0 };
+            
+            // Check if click is inside prediction polygon
+            const isInside = isPointInPrediction(
+              coords.x, 
+              coords.y, 
+              currentPrediction.predictedContour,
+              imageMetadata,
+              transform
+            );
+            
+              if (isInside) {
+                // Click inside -> Accept prediction
+                e.preventDefault();
+                e.stopPropagation();
+                if (onContourUpdate) {
+                  onContourUpdate({
+                    action: 'accept_predictions',
+                    structureId: selectedStructure,
+                    slicePosition: currentSlicePosition
+                  });
+                }
+                return; // Don't start drawing
+              } else {
+                // Click outside -> Reject prediction
+              e.preventDefault();
+              e.stopPropagation();
+              if (onContourUpdate) {
+                onContourUpdate({
+                  action: 'reject_predictions',
+                  structureId: selectedStructure
+                });
+              }
+              // Continue to drawing mode after rejecting
+            }
+          }
+        }
+        
         log.debug("✅ Entering drawing mode", 'brush');
         // Left click and structure selected
         e.preventDefault();
@@ -734,6 +889,15 @@ export function SimpleBrushTool({
                     slicePosition: currentSlicePosition,
                     points: unifiedPolygon,
                 });
+                
+                // Trigger prediction if enabled
+                if (predictionEnabled) {
+                    onContourUpdate({
+                        action: 'trigger_prediction',
+                        structureId: selectedStructure,
+                        slicePosition: currentSlicePosition
+                    });
+                }
             }
         } else if (!smartBrushEnabled && brushPointsRef.current.length > 0) {
             log.debug(`Finalizing regular brush with ${brushPointsRef.current.length} points`, 'brush');
@@ -779,6 +943,15 @@ export function SimpleBrushTool({
                 predictionEnabled: predictionEnabled,
                 isEraseMode: isInEraseMode,
               });
+              
+              // Trigger prediction if enabled and not in erase mode
+              if (predictionEnabled && !isInEraseMode) {
+                onContourUpdate({
+                  action: 'trigger_prediction',
+                  structureId: selectedStructure,
+                  slicePosition: currentSlicePosition
+                });
+              }
             }
         }
     } catch (error) {

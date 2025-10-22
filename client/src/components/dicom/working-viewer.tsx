@@ -29,7 +29,9 @@ import {
 } from "@/lib/brush-to-polygon";
 import { applyDirectionalGrow } from "@/lib/contour-directional-grow";
 import { naiveCombineContours as combineContours, naiveSubtractContours as subtractContours } from "@/lib/contour-boolean-operations";
-import { predictNextSliceContour } from "@/lib/contour-prediction";
+import { predictNextSliceContour, type PredictionResult, type PropagationMode } from "@/lib/contour-prediction";
+import { PredictionHistoryManager, type ContourSnapshot } from "@/lib/prediction-history-manager";
+import { PredictionOverlay } from "./prediction-overlay";
 import { getFusedSlice, getFusedSliceSmart, fuseboxSliceToImageData, clearFusionSlices, getFusionManifest } from "@/lib/fusion-utils";
 import type { FuseboxSlice } from "@/lib/fusion-utils";
 import { performPolygonUnion, polygonUnion } from "@/lib/polygon-union";
@@ -50,6 +52,20 @@ import type { RegistrationAssociation, RegistrationTransformCandidate, Registrat
 import { useToast } from '@/hooks/use-toast';
 import { BlobManagementDialog } from './blob-management-dialog';
 import { groupStructureBlobs, computeBlobVolumeCc, createContourKey, type Blob, type BlobContour } from '@/lib/blob-operations';
+
+const normalizeSlicePosition = (value: number): number => {
+  if (!Number.isFinite(value)) return value;
+  return Math.round(value * 1000) / 1000;
+};
+
+const createDirectCopyContour = (sourceContour: number[], targetSlice: number): number[] => {
+  if (!Array.isArray(sourceContour) || sourceContour.length < 9) return [];
+  const copied = [...sourceContour];
+  for (let i = 2; i < copied.length; i += 3) {
+    copied[i] = targetSlice;
+  }
+  return copied;
+};
 
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
@@ -143,6 +159,7 @@ interface WorkingViewerProps {
   orientation?: 'axial' | 'sagittal' | 'coronal';
   onMPRToggle?: () => void;
   isMPRVisible?: boolean;
+  onActivePredictionsChange?: (predictions: Map<number, any>) => void;
   availableSeries?: Array<{
     id: number;
     modality?: string;
@@ -196,6 +213,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     fusionSecondaryStatuses,
     fusionManifestLoading = false,
     fusionManifestPrimarySeriesId = null,
+    onMPRToggle,
+    isMPRVisible = false,
+    onActivePredictionsChange
   } = props;
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -221,6 +241,20 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   const [testPredictionAdded, setTestPredictionAdded] = useState(false);
   const [imageMetadata, setImageMetadata] = useState<any>(null);
   const [dicomPixelData, setDicomPixelData] = useState<any>(null);
+  
+  // Next slice prediction state
+  const [activePredictions, setActivePredictions] = useState<Map<number, PredictionResult>>(new Map());
+  const updateActivePredictions = useCallback((predictions: Map<number, PredictionResult>) => {
+    setActivePredictions(predictions);
+    if (onActivePredictionsChange) {
+      onActivePredictionsChange(predictions);
+    }
+  }, [onActivePredictionsChange]);
+  const predictionHistoryManagerRef = useRef<Map<number, PredictionHistoryManager>>(new Map()); // One per structure
+const [propagationMode, setPropagationMode] = useState<PropagationMode>('moderate');
+const lastPredictionSliceRef = useRef<number | null>(null);
+const lastViewedContourSliceRef = useRef<number | null>(null);
+  const [predictionTrigger, setPredictionTrigger] = useState(0); // Force update counter
   
   // Smooth animation state - using clean animation module
   const [smoothAnimation, setSmoothAnimation] = useState<RippleAnimationState>(
@@ -418,6 +452,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     [],
   );
 
+  // Fusion QA (temporary): toggleable diagnostics for overlay alignment
+  const [fusionQAMode, setFusionQAMode] = useState(false);
+  const [fusionQAClamp, setFusionQAClamp] = useState(false);
+  const [fusionQAGrid, setFusionQAGrid] = useState(false);
+  const fusionQAInfoRef = useRef<{ baseW: number; baseH: number; overW: number; overH: number; offX: number; offY: number; tgtW: number; tgtH: number } | null>(null);
+
   const clearFusionOverlayCanvas = useCallback(() => {
     const overlayCanvas = fusionOverlayCanvasRef.current;
     if (!overlayCanvas) return;
@@ -452,6 +492,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const targetHeight = transform.imageHeight * transform.scale;
       if (targetWidth === 0 || targetHeight === 0) return;
 
+      // Optional QA clamping to integers
+      const drawOffsetX = fusionQAClamp ? Math.round(transform.offsetX) : transform.offsetX;
+      const drawOffsetY = fusionQAClamp ? Math.round(transform.offsetY) : transform.offsetY;
+      const drawWidth = fusionQAClamp ? Math.round(targetWidth) : targetWidth;
+      const drawHeight = fusionQAClamp ? Math.round(targetHeight) : targetHeight;
+
+      // Record QA info
+      if (fusionQAMode) {
+        fusionQAInfoRef.current = {
+          baseW: Math.round(transform.imageWidth),
+          baseH: Math.round(transform.imageHeight),
+          overW: overlaySource.width,
+          overH: overlaySource.height,
+          offX: drawOffsetX,
+          offY: drawOffsetY,
+          tgtW: drawWidth,
+          tgtH: drawHeight,
+        };
+      }
+
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       
@@ -463,13 +523,37 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         0,
         overlaySource.width,
         overlaySource.height,
-        transform.offsetX,
-        transform.offsetY,
-        targetWidth,
-        targetHeight,
+        drawOffsetX,
+        drawOffsetY,
+        drawWidth,
+        drawHeight,
       );
+
+      // Optional QA grid overlay
+      if (fusionQAMode && fusionQAGrid) {
+        try {
+          const step = Math.max(16, Math.floor(Math.min(drawWidth, drawHeight) / 32));
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.strokeStyle = '#00ffd5';
+          ctx.lineWidth = 1;
+          for (let x = 0; x <= drawWidth; x += step) {
+            ctx.beginPath();
+            ctx.moveTo(drawOffsetX + x + 0.5, drawOffsetY + 0.5);
+            ctx.lineTo(drawOffsetX + x + 0.5, drawOffsetY + drawHeight + 0.5);
+            ctx.stroke();
+          }
+          for (let y = 0; y <= drawHeight; y += step) {
+            ctx.beginPath();
+            ctx.moveTo(drawOffsetX + 0.5, drawOffsetY + y + 0.5);
+            ctx.lineTo(drawOffsetX + drawWidth + 0.5, drawOffsetY + y + 0.5);
+            ctx.stroke();
+          }
+          ctx.restore();
+        } catch {}
+      }
     },
-    [canvasRef, fusionOverlayCanvasRef],
+    [canvasRef, fusionOverlayCanvasRef, fusionQAMode, fusionQAClamp, fusionQAGrid],
   );
 
   const convertSliceToCanvas = useCallback(
@@ -574,9 +658,8 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       secondarySeriesId,
       selectedRegistrationId,
       seriesId,
-      fusionManifestLoading,
-      fusionSecondaryStatuses,
-      fusionManifestPrimarySeriesId,
+      // NOTE: fusionManifestLoading, fusionSecondaryStatuses, and fusionManifestPrimarySeriesId
+      // are intentionally excluded from deps to avoid infinite loop during preload progress updates
     ],
   );
 
@@ -1883,6 +1966,421 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     };
   }, [onRTStructureUpdate]);
 
+  // Helper to extract image data for prediction
+  const extractImageDataForPrediction = useCallback((imageIndex: number) => {
+    if (!images || imageIndex < 0 || imageIndex >= images.length) return null;
+    
+    const img = images[imageIndex];
+    if (!img?.pixelData) return null;
+    
+    try {
+      // Extract pixel data and metadata
+      return {
+        pixels: img.pixelData, // Float32Array or Uint16Array
+        width: img.width || img.columns || 512,
+        height: img.height || img.rows || 512,
+        rescaleSlope: img.rescaleSlope || 1,
+        rescaleIntercept: img.rescaleIntercept || 0,
+        windowCenter: img.windowCenter,
+        windowWidth: img.windowWidth
+      };
+    } catch (error) {
+      console.warn('Failed to extract image data for prediction:', error);
+      return null;
+    }
+  }, [images]);
+
+  // Generate prediction for current slice only (on-demand)
+  const generatePredictionForCurrentSlice = useCallback((structureId: number, slicePosition: number) => {
+    if (!rtStructures || !rtStructures.structures) {
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure || structure.contours.length === 0) {
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    // Calculate adaptive tolerance based on actual slice spacing
+    let sliceSpacing = 2.5; // Default fallback
+    if (imageMetadata) {
+      const spacing = getSpacing(imageMetadata);
+      sliceSpacing = spacing.z;
+    } else if (images && images.length >= 2) {
+      // Calculate from actual slice positions
+      const z0 = images[0]?.sliceZ || images[0]?.parsedSliceLocation || 0;
+      const z1 = images[1]?.sliceZ || images[1]?.parsedSliceLocation || 1;
+      sliceSpacing = Math.abs(z1 - z0) || 2.5;
+    }
+    
+    // Adaptive tolerance: 40% of slice spacing (works for 0.5mm to 10mm slices)
+    const tolerance = sliceSpacing * 0.4;
+    
+    // Check if current slice already has a contour
+    const hasContourOnSlice = structure.contours.some((c: any) => {
+      const isNotPredicted = !c.isPredicted;
+      const dist = Math.abs(c.slicePosition - slicePosition);
+      const isClose = dist <= tolerance;
+      return isNotPredicted && isClose;
+    });
+    
+    if (hasContourOnSlice) {
+      // Current slice has a contour, don't predict
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    // Get or create history manager for this structure
+    let historyManager = predictionHistoryManagerRef.current.get(structureId);
+    if (!historyManager) {
+      historyManager = new PredictionHistoryManager();
+      predictionHistoryManagerRef.current.set(structureId, historyManager);
+    }
+    
+    // Update history with ALL existing contours
+    historyManager.clear();
+    structure.contours.forEach((contour: any) => {
+      if (!contour?.isPredicted && contour.points && contour.points.length >= 9) {
+        historyManager!.addContour(contour.slicePosition, contour.points);
+      }
+    });
+    
+    // Find nearest contours to use as reference
+    const { before, after } = historyManager.getNearestContours(slicePosition);
+    
+    // Determine reference contour: prioritize last viewed contoured slice when nearby, otherwise use nearest available
+    let referenceSnapshot: ContourSnapshot | null = null;
+    let lastViewedSnapshot: ContourSnapshot | null = null;
+
+    const lastViewedSlice = lastViewedContourSliceRef.current;
+    if (lastViewedSlice != null) {
+      lastViewedSnapshot = historyManager.getContour(lastViewedSlice);
+      
+      if (!lastViewedSnapshot) {
+        const { before: lastBefore, after: lastAfter } = historyManager.getNearestContours(lastViewedSlice);
+        if (lastBefore && lastAfter) {
+          lastViewedSnapshot = Math.abs(lastViewedSlice - lastBefore.slicePosition) <= Math.abs(lastViewedSlice - lastAfter.slicePosition)
+            ? lastBefore
+            : lastAfter;
+        } else {
+          lastViewedSnapshot = lastBefore || lastAfter || null;
+        }
+      }
+    }
+    
+    const distBefore = before ? Math.abs(slicePosition - before.slicePosition) : Infinity;
+    const distAfter = after ? Math.abs(slicePosition - after.slicePosition) : Infinity;
+    const nearestSnapshot = (() => {
+      if (distBefore === Infinity && distAfter === Infinity) return null;
+      if (distBefore <= distAfter) return before;
+      return after;
+    })();
+    const nearestDistance = nearestSnapshot ? Math.abs(slicePosition - nearestSnapshot.slicePosition) : Infinity;
+    const lastViewedDistance = lastViewedSnapshot ? Math.abs(slicePosition - lastViewedSnapshot.slicePosition) : Infinity;
+    const effectiveSpacing = Math.max(sliceSpacing, 0.5);
+    const maxLastViewedDistance = effectiveSpacing * 4;
+    
+    const canUseLastViewed = lastViewedSnapshot && lastViewedDistance <= maxLastViewedDistance;
+    const lastViewedComparable = canUseLastViewed && (
+      !nearestSnapshot ||
+      lastViewedDistance <= nearestDistance - effectiveSpacing * 0.1 ||
+      Math.abs(lastViewedDistance - nearestDistance) <= effectiveSpacing * 0.25
+    );
+    
+    if (lastViewedComparable && lastViewedSnapshot) {
+      referenceSnapshot = lastViewedSnapshot;
+    } else if (nearestSnapshot) {
+      referenceSnapshot = nearestSnapshot;
+    } else if (canUseLastViewed && lastViewedSnapshot) {
+      referenceSnapshot = lastViewedSnapshot;
+    }
+    
+    if (!referenceSnapshot) {
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    // Try to get image data for image-aware refinement
+    let imageData: any = undefined;
+    let coordinateTransforms: any = undefined;
+    
+    if (images && images.length > 0 && imageMetadata) {
+      const tolerance = Math.max(sliceSpacing * 0.75, 1.5);
+      const getImageDataForSlice = (targetSlice: number) => {
+        let bestIndex = -1;
+        let bestDiff = Infinity;
+        for (let idx = 0; idx < images.length; idx++) {
+          const img = images[idx];
+          const imgZ = img.sliceZ || img.parsedSliceLocation || img.parsedZPosition;
+          if (imgZ == null) continue;
+          const diff = Math.abs(imgZ - targetSlice);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestIndex = idx;
+          }
+        }
+        if (bestIndex === -1 || bestDiff > tolerance) {
+          return null;
+        }
+        return extractImageDataForPrediction(bestIndex);
+      };
+
+      const targetImageData = getImageDataForSlice(slicePosition);
+      const referenceSlicesData: Array<{ contour: number[]; imageData: any }> = [];
+
+      const uniqueReferenceSlices = new Map<number, ContourSnapshot>();
+      uniqueReferenceSlices.set(referenceSnapshot.slicePosition, referenceSnapshot);
+      if (before && before.slicePosition !== referenceSnapshot.slicePosition) {
+        uniqueReferenceSlices.set(before.slicePosition, before);
+      }
+      if (after && after.slicePosition !== referenceSnapshot.slicePosition) {
+        uniqueReferenceSlices.set(after.slicePosition, after);
+      }
+
+      uniqueReferenceSlices.forEach((snapshot) => {
+        const refData = getImageDataForSlice(snapshot.slicePosition);
+        if (refData) {
+          referenceSlicesData.push({
+            contour: snapshot.contour,
+            imageData: refData
+          });
+        }
+      });
+
+      if (targetImageData) {
+        imageData = {
+          targetSlice: targetImageData,
+          referenceSlices: referenceSlicesData
+        };
+        
+        // Create coordinate transforms
+        coordinateTransforms = {
+          worldToPixel: (x: number, y: number): [number, number] => {
+            if (!imageMetadata) return [0, 0];
+            
+            const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
+            const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
+            
+            const pixelX = (x - imagePositionX) / colSpacing;
+            const pixelY = (y - imagePositionY) / rowSpacing;
+            
+            return [pixelX, pixelY];
+          },
+          pixelToWorld: (px: number, py: number): [number, number] => {
+            if (!imageMetadata) return [0, 0];
+            
+            const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
+            const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
+            
+            const worldX = imagePositionX + px * colSpacing;
+            const worldY = imagePositionY + py * rowSpacing;
+            
+            return [worldX, worldY];
+          }
+        };
+      }
+    }
+    
+    if (!imageData || !coordinateTransforms) {
+      console.warn('⚠️ Prediction skipped: required DICOM greyscale data unavailable for slice', slicePosition);
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    const allContoursMap = new Map<number, number[]>();
+    structure.contours.forEach((contour: any) => {
+      if (contour?.points && contour.points.length >= 9 && !contour.isPredicted) {
+        allContoursMap.set(normalizeSlicePosition(contour.slicePosition), contour.points);
+      }
+    });
+    
+    // Generate single prediction for current slice with optional image refinement
+    let prediction = predictNextSliceContour({
+      currentContour: referenceSnapshot.contour,
+      currentSlicePosition: referenceSnapshot.slicePosition,
+      targetSlicePosition: slicePosition,
+      predictionMode: historyManager.size() >= 2 ? 'trend-based' : 'adaptive',
+      confidenceThreshold: 0.2,
+      historyManager,
+      imageData,
+      coordinateTransforms,
+      enableImageRefinement: true,
+      allContours: allContoursMap
+    });
+    
+    if (!prediction.predictedContour || prediction.predictedContour.length < 9) {
+      console.warn('⚠️ Prediction skipped: refinement could not produce a valid contour for slice', slicePosition);
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    // Store prediction for current slice
+    const normalizedSlice = normalizeSlicePosition(slicePosition);
+    const predictions = new Map<number, PredictionResult>();
+    if (prediction.predictedContour.length >= 9) {
+      predictions.set(normalizedSlice, prediction);
+    }
+    
+    updateActivePredictions(predictions);
+    
+    scheduleRender();
+  }, [rtStructures?.structures, scheduleRender, images, imageMetadata, extractImageDataForPrediction, updateActivePredictions]);
+
+  // Auto-regenerate prediction when slice changes (if prediction enabled)
+  useEffect(() => {
+    // Debug helper
+    (window as any).predictionDebug = {
+      enabled: brushToolState?.predictionEnabled,
+      selectedForEdit,
+      hasStructures: !!rtStructures?.structures,
+      structureCount: rtStructures?.structures?.length || 0,
+      hasImages: images?.length > 0,
+      currentIndex,
+      activePredictions: activePredictions.size,
+      trigger: predictionTrigger
+    };
+    
+    if (!brushToolState?.predictionEnabled || !selectedForEdit || !rtStructures?.structures) {
+      updateActivePredictions(new Map());
+      return;
+    }
+    if (!images || images.length === 0 || !images[currentIndex]) {
+      updateActivePredictions(new Map());
+      return;
+    }
+    
+    const rawSlicePos =
+      images[currentIndex].sliceZ ??
+      images[currentIndex].parsedSliceLocation ??
+      images[currentIndex].parsedZPosition ??
+      currentIndex;
+    const parsedSlicePos =
+      typeof rawSlicePos === "string" ? parseFloat(rawSlicePos) : rawSlicePos;
+    const currentSlicePos = normalizeSlicePosition(
+      Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+    );
+    
+    // Track last viewed contoured slice for prioritization
+    if (rtStructures?.structures && selectedForEdit) {
+      const structure = rtStructures.structures.find((s: any) => s.roiNumber === selectedForEdit);
+      if (structure) {
+        const hasRealContour = structure.contours?.some((c: any) => 
+          !c.isPredicted && Math.abs(c.slicePosition - currentSlicePos) <= SLICE_TOL_MM
+        );
+        if (hasRealContour) {
+          lastViewedContourSliceRef.current = currentSlicePos;
+        }
+      }
+    }
+    
+    // Generate prediction for THIS slice only
+    generatePredictionForCurrentSlice(selectedForEdit, currentSlicePos);
+  }, [
+    currentIndex, 
+    selectedForEdit, 
+    brushToolState?.predictionEnabled, 
+    rtStructures?.structures, // Changed from rtStructures to trigger on structure updates
+    images, 
+    generatePredictionForCurrentSlice,
+    predictionTrigger // Manual trigger for forcing updates
+  ]);
+
+  // Handle prediction trigger from brush tool
+  const handlePredictionTrigger = async (payload: {
+    structureId: number;
+    slicePosition: number;
+  }) => {
+    // After drawing, update prediction for next slice
+    if (images && images.length > 0) {
+      const rawSlicePos =
+        images[currentIndex]?.sliceZ ??
+        images[currentIndex]?.parsedSliceLocation ??
+        images[currentIndex]?.parsedZPosition ??
+        currentIndex;
+      const parsedSlicePos =
+        typeof rawSlicePos === "string" ? parseFloat(rawSlicePos) : rawSlicePos;
+      const currentSlicePos = normalizeSlicePosition(
+        Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+      );
+      generatePredictionForCurrentSlice(payload.structureId, currentSlicePos);
+    }
+  };
+  
+  // Handle rejecting predictions
+  const handleRejectPredictions = async (payload: { structureId?: number }) => {
+    // Simply clear predictions
+    updateActivePredictions(new Map());
+    scheduleRender();
+    log.debug('Rejected predictions', 'viewer');
+  };
+  
+  // Handle accepting prediction(s)
+  const handleAcceptPredictions = async (payload: { structureId?: number; slicePosition?: number }) => {
+    if (!rtStructures || !rtStructures.structures || activePredictions.size === 0) return;
+    
+    const structureId = payload.structureId || selectedForEdit;
+    if (!structureId) return;
+    
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) return;
+    
+    const targetSlice = payload.slicePosition != null && Number.isFinite(payload.slicePosition)
+      ? normalizeSlicePosition(payload.slicePosition)
+      : null;
+    
+    // Create updated structures with prediction applied
+    const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+    const updatedStructure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+    
+    if (!updatedStructure) return;
+    
+    let acceptedCount = 0;
+    
+    // Accept all predictions if no specific slice provided
+    for (const [slicePosition, prediction] of activePredictions.entries()) {
+      if (targetSlice != null && Math.abs(slicePosition - targetSlice) > SLICE_TOL_MM) {
+        continue;
+      }
+      if (prediction.predictedContour && prediction.predictedContour.length >= 9) {
+        // Remove any existing predicted contours on this slice
+        updatedStructure.contours = updatedStructure.contours.filter(
+          (c: any) =>
+            !c.isPredicted || Math.abs(c.slicePosition - slicePosition) > SLICE_TOL_MM
+        );
+        
+        // Add the prediction as a new contour
+        updatedStructure.contours.push({
+          slicePosition,
+          points: prediction.predictedContour,
+          numberOfPoints: prediction.predictedContour.length / 3
+        });
+        lastViewedContourSliceRef.current = slicePosition;
+        
+        acceptedCount++;
+      }
+    }
+    
+    // Clear predictions
+    updateActivePredictions(new Map());
+    
+    // Update structures
+    setLocalRTStructures(updatedStructures);
+    saveContourUpdates(updatedStructures, 'accept_prediction');
+    
+    if (onContourUpdate) {
+      onContourUpdate(updatedStructures);
+    }
+    
+    try { scheduleRender(); } catch {}
+    
+    toast({
+      title: `Accepted ${acceptedCount} prediction${acceptedCount > 1 ? 's' : ''}`,
+      description: `Added ${acceptedCount} contour${acceptedCount > 1 ? 's' : ''}`
+    });
+  };
+
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = async (payload: any) => {
     // Handle margin toolbar operations
@@ -1948,6 +2446,26 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     if (payload && payload.action === "execute_margin") {
       console.log("🔹 Advanced margin execution request:", payload);
       await handleAdvancedMarginExecution(payload);
+      return;
+    }
+    
+    // Handle prediction trigger from brush tool
+    if (payload && payload.action === "trigger_prediction") {
+      log.debug('Prediction trigger received', 'viewer');
+      await handlePredictionTrigger(payload);
+      return;
+    }
+    
+    // Handle accept/reject prediction actions
+    if (payload && payload.action === "accept_predictions") {
+      log.debug('Accepting predictions', 'viewer');
+      await handleAcceptPredictions(payload);
+      return;
+    }
+    
+    if (payload && payload.action === "reject_predictions") {
+      log.debug('Rejecting predictions', 'viewer');
+      await handleRejectPredictions(payload);
       return;
     }
     
@@ -2178,7 +2696,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       console.log(`Structure now has ${structure.contours.length} contours`);
+      lastViewedContourSliceRef.current = payload.slicePosition;
       setLocalRTStructures(updatedStructures);
+      
+      // Pass updated structures to parent (for sidebar updates)
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
       
       // Save state to undo system
       if (seriesId) {
@@ -2195,86 +2719,6 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         } catch {}
       }, 10);
       
-      // Handle next slice prediction if enabled
-      if (payload.predictionEnabled) {
-        console.log("Next slice prediction is enabled, predicting contours for adjacent slices");
-        
-        // Get the final contour on this slice
-        // Find the contour we just created
-        const finalContour = structure.contours[structure.contours.length - 1];
-        
-        if (finalContour && finalContour.points && finalContour.points.length > 0) {
-          // Calculate next slice positions (assuming 3mm slice spacing as typical)
-          const sliceSpacing = 3; // mm
-          const nextSlicePosition = payload.slicePosition + sliceSpacing;
-          const prevSlicePosition = payload.slicePosition - sliceSpacing;
-          
-          // Predict for next slice
-          const nextPrediction = predictNextSliceContour({
-            currentContour: finalContour.points,
-            currentSlicePosition: payload.slicePosition,
-            targetSlicePosition: nextSlicePosition,
-            anatomicalRegion: 'head', // You could determine this from metadata
-            predictionMode: 'simple',
-            confidenceThreshold: 0.5
-          });
-          
-          // If prediction has good confidence, apply it
-          if (nextPrediction.confidence > 0.5 && nextPrediction.predictedContour.length > 0) {
-            // Check if there's already a contour on the next slice
-            const nextSliceContourIndex = structure.contours.findIndex(
-              (c: any) => Math.abs(c.slicePosition - nextSlicePosition) < SLICE_TOL_MM
-            );
-            
-            if (nextSliceContourIndex === -1) {
-              // No existing contour, add the predicted one
-              structure.contours.push({
-                slicePosition: nextSlicePosition,
-                points: nextPrediction.predictedContour,
-                numberOfPoints: nextPrediction.predictedContour.length / 3,
-                isPredicted: true // Mark as predicted
-              });
-              console.log(`Added predicted contour to next slice ${nextSlicePosition} with confidence ${nextPrediction.confidence.toFixed(2)}`);
-            }
-          }
-          
-          // Also predict for previous slice
-          const prevPrediction = predictNextSliceContour({
-            currentContour: finalContour.points,
-            currentSlicePosition: payload.slicePosition,
-            targetSlicePosition: prevSlicePosition,
-            anatomicalRegion: 'head',
-            predictionMode: 'simple',
-            confidenceThreshold: 0.5
-          });
-          
-          if (prevPrediction.confidence > 0.5 && prevPrediction.predictedContour.length > 0) {
-            const prevSliceContourIndex = structure.contours.findIndex(
-              (c: any) => Math.abs(c.slicePosition - prevSlicePosition) < SLICE_TOL_MM
-            );
-            
-            if (prevSliceContourIndex === -1) {
-              structure.contours.push({
-                slicePosition: prevSlicePosition,
-                points: prevPrediction.predictedContour,
-                numberOfPoints: prevPrediction.predictedContour.length / 3,
-                isPredicted: true
-              });
-              console.log(`Added predicted contour to previous slice ${prevSlicePosition} with confidence ${prevPrediction.confidence.toFixed(2)}`);
-            }
-          }
-          
-          // Update the structures again with predictions
-          setLocalRTStructures(updatedStructures);
-          // Re-trigger render for predictions with same delay
-          setTimeout(() => {
-            try { 
-              scheduleRender(); 
-              console.log('🎯 BRUSH FIX: Render triggered after prediction update');
-            } catch {}
-          }, 10);
-        }
-      }
     } else if (payload.action === "smart_brush_stroke") {
       // Handle smart brush stroke - add already processed contour points
       if (false) console.log("🎯 Processing smart brush stroke:", payload);
@@ -2373,7 +2817,13 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       if (false) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
+      lastViewedContourSliceRef.current = payload.slicePosition;
       setLocalRTStructures(updatedStructures);
+      
+      // Pass updated structures to parent (for sidebar updates)
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
       
       // Save state to undo system
       if (seriesId) {
@@ -2750,6 +3200,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
 
       setLocalRTStructures(updatedStructures);
+      
+      // Pass updated structures to parent (for sidebar updates)
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+      
       saveContourUpdates(updatedStructures, 'pen_boolean_operation');
       
       // FIX #7: Delay render to allow React state update to complete
@@ -2762,6 +3218,12 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
+      
+      // Pass updated structures to parent (for sidebar updates)
+      if (onContourUpdate) {
+        onContourUpdate(updatedStructures);
+      }
+      
       // Save state to undo system
       if (seriesId && payload.structureId) {
         undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
@@ -2918,6 +3380,14 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       console.log(`Deleted ${deletedCount} contour(s) for structure ${payload.structureId} (${structure.structureName}) at slice ${payload.slicePosition}`);
       console.log(`After delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
       
+      // Trigger prediction regeneration after deletion if prediction enabled
+      if (brushToolState?.predictionEnabled && deletedCount > 0) {
+        const normalizedSlice = normalizeSlicePosition(payload.slicePosition);
+        generatePredictionForCurrentSlice(payload.structureId, normalizedSlice);
+        // Force prediction update by incrementing trigger
+        setPredictionTrigger(prev => prev + 1);
+      }
+      
       // Log all structures to verify others are not affected
       console.log("All structures after delete:", updatedStructures.structures.map((s: any) => ({
         id: s.roiNumber,
@@ -2931,6 +3401,19 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         onContourUpdate(updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'delete_slice');
+      
+      // Check for blob separation after deletion
+      if (structure.contours.length > 0) {
+        const blobs = groupStructureBlobs(structure, SLICE_TOL_MM);
+        if (blobs.length > 1) {
+          console.log(`⚠️ Slice deletion created ${blobs.length} separate blobs in ${structure.structureName}`);
+          toast({
+            title: "Multiple blobs detected",
+            description: `Deleting this slice split ${structure.structureName} into ${blobs.length} separate parts. Use the Blob menu to manage them.`,
+            duration: 5000
+          });
+        }
+      }
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(
@@ -2946,10 +3429,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'clear_all');
     } else if (payload.action === "interpolate") {
-      // Handle interpolate missing slices (SDT multi-loop with CT-grid targeting)
+      // Handle interpolate missing slices (fast polar interpolation, non-blocking)
       const structure = updatedStructures.structures.find((s: any) => s.roiNumber === payload.structureId);
       if (!structure || !structure.contours || structure.contours.length < 2) {
         console.log("Not enough contours to interpolate");
+        toast({ title: "Not enough contours", description: "Need at least 2 contours to interpolate", variant: "destructive" });
         return;
       }
 
@@ -2978,44 +3462,73 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       const zArray = [...zArrayRaw].sort((a, b) => a - b);
       const tol = SLICE_TOL_MM;
 
+      // Show toast immediately
+      toast({ title: "Interpolating...", description: "Processing slices" });
+
+      // Import fast polar interpolation
+      const { fastPolarInterpolateMulti } = await import('@/lib/fast-polar-interpolation');
+
       const newContours: any[] = [];
+      let interpolatedCount = 0;
+      
+      // Process each gap between contoured slices
       for (let i = 0; i < zKeys.length - 1; i++) {
         const zA = zKeys[i];
         const zB = zKeys[i + 1];
         const listA = byZ.get(zA)!;
         const listB = byZ.get(zB)!;
-        // Keep originals
+        
+        // Keep original contours from slice A
         newContours.push(...listA);
+        
         const zMin = Math.min(zA, zB) + tol;
         const zMax = Math.max(zA, zB) - tol;
+        
+        // Find all slices between zA and zB
         for (const z of zArray) {
           if (z > zMin && z < zMax) {
-            let pts: number[] = [];
             try {
-              const { interpolateBetweenContoursSDTMulti } = await import('@/lib/sdt-interpolation');
-              pts = interpolateBetweenContoursSDTMulti(
-                listA, zA, listB, zB, z,
-                { gridSpacingMm: 0.25, paddingMm: 3, adaptiveMinCells: 180, pivotPiecewise: true, pivotMode: 'euclidean', closingMm: 0.3 }
+              // Use fast polar interpolation
+              const pts = fastPolarInterpolateMulti(
+                listA.map((c: any) => ({ points: c.points })),
+                zA,
+                listB.map((c: any) => ({ points: c.points })),
+                zB,
+                z,
+                128 // bins
               );
-            } catch {}
-            if (!pts || pts.length < 9) {
-              // fallback to polar using largest contour of each slice
-              const a0 = listA[0], b0 = listB[0];
-              const { interpolateBetweenContoursPolar } = await import('@/lib/contour-interpolation');
-              pts = interpolateBetweenContoursPolar(a0.points, zA, b0.points, zB, z, 512, true, false);
+              
+              if (pts && pts.length >= 9) {
+                newContours.push({ 
+                  slicePosition: z, 
+                  points: pts, 
+                  numberOfPoints: pts.length / 3 
+                });
+                interpolatedCount++;
+              }
+            } catch (error) {
+              console.error(`Failed to interpolate at z=${z}:`, error);
             }
-            if (pts && pts.length >= 9) newContours.push({ slicePosition: z, points: pts, numberOfPoints: pts.length / 3 });
           }
         }
       }
-      // push last originals
+      
+      // Add last slice's original contours
       const lastZ = zKeys[zKeys.length - 1];
       newContours.push(...(byZ.get(lastZ) || []));
+      
+      // Update structure with all contours (original + interpolated)
       structure.contours = newContours;
-      console.log(`Interpolated ${newContours.length - structure.contours.length} new slices for structure ${payload.structureId}`);
+      console.log(`Interpolated ${interpolatedCount} new slices for structure ${payload.structureId}`);
+      
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'interpolate');
       try { scheduleRender(); } catch {}
+      
+      toast({ 
+        title: "Interpolation complete", 
+        description: `Added ${interpolatedCount} interpolated slices` 
+      });
     } else if (payload.action === "delete_nth_slice") {
       // Handle delete every nth slice
       const structure = updatedStructures.structures.find(
@@ -3038,6 +3551,109 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       
       setLocalRTStructures(updatedStructures);
       saveContourUpdates(updatedStructures, 'delete_nth_slice');
+      
+      // Check for blob separation after deletion
+      if (structure.contours.length > 0) {
+        const blobs = groupStructureBlobs(structure, SLICE_TOL_MM);
+        if (blobs.length > 1) {
+          console.log(`⚠️ Deleting every ${payload.nth} slice created ${blobs.length} separate blobs in ${structure.structureName}`);
+          toast({
+            title: "Multiple blobs detected",
+            description: `Deleting slices split ${structure.structureName} into ${blobs.length} separate parts. Use the Blob menu to manage them.`,
+            duration: 5000
+          });
+        }
+      }
+    } else if (payload.action === "get_slice_count") {
+      // Handle request for slice count (for SmartNth dialog)
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+      
+      if (payload.callback && typeof payload.callback === 'function') {
+        payload.callback(structure.contours.length);
+      }
+    } else if (payload.action === "smart_nth_slice") {
+      // Handle smart nth slice deletion
+      const structure = updatedStructures.structures.find(
+        (s: any) => s.roiNumber === payload.structureId,
+      );
+      if (!structure) return;
+
+      // Sort contours by slice position
+      const sortedContours = [...structure.contours].sort((a: any, b: any) => a.slicePosition - b.slicePosition);
+      
+      if (sortedContours.length <= 1) {
+        console.log('Not enough contours for SmartNth operation');
+        return;
+      }
+      
+      // Area calculation using shoelace formula
+      const areaOf = (pts: number[]) => {
+        let area = 0;
+        for (let i = 0; i < pts.length; i += 3) {
+          const j = (i + 3) % pts.length;
+          area += pts[i] * pts[j + 1] - pts[j] * pts[i + 1];
+        }
+        return Math.abs(area / 2);
+      };
+      
+      // Calculate areas for all contours
+      const contoursWithArea = sortedContours.map((contour: any) => ({
+        contour,
+        area: areaOf(contour.points)
+      }));
+      
+      // Determine which slices to keep
+      const keepFlags = new Array(contoursWithArea.length).fill(false);
+      keepFlags[0] = true; // Always keep first slice
+      
+      let consecutiveRemoved = 0;
+      const thresholdPercent = payload.threshold || 30;
+      
+      for (let i = 1; i < contoursWithArea.length; i++) {
+        const currentArea = contoursWithArea[i].area;
+        const prevArea = contoursWithArea[i - 1].area;
+        const nextArea = i < contoursWithArea.length - 1 ? contoursWithArea[i + 1].area : null;
+        
+        // Calculate percent change from previous
+        const changeFromPrev = prevArea > 0 ? Math.abs((currentArea - prevArea) / prevArea) * 100 : 0;
+        
+        // Calculate percent change to next (if exists)
+        const changeToNext = nextArea !== null && currentArea > 0 
+          ? Math.abs((nextArea - currentArea) / currentArea) * 100 
+          : 0;
+        
+        // Keep slice if:
+        // 1. Significant change from previous slice (this is the change point)
+        // 2. Significant change to next slice (before the change point)
+        // 3. Previous slice was a significant change (after the change point)
+        // 4. We've already removed 3 consecutive slices (max gap enforcement)
+        const isSignificantChange = changeFromPrev > thresholdPercent;
+        const nextIsSignificantChange = changeToNext > thresholdPercent;
+        const prevWasSignificantChange = i > 1 && prevArea > 0 && contoursWithArea[i - 2].area > 0
+          ? Math.abs((prevArea - contoursWithArea[i - 2].area) / contoursWithArea[i - 2].area) * 100 > thresholdPercent
+          : false;
+        
+        if (isSignificantChange || nextIsSignificantChange || prevWasSignificantChange || consecutiveRemoved >= 3) {
+          keepFlags[i] = true;
+          consecutiveRemoved = 0;
+        } else {
+          consecutiveRemoved++;
+        }
+      }
+      
+      // Filter contours based on keep flags
+      const filteredContours = sortedContours.filter((_: any, index: number) => keepFlags[index]);
+      
+      const deletedCount = sortedContours.length - filteredContours.length;
+      console.log(`SmartNth: Deleted ${deletedCount} contours (threshold: ${thresholdPercent}%) for structure ${payload.structureId}`);
+      console.log(`SmartNth: Kept ${filteredContours.length} out of ${sortedContours.length} slices`);
+      
+      structure.contours = filteredContours;
+      setLocalRTStructures(updatedStructures);
+      saveContourUpdates(updatedStructures, 'smart_nth_slice');
     } else if (payload.action === "clear_below") {
       // Handle clear below current slice
       const structure = updatedStructures.structures.find(
@@ -3220,6 +3836,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       }
     },
     openFusionDebug,
+    getActivePredictions: () => activePredictions,
+    getPropagationMode: () => propagationMode,
+    setPropagationMode: (mode: PropagationMode) => setPropagationMode(mode),
     navigateToSlice: (targetZ: number) => {
       if (!images || images.length === 0) {
         console.warn('🎯 Cannot navigate: no images available');
@@ -4885,7 +5504,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Coordinate transformation functions for pen tool with CT transform applied
   // Using useCallback to ensure functions always use latest ctTransform value
-  const worldToCanvas = useCallback((worldX: number, worldY: number): [number, number] => {
+  const worldToCanvas = useCallback((worldX: number, worldY: number, worldZ?: number): [number, number] => {
     if (!imageMetadata) return [0, 0];
     
     const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
@@ -5406,11 +6025,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   // Notify parent when slice position changes
   useEffect(() => {
     if (images.length > 0 && images[currentIndex] && onSlicePositionChange) {
-      const slicePosition =
+      const rawSlicePos =
+        images[currentIndex].sliceZ ??
         images[currentIndex].parsedSliceLocation ??
         images[currentIndex].parsedZPosition ??
         currentIndex;
-      onSlicePositionChange(slicePosition);
+      const parsedSlicePos =
+        typeof rawSlicePos === "string" ? parseFloat(rawSlicePos) : rawSlicePos;
+      const normalizedSlicePos = normalizeSlicePosition(
+        Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+      );
+      onSlicePositionChange(normalizedSlicePos);
     }
     
     // Clear preview contours when slice changes to prevent showing same preview on different slices
@@ -6244,6 +6869,42 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   zIndex: 2,
                 }}
               />
+              
+              {/* Prediction Overlay */}
+              {activePredictions.size > 0 && selectedForEdit && images.length > 0 && images[currentIndex] && (() => {
+                const rawSlicePos =
+                  images[currentIndex].sliceZ ??
+                  images[currentIndex].parsedSliceLocation ??
+                  images[currentIndex].parsedZPosition ??
+                  currentIndex;
+                const parsedSlicePos =
+                  typeof rawSlicePos === "string"
+                    ? parseFloat(rawSlicePos)
+                    : rawSlicePos;
+                const currentSlicePos = normalizeSlicePosition(
+                  Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                );
+                const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit);
+                const hasContour = structure?.contours?.some((c: any) => 
+                  !c.isPredicted && Math.abs(c.slicePosition - currentSlicePos) <= SLICE_TOL_MM
+                ) || false;
+                
+                return (
+                  <>
+                    <PredictionOverlay
+                      canvasRef={canvasRef}
+                      predictions={activePredictions}
+                      currentSlicePosition={currentSlicePos}
+                      selectedStructureColor={structure?.color || [255, 255, 255]}
+                      ctTransform={ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 }}
+                  worldToCanvas={worldToCanvas}
+                  imageMetadata={imageMetadata}
+                  showLabels={true}
+                  hasContourOnCurrentSlice={hasContour}
+                />
+              </>
+            );
+              })()}
             </div>
             
             {/* Secondary/Fusion Canvas Container */}
@@ -6321,6 +6982,93 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 zIndex: 2,
               }}
             />
+
+            {/* Fusion QA debug panel (temporary) */}
+            {fusionQAMode && (
+              <div
+                className="absolute bottom-3 left-3 z-[1000] text-xs text-white bg-black/80 rounded px-2 py-2 space-y-1 border border-white/30 shadow-lg"
+                style={{ pointerEvents: 'auto' }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-semibold">Fusion QA</div>
+                  <button
+                    onClick={() => setFusionQAMode(false)}
+                    className="px-1 py-0.5 rounded bg-gray-700 hover:bg-gray-600"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" checked={fusionQAClamp} onChange={(e) => setFusionQAClamp(e.target.checked)} />
+                    <span>Clamp ints</span>
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" checked={fusionQAGrid} onChange={(e) => setFusionQAGrid(e.target.checked)} />
+                    <span>Show grid</span>
+                  </label>
+                </div>
+                {fusionQAInfoRef.current && (
+                  <div className="leading-snug">
+                    <div>Base: {fusionQAInfoRef.current.baseW} × {fusionQAInfoRef.current.baseH}px</div>
+                    <div>Overlay: {fusionQAInfoRef.current.overW} × {fusionQAInfoRef.current.overH}px</div>
+                    <div>Draw at: ({fusionQAInfoRef.current.offX}, {fusionQAInfoRef.current.offY})</div>
+                    <div>Draw size: {fusionQAInfoRef.current.tgtW} × {fusionQAInfoRef.current.tgtH}</div>
+                    {selectedRegistrationId && (
+                      <div>Reg: {selectedRegistrationId}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* QA toggle floater (hidden when panel open) */}
+            {!fusionQAMode && (
+              <button
+                className="absolute bottom-3 left-3 z-[999] text-xs text-white bg-black/70 hover:bg-black/80 border border-white/30 rounded px-2 py-1 shadow"
+                onClick={() => setFusionQAMode(true)}
+                title="Toggle Fusion QA"
+                style={{ pointerEvents: 'auto' }}
+              >
+                Fusion QA
+              </button>
+            )}
+            
+            {/* Prediction Overlay */}
+            {activePredictions.size > 0 && selectedForEdit && images.length > 0 && images[currentIndex] && (() => {
+              const rawSlicePos =
+                images[currentIndex].sliceZ ??
+                images[currentIndex].parsedSliceLocation ??
+                images[currentIndex].parsedZPosition ??
+                currentIndex;
+              const parsedSlicePos =
+                typeof rawSlicePos === "string"
+                  ? parseFloat(rawSlicePos)
+                  : rawSlicePos;
+              const currentSlicePos = normalizeSlicePosition(
+                Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+              );
+              const structure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit);
+              const hasContour = structure?.contours?.some((c: any) => 
+                !c.isPredicted && Math.abs(c.slicePosition - currentSlicePos) <= SLICE_TOL_MM
+              ) || false;
+              
+              return (
+                <>
+                  <PredictionOverlay
+                    canvasRef={canvasRef}
+                    predictions={activePredictions}
+                    currentSlicePosition={currentSlicePos}
+                    selectedStructureColor={structure?.color || [255, 255, 255]}
+                    ctTransform={ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 }}
+                    worldToCanvas={worldToCanvas}
+                    imageMetadata={imageMetadata}
+                    showLabels={true}
+                    hasContourOnCurrentSlice={hasContour}
+                  />
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -6334,13 +7082,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 brushSize={brushToolState.brushSize}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
+                currentSlicePosition={(() => {
+                  if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                  const rawSlicePos =
+                    images[currentIndex].sliceZ ??
+                    images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex;
+                  const parsedSlicePos =
+                    typeof rawSlicePos === "string"
+                      ? parseFloat(rawSlicePos)
+                      : rawSlicePos;
+                  return normalizeSlicePosition(
+                    Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                  );
+                })()}
                 onContourUpdate={(payload: any) => {
                   // Handle different types of contour updates
                   if (payload.action === "grow_contour") {
@@ -6355,7 +7111,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
-                predictionEnabled={false}
+                predictionEnabled={brushToolState.predictionEnabled ?? false}
                 smartBrushEnabled={!!brushToolState.smartBrushEnabled}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
@@ -6376,6 +7132,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 onPreviewUpdate={(contours: any[] | null) => {
                   setPreviewContours(contours || []);
                 }}
+                activePredictions={activePredictions}
               />
             )}
 
@@ -6388,13 +7145,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 brushSize={brushToolState.brushSize}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
+                currentSlicePosition={(() => {
+                  if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                  const rawSlicePos =
+                    images[currentIndex].sliceZ ??
+                    images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex;
+                  const parsedSlicePos =
+                    typeof rawSlicePos === "string"
+                      ? parseFloat(rawSlicePos)
+                      : rawSlicePos;
+                  return normalizeSlicePosition(
+                    Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                  );
+                })()}
                 onContourUpdate={(payload: any) => {
                   // Handle different types of contour updates
                   if (payload.action === "grow_contour") {
@@ -6409,7 +7174,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 imageMetadata={imageMetadata}
                 smoothingEnabled={true}
                 enableSmartMode={true}
-                predictionEnabled={false}
+                predictionEnabled={brushToolState.predictionEnabled ?? false}
                 smartBrushEnabled={!!brushToolState.smartBrushEnabled}
                 ctTransform={ctTransform}
                 dicomImage={images.length > 0 && images[currentIndex] ? images[currentIndex] : null}
@@ -6431,6 +7196,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 onPreviewUpdate={(contours: any[] | null) => {
                   setPreviewContours(contours || []);
                 }}
+                activePredictions={activePredictions}
               />
             )}
 
@@ -6442,13 +7208,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
+                currentSlicePosition={(() => {
+                  if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                  const rawSlicePos =
+                    images[currentIndex].sliceZ ??
+                    images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex;
+                  const parsedSlicePos =
+                    typeof rawSlicePos === "string"
+                      ? parseFloat(rawSlicePos)
+                      : rawSlicePos;
+                  return normalizeSlicePosition(
+                    Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                  );
+                })()}
                 imageMetadata={imageMetadata}
                 onContourUpdate={(payload: any) => {
                   handleContourUpdate(payload);
@@ -6485,13 +7259,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                 isActive={brushToolState.isActive}
                 selectedStructure={selectedForEdit}
                 rtStructures={rtStructures}
-                currentSlicePosition={
-                  images.length > 0 && images[currentIndex]
-                    ? (images[currentIndex].parsedSliceLocation ??
-                      images[currentIndex].parsedZPosition ??
-                      currentIndex)
-                    : 0
-                }
+                currentSlicePosition={(() => {
+                  if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                  const rawSlicePos =
+                    images[currentIndex].sliceZ ??
+                    images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex;
+                  const parsedSlicePos =
+                    typeof rawSlicePos === "string"
+                      ? parseFloat(rawSlicePos)
+                      : rawSlicePos;
+                  return Number.isFinite(parsedSlicePos)
+                    ? parsedSlicePos
+                    : currentIndex;
+                })()}
                 onContourUpdate={(payload: any) => {
                   handleContourUpdate(payload);
                 }}
@@ -6515,13 +7297,21 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
                   offsetY: ctTransform.current.offsetY
                 }
               } as React.MutableRefObject<{ scale: number; offsetX: number; offsetY: number }> : null}
-              currentSlicePosition={
-                images.length > 0 && images[currentIndex]
-                  ? (images[currentIndex].parsedSliceLocation ??
-                    images[currentIndex].parsedZPosition ??
-                    currentIndex)
-                  : 0
-              }
+              currentSlicePosition={(() => {
+                if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                const rawSlicePos =
+                  images[currentIndex].sliceZ ??
+                  images[currentIndex].parsedSliceLocation ??
+                  images[currentIndex].parsedZPosition ??
+                  currentIndex;
+                const parsedSlicePos =
+                  typeof rawSlicePos === "string"
+                    ? parseFloat(rawSlicePos)
+                    : rawSlicePos;
+                return normalizeSlicePosition(
+                  Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                );
+              })()}
               onMeasurementComplete={(distance, unit) => {
                 console.log(`Measurement completed: ${distance.toFixed(1)} ${unit}`);
               }}

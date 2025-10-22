@@ -900,6 +900,16 @@ export default function PatientManager() {
                 </h1>
               </div>
             </div>
+            <div className="flex items-center gap-3">
+              <Link href="/introducing">
+                <Button 
+                  variant="outline" 
+                  className="bg-gradient-to-r from-indigo-500/10 to-purple-500/10 hover:from-indigo-500/20 hover:to-purple-500/20 border border-purple-500/30 text-white font-medium shadow-lg hover:shadow-purple-500/20 transition-all duration-200"
+                >
+                  ✨ Introducing Superbeam
+                </Button>
+              </Link>
+            </div>
           </div>
         </header>
 
