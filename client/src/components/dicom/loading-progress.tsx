@@ -1,7 +1,6 @@
 import React from 'react';
-import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, AlertCircle, CheckCircle2, Download, Image, Zap } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
 
 interface LoadingState {
   seriesId?: number;
@@ -52,47 +51,50 @@ function LoadingProgressItem({ seriesId, state, seriesInfo }: LoadingProgressIte
   };
 
   return (
-    <Card className={`p-3 ${getStatusColor()} border transition-all duration-300 pointer-events-auto`}>
+    <div className={`p-3 rounded-lg ${getStatusColor()} border transition-all duration-300 bg-gray-800/50`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           {getStatusIcon()}
-          <div className="text-sm font-medium text-white">
+          <div className="text-xs font-medium text-white">
             {seriesInfo?.description || `Series ${seriesId}`}
           </div>
           {seriesInfo?.modality && (
-            <span className="px-1.5 py-0.5 text-xs bg-indigo-600 text-white rounded">
+            <span className="px-1.5 py-0.5 text-[10px] bg-blue-600/80 text-white rounded font-medium">
               {seriesInfo.modality}
             </span>
           )}
         </div>
-        <div className="text-xs text-gray-400">
-          {completedCount}/{totalCount}
-        </div>
+        {totalCount > 0 && (
+          <div className="text-[10px] text-gray-400 font-mono">
+            {completedCount}/{totalCount}
+          </div>
+        )}
       </div>
-      
-      <Progress 
-        value={progress} 
-        className="h-2 mb-2 bg-gray-700"
+
+      <Progress
+        value={progress}
+        className="h-1.5 mb-1.5 bg-gray-700/50"
         style={{
           '--progress-color': getProgressColor()
         } as React.CSSProperties}
       />
-      
-      <div className="flex items-center justify-between text-xs text-gray-400">
-        <span>
-          {isLoading ? 'Loading images...' : 
+
+      <div className="flex items-center justify-between text-[10px]">
+        <span className={isLoading ? 'text-blue-300' : errors.length > 0 ? 'text-orange-300' : 'text-green-300'}>
+          {isLoading ? 'Loading images...' :
            errors.length > 0 ? `${errors.length} errors` : 'Complete'}
         </span>
-        <span>{Math.round(progress)}%</span>
+        <span className="text-gray-400 font-mono">{Math.round(progress)}%</span>
       </div>
-      
+
       {errors.length > 0 && (
-        <div className="mt-2 text-xs text-orange-300">
+        <div className="mt-2 text-[10px] text-orange-300">
           <details>
-            <summary className="cursor-pointer hover:text-orange-200">
+            <summary className="cursor-pointer hover:text-orange-200 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
               View errors ({errors.length})
             </summary>
-            <div className="mt-1 space-y-1 text-gray-400 max-h-20 overflow-y-auto">
+            <div className="mt-1 space-y-1 text-gray-400 max-h-16 overflow-y-auto text-[10px]">
               {errors.slice(0, 3).map((error, i) => (
                 <div key={i} className="truncate">{error}</div>
               ))}
@@ -103,7 +105,7 @@ function LoadingProgressItem({ seriesId, state, seriesInfo }: LoadingProgressIte
           </details>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -112,7 +114,7 @@ export function LoadingProgress({ loadingStates, className = "" }: LoadingProgre
     return null;
   }
 
-  const activeStates = Array.from(loadingStates.entries()).filter(([_, state]) => 
+  const activeStates = Array.from(loadingStates.entries()).filter(([_, state]) =>
     state.isLoading || (state.errors?.length ?? 0) > 0 || (state.completedCount ?? 0) < (state.totalCount ?? 0)
   );
 
@@ -121,14 +123,14 @@ export function LoadingProgress({ loadingStates, className = "" }: LoadingProgre
   }
 
   return (
-    <div className={`fixed top-4 right-4 w-80 z-30 space-y-2 pointer-events-none ${className}`}>
-      <div className="bg-black/90 backdrop-blur-sm border border-gray-700 rounded-lg p-3 pointer-events-auto">
+    <div className={`fixed bottom-4 right-4 w-96 z-50 pointer-events-none animate-in fade-in-0 slide-in-from-right-4 duration-300 ${className}`}>
+      <div className="bg-gray-900/95 backdrop-blur-xl border border-blue-500/40 rounded-xl p-4 shadow-2xl shadow-blue-500/20 pointer-events-auto">
         <div className="flex items-center gap-2 mb-3">
-          <Download className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-medium text-white">Loading Images</span>
+          <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+          <span className="text-sm font-medium text-white">Loading Fusion Images</span>
         </div>
-        
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+
+        <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
           {activeStates.map(([seriesId, state]) => (
             <LoadingProgressItem
               key={seriesId}
@@ -138,10 +140,10 @@ export function LoadingProgress({ loadingStates, className = "" }: LoadingProgre
             />
           ))}
         </div>
-        
+
         {activeStates.some(([_, state]) => state.isLoading) && (
-          <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
-            <Zap className="w-3 h-3" />
+          <div className="mt-3 pt-3 border-t border-gray-700/50 flex items-center gap-2 text-xs text-gray-400">
+            <Zap className="w-3 h-3 text-blue-400" />
             <span>Background loading - viewer remains interactive</span>
           </div>
         )}

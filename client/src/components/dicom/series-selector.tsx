@@ -472,8 +472,38 @@ export function SeriesSelector({
   };
 
   const handleDeleteStructure = (structureId: number) => {
-    // Handle structure deletion
-    console.log('Delete structure:', structureId);
+    console.log('🗑️ Delete structure:', structureId);
+
+    if (!rtStructures || !onRTStructureLoad) {
+      console.warn('Cannot delete structure: rtStructures or onRTStructureLoad not available');
+      return;
+    }
+
+    // Deep clone the rtStructures
+    const updated = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+
+    // Remove the structure from the structures array
+    updated.structures = updated.structures.filter((s: any) => s.roiNumber !== structureId);
+
+    // Update the RT structures
+    onRTStructureLoad(updated);
+
+    // Remove from selected structures if it was selected
+    if (selectedStructures.has(structureId)) {
+      const newSelection = new Set(selectedStructures);
+      newSelection.delete(structureId);
+      setSelectedStructures(newSelection);
+    }
+
+    // Clear edit selection if this structure was being edited
+    if (externalSelectedForEdit === structureId && onSelectedForEditChange) {
+      onSelectedForEditChange(null);
+    }
+
+    toast({
+      title: "Structure deleted",
+      description: `Removed structure ${structureId}`
+    });
   };
   
   // Blob management handlers

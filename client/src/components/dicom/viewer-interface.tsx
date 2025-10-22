@@ -1931,9 +1931,9 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
         </div>
 
         {/* DICOM Viewer with Dynamic Border - Flexible Width */}
-        <div className="flex-1 relative overflow-hidden">
+        <div className="flex-1 relative overflow-visible">
           {selectedSeries ? (
-            <div className="relative h-full overflow-hidden">
+            <div className="relative h-full overflow-visible">
               {/* Dynamic Border Based on Selected Structures */}
               <div 
                 className="absolute inset-0 rounded-lg pointer-events-none"
@@ -2182,7 +2182,6 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowMarginToolbar(true);
           }}
           activePredictions={activePredictions}
-
         />
       )}
 

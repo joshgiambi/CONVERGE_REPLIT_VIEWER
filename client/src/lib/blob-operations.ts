@@ -84,6 +84,24 @@ export function groupStructureBlobs(
   // Step 3: Connect slice groups across adjacent slices to form 3D blobs
   const blobs3D: BlobContour[][] = [];
   const sortedSlices = Array.from(sliceGroups.keys()).sort((a, b) => a - b);
+
+  // Estimate typical slice spacing so we can detect large gaps introduced by deletions
+  const spacingSamples: number[] = [];
+  for (let i = 1; i < sortedSlices.length; i++) {
+    const gap = Math.abs(sortedSlices[i] - sortedSlices[i - 1]);
+    if (Number.isFinite(gap) && gap > 0) {
+      spacingSamples.push(gap);
+    }
+  }
+  let typicalSpacing = spacingSamples.length
+    ? spacingSamples
+        .slice()
+        .sort((a, b) => a - b)[Math.floor(spacingSamples.length / 2)]
+    : tolMm || 1;
+  if (!Number.isFinite(typicalSpacing) || typicalSpacing <= 0) {
+    typicalSpacing = Math.max(tolMm, 0.5);
+  }
+  const maxConnectGap = Math.max(tolMm * 1.5, typicalSpacing * 1.4);
   const processedGroups = new Set<string>();
   
   for (let i = 0; i < sortedSlices.length; i++) {
@@ -99,10 +117,17 @@ export function groupStructureBlobs(
       processedGroups.add(groupKey);
       
       // Recursively find connected groups on adjacent slices
-      const findConnected = (sliceIdx: number, prevContours: BlobContour[]) => {
+      const findConnected = (sliceIdx: number, prevContours: BlobContour[], prevSlice: number) => {
         // Check next slice
         if (sliceIdx + 1 < sortedSlices.length) {
           const nextSlice = sortedSlices[sliceIdx + 1];
+
+          // Treat large gaps as disconnected blobs (e.g., deleted slices)
+          const sliceGap = Math.abs(nextSlice - prevSlice);
+          if (sliceGap > maxConnectGap) {
+            return;
+          }
+
           const nextGroups = sliceGroups.get(nextSlice) || [];
           
           for (let nextGroupIdx = 0; nextGroupIdx < nextGroups.length; nextGroupIdx++) {
@@ -119,13 +144,13 @@ export function groupStructureBlobs(
             if (overlaps) {
               blob.push(...nextGroup);
               processedGroups.add(nextGroupKey);
-              findConnected(sliceIdx + 1, nextGroup);
+              findConnected(sliceIdx + 1, nextGroup, nextSlice);
             }
           }
         }
       };
       
-      findConnected(i, currentGroups[groupIdx]);
+      findConnected(i, currentGroups[groupIdx], currentSlice);
       
       if (blob.length > 0) {
         blobs3D.push(blob);
@@ -273,4 +298,3 @@ export function countStructureBlobs(structure: any, tolMm: number = SLICE_TOL_MM
   const blobs = groupStructureBlobs(structure, tolMm);
   return blobs.length;
 }
-

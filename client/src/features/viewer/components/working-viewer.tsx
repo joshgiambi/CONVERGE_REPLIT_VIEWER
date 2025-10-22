@@ -2918,29 +2918,66 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // Log current state before deletion
       console.log(`Before delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
       
-      // Remove contour at specified slice position for this structure only - tight tolerance
+      // Calculate adaptive tolerance matching prediction system
+      // This ensures deleted slices are fully removed and predictions can regenerate
+      let sliceSpacing = 2.5; // Default fallback
+      if (imageMetadata) {
+        const spacing = getSpacing(imageMetadata);
+        sliceSpacing = spacing.z;
+      } else if (images && images.length >= 2) {
+        // Calculate from actual slice positions
+        const z0 = images[0]?.sliceZ || images[0]?.parsedSliceLocation || 0;
+        const z1 = images[1]?.sliceZ || images[1]?.parsedSliceLocation || 1;
+        sliceSpacing = Math.abs(z1 - z0) || 2.5;
+      }
+      const adaptiveTolerance = sliceSpacing * 0.4;
+      const deleteTolerance = Math.max(adaptiveTolerance, SLICE_TOL_MM);
+      
+      console.log(`Using adaptive delete tolerance: ${deleteTolerance.toFixed(2)}mm (slice spacing: ${sliceSpacing.toFixed(2)}mm)`);
+      
+      // Remove contour at specified slice position for this structure only
       const originalLength = structure.contours.length;
       structure.contours = structure.contours.filter(
-        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > SLICE_TOL_MM
+        (c: any) => Math.abs(c.slicePosition - payload.slicePosition) > deleteTolerance
       );
 
       const deletedCount = originalLength - structure.contours.length;
       console.log(`Deleted ${deletedCount} contour(s) for structure ${payload.structureId} (${structure.structureName}) at slice ${payload.slicePosition}`);
       console.log(`After delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
-      
+
       // Log all structures to verify others are not affected
       console.log("All structures after delete:", updatedStructures.structures.map((s: any) => ({
         id: s.roiNumber,
         name: s.structureName,
         contourCount: s.contours.length
       })));
-      
+
+      // Check for blob separation after deletion
+      if (structure.contours.length > 0) {
+        const blobs = groupStructureBlobs(structure, SLICE_TOL_MM);
+        if (blobs.length > 1) {
+          console.log(`⚠️ Slice deletion created ${blobs.length} separate blobs in ${structure.structureName}`);
+          toast({
+            title: "Multiple blobs detected",
+            description: `Deleting this slice created ${blobs.length} separate blobs in ${structure.structureName}. Use the blob management dropdown to separate them.`,
+            duration: 5000,
+          });
+        }
+      }
+
       setLocalRTStructures(updatedStructures);
       // Pass the full updated structures to parent
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'delete_slice');
+      
+      // Trigger immediate render to show deletion
+      try { scheduleRender(); } catch {}
+      
+      // Clear prediction cache to force regeneration on the now-empty slice
+      console.log('🔄 Dispatching prediction cache clear event after deletion');
+      window.dispatchEvent(new CustomEvent('prediction:cache:clear'));
     } else if (payload.action === "clear_all") {
       // Handle clear all slices action
       const structure = updatedStructures.structures.find(

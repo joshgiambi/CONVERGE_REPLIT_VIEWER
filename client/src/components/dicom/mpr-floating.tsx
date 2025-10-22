@@ -64,6 +64,15 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     const width = axial[0]?.columns || axial[0]?.width || 512;
     const height = axial[0]?.rows || axial[0]?.height || 512;
     const depth = axial.length;
+    
+    // Debug: check cache availability
+    const cache = (window as any).__WV_CACHE__ as Map<string, { data: Float32Array; width: number; height: number }>;
+    if (!cache) {
+      console.warn(`⚠️ MPR ${orientation}: __WV_CACHE__ not initialized`);
+      return;
+    }
+    const cachedCount = Array.from({ length: depth }, (_, i) => axial[i]?.sopInstanceUID).filter(uid => uid && cache.has(uid)).length;
+    console.log(`🎨 MPR ${orientation}: ${cachedCount}/${depth} slices cached, rendering slice ${sliceIndex}`);
 
     // Build a lazy getter for Float32 HU per slice from existing caches (WorkingViewer fills these)
     const getSlice = (idx: number): Float32Array | null => {
