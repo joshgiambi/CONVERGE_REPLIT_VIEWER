@@ -2198,7 +2198,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     
     // Map UI prediction mode to algorithm mode
     const uiMode = brushToolState?.predictionMode || 'balanced';
-    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'segvol' = 'adaptive';
+    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'mem3d' | 'segvol' = 'adaptive';
 
     switch (uiMode) {
       case 'fast':
@@ -2209,13 +2209,17 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
         // Use trend-based if enough history, else adaptive
         algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
         break;
-      case 'ai':
-        // Use SegVol AI model
+      case 'mem3d':
+        // Use Mem3D memory-augmented AI model (primary AI)
+        algorithmMode = 'mem3d';
+        break;
+      case 'segvol':
+        // Use SegVol volumetric AI model (advanced)
         algorithmMode = 'segvol';
         break;
       case 'smart':
-        // Auto-select: Try SegVol first, fall back if unavailable
-        algorithmMode = 'segvol'; // Built-in fallback in prediction algorithm
+        // Auto-select: Try Mem3D first (primary AI), has built-in fallback
+        algorithmMode = 'mem3d';
         break;
       default:
         algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';

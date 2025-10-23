@@ -12,6 +12,7 @@ import {
   type RegionCharacteristics
 } from './image-aware-prediction';
 import { segvolClient, type SegVolPredictionRequest } from './segvol-client';
+import { mem3dClient, type Mem3DPredictionRequest, type Mem3DReferenceSlice } from './mem3d-client';
 
 export type PropagationMode = 'conservative' | 'moderate' | 'aggressive';
 
@@ -20,7 +21,7 @@ export interface PredictionParams {
   currentSlicePosition: number;
   targetSlicePosition: number;
   anatomicalRegion?: 'head' | 'neck' | 'thorax' | 'abdomen' | 'pelvis';
-  predictionMode?: 'simple' | 'adaptive' | 'trend-based' | 'segvol';
+  predictionMode?: 'simple' | 'adaptive' | 'trend-based' | 'segvol' | 'mem3d';
   confidenceThreshold?: number; // 0-1, determines when to stop propagating
   historyManager?: PredictionHistoryManager;
   allContours?: Map<number, number[]>; // All contours in the structure by slice position
@@ -574,6 +575,245 @@ async function segvolPrediction(
 }
 
 /**
+ * Mem3D-based prediction using memory network
+ */
+async function mem3dPrediction(
+  currentContour: number[],
+  currentSlicePosition: number,
+  targetSlicePosition: number,
+  historyManager?: PredictionHistoryManager,
+  imageData?: {
+    currentSlice?: ImageData;
+    targetSlice?: ImageData;
+  },
+  coordinateTransforms?: {
+    worldToPixel: (x: number, y: number) => [number, number];
+    pixelToWorld: (x: number, y: number) => [number, number];
+  },
+  spacing?: [number, number, number]
+): Promise<PredictionResult> {
+  try {
+    // Validate required data
+    if (!imageData?.currentSlice || !imageData?.targetSlice) {
+      throw new Error('Mem3D requires image data for both slices');
+    }
+
+    if (!coordinateTransforms) {
+      throw new Error('Mem3D requires coordinate transforms');
+    }
+
+    if (!historyManager) {
+      throw new Error('Mem3D requires history manager for memory');
+    }
+
+    // Convert current contour from [x,y,z,...] to [[x,y],...]
+    const contour2D: number[][] = [];
+    for (let i = 0; i < currentContour.length; i += 3) {
+      const x = currentContour[i];
+      const y = currentContour[i + 1];
+      const [px, py] = coordinateTransforms.worldToPixel(x, y);
+      contour2D.push([Math.round(px), Math.round(py)]);
+    }
+
+    // Create mask from current contour
+    const currentMask = contourToMask(
+      contour2D,
+      imageData.currentSlice.rows,
+      imageData.currentSlice.columns
+    );
+
+    // Get memory slices (past segmented slices)
+    const referenceSlices: Mem3DReferenceSlice[] = [];
+    const allSnapshots = historyManager.getAllContours();
+
+    // Get up to 3 nearest slices as memory
+    const nearestSlices = allSnapshots
+      .map(snapshot => ({
+        snapshot,
+        distance: Math.abs(snapshot.slicePosition - targetSlicePosition)
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 3);
+
+    for (const { snapshot } of nearestSlices) {
+      // Convert contour to mask for this slice
+      const refContour2D: number[][] = [];
+      for (let i = 0; i < snapshot.contour.length; i += 3) {
+        const x = snapshot.contour[i];
+        const y = snapshot.contour[i + 1];
+        const [px, py] = coordinateTransforms.worldToPixel(x, y);
+        refContour2D.push([Math.round(px), Math.round(py)]);
+      }
+
+      const refMask = contourToMask(
+        refContour2D,
+        imageData.currentSlice.rows,
+        imageData.currentSlice.columns
+      );
+
+      // TODO: Get actual pixel data for reference slice
+      // For now, use current slice as placeholder
+      referenceSlices.push({
+        slice_data: Array.from(imageData.currentSlice.pixelData),
+        mask: refMask,
+        position: snapshot.slicePosition,
+        image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number]
+      });
+    }
+
+    // Add current slice to references
+    referenceSlices.push({
+      slice_data: Array.from(imageData.currentSlice.pixelData),
+      mask: currentMask,
+      position: currentSlicePosition,
+      image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number]
+    });
+
+    // Prepare Mem3D request
+    const request: Mem3DPredictionRequest = {
+      reference_slices: referenceSlices,
+      target_slice_data: Array.from(imageData.targetSlice.pixelData),
+      target_slice_position: targetSlicePosition,
+      image_shape: [imageData.targetSlice.rows, imageData.targetSlice.columns] as [number, number],
+      interaction_type: 'contour'
+    };
+
+    // Call Mem3D API
+    const result = await mem3dClient.predictWithMemory(request);
+
+    // Convert predicted mask back to contour
+    const predictedMask = new Uint8Array(result.predicted_mask);
+    const predictedContour = maskToContour(
+      predictedMask,
+      imageData.targetSlice.rows,
+      imageData.targetSlice.columns,
+      coordinateTransforms,
+      targetSlicePosition
+    );
+
+    return {
+      predictedContour,
+      confidence: result.confidence,
+      adjustments: {
+        scale: 1.0,
+        centerShift: { x: 0, y: 0 },
+        deformation: 0,
+      },
+      metadata: {
+        method: result.method,
+        historySize: result.memory_size,
+        qualityScore: result.quality_score,  // NEW: Quality assessment from Mem3D
+        ...result.metadata,
+      },
+    };
+  } catch (error: any) {
+    console.error('Mem3D prediction failed:', error);
+    // Return empty result on failure
+    return {
+      predictedContour: [],
+      confidence: 0,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: {
+        method: 'mem3d_failed',
+        historySize: 0,
+        notes: error.message,
+      },
+    };
+  }
+}
+
+// Helper: Convert contour to binary mask
+function contourToMask(contour: number[][], rows: number, cols: number): number[] {
+  const mask = new Uint8Array(rows * cols);
+
+  if (contour.length === 0) return Array.from(mask);
+
+  // Simple scanline fill algorithm
+  for (let y = 0; y < rows; y++) {
+    const intersections: number[] = [];
+
+    // Find intersections with this scanline
+    for (let i = 0; i < contour.length; i++) {
+      const p1 = contour[i];
+      const p2 = contour[(i + 1) % contour.length];
+
+      const y1 = p1[1];
+      const y2 = p2[1];
+
+      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+        const x = p1[0] + (y - y1) * (p2[0] - p1[0]) / (y2 - y1);
+        intersections.push(Math.round(x));
+      }
+    }
+
+    // Sort intersections
+    intersections.sort((a, b) => a - b);
+
+    // Fill between pairs of intersections
+    for (let i = 0; i < intersections.length; i += 2) {
+      if (i + 1 < intersections.length) {
+        const x1 = Math.max(0, intersections[i]);
+        const x2 = Math.min(cols - 1, intersections[i + 1]);
+
+        for (let x = x1; x <= x2; x++) {
+          mask[y * cols + x] = 1;
+        }
+      }
+    }
+  }
+
+  return Array.from(mask);
+}
+
+// Helper: Convert binary mask to contour
+function maskToContour(
+  mask: Uint8Array,
+  rows: number,
+  cols: number,
+  coordinateTransforms: {
+    pixelToWorld: (px: number, py: number) => [number, number];
+  },
+  z: number
+): number[] {
+  // Find contour using marching squares algorithm (simplified)
+  const contourPixels: Array<[number, number]> = [];
+
+  // Find boundary pixels (pixels with at least one non-mask neighbor)
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const idx = y * cols + x;
+
+      if (mask[idx] === 1) {
+        // Check if boundary pixel
+        const isBoundary =
+          x === 0 || x === cols - 1 || y === 0 || y === rows - 1 ||
+          mask[idx - 1] === 0 ||  // left
+          mask[idx + 1] === 0 ||  // right
+          mask[idx - cols] === 0 ||  // top
+          mask[idx + cols] === 0;  // bottom
+
+        if (isBoundary) {
+          contourPixels.push([x, y]);
+        }
+      }
+    }
+  }
+
+  if (contourPixels.length === 0) {
+    return [];
+  }
+
+  // Convert to world coordinates
+  const contour: number[] = [];
+  for (const [px, py] of contourPixels) {
+    const [x, y] = coordinateTransforms.pixelToWorld(px, py);
+    contour.push(x, y, z);
+  }
+
+  return contour;
+}
+
+/**
  * Main prediction function that orchestrates different prediction modes
  */
 export async function predictNextSliceContour(params: PredictionParams): Promise<PredictionResult> {
@@ -644,6 +884,42 @@ export async function predictNextSliceContour(params: PredictionParams): Promise
       break;
     }
 
+    case 'mem3d': {
+      // AI-powered prediction using Mem3D memory network
+      // Extract spacing from image data if available
+      const spacing: [number, number, number] | undefined = imageData?.currentSlice
+        ? [
+            imageData.currentSlice.pixelSpacing?.[0] || 1.0,
+            imageData.currentSlice.pixelSpacing?.[1] || 1.0,
+            imageData.currentSlice.sliceThickness || 1.0,
+          ]
+        : undefined;
+
+      result = await mem3dPrediction(
+        currentContour,
+        currentSlicePosition,
+        targetSlicePosition,
+        historyManager,
+        imageData,
+        coordinateTransforms,
+        spacing
+      );
+
+      // If Mem3D fails, fall back to geometric prediction
+      if (result.predictedContour.length === 0 || result.confidence === 0) {
+        console.warn('Mem3D prediction failed, falling back to trend-based prediction');
+        const fallbackContour = findNearestContour();
+        result = historyManager && historyManager.size() >= 2
+          ? trendBasedPrediction(historyManager, currentSlicePosition, targetSlicePosition)
+          : adaptivePrediction(currentContour, fallbackContour, sliceDistance, targetSlicePosition);
+        if (result.metadata) {
+          result.metadata.fallbackApplied = true;
+          result.metadata.notes = 'Mem3D failed, used geometric fallback';
+        }
+      }
+      break;
+    }
+
     case 'segvol': {
       // AI-powered prediction using SegVol model
       // Extract spacing from image data if available
@@ -682,9 +958,10 @@ export async function predictNextSliceContour(params: PredictionParams): Promise
   }
   
   // Apply image-aware refinement if enabled and image data available
-  // Skip refinement for segvol mode as it handles this internally
+  // Skip refinement for AI modes (segvol, mem3d) as they handle this internally
   if (enableImageRefinement &&
       predictionMode !== 'segvol' &&
+      predictionMode !== 'mem3d' &&
       imageData?.targetSlice &&
       coordinateTransforms &&
       result.predictedContour.length > 0) {

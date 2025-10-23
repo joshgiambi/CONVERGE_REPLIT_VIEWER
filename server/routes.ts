@@ -28,6 +28,7 @@ import { fusionManifestService } from './fusion/manifest-service';
 import { FuseboxVolumeResampler } from './fusion/resampler.ts';
 import { loadDicomMetadata } from './fusion/dicom-metadata.ts';
 import segvolRouter from './segvol-api';
+import mem3dRouter from './mem3d-api';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -6116,6 +6117,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Register SegVol API routes
   app.use('/api', segvolRouter);
+
+  // Register Mem3D API routes
+  app.use('/api', mem3dRouter);
 
   return { close: () => {} } as Server;
 }

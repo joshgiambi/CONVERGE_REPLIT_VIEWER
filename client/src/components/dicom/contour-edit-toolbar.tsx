@@ -7,9 +7,9 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Brush, 
-  Pen, 
+import {
+  Brush,
+  Pen,
   Scissors,
   Settings,
   X,
@@ -39,7 +39,8 @@ import {
   Zap,
   Keyboard,
   SplitSquareHorizontal,
-  Info
+  Info,
+  Brain
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -49,6 +50,7 @@ import { useToast } from '@/hooks/use-toast';
 import { SmartNthSettingsDialog } from './smart-nth-settings-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { segvolClient } from '@/lib/segvol-client';
+import { mem3dClient } from '@/lib/mem3d-client';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -66,7 +68,7 @@ interface ContourEditToolbarProps {
     isActive: boolean;
     predictionEnabled?: boolean;
     smartBrushEnabled?: boolean;
-    predictionMode?: 'fast' | 'balanced' | 'ai' | 'smart';
+    predictionMode?: 'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart';
   }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
@@ -123,8 +125,9 @@ export function ContourEditToolbar({
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
-  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'ai' | 'smart'>('balanced'); // Prediction algorithm mode
+  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart'>('balanced'); // Prediction algorithm mode
   const [segvolAvailable, setSegvolAvailable] = useState<boolean | null>(null); // SegVol service availability
+  const [mem3dAvailable, setMem3dAvailable] = useState<boolean | null>(null); // Mem3D service availability
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
@@ -164,25 +167,38 @@ export function ContourEditToolbar({
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isVisible, activePredictions, onContourUpdate, selectedStructure]);
 
-  // Check SegVol availability on mount and when prediction is enabled
+  // Check AI service availability on mount and when prediction is enabled
   useEffect(() => {
     let cancelled = false;
 
-    const checkSegVol = async () => {
+    const checkServices = async () => {
+      // Check SegVol
       try {
-        const health = await segvolClient.checkHealth();
+        const segvolHealth = await segvolClient.checkHealth();
         if (!cancelled) {
-          setSegvolAvailable(health.segvol_available);
+          setSegvolAvailable(segvolHealth.segvol_available);
         }
       } catch (error) {
         if (!cancelled) {
           setSegvolAvailable(false);
         }
       }
+
+      // Check Mem3D
+      try {
+        const mem3dHealth = await mem3dClient.checkHealth();
+        if (!cancelled) {
+          setMem3dAvailable(mem3dHealth.mem3d_available);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMem3dAvailable(false);
+        }
+      }
     };
 
     if (isPredictionEnabled) {
-      checkSegVol();
+      checkServices();
     }
 
     return () => {
@@ -794,7 +810,7 @@ export function ContourEditToolbar({
             {/* Prediction Mode Selector */}
             {isPredictionEnabled && (
               <Select value={predictionMode} onValueChange={(value: any) => setPredictionMode(value)}>
-                <SelectTrigger className="h-7 w-[110px] text-[11px] bg-white/5 border-white/20 text-gray-200">
+                <SelectTrigger className="h-7 w-[120px] text-[11px] bg-white/5 border-white/20 text-gray-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-900 border-white/20">
@@ -813,13 +829,30 @@ export function ContourEditToolbar({
                     </div>
                   </SelectItem>
                   <SelectItem
-                    value="ai"
+                    value="mem3d"
+                    disabled={mem3dAvailable === false}
+                    className="text-[11px]"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Brain className="w-3 h-3 text-cyan-400" />
+                      <span>Mem3D</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-cyan-400/40 text-cyan-300">~200ms</Badge>
+                      {mem3dAvailable === false && (
+                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
+                      )}
+                      {mem3dAvailable === null && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="segvol"
                     disabled={segvolAvailable === false}
                     className="text-[11px]"
                   >
                     <div className="flex items-center gap-1.5">
                       <Sparkles className="w-3 h-3 text-purple-400" />
-                      <span>AI (SegVol)</span>
+                      <span>SegVol</span>
                       <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">~1s</Badge>
                       {segvolAvailable === false && (
                         <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
