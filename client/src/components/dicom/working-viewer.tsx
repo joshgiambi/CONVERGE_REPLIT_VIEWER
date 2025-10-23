@@ -1970,10 +1970,10 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   // Helper to extract image data for prediction
   const extractImageDataForPrediction = useCallback((imageIndex: number) => {
     if (!images || imageIndex < 0 || imageIndex >= images.length) return null;
-    
+
     const img = images[imageIndex];
     if (!img?.pixelData) return null;
-    
+
     try {
       // Extract pixel data and metadata
       return {
@@ -1988,6 +1988,65 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     } catch (error) {
       console.warn('Failed to extract image data for prediction:', error);
       return null;
+    }
+  }, [images]);
+
+  // Helper to extract full 3D volume for nnInteractive segmentation
+  const extract3DVolume = useCallback((): number[][][] | undefined => {
+    if (!images || images.length === 0) return undefined;
+
+    try {
+      // Get dimensions from first image
+      const firstImage = images[0];
+      const width = firstImage.width || firstImage.columns || 512;
+      const height = firstImage.height || firstImage.rows || 512;
+
+      // Create 3D array: [z][y][x]
+      const volume: number[][][] = [];
+
+      for (let z = 0; z < images.length; z++) {
+        const img = images[z];
+
+        if (!img?.pixelData) {
+          console.warn(`No pixel data for slice ${z}, skipping`);
+          continue;
+        }
+
+        // Extract pixel data
+        const pixels = img.pixelData; // Float32Array or Uint16Array
+        const rescaleSlope = img.rescaleSlope || 1;
+        const rescaleIntercept = img.rescaleIntercept || 0;
+
+        // Create 2D slice: [y][x]
+        const slice: number[][] = [];
+
+        for (let y = 0; y < height; y++) {
+          const row: number[] = [];
+          for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            const rawValue = pixels[index] || 0;
+
+            // Apply rescale to get HU values for CT
+            const huValue = rawValue * rescaleSlope + rescaleIntercept;
+            row.push(huValue);
+          }
+          slice.push(row);
+        }
+
+        volume.push(slice);
+      }
+
+      if (volume.length === 0) {
+        console.warn('Failed to extract 3D volume: no valid slices');
+        return undefined;
+      }
+
+      console.log(`Extracted 3D volume: ${volume.length} slices, ${height}x${width} pixels`);
+      return volume;
+
+    } catch (error) {
+      console.error('Failed to extract 3D volume:', error);
+      return undefined;
     }
   }, [images]);
 
@@ -7322,7 +7381,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
                 canvasRef={canvasRef}
                 currentSliceIndex={currentIndex}
                 totalSlices={images.length}
-                imageVolume={undefined} // TODO: Extract 3D volume from images array
+                imageVolume={extract3DVolume()}
                 voxelSpacing={[
                   parseFloat(imageMetadata?.spacingBetweenSlices || imageMetadata?.sliceThickness || "1.0"),
                   parseFloat(imageMetadata?.pixelSpacing?.[0] || "1.0"),
