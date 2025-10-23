@@ -744,7 +744,7 @@ export function ContourEditToolbar({
                   onContourUpdate({
                     action: 'accept_predictions',
                     structureId: selectedStructure?.roiNumber,
-                    slicePosition: normalizedCurrentSlice ?? undefined
+                    slicePosition: currentSlicePosition
                   });
                 }
                 toast({ title: 'Prediction accepted (A)' });
@@ -764,7 +764,7 @@ export function ContourEditToolbar({
                   onContourUpdate({ 
                     action: 'reject_predictions', 
                     structureId: selectedStructure?.roiNumber,
-                    slicePosition: normalizedCurrentSlice ?? undefined
+                    slicePosition: currentSlicePosition
                   });
                 }
                 toast({ title: 'Prediction rejected (X)' });

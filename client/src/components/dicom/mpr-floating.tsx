@@ -11,6 +11,7 @@ interface MPRFloatingProps {
   windowCenter: number;
   crosshairPos: { x: number; y: number };
   rtStructures?: any;
+  structureVisibility?: Map<number, boolean>;
   onClick?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   currentZIndex?: number; // axial slice index for contour sampling
 }
@@ -23,6 +24,7 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
   windowCenter,
   crosshairPos,
   rtStructures,
+  structureVisibility,
   onClick,
   currentZIndex
 }) => {
@@ -65,14 +67,9 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     const height = axial[0]?.rows || axial[0]?.height || 512;
     const depth = axial.length;
     
-    // Debug: check cache availability
+    // Check cache availability
     const cache = (window as any).__WV_CACHE__ as Map<string, { data: Float32Array; width: number; height: number }>;
-    if (!cache) {
-      console.warn(`⚠️ MPR ${orientation}: __WV_CACHE__ not initialized`);
-      return;
-    }
-    const cachedCount = Array.from({ length: depth }, (_, i) => axial[i]?.sopInstanceUID).filter(uid => uid && cache.has(uid)).length;
-    console.log(`🎨 MPR ${orientation}: ${cachedCount}/${depth} slices cached, rendering slice ${sliceIndex}`);
+    if (!cache) return;
 
     // Build a lazy getter for Float32 HU per slice from existing caches (WorkingViewer fills these)
     const getSlice = (idx: number): Float32Array | null => {
@@ -96,15 +93,15 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     };
 
     // Target plane dims in voxels
-    const dimX = orientation === 'sagittal' ? height : width; // horizontal
-    const dimY = depth;                                       // vertical (Z)
+    const dimX = orientation === 'coronal' ? width : height; // horizontal
+    const dimY = depth;                                      // vertical (Z)
 
     // Create image data
     const imgData = ctx.createImageData(canvas.width, canvas.height);
     const data = imgData.data;
 
     // Physical sizing
-    const physW = (orientation === 'sagittal' ? spacing.row * dimX : spacing.col * dimX);
+    const physW = (orientation === 'coronal' ? spacing.col * dimX : spacing.row * dimX);
     const physH = spacing.z * dimY;
     const aspect = physW / physH;
     let drawW, drawH;
@@ -134,13 +131,13 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
       for (let x = 0; x < drawW; x++) {
         const u = Math.min(dimX - 1, Math.max(0, Math.floor(x * sx)));
         let f: number;
-        if (orientation === 'sagittal') {
-          // Y (u) across rows, X fixed = sliceIndex
-          const idx = (u * width) + Math.min(width - 1, Math.max(0, sliceIndex));
+        if (orientation === 'coronal') {
+          // Coronal: X (u) across columns, Y fixed = sliceIndex
+          const idx = (Math.min(height - 1, Math.max(0, sliceIndex)) * width) + u;
           f = slice[idx];
         } else {
-          // X (u) across columns, Y fixed = sliceIndex
-          const idx = (Math.min(height - 1, Math.max(0, sliceIndex)) * width) + u;
+          // Sagittal: Y (u) across rows, X fixed = sliceIndex
+          const idx = (u * width) + Math.min(width - 1, Math.max(0, sliceIndex));
           f = slice[idx];
         }
         let g = 0;
@@ -170,16 +167,16 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     ctx.restore();
 
     // Contours projection by intersecting axial polygons with current plane
-    if (rtStructures?.structures?.length && images?.[0]?.imageMetadata?.imagePosition) {
+    const hasImagePosition = images?.[0]?.imageMetadata?.imagePosition || images?.[0]?.imagePosition;
+    
+    if (rtStructures?.structures?.length && hasImagePosition) {
       ctx.save();
-      ctx.globalAlpha = 1.0;
-      ctx.lineWidth = 2.0;
-      const prevComp = ctx.globalCompositeOperation;
-      ctx.globalCompositeOperation = 'lighter';
-      const pos0Str = images[0].imageMetadata.imagePosition || images[0].imagePosition;
+      ctx.globalAlpha = 0.4;
+      ctx.lineWidth = 1.0;
+      const pos0Str = images[0].imageMetadata?.imagePosition || images[0].imagePosition;
       const pos0 = (typeof pos0Str === 'string' ? pos0Str.split('\\').map(Number) : pos0Str) as number[];
       // Parse IOP to handle rotated datasets correctly
-      const iopVal = images[0].imageMetadata.imageOrientation || images[0].imageOrientation;
+      const iopVal = images[0].imageMetadata?.imageOrientation || images[0].imageOrientation;
       const iop = ((): number[] => {
         if (Array.isArray(iopVal)) return iopVal.map(Number);
         if (typeof iopVal === 'string') return iopVal.split('\\').map(Number);
@@ -195,28 +192,30 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
         const y = (dot(d, rowDir) / spacing.row) - 0.5; // row index (centered)
         return { x, y };
       };
-      const zIndexForContours = Number.isFinite(currentZIndex as number) ? (currentZIndex as number) : Math.round(depth / 2);
-      // Derive actual Z for tolerant matching
-      const curZFromMeta = (() => {
-        const i = Math.min(depth - 1, Math.max(0, zIndexForContours));
-        const im = images[i];
-        const p = (im?.imageMetadata?.imagePosition || im?.imagePosition) as any;
-        if (p) {
-          const arr = Array.isArray(p) ? p.map(Number) : (typeof p === 'string' ? p.split('\\').map(Number) : []);
-          if (arr.length >= 3 && isFinite(arr[2])) return arr[2];
-        }
-        return pos0[2] + i * spacing.z;
-      })();
-      const zTol = Math.max(Math.abs(spacing.z) * 1.1, 1.2);
+      // Helper to convert world Z to slice index
+      const worldZToSliceIndex = (worldZ: number): number => {
+        // Find which slice this Z corresponds to
+        const relZ = worldZ - pos0[2];
+        const sliceIdx = Math.round(relZ / spacing.z);
+        return Math.min(depth - 1, Math.max(0, sliceIdx));
+      };
+      
       for (const s of rtStructures.structures) {
         if (!s?.contours?.length) continue;
+        
+        // Check visibility - skip if structure is hidden
+        const isVisible = structureVisibility?.get(s.id) ?? true;
+        if (!isVisible) continue;
+        
         const color = s.color || [0, 255, 0];
         ctx.strokeStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
         for (const c of s.contours) {
           if (typeof c.slicePosition !== 'number' || !c.points || c.points.length < 6) continue;
-          // Tolerant Z matching
-          if (Math.abs(c.slicePosition - curZFromMeta) > zTol) continue;
-          if (orientation === 'sagittal') {
+          
+          // Calculate which slice index this contour belongs to
+          const contourSliceIdx = worldZToSliceIndex(c.slicePosition);
+          if (orientation === 'coronal') {
+            // Apply sagittal logic to coronal
             const x0 = sliceIndex; // fixed column index in axial space
             const ys: number[] = [];
             for (let i = 0; i < c.points.length; i += 3) {
@@ -229,16 +228,15 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
               }
             }
             ys.sort((a, b) => a - b);
+            // Draw at the correct Y position for this contour's Z slice
+            const yA = offY + Math.round((((depth - 1 - contourSliceIdx) + 0.5) / dimY) * drawH);
             for (let k = 0; k + 1 < ys.length; k += 2) {
-              const yA = offY + Math.round((((depth - 1 - zIndexForContours) + 0.5) / dimY) * drawH);
               const xA = offX + Math.round(((ys[k] + 0.5) / height) * drawW);
               const xB = offX + Math.round(((ys[k + 1] + 0.5) / height) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
-              ctx.fillStyle = '#ff0';
-              ctx.beginPath(); ctx.arc(xA, yA, 1.8, 0, Math.PI * 2); ctx.fill();
-              ctx.beginPath(); ctx.arc(xB, yA, 1.8, 0, Math.PI * 2); ctx.fill();
             }
           } else {
+            // Apply coronal logic to sagittal
             const y0 = sliceIndex; // fixed row index in axial space
             const xs: number[] = [];
             for (let i = 0; i < c.points.length; i += 3) {
@@ -251,19 +249,16 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
               }
             }
             xs.sort((a, b) => a - b);
+            // Draw at the correct Y position for this contour's Z slice
+            const yA = offY + Math.round((((depth - 1 - contourSliceIdx) + 0.5) / dimY) * drawH);
             for (let k = 0; k + 1 < xs.length; k += 2) {
-              const yA = offY + Math.round((((depth - 1 - zIndexForContours) + 0.5) / dimY) * drawH);
               const xA = offX + Math.round(((xs[k] + 0.5) / width) * drawW);
               const xB = offX + Math.round(((xs[k + 1] + 0.5) / width) * drawW);
               ctx.beginPath(); ctx.moveTo(xA, yA); ctx.lineTo(xB, yA); ctx.stroke();
-              ctx.fillStyle = '#ff0';
-              ctx.beginPath(); ctx.arc(xA, yA, 1.8, 0, Math.PI * 2); ctx.fill();
-              ctx.beginPath(); ctx.arc(xB, yA, 1.8, 0, Math.PI * 2); ctx.fill();
             }
           }
         }
       }
-      ctx.globalCompositeOperation = prevComp;
       ctx.restore();
     }
 
@@ -275,7 +270,7 @@ export const MPRFloating: React.FC<MPRFloatingProps> = ({
     }
   };
 
-  useEffect(() => { reconstruct(); }, [images, orientation, sliceIndex, windowWidth, windowCenter, crosshairPos.x, crosshairPos.y]);
+  useEffect(() => { reconstruct(); }, [images, orientation, sliceIndex, windowWidth, windowCenter, crosshairPos.x, crosshairPos.y, rtStructures, structureVisibility]);
 
   return (
     <canvas ref={canvasRef} className="mpr-canvas" width={384} height={384} onClick={onClick} />

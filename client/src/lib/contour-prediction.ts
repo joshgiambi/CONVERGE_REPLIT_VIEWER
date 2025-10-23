@@ -871,8 +871,10 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
       finalResult.predictedContour.length > 0) {
     
     try {
-      const snapToEdges = !usedDualNeighbor;
-      const geometryWeight = usedDualNeighbor ? 0.7 : 0.5;
+      // ALWAYS snap to edges for better anatomical accuracy
+      const snapToEdges = true;
+      // For dual-neighbor, trust geometry more but still use image data
+      const geometryWeight = usedDualNeighbor ? 0.6 : 0.4;
       const imageWeight = 1 - geometryWeight;
 
       const { refinedContour, confidence: imageConfidence, metadata: refinementMetadata } = 
@@ -885,8 +887,8 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
           {
             snapToEdges,
             validateSimilarity: imageData.referenceSlices && imageData.referenceSlices.length > 0,
-            searchRadius: snapToEdges ? 10 : 6,
-            edgeThreshold: snapToEdges ? 50 : 65
+            searchRadius: 15,
+            edgeThreshold: 40
           }
         );
       
@@ -907,7 +909,6 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
       };
       
     } catch (error) {
-      console.warn('Image refinement failed, using geometric prediction only:', error);
       if (!finalResult.metadata) {
         finalResult.metadata = { method: predictionMode as string, historySize: 0 };
       }

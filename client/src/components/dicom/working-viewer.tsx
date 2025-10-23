@@ -58,15 +58,6 @@ const normalizeSlicePosition = (value: number): number => {
   return Math.round(value * 1000) / 1000;
 };
 
-const createDirectCopyContour = (sourceContour: number[], targetSlice: number): number[] => {
-  if (!Array.isArray(sourceContour) || sourceContour.length < 9) return [];
-  const copied = [...sourceContour];
-  for (let i = 2; i < copied.length; i += 3) {
-    copied[i] = targetSlice;
-  }
-  return copied;
-};
-
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
 const RT_STRUCTURE_DEBUG = false; // Set to true when specifically debugging RT structures
@@ -944,6 +935,15 @@ const skipNextPredictionRef = useRef(false);
   // Missing caches/levels used later in the file
   const imageCacheRef = useRef<Map<string, any>>(new Map());
   const mprCacheRef = useRef<Map<string, any>>(new Map());
+  
+  // Initialize global cache for MPR views - MPRFloating component needs this
+  useEffect(() => {
+    if (!(window as any).__WV_CACHE__) {
+      (window as any).__WV_CACHE__ = imageCacheRef.current;
+      console.log('✅ MPR cache bridge initialized');
+    }
+  }, []);
+  
   const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
     props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
   );
@@ -1977,9 +1977,8 @@ const skipNextPredictionRef = useRef(false);
     if (!img?.pixelData) return null;
     
     try {
-      // Extract pixel data and metadata
       return {
-        pixels: img.pixelData, // Float32Array or Uint16Array
+        pixels: img.pixelData,
         width: img.width || img.columns || 512,
         height: img.height || img.rows || 512,
         rescaleSlope: img.rescaleSlope || 1,
@@ -1988,7 +1987,6 @@ const skipNextPredictionRef = useRef(false);
         windowWidth: img.windowWidth
       };
     } catch (error) {
-      console.warn('Failed to extract image data for prediction:', error);
       return null;
     }
   }, [images]);
@@ -2329,7 +2327,8 @@ const skipNextPredictionRef = useRef(false);
       }
     }
 
-    // Generate single prediction for current slice with optional image refinement
+    // Generate single prediction for current slice
+    // IMPORTANT: Pass both neighbors if available for dual-neighbor interpolation
     const neighborContext = (before || after)
       ? {
           before: before
@@ -2340,9 +2339,11 @@ const skipNextPredictionRef = useRef(false);
             : undefined,
         }
       : undefined;
+    
+    console.log(`🔗 NEIGHBOR CONTEXT: hasBefore=${!!neighborContext?.before}, hasAfter=${!!neighborContext?.after}, beforeSlice=${neighborContext?.before?.slicePosition?.toFixed(1)}, afterSlice=${neighborContext?.after?.slicePosition?.toFixed(1)}`);
 
-    // ALWAYS use 'simple' mode - it's the most reliable and least janky
-    // The sophisticated algorithms (adaptive, trend-based, dual-neighbor) often produce wrong sizes
+    // Always use 'simple' mode - most reliable for basic interpolation
+    // Adaptive and trend-based can produce wrong sizes
     const predictionMode = 'simple';
     
     console.log(`🎯 PREDICTION CALL: reference=${effectiveReference.slicePosition.toFixed(1)}mm, target=${slicePosition.toFixed(1)}mm, mode=${predictionMode}, hasBefore=${!!before}, hasAfter=${!!after}`);
@@ -2357,37 +2358,26 @@ const skipNextPredictionRef = useRef(false);
       neighborContours: neighborContext,
       imageData,
       coordinateTransforms,
-      enableImageRefinement: !!imageData,
+      enableImageRefinement: false, // Disabled - image data not available
       allContours: allContoursMap
     });
     
-    console.log(`📊 PREDICTION METHOD: ${prediction.metadata?.method}, confidence=${prediction.confidence.toFixed(2)}, contourLength=${prediction.predictedContour.length}`);
+    console.log(`📊 PREDICTION RESULT:`, {
+      method: prediction.metadata?.method,
+      confidence: prediction.confidence,
+      contourLength: prediction.predictedContour?.length,
+      hasMetadata: !!prediction.metadata,
+      metadata: prediction.metadata
+    });
     
+    // If prediction failed, skip it - no fallback
     if (!prediction.predictedContour || prediction.predictedContour.length < 9) {
-      const fallbackContour = createDirectCopyContour(referenceSnapshot.contour, slicePosition);
-      if (fallbackContour.length >= 9) {
-        prediction = {
-          predictedContour: fallbackContour,
-          confidence: Math.max(prediction.confidence, 0.2),
-          adjustments: prediction.adjustments ?? {
-            scale: 1,
-            centerShift: { x: 0, y: 0 },
-            deformation: 0
-          },
-          metadata: {
-            ...prediction.metadata,
-            method: `${prediction.metadata?.method ?? "shape"}-fallback`,
-            historySize: historyManager.size(),
-            fallbackApplied: true,
-            notes: "Applied direct contour copy fallback."
-          }
-        };
-      } else if (!hasContourOnSlice) {
-        // Only bail out if current slice doesn't have a contour
-        // If it does have a contour, continue to gap prediction logic
+      console.warn(`⚠️ PREDICTION FAILED: contourLength=${prediction.predictedContour?.length}, confidence=${prediction.confidence}`);
+      if (!hasContourOnSlice) {
         updateActivePredictions(new Map());
         return;
       }
+      // If current slice has a contour, continue to gap prediction logic
     }
     
     // Store prediction for current slice (only if it doesn't already have a contour)
@@ -2423,17 +2413,24 @@ const skipNextPredictionRef = useRef(false);
       // Generate predictions for all gap slices
       if (gapSlices.length > 0) {
         for (const gapSlice of gapSlices) {
-          // Use simple mode for all predictions - most reliable
+          // For each gap slice, use the CLOSEST contour as reference
+          const distToBefore = Math.abs(gapSlice - before.slicePosition);
+          const distToAfter = Math.abs(gapSlice - after.slicePosition);
+          const closestReference = distToBefore < distToAfter ? before : after;
+          
+          console.log(`🎯 GAP PREDICTION: slice=${gapSlice.toFixed(1)}mm, before=${before.slicePosition.toFixed(1)}mm (dist=${distToBefore.toFixed(1)}), after=${after.slicePosition.toFixed(1)}mm (dist=${distToAfter.toFixed(1)}), using ${closestReference === before ? 'BEFORE' : 'AFTER'}`);
+          
+          // Use simple mode for gap predictions - most reliable
           const gapPrediction = predictNextSliceContour({
-            currentContour: effectiveReference.contour,
-            currentSlicePosition: effectiveReference.slicePosition,
+            currentContour: closestReference.contour,
+            currentSlicePosition: closestReference.slicePosition,
             targetSlicePosition: gapSlice,
             predictionMode: 'simple',
             confidenceThreshold: 0.2,
             historyManager,
             neighborContours: neighborContext,
-            imageData: undefined, // Skip image refinement for batch predictions for performance
-            coordinateTransforms,
+            imageData: undefined,
+            coordinateTransforms: undefined,
             enableImageRefinement: false,
             allContours: allContoursMap
           });
@@ -2453,15 +2450,24 @@ const skipNextPredictionRef = useRef(false);
       
       // Get prediction method info for toast
       const mainPrediction = predictions.get(normalizeSlicePosition(slicePosition));
+      
+      console.log(`📊 FINAL PREDICTION:`, {
+        hasPrediction: !!mainPrediction,
+        method: mainPrediction?.metadata?.method,
+        confidence: mainPrediction?.confidence,
+        contourLength: mainPrediction?.predictedContour?.length,
+        fullMetadata: mainPrediction?.metadata
+      });
+      
       const method = mainPrediction?.metadata?.method || 'unknown';
       const confidence = mainPrediction?.confidence || 0;
       const neighborInfo = before && after ? '↕️ Between' : before ? '↑️ Above' : after ? '↓️ Below' : '❓ Single';
       
       // Notify user of successful prediction with detailed info
       toast({
-        title: `Prediction: ${method}`,
-        description: `Slice ${slicePosition.toFixed(1)}mm | ${neighborInfo} | Confidence: ${(confidence * 100).toFixed(0)}% | Before: ${before?.slicePosition.toFixed(1) || 'none'}mm | After: ${after?.slicePosition.toFixed(1) || 'none'}mm`,
-        duration: 3000,
+        title: `${method}`,
+        description: `${neighborInfo} | Conf: ${(confidence * 100).toFixed(0)}%`,
+        duration: 2000,
       });
     } else {
       updateActivePredictions(new Map());
@@ -4622,7 +4628,7 @@ const skipNextPredictionRef = useRef(false);
             metadataMap.set(meta.sopInstanceUID, meta);
           });
           
-          // Merge batch metadata with series images
+          // Merge batch metadata with series images (including spatial metadata for MPR)
           imagesWithMetadata = seriesImages.map((img: any) => {
             const metadata = metadataMap.get(img.sopInstanceUID);
             if (metadata && !metadata.error) {
@@ -4631,6 +4637,14 @@ const skipNextPredictionRef = useRef(false);
                 parsedSliceLocation: metadata.parsedSliceLocation,
                 parsedZPosition: metadata.parsedZPosition,
                 parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
+                imagePosition: metadata.imagePosition,
+                imageOrientation: metadata.imageOrientation,
+                pixelSpacing: metadata.pixelSpacing,
+                imageMetadata: {
+                  imagePosition: metadata.imagePosition,
+                  imageOrientation: metadata.imageOrientation,
+                  pixelSpacing: metadata.pixelSpacing,
+                },
               };
             } else {
               return {
@@ -7803,32 +7817,7 @@ const skipNextPredictionRef = useRef(false);
 
           {/* Floating MPR windows for sagittal and coronal views */}
           {orientation === 'axial' && images.length > 0 && mprVisible && (
-            <div className="absolute right-4 top-16 flex flex-col gap-3">
-              {/* Sagittal view */}
-              <div className="mpr-window">
-                <div className="mpr-window-header flex justify-between items-center">
-                  <span>Sagittal</span>
-                </div>
-                <div className="mpr-canvas-container">
-                  <MPRFloating
-                    images={images}
-                    orientation="sagittal"
-                    sliceIndex={Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1))}
-                    windowWidth={currentWindowLevel.width}
-                    windowCenter={currentWindowLevel.center}
-                    crosshairPos={crosshairPos}
-                    rtStructures={rtStructures}
-                    currentZIndex={currentIndex}
-                    onClick={handleSagittalClick}
-                  />
-                  {isLoadingMPR && (
-                    <div className="mpr-loading">
-                      <div className="mpr-loading-spinner" />
-                    </div>
-                  )}
-                </div>
-              </div>
-              
+            <div className="absolute right-4 top-16 flex flex-col gap-3" style={{ zIndex: 50 }}>
               {/* Coronal view */}
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
@@ -7843,8 +7832,35 @@ const skipNextPredictionRef = useRef(false);
                     windowCenter={currentWindowLevel.center}
                     crosshairPos={crosshairPos}
                     rtStructures={rtStructures}
+                    structureVisibility={structureVisibility}
                     currentZIndex={currentIndex}
                     onClick={handleCoronalClick}
+                  />
+                  {isLoadingMPR && (
+                    <div className="mpr-loading">
+                      <div className="mpr-loading-spinner" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Sagittal view */}
+              <div className="mpr-window">
+                <div className="mpr-window-header flex justify-between items-center">
+                  <span>Sagittal</span>
+                </div>
+                <div className="mpr-canvas-container">
+                  <MPRFloating
+                    images={images}
+                    orientation="sagittal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.x, (images[0]?.columns || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    structureVisibility={structureVisibility}
+                    currentZIndex={currentIndex}
+                    onClick={handleSagittalClick}
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">

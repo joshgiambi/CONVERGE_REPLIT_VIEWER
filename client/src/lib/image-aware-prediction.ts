@@ -5,6 +5,36 @@
  * by analyzing tissue characteristics, edge gradients, and texture patterns
  */
 
+/**
+ * Smooth contour in-place using Laplacian smoothing
+ */
+function smoothContourInPlace(points: number[], iterations = 1, smoothing = 0.2): void {
+  if (points.length < 9) return; // Need at least 3 points
+  
+  for (let iter = 0; iter < iterations; iter++) {
+    const numPoints = points.length / 3;
+    const smoothedX: number[] = [];
+    const smoothedY: number[] = [];
+    
+    for (let i = 0; i < numPoints; i++) {
+      const prevIdx = (i === 0 ? numPoints - 1 : i - 1) * 3;
+      const currIdx = i * 3;
+      const nextIdx = ((i + 1) % numPoints) * 3;
+      
+      const avgX = (points[prevIdx] + points[currIdx] + points[nextIdx]) / 3;
+      const avgY = (points[prevIdx + 1] + points[currIdx + 1] + points[nextIdx + 1]) / 3;
+      
+      smoothedX.push(points[currIdx] + (avgX - points[currIdx]) * smoothing);
+      smoothedY.push(points[currIdx + 1] + (avgY - points[currIdx + 1]) * smoothing);
+    }
+    
+    for (let i = 0; i < numPoints; i++) {
+      points[i * 3] = smoothedX[i];
+      points[i * 3 + 1] = smoothedY[i];
+    }
+  }
+}
+
 export interface ImageData {
   pixels: Float32Array | Uint16Array | Int16Array;
   width: number;
@@ -483,6 +513,11 @@ export function refineContourWithImageData(
       searchRadius,
       edgeThreshold
     );
+    
+    // Apply light smoothing to reduce jaggedness from edge snapping
+    // Each point independently snapped can create jagged contours
+    smoothContourInPlace(refinedContour, 2, 0.15);
+    
     edgeSnapped = true;
     confidence += 0.2; // Boost confidence
   }
