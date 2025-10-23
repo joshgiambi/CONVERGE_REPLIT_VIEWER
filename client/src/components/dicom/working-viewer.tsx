@@ -8,6 +8,7 @@ import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
 import PenToolV2 from "./pen-tool-v2";
+import { InteractiveSegmentTool } from "./interactive-segment-tool";
 
 import { MeasurementTool } from "./measurement-tool";
 import { MPRFloating } from './mpr-floating';
@@ -7312,7 +7313,42 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
                 imageMetadata={imageMetadata}
               />
             )}
-            
+
+          {/* Interactive Tumor Segmentation Tool */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "interactive-tumor" &&
+            selectedForEdit && (
+              <InteractiveSegmentTool
+                canvasRef={canvasRef}
+                currentSliceIndex={currentIndex}
+                totalSlices={images.length}
+                imageVolume={undefined} // TODO: Extract 3D volume from images array
+                voxelSpacing={[
+                  parseFloat(imageMetadata?.spacingBetweenSlices || imageMetadata?.sliceThickness || "1.0"),
+                  parseFloat(imageMetadata?.pixelSpacing?.[0] || "1.0"),
+                  parseFloat(imageMetadata?.pixelSpacing?.[1] || "1.0")
+                ]}
+                selectedStructureId={selectedForEdit.roiNumber}
+                selectedStructureName={selectedForEdit.structureName}
+                selectedStructureColor={`rgb(${selectedForEdit.color.join(',')})`}
+                onContourGenerated={(mask3D: number[][][], structureId: number) => {
+                  // TODO: Convert 3D mask to contours for each slice
+                  console.log('Interactive segmentation generated:', mask3D.length, 'slices');
+                  // This would need to:
+                  // 1. Iterate through each slice of mask3D
+                  // 2. Convert binary mask to contour points
+                  // 3. Call handleContourUpdate for each slice
+                }}
+                onClose={() => {
+                  // Deactivate the tool
+                  if (brushToolState) {
+                    brushToolState.isActive = false;
+                  }
+                }}
+                isActive={brushToolState.isActive}
+              />
+            )}
+
           {/* Measurement Tool overlay */}
           {isMeasurementToolActive && (
             <MeasurementTool
