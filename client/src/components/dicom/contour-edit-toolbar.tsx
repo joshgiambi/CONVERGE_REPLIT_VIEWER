@@ -714,7 +714,8 @@ export function ContourEditToolbar({
     { id: 'brush', icon: Brush, label: 'Brush' },
     { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
-    { id: 'margin', icon: Maximize2, label: 'Margin' }
+    { id: 'margin', icon: Maximize2, label: 'Margin' },
+    { id: 'interactive-tumor', icon: Sparkles, label: 'AI Tumor' }
   ];
 
   // Render inline settings on the bottom toolbar row
@@ -945,6 +946,18 @@ export function ContourEditToolbar({
       );
     }
 
+    if (activeTool === 'interactive-tumor') {
+      return (
+        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
+          <Sparkles className="w-3 h-3 text-purple-400" />
+          <span className="text-[11px] text-gray-300">Draw scribbles on 3-5 key slices</span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">
+            AI 3D
+          </Badge>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -990,6 +1003,26 @@ export function ContourEditToolbar({
             <li>Uses the same size settings as the brush tool</li>
             <li>Hold Shift while using brush tool for quick erase mode</li>
           </ul>
+        </div>
+      );
+    } else if (activeTool === 'interactive-tumor') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            Interactive AI Tumor Segmentation
+          </h3>
+          <ul className="text-xs text-gray-300 space-y-1 list-disc list-inside">
+            <li>Draw scribbles on tumor in 3-5 key slices</li>
+            <li>AI generates full 3D segmentation automatically</li>
+            <li>Use "Draw" mode for tumor, "Erase" for background</li>
+            <li>System recommends which slice to annotate next</li>
+            <li>Preview and refine before accepting</li>
+            <li>Much faster than slice-by-slice contouring</li>
+          </ul>
+          <div className="text-xs text-yellow-300 bg-yellow-900/20 p-2 rounded border border-yellow-500/30 mt-2">
+            ⚠️ Requires nnInteractive service to be running
+          </div>
         </div>
       );
     } else if (activeTool === 'margin') {
