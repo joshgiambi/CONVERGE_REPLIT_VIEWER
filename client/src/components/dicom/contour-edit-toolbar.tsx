@@ -48,6 +48,7 @@ import { log } from '@/lib/log';
 import { useToast } from '@/hooks/use-toast';
 import { SmartNthSettingsDialog } from './smart-nth-settings-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { segvolClient } from '@/lib/segvol-client';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -59,7 +60,14 @@ interface ContourEditToolbarProps {
   onClose: () => void;
   onStructureNameChange: (name: string) => void;
   onStructureColorChange: (color: string) => void;
-  onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean; predictionEnabled?: boolean; smartBrushEnabled?: boolean }) => void;
+  onToolChange?: (toolState: {
+    tool: string | null;
+    brushSize: number;
+    isActive: boolean;
+    predictionEnabled?: boolean;
+    smartBrushEnabled?: boolean;
+    predictionMode?: 'fast' | 'balanced' | 'ai' | 'smart';
+  }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
   onAutoZoomSettingsChange?: (settings: {
@@ -115,6 +123,8 @@ export function ContourEditToolbar({
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
+  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'ai' | 'smart'>('balanced'); // Prediction algorithm mode
+  const [segvolAvailable, setSegvolAvailable] = useState<boolean | null>(null); // SegVol service availability
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
@@ -153,6 +163,47 @@ export function ContourEditToolbar({
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isVisible, activePredictions, onContourUpdate, selectedStructure]);
+
+  // Check SegVol availability on mount and when prediction is enabled
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkSegVol = async () => {
+      try {
+        const health = await segvolClient.checkHealth();
+        if (!cancelled) {
+          setSegvolAvailable(health.segvol_available);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSegvolAvailable(false);
+        }
+      }
+    };
+
+    if (isPredictionEnabled) {
+      checkSegVol();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPredictionEnabled]);
+
+  // Notify parent when prediction mode changes
+  useEffect(() => {
+    if (onToolChange && activeTool === 'brush' && isPredictionEnabled) {
+      onToolChange({
+        tool: 'brush',
+        brushSize: brushThickness[0],
+        isActive: true,
+        smartBrushEnabled: smartBrush,
+        predictionEnabled: isPredictionEnabled,
+        predictionMode: predictionMode
+      });
+    }
+  }, [predictionMode, onToolChange, activeTool, isPredictionEnabled, brushThickness, smartBrush]);
+
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [showSmartNthDialog, setShowSmartNthDialog] = useState(false);
   const [totalSlicesForSmartNth, setTotalSlicesForSmartNth] = useState(0);
@@ -245,7 +296,8 @@ export function ContourEditToolbar({
         tool: newTool,
         brushSize: brushThickness[0],
         isActive: newTool !== null,
-        predictionEnabled: isPredictionEnabled
+        predictionEnabled: isPredictionEnabled,
+        predictionMode: predictionMode
       };
       log.debug('TOOLBAR: Sending tool state to parent', 'toolbar');
       onToolChange(toolState);
@@ -678,7 +730,8 @@ export function ContourEditToolbar({
                       tool: 'brush',
                       brushSize: value[0],
                       isActive: true,
-                      predictionEnabled: isPredictionEnabled
+                      predictionEnabled: isPredictionEnabled,
+                      predictionMode: predictionMode
                     });
                   }
                 }}
@@ -704,7 +757,8 @@ export function ContourEditToolbar({
                     brushSize: brushThickness[0],
                     isActive: true,
                     smartBrushEnabled: enabled,
-                    predictionEnabled: isPredictionEnabled
+                    predictionEnabled: isPredictionEnabled,
+                    predictionMode: predictionMode
                   });
                 }
               }}
@@ -726,15 +780,65 @@ export function ContourEditToolbar({
                     brushSize: brushThickness[0],
                     isActive: true,
                     smartBrushEnabled: smartBrush,
-                    predictionEnabled: enabled
+                    predictionEnabled: enabled,
+                    predictionMode: predictionMode
                   });
                 }
               }}
-              title="AI Predict next slice"
+              title="Toggle next slice prediction"
               className={`h-7 px-2 rounded-md border ${isPredictionEnabled ? 'border-purple-400/60 bg-purple-900/30 text-purple-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
             >
               <Sparkles className="w-3.5 h-3.5" />
             </Button>
+
+            {/* Prediction Mode Selector */}
+            {isPredictionEnabled && (
+              <Select value={predictionMode} onValueChange={(value: any) => setPredictionMode(value)}>
+                <SelectTrigger className="h-7 w-[110px] text-[11px] bg-white/5 border-white/20 text-gray-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-white/20">
+                  <SelectItem value="fast" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-3 h-3 text-blue-400" />
+                      <span>Fast</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400/40 text-blue-300">~10ms</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="balanced" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Workflow className="w-3 h-3 text-green-400" />
+                      <span>Balanced</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-green-400/40 text-green-300">~15ms</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="ai"
+                    disabled={segvolAvailable === false}
+                    className="text-[11px]"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-purple-400" />
+                      <span>AI (SegVol)</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">~1s</Badge>
+                      {segvolAvailable === false && (
+                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
+                      )}
+                      {segvolAvailable === null && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="smart" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Grid3x3 className="w-3 h-3 text-orange-400" />
+                      <span>Smart</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-orange-400/40 text-orange-300">Auto</Badge>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
 
             <Button
               variant="ghost"

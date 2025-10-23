@@ -2196,12 +2196,37 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       }
     });
     
+    // Map UI prediction mode to algorithm mode
+    const uiMode = brushToolState?.predictionMode || 'balanced';
+    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'segvol' = 'adaptive';
+
+    switch (uiMode) {
+      case 'fast':
+        // Use simple/adaptive based on history
+        algorithmMode = 'adaptive';
+        break;
+      case 'balanced':
+        // Use trend-based if enough history, else adaptive
+        algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
+        break;
+      case 'ai':
+        // Use SegVol AI model
+        algorithmMode = 'segvol';
+        break;
+      case 'smart':
+        // Auto-select: Try SegVol first, fall back if unavailable
+        algorithmMode = 'segvol'; // Built-in fallback in prediction algorithm
+        break;
+      default:
+        algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
+    }
+
     // Generate single prediction for current slice with optional image refinement
     let prediction = await predictNextSliceContour({
       currentContour: referenceSnapshot.contour,
       currentSlicePosition: referenceSnapshot.slicePosition,
       targetSlicePosition: slicePosition,
-      predictionMode: historyManager.size() >= 2 ? 'trend-based' : 'adaptive',
+      predictionMode: algorithmMode,
       confidenceThreshold: 0.2,
       historyManager,
       imageData,
