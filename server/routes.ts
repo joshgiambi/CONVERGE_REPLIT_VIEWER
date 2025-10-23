@@ -27,6 +27,9 @@ import {
 import { fusionManifestService } from './fusion/manifest-service';
 import { FuseboxVolumeResampler } from './fusion/resampler.ts';
 import { loadDicomMetadata } from './fusion/dicom-metadata.ts';
+import segvolRouter from './segvol-api';
+import mem3dRouter from './mem3d-api';
+import nninteractiveRouter from './nninteractive-api';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -6112,6 +6115,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to get storage overview" });
     }
   });
+
+  // Register SegVol API routes
+  app.use('/api', segvolRouter);
+
+  // Register Mem3D API routes
+  app.use('/api', mem3dRouter);
+
+  // Register nnInteractive API routes
+  app.use('/api/nninteractive', nninteractiveRouter);
 
   return { close: () => {} } as Server;
 }

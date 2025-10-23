@@ -7,9 +7,9 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Brush, 
-  Pen, 
+import {
+  Brush,
+  Pen,
   Scissors,
   Settings,
   X,
@@ -39,7 +39,8 @@ import {
   Zap,
   Keyboard,
   SplitSquareHorizontal,
-  Info
+  Info,
+  Brain
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -48,6 +49,8 @@ import { log } from '@/lib/log';
 import { useToast } from '@/hooks/use-toast';
 import { SmartNthSettingsDialog } from './smart-nth-settings-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { segvolClient } from '@/lib/segvol-client';
+import { mem3dClient } from '@/lib/mem3d-client';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -59,7 +62,14 @@ interface ContourEditToolbarProps {
   onClose: () => void;
   onStructureNameChange: (name: string) => void;
   onStructureColorChange: (color: string) => void;
-  onToolChange?: (toolState: { tool: string | null; brushSize: number; isActive: boolean; predictionEnabled?: boolean; smartBrushEnabled?: boolean }) => void;
+  onToolChange?: (toolState: {
+    tool: string | null;
+    brushSize: number;
+    isActive: boolean;
+    predictionEnabled?: boolean;
+    smartBrushEnabled?: boolean;
+    predictionMode?: 'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart';
+  }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
   onAutoZoomSettingsChange?: (settings: {
@@ -115,6 +125,9 @@ export function ContourEditToolbar({
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
+  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart'>('balanced'); // Prediction algorithm mode
+  const [segvolAvailable, setSegvolAvailable] = useState<boolean | null>(null); // SegVol service availability
+  const [mem3dAvailable, setMem3dAvailable] = useState<boolean | null>(null); // Mem3D service availability
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
@@ -153,6 +166,60 @@ export function ContourEditToolbar({
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isVisible, activePredictions, onContourUpdate, selectedStructure]);
+
+  // Check AI service availability on mount and when prediction is enabled
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkServices = async () => {
+      // Check SegVol
+      try {
+        const segvolHealth = await segvolClient.checkHealth();
+        if (!cancelled) {
+          setSegvolAvailable(segvolHealth.segvol_available);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSegvolAvailable(false);
+        }
+      }
+
+      // Check Mem3D
+      try {
+        const mem3dHealth = await mem3dClient.checkHealth();
+        if (!cancelled) {
+          setMem3dAvailable(mem3dHealth.mem3d_available);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMem3dAvailable(false);
+        }
+      }
+    };
+
+    if (isPredictionEnabled) {
+      checkServices();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPredictionEnabled]);
+
+  // Notify parent when prediction mode changes
+  useEffect(() => {
+    if (onToolChange && activeTool === 'brush' && isPredictionEnabled) {
+      onToolChange({
+        tool: 'brush',
+        brushSize: brushThickness[0],
+        isActive: true,
+        smartBrushEnabled: smartBrush,
+        predictionEnabled: isPredictionEnabled,
+        predictionMode: predictionMode
+      });
+    }
+  }, [predictionMode, onToolChange, activeTool, isPredictionEnabled, brushThickness, smartBrush]);
+
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [showSmartNthDialog, setShowSmartNthDialog] = useState(false);
   const [totalSlicesForSmartNth, setTotalSlicesForSmartNth] = useState(0);
@@ -245,7 +312,8 @@ export function ContourEditToolbar({
         tool: newTool,
         brushSize: brushThickness[0],
         isActive: newTool !== null,
-        predictionEnabled: isPredictionEnabled
+        predictionEnabled: isPredictionEnabled,
+        predictionMode: predictionMode
       };
       log.debug('TOOLBAR: Sending tool state to parent', 'toolbar');
       onToolChange(toolState);
@@ -646,7 +714,8 @@ export function ContourEditToolbar({
     { id: 'brush', icon: Brush, label: 'Brush' },
     { id: 'pen', icon: Pen, label: 'Pen' },
     { id: 'erase', icon: Scissors, label: 'Erase' },
-    { id: 'margin', icon: Maximize2, label: 'Margin' }
+    { id: 'margin', icon: Maximize2, label: 'Margin' },
+    { id: 'interactive-tumor', icon: Sparkles, label: 'AI Tumor' }
   ];
 
   // Render inline settings on the bottom toolbar row
@@ -678,7 +747,8 @@ export function ContourEditToolbar({
                       tool: 'brush',
                       brushSize: value[0],
                       isActive: true,
-                      predictionEnabled: isPredictionEnabled
+                      predictionEnabled: isPredictionEnabled,
+                      predictionMode: predictionMode
                     });
                   }
                 }}
@@ -704,7 +774,8 @@ export function ContourEditToolbar({
                     brushSize: brushThickness[0],
                     isActive: true,
                     smartBrushEnabled: enabled,
-                    predictionEnabled: isPredictionEnabled
+                    predictionEnabled: isPredictionEnabled,
+                    predictionMode: predictionMode
                   });
                 }
               }}
@@ -726,15 +797,82 @@ export function ContourEditToolbar({
                     brushSize: brushThickness[0],
                     isActive: true,
                     smartBrushEnabled: smartBrush,
-                    predictionEnabled: enabled
+                    predictionEnabled: enabled,
+                    predictionMode: predictionMode
                   });
                 }
               }}
-              title="AI Predict next slice"
+              title="Toggle next slice prediction"
               className={`h-7 px-2 rounded-md border ${isPredictionEnabled ? 'border-purple-400/60 bg-purple-900/30 text-purple-200' : 'border-white/20 text-gray-300 hover:bg-white/10'}`}
             >
               <Sparkles className="w-3.5 h-3.5" />
             </Button>
+
+            {/* Prediction Mode Selector */}
+            {isPredictionEnabled && (
+              <Select value={predictionMode} onValueChange={(value: any) => setPredictionMode(value)}>
+                <SelectTrigger className="h-7 w-[120px] text-[11px] bg-white/5 border-white/20 text-gray-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-white/20">
+                  <SelectItem value="fast" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-3 h-3 text-blue-400" />
+                      <span>Fast</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400/40 text-blue-300">~10ms</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="balanced" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Workflow className="w-3 h-3 text-green-400" />
+                      <span>Balanced</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-green-400/40 text-green-300">~15ms</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="mem3d"
+                    disabled={mem3dAvailable === false}
+                    className="text-[11px]"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Brain className="w-3 h-3 text-cyan-400" />
+                      <span>Mem3D</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-cyan-400/40 text-cyan-300">~200ms</Badge>
+                      {mem3dAvailable === false && (
+                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
+                      )}
+                      {mem3dAvailable === null && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="segvol"
+                    disabled={segvolAvailable === false}
+                    className="text-[11px]"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-purple-400" />
+                      <span>SegVol</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">~1s</Badge>
+                      {segvolAvailable === false && (
+                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
+                      )}
+                      {segvolAvailable === null && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="smart" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Grid3x3 className="w-3 h-3 text-orange-400" />
+                      <span>Smart</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-orange-400/40 text-orange-300">Auto</Badge>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
 
             <Button
               variant="ghost"
@@ -808,6 +946,18 @@ export function ContourEditToolbar({
       );
     }
 
+    if (activeTool === 'interactive-tumor') {
+      return (
+        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
+          <Sparkles className="w-3 h-3 text-purple-400" />
+          <span className="text-[11px] text-gray-300">Draw scribbles on 3-5 key slices</span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">
+            AI 3D
+          </Badge>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -853,6 +1003,26 @@ export function ContourEditToolbar({
             <li>Uses the same size settings as the brush tool</li>
             <li>Hold Shift while using brush tool for quick erase mode</li>
           </ul>
+        </div>
+      );
+    } else if (activeTool === 'interactive-tumor') {
+      infoContent = (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            Interactive AI Tumor Segmentation
+          </h3>
+          <ul className="text-xs text-gray-300 space-y-1 list-disc list-inside">
+            <li>Draw scribbles on tumor in 3-5 key slices</li>
+            <li>AI generates full 3D segmentation automatically</li>
+            <li>Use "Draw" mode for tumor, "Erase" for background</li>
+            <li>System recommends which slice to annotate next</li>
+            <li>Preview and refine before accepting</li>
+            <li>Much faster than slice-by-slice contouring</li>
+          </ul>
+          <div className="text-xs text-yellow-300 bg-yellow-900/20 p-2 rounded border border-yellow-500/30 mt-2">
+            ⚠️ Requires nnInteractive service to be running
+          </div>
         </div>
       );
     } else if (activeTool === 'margin') {

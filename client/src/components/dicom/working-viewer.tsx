@@ -58,6 +58,15 @@ const normalizeSlicePosition = (value: number): number => {
   return Math.round(value * 1000) / 1000;
 };
 
+const createDirectCopyContour = (sourceContour: number[], targetSlice: number): number[] => {
+  if (!Array.isArray(sourceContour) || sourceContour.length < 9) return [];
+  const copied = [...sourceContour];
+  for (let i = 2; i < copied.length; i += 3) {
+    copied[i] = targetSlice;
+  }
+  return copied;
+};
+
 // Debug flags - more granular control over logging
 const DEBUG = false; // TEMP: disabled permanently - console spam was causing performance issues
 const RT_STRUCTURE_DEBUG = false; // Set to true when specifically debugging RT structures
@@ -241,13 +250,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       onActivePredictionsChange(predictions);
     }
   }, [onActivePredictionsChange]);
-const predictionHistoryManagerRef = useRef<Map<number, PredictionHistoryManager>>(new Map()); // One per structure
+  const predictionHistoryManagerRef = useRef<Map<number, PredictionHistoryManager>>(new Map()); // One per structure
 const [propagationMode, setPropagationMode] = useState<PropagationMode>('moderate');
-const lastPredictionSignatureRef = useRef<string | null>(null);
-const lastPredictionTimestampRef = useRef<number>(0);
-const lastStructureHashRef = useRef<number>(0); // Track structure changes for cache invalidation
+const lastPredictionSliceRef = useRef<number | null>(null);
 const lastViewedContourSliceRef = useRef<number | null>(null);
-const skipNextPredictionRef = useRef(false);
   const [predictionTrigger, setPredictionTrigger] = useState(0); // Force update counter
   
   // Smooth animation state - using clean animation module
@@ -935,15 +941,6 @@ const skipNextPredictionRef = useRef(false);
   // Missing caches/levels used later in the file
   const imageCacheRef = useRef<Map<string, any>>(new Map());
   const mprCacheRef = useRef<Map<string, any>>(new Map());
-  
-  // Initialize global cache for MPR views - MPRFloating component needs this
-  useEffect(() => {
-    if (!(window as any).__WV_CACHE__) {
-      (window as any).__WV_CACHE__ = imageCacheRef.current;
-      console.log('✅ MPR cache bridge initialized');
-    }
-  }, []);
-  
   const [currentWindowLevel, setCurrentWindowLevel] = useState<{ width: number; center: number }>(
     props.windowLevel ? { width: props.windowLevel.window, center: props.windowLevel.level } : { width: 350, center: 40 }
   );
@@ -1977,8 +1974,9 @@ const skipNextPredictionRef = useRef(false);
     if (!img?.pixelData) return null;
     
     try {
+      // Extract pixel data and metadata
       return {
-        pixels: img.pixelData,
+        pixels: img.pixelData, // Float32Array or Uint16Array
         width: img.width || img.columns || 512,
         height: img.height || img.rows || 512,
         rescaleSlope: img.rescaleSlope || 1,
@@ -1987,26 +1985,23 @@ const skipNextPredictionRef = useRef(false);
         windowWidth: img.windowWidth
       };
     } catch (error) {
+      console.warn('Failed to extract image data for prediction:', error);
       return null;
     }
   }, [images]);
 
   // Generate prediction for current slice only (on-demand)
-  const generatePredictionForCurrentSlice = useCallback((structureId: number, slicePosition: number) => {
+  const generatePredictionForCurrentSlice = useCallback(async (structureId: number, slicePosition: number) => {
     if (!rtStructures || !rtStructures.structures) {
       updateActivePredictions(new Map());
       return;
     }
-
+    
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
     if (!structure || structure.contours.length === 0) {
-      console.log(`⚠️ PREDICTION BLOCKED: No structure or no contours - structureId=${structureId}, found=${!!structure}, contours=${structure?.contours?.length || 0}`);
       updateActivePredictions(new Map());
       return;
     }
-    
-    console.log(`✅ PREDICTION START: Structure ${structureId} has ${structure.contours.length} contours`);
-
     
     // Calculate adaptive tolerance based on actual slice spacing
     let sliceSpacing = 2.5; // Default fallback
@@ -2030,37 +2025,12 @@ const skipNextPredictionRef = useRef(false);
       const isClose = dist <= tolerance;
       return isNotPredicted && isClose;
     });
-
-
-    // NOTE: Even if current slice has a contour, we still want to generate predictions
-    // for OTHER gap slices. So we'll continue and skip current slice prediction later.
-
-    const normalizedSignatureSlice = normalizeSlicePosition(slicePosition);
-    const predictionSignature = `${structureId}:${normalizedSignatureSlice}`;
-    const nowTs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     
-    // Only throttle if BOTH signature AND structure state are unchanged
-    // AND we already have predictions visible (if predictions were cleared, we need to regenerate)
-    // This ensures predictions regenerate when structures change (e.g., after deletion)
-    // AND when scrolling back to a slice after predictions were cleared
-    const structureHash = structure?.contours?.length || 0;
-    const hasPredictions = activePredictions.size > 0;
-    const isSameState = 
-      lastPredictionSignatureRef.current === predictionSignature &&
-      lastStructureHashRef.current === structureHash &&
-      hasPredictions && // Don't throttle if predictions were cleared
-      nowTs - lastPredictionTimestampRef.current < 80;
-    
-    if (isSameState) {
-      console.log(`⏱️ PREDICTION THROTTLED: Same state within 80ms - signature=${predictionSignature}, hash=${structureHash}, timeSinceLast=${nowTs - lastPredictionTimestampRef.current}ms`);
-      return; // Skip only if nothing changed AND we have predictions
+    if (hasContourOnSlice) {
+      // Current slice has a contour, don't predict
+      updateActivePredictions(new Map());
+      return;
     }
-    
-    console.log(`🚀 PREDICTION ALLOWED: signature=${predictionSignature}, oldHash=${lastStructureHashRef.current}, newHash=${structureHash}, timeSinceLast=${nowTs - lastPredictionTimestampRef.current}ms`);
-    
-    lastPredictionSignatureRef.current = predictionSignature;
-    lastPredictionTimestampRef.current = nowTs;
-    lastStructureHashRef.current = structureHash;
     
     // Get or create history manager for this structure
     let historyManager = predictionHistoryManagerRef.current.get(structureId);
@@ -2069,26 +2039,16 @@ const skipNextPredictionRef = useRef(false);
       predictionHistoryManagerRef.current.set(structureId, historyManager);
     }
     
-    // Update history with ALL existing contours (including predicted ones)
-    // This allows predictions to chain - using previous predictions as stepping stones
-    // even if they haven't been accepted yet
+    // Update history with ALL existing contours
     historyManager.clear();
-    let addedToHistory = 0;
     structure.contours.forEach((contour: any) => {
-      if (contour.points && contour.points.length >= 9) {
-        // Include ALL contours - both real and predicted
-        // This ensures we always have neighbors for interpolation
+      if (!contour?.isPredicted && contour.points && contour.points.length >= 9) {
         historyManager!.addContour(contour.slicePosition, contour.points);
-        addedToHistory++;
       }
     });
     
-    console.log(`📚 History manager updated: ${addedToHistory} contours added to history`);
-
     // Find nearest contours to use as reference
     const { before, after } = historyManager.getNearestContours(slicePosition);
-    
-    console.log(`🔍 PREDICTION DEBUG: Slice ${slicePosition.toFixed(1)}mm - before=${before?.slicePosition.toFixed(1) || 'none'}, after=${after?.slicePosition.toFixed(1) || 'none'}, hasContourOnSlice=${hasContourOnSlice}`);
     
     // Determine reference contour: prioritize last viewed contoured slice when nearby, otherwise use nearest available
     let referenceSnapshot: ContourSnapshot | null = null;
@@ -2112,62 +2072,37 @@ const skipNextPredictionRef = useRef(false);
     
     const distBefore = before ? Math.abs(slicePosition - before.slicePosition) : Infinity;
     const distAfter = after ? Math.abs(slicePosition - after.slicePosition) : Infinity;
-    const nearestDistance = Math.min(distBefore, distAfter);
-    const hasBothNeighbors = Boolean(before && after);
-    const isBetweenNeighbors = hasBothNeighbors
-      ? (() => {
-          const lower = Math.min(before!.slicePosition, after!.slicePosition);
-          const upper = Math.max(before!.slicePosition, after!.slicePosition);
-          return slicePosition > lower - tolerance && slicePosition < upper + tolerance;
-        })()
-      : false;
-    // Increase max gap for single-neighbor predictions to handle larger gaps
-    // Use 10x slice spacing or minimum 50mm to allow predictions in larger gaps
-    const maxPredictionGap = Math.max(sliceSpacing * 10, 50);
-    
-    console.log(`📏 Distance check: hasBothNeighbors=${hasBothNeighbors}, nearestDistance=${nearestDistance.toFixed(1)}mm, maxGap=${maxPredictionGap.toFixed(1)}mm`);
-
-    // Only bail out if we have NO neighbors at all
-    if (!before && !after) {
-      // No neighbors at all - can't predict
-      console.log(`❌ No neighbors found - cannot predict`);
-      updateActivePredictions(new Map());
-      return;
-    }
-
-    // If we have at least one neighbor, check distance (more permissive)
-    if (!hasBothNeighbors) {
-      if (!Number.isFinite(nearestDistance) || nearestDistance > maxPredictionGap) {
-        console.log(`❌ Single neighbor too far: ${nearestDistance.toFixed(1)}mm > ${maxPredictionGap.toFixed(1)}mm`);
-        updateActivePredictions(new Map());
-        return;
-      }
-      console.log(`⚠️ Single neighbor (extrapolation) within range: ${nearestDistance.toFixed(1)}mm <= ${maxPredictionGap.toFixed(1)}mm`);
-    } else {
-      console.log(`✅ Dual neighbor interpolation available (before & after)`);
-    }
-
-    // SIMPLIFIED: Always use the nearest contour for deterministic predictions
-    // No "last viewed" heuristics - just pure nearest neighbor
     const nearestSnapshot = (() => {
       if (distBefore === Infinity && distAfter === Infinity) return null;
-      // Use strict nearest neighbor
-      if (distBefore < distAfter) return before;
-      if (distAfter < distBefore) return after;
-      // When exactly equal (rare), prefer before for consistency
-      return before;
+      if (distBefore <= distAfter) return before;
+      return after;
     })();
-
-    if (!nearestSnapshot) {
+    const nearestDistance = nearestSnapshot ? Math.abs(slicePosition - nearestSnapshot.slicePosition) : Infinity;
+    const lastViewedDistance = lastViewedSnapshot ? Math.abs(slicePosition - lastViewedSnapshot.slicePosition) : Infinity;
+    const effectiveSpacing = Math.max(sliceSpacing, 0.5);
+    const maxLastViewedDistance = effectiveSpacing * 4;
+    
+    const canUseLastViewed = lastViewedSnapshot && lastViewedDistance <= maxLastViewedDistance;
+    const lastViewedComparable = canUseLastViewed && (
+      !nearestSnapshot ||
+      lastViewedDistance <= nearestDistance - effectiveSpacing * 0.1 ||
+      Math.abs(lastViewedDistance - nearestDistance) <= effectiveSpacing * 0.25
+    );
+    
+    if (lastViewedComparable && lastViewedSnapshot) {
+      referenceSnapshot = lastViewedSnapshot;
+    } else if (nearestSnapshot) {
+      referenceSnapshot = nearestSnapshot;
+    } else if (canUseLastViewed && lastViewedSnapshot) {
+      referenceSnapshot = lastViewedSnapshot;
+    }
+    
+    if (!referenceSnapshot) {
       updateActivePredictions(new Map());
-      lastPredictionSignatureRef.current = null;
-      lastPredictionTimestampRef.current = 0;
       return;
     }
-
-    referenceSnapshot = nearestSnapshot;
     
-    // Try to get image data for image-aware refinement if available
+    // Try to get image data for image-aware refinement
     let imageData: any = undefined;
     let coordinateTransforms: any = undefined;
     
@@ -2248,241 +2183,79 @@ const skipNextPredictionRef = useRef(false);
       }
     }
     
+    if (!imageData || !coordinateTransforms) {
+      console.warn('⚠️ Prediction skipped: required DICOM greyscale data unavailable for slice', slicePosition);
+      updateActivePredictions(new Map());
+      return;
+    }
+    
     const allContoursMap = new Map<number, number[]>();
     structure.contours.forEach((contour: any) => {
-      // Include ALL contours (both real and predicted) for prediction algorithm
-      if (contour?.points && contour.points.length >= 9) {
+      if (contour?.points && contour.points.length >= 9 && !contour.isPredicted) {
         allContoursMap.set(normalizeSlicePosition(contour.slicePosition), contour.points);
       }
     });
+    
+    // Map UI prediction mode to algorithm mode
+    const uiMode = brushToolState?.predictionMode || 'balanced';
+    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'mem3d' | 'segvol' = 'adaptive';
 
-    // PREDICTION CHAINING: Check if there's ANY intermediate contour we can use as a better reference
-    // This allows predictions to build on each other for better multi-slice propagation
-    // Now accepts both real and predicted contours as stepping stones
-    let effectiveReference = referenceSnapshot;
-
-    // Look for the closest intermediate contour (real or predicted) between reference and current slice
-    const direction = Math.sign(slicePosition - referenceSnapshot.slicePosition);
-    if (direction !== 0) {
-      let closestIntermediateDistance = Infinity;
-      let closestIntermediate: { slicePosition: number; contour: number[]; isPredicted: boolean } | null = null;
-
-      console.log(`🔍 CHAINING: Looking for intermediate contours between ${referenceSnapshot.slicePosition.toFixed(1)}mm and ${slicePosition.toFixed(1)}mm (direction: ${direction > 0 ? 'superior' : 'inferior'})`);
-
-      structure.contours.forEach((contour: any) => {
-        if (contour?.points && contour.points.length >= 9) {
-          const contourPos = contour.slicePosition;
-          // Check if this contour is between reference and target
-          const isBetween = direction > 0
-            ? (contourPos > referenceSnapshot.slicePosition && contourPos < slicePosition)
-            : (contourPos < referenceSnapshot.slicePosition && contourPos > slicePosition);
-
-          if (isBetween) {
-            const dist = Math.abs(slicePosition - contourPos);
-            console.log(`   Found intermediate at ${contourPos.toFixed(1)}mm (dist=${dist.toFixed(1)}mm, isPredicted=${contour.isPredicted || false})`);
-
-            // Use ANY contour (predicted or real) as a stepping stone
-            if (dist < closestIntermediateDistance) {
-              closestIntermediateDistance = dist;
-              closestIntermediate = {
-                slicePosition: contourPos,
-                contour: contour.points,
-                isPredicted: contour.isPredicted || false
-              };
-            }
-          }
-        }
-      });
-
-      // If we found a closer intermediate contour (predicted or real), use it as reference
-      if (closestIntermediate && closestIntermediateDistance < Math.abs(slicePosition - referenceSnapshot.slicePosition)) {
-        // Calculate centroid for the intermediate contour
-        let sumX = 0, sumY = 0;
-        const numPoints = closestIntermediate.contour.length / 3;
-        for (let i = 0; i < closestIntermediate.contour.length; i += 3) {
-          sumX += closestIntermediate.contour[i];
-          sumY += closestIntermediate.contour[i + 1];
-        }
-        const centroid = { x: sumX / numPoints, y: sumY / numPoints };
-
-        effectiveReference = {
-          slicePosition: closestIntermediate.slicePosition,
-          contour: closestIntermediate.contour,
-          descriptor: {
-            centroid,
-            area: 0, // Will be calculated by prediction algorithm if needed
-            perimeter: 0,
-            eccentricity: 0,
-            majorAxis: 0,
-            minorAxis: 0,
-            boundingBox: { minX: 0, maxX: 0, minY: 0, maxY: 0 }
-          },
-          timestamp: Date.now()
-        };
-        console.log(`✅ CHAINING: Using intermediate contour at ${closestIntermediate.slicePosition.toFixed(1)}mm instead of ${referenceSnapshot.slicePosition.toFixed(1)}mm (saves ${(Math.abs(slicePosition - referenceSnapshot.slicePosition) - closestIntermediateDistance).toFixed(1)}mm)`);
-      } else if (closestIntermediate) {
-        console.log(`❌ CHAINING: Found intermediate but it's not closer (intermediate dist=${closestIntermediateDistance.toFixed(1)}mm vs reference dist=${Math.abs(slicePosition - referenceSnapshot.slicePosition).toFixed(1)}mm)`);
-      } else {
-        console.log(`❌ CHAINING: No accepted intermediate contours found`);
-      }
+    switch (uiMode) {
+      case 'fast':
+        // Use simple/adaptive based on history
+        algorithmMode = 'adaptive';
+        break;
+      case 'balanced':
+        // Use trend-based if enough history, else adaptive
+        algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
+        break;
+      case 'mem3d':
+        // Use Mem3D memory-augmented AI model (primary AI)
+        algorithmMode = 'mem3d';
+        break;
+      case 'segvol':
+        // Use SegVol volumetric AI model (advanced)
+        algorithmMode = 'segvol';
+        break;
+      case 'smart':
+        // Auto-select: Try Mem3D first (primary AI), has built-in fallback
+        algorithmMode = 'mem3d';
+        break;
+      default:
+        algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
     }
 
-    // Generate single prediction for current slice
-    // IMPORTANT: Pass both neighbors if available for dual-neighbor interpolation
-    const neighborContext = (before || after)
-      ? {
-          before: before
-            ? { contour: before.contour, slicePosition: before.slicePosition }
-            : undefined,
-          after: after
-            ? { contour: after.contour, slicePosition: after.slicePosition }
-            : undefined,
-        }
-      : undefined;
-    
-    console.log(`🔗 NEIGHBOR CONTEXT: hasBefore=${!!neighborContext?.before}, hasAfter=${!!neighborContext?.after}, beforeSlice=${neighborContext?.before?.slicePosition?.toFixed(1)}, afterSlice=${neighborContext?.after?.slicePosition?.toFixed(1)}`);
-
-    // Always use 'simple' mode - most reliable for basic interpolation
-    // Adaptive and trend-based can produce wrong sizes
-    const predictionMode = 'simple';
-    
-    console.log(`🎯 PREDICTION CALL: reference=${effectiveReference.slicePosition.toFixed(1)}mm, target=${slicePosition.toFixed(1)}mm, mode=${predictionMode}, hasBefore=${!!before}, hasAfter=${!!after}`);
-    
-    let prediction = predictNextSliceContour({
-      currentContour: effectiveReference.contour,
-      currentSlicePosition: effectiveReference.slicePosition,
+    // Generate single prediction for current slice with optional image refinement
+    let prediction = await predictNextSliceContour({
+      currentContour: referenceSnapshot.contour,
+      currentSlicePosition: referenceSnapshot.slicePosition,
       targetSlicePosition: slicePosition,
-      predictionMode,
+      predictionMode: algorithmMode,
       confidenceThreshold: 0.2,
       historyManager,
-      neighborContours: neighborContext,
       imageData,
       coordinateTransforms,
-      enableImageRefinement: false, // Disabled - image data not available
+      enableImageRefinement: true,
       allContours: allContoursMap
     });
     
-    console.log(`📊 PREDICTION RESULT:`, {
-      method: prediction.metadata?.method,
-      confidence: prediction.confidence,
-      contourLength: prediction.predictedContour?.length,
-      hasMetadata: !!prediction.metadata,
-      metadata: prediction.metadata
-    });
-    
-    // If prediction failed, skip it - no fallback
     if (!prediction.predictedContour || prediction.predictedContour.length < 9) {
-      console.warn(`⚠️ PREDICTION FAILED: contourLength=${prediction.predictedContour?.length}, confidence=${prediction.confidence}`);
-      if (!hasContourOnSlice) {
-        updateActivePredictions(new Map());
-        return;
-      }
-      // If current slice has a contour, continue to gap prediction logic
+      console.warn('⚠️ Prediction skipped: refinement could not produce a valid contour for slice', slicePosition);
+      updateActivePredictions(new Map());
+      return;
     }
     
-    // Store prediction for current slice (only if it doesn't already have a contour)
+    // Store prediction for current slice
     const normalizedSlice = normalizeSlicePosition(slicePosition);
     const predictions = new Map<number, PredictionResult>();
-    if (!hasContourOnSlice && prediction.predictedContour.length >= 9) {
+    if (prediction.predictedContour.length >= 9) {
       predictions.set(normalizedSlice, prediction);
     }
-
-    // MULTI-SLICE GAP PREDICTION: If current slice is between two contours with a gap,
-    // generate predictions for ALL slices in the gap, not just the current one
-    if (before && after && before !== after && images && images.length > 0) {
-      const lowerSlice = Math.min(before.slicePosition, after.slicePosition);
-      const upperSlice = Math.max(before.slicePosition, after.slicePosition);
-
-      // Check if there's a significant gap (more than 2 slices)
-      const gapSlices: number[] = [];
-      for (let i = 0; i < images.length; i++) {
-        const imgZ = images[i].sliceZ ?? images[i].parsedSliceLocation ?? images[i].parsedZPosition ?? i;
-        const imgSlicePos = typeof imgZ === 'string' ? parseFloat(imgZ) : imgZ;
-
-        // Check if this slice is in the gap and doesn't have a contour
-        if (imgSlicePos > lowerSlice && imgSlicePos < upperSlice) {
-          const hasContour = structure.contours.some((c: any) =>
-            !c.isPredicted && Math.abs(c.slicePosition - imgSlicePos) <= tolerance
-          );
-          if (!hasContour && imgSlicePos !== slicePosition) {
-            gapSlices.push(normalizeSlicePosition(imgSlicePos));
-          }
-        }
-      }
-
-      // Generate predictions for all gap slices
-      if (gapSlices.length > 0) {
-        for (const gapSlice of gapSlices) {
-          // For each gap slice, use the CLOSEST contour as reference
-          const distToBefore = Math.abs(gapSlice - before.slicePosition);
-          const distToAfter = Math.abs(gapSlice - after.slicePosition);
-          const closestReference = distToBefore < distToAfter ? before : after;
-          
-          console.log(`🎯 GAP PREDICTION: slice=${gapSlice.toFixed(1)}mm, before=${before.slicePosition.toFixed(1)}mm (dist=${distToBefore.toFixed(1)}), after=${after.slicePosition.toFixed(1)}mm (dist=${distToAfter.toFixed(1)}), using ${closestReference === before ? 'BEFORE' : 'AFTER'}`);
-          
-          // Use simple mode for gap predictions - most reliable
-          const gapPrediction = predictNextSliceContour({
-            currentContour: closestReference.contour,
-            currentSlicePosition: closestReference.slicePosition,
-            targetSlicePosition: gapSlice,
-            predictionMode: 'simple',
-            confidenceThreshold: 0.2,
-            historyManager,
-            neighborContours: neighborContext,
-            imageData: undefined,
-            coordinateTransforms: undefined,
-            enableImageRefinement: false,
-            allContours: allContoursMap
-          });
-
-          if (gapPrediction.predictedContour && gapPrediction.predictedContour.length >= 9) {
-            predictions.set(gapSlice, gapPrediction);
-          }
-        }
-      }
-    }
-
-    console.log(`🎯 PREDICTION RESULT: Generated ${predictions.size} prediction(s) for slice ${slicePosition.toFixed(1)}mm`, Array.from(predictions.keys()).map(k => k.toFixed(1)));
     
-    if (predictions.size > 0) {
-      updateActivePredictions(predictions);
-      scheduleRender();
-      
-      // Get prediction method info for toast
-      const mainPrediction = predictions.get(normalizeSlicePosition(slicePosition));
-      
-      console.log(`📊 FINAL PREDICTION:`, {
-        hasPrediction: !!mainPrediction,
-        method: mainPrediction?.metadata?.method,
-        confidence: mainPrediction?.confidence,
-        contourLength: mainPrediction?.predictedContour?.length,
-        fullMetadata: mainPrediction?.metadata
-      });
-      
-      const method = mainPrediction?.metadata?.method || 'unknown';
-      const confidence = mainPrediction?.confidence || 0;
-      const neighborInfo = before && after ? '↕️ Between' : before ? '↑️ Above' : after ? '↓️ Below' : '❓ Single';
-      
-      // Notify user of successful prediction with detailed info
-      toast({
-        title: `${method}`,
-        description: `${neighborInfo} | Conf: ${(confidence * 100).toFixed(0)}%`,
-        duration: 2000,
-      });
-    } else {
-      updateActivePredictions(new Map());
-      
-      // Notify user that no predictions could be generated
-      if (before || after) {
-        const neighborInfo = `Before: ${before?.slicePosition.toFixed(1) || 'none'}mm | After: ${after?.slicePosition.toFixed(1) || 'none'}mm`;
-        toast({
-          title: "No predictions",
-          description: `Slice ${slicePosition.toFixed(1)}mm | ${neighborInfo} | Check console for details.`,
-          duration: 3000,
-        });
-      }
-    }
-  }, [rtStructures?.structures, scheduleRender, images, imageMetadata, extractImageDataForPrediction, updateActivePredictions, toast]);
+    updateActivePredictions(predictions);
+    
+    scheduleRender();
+  }, [rtStructures?.structures, scheduleRender, images, imageMetadata, extractImageDataForPrediction, updateActivePredictions]);
 
   // Auto-regenerate prediction when slice changes (if prediction enabled)
   useEffect(() => {
@@ -2504,13 +2277,6 @@ const skipNextPredictionRef = useRef(false);
     }
     if (!images || images.length === 0 || !images[currentIndex]) {
       updateActivePredictions(new Map());
-      return;
-    }
-
-    if (skipNextPredictionRef.current) {
-      skipNextPredictionRef.current = false;
-      updateActivePredictions(new Map());
-      setPredictionTrigger(prev => prev + 1);
       return;
     }
     
@@ -2539,7 +2305,6 @@ const skipNextPredictionRef = useRef(false);
     }
     
     // Generate prediction for THIS slice only
-    console.log(`📢 CALLING generatePredictionForCurrentSlice: structureId=${selectedForEdit}, slice=${currentSlicePos.toFixed(1)}mm, predictionEnabled=${brushToolState?.predictionEnabled}`);
     generatePredictionForCurrentSlice(selectedForEdit, currentSlicePos);
   }, [
     currentIndex, 
@@ -2550,38 +2315,6 @@ const skipNextPredictionRef = useRef(false);
     generatePredictionForCurrentSlice,
     predictionTrigger // Manual trigger for forcing updates
   ]);
-
-  // Listen for prediction cache clear events (e.g., after deletion)
-  useEffect(() => {
-    const handleCacheClear = () => {
-      console.log('🔄 Clearing prediction cache after deletion');
-      lastPredictionSignatureRef.current = null;
-      lastPredictionTimestampRef.current = 0;
-      lastStructureHashRef.current = 0;
-      
-      // Regenerate prediction for current slice if enabled
-      if (selectedForEdit && brushToolState?.predictionEnabled && images && images.length > 0) {
-        const rawSlicePos =
-          images[currentIndex]?.sliceZ ??
-          images[currentIndex]?.parsedSliceLocation ??
-          images[currentIndex]?.parsedZPosition ??
-          currentIndex;
-        const parsedSlicePos =
-          typeof rawSlicePos === "string" ? parseFloat(rawSlicePos) : rawSlicePos;
-        const currentSlicePos = normalizeSlicePosition(
-          Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
-        );
-        
-        // Use setTimeout to ensure state has settled
-        setTimeout(() => {
-          generatePredictionForCurrentSlice(selectedForEdit, currentSlicePos);
-        }, 10);
-      }
-    };
-    
-    window.addEventListener('prediction:cache:clear', handleCacheClear);
-    return () => window.removeEventListener('prediction:cache:clear', handleCacheClear);
-  }, [selectedForEdit, brushToolState?.predictionEnabled, currentIndex, images, generatePredictionForCurrentSlice]);
 
   // Handle prediction trigger from brush tool
   const handlePredictionTrigger = async (payload: {
@@ -2614,56 +2347,29 @@ const skipNextPredictionRef = useRef(false);
   
   // Handle accepting prediction(s)
   const handleAcceptPredictions = async (payload: { structureId?: number; slicePosition?: number }) => {
-    console.log('🎯 handleAcceptPredictions called with:', payload);
-    console.log('   activePredictions size:', activePredictions.size);
-    console.log('   activePredictions keys:', Array.from(activePredictions.keys()));
-
-    if (!rtStructures || !rtStructures.structures || activePredictions.size === 0) {
-      console.warn('⚠️ Cannot accept predictions:', {
-        hasRtStructures: !!rtStructures,
-        hasStructuresArray: !!rtStructures?.structures,
-        activePredictionsSize: activePredictions.size
-      });
-      return;
-    }
-
+    if (!rtStructures || !rtStructures.structures || activePredictions.size === 0) return;
+    
     const structureId = payload.structureId || selectedForEdit;
-    if (!structureId) {
-      console.warn('⚠️ No structure ID provided');
-      return;
-    }
-
+    if (!structureId) return;
+    
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
-    if (!structure) {
-      console.warn('⚠️ Structure not found:', structureId);
-      return;
-    }
-
+    if (!structure) return;
+    
     const targetSlice = payload.slicePosition != null && Number.isFinite(payload.slicePosition)
       ? normalizeSlicePosition(payload.slicePosition)
       : null;
-
-    console.log('   targetSlice (normalized):', targetSlice);
-
+    
     // Create updated structures with prediction applied
     const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
     const updatedStructure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
-
-    if (!updatedStructure) {
-      console.warn('⚠️ Updated structure not found');
-      return;
-    }
-
+    
+    if (!updatedStructure) return;
+    
     let acceptedCount = 0;
-
+    
     // Accept all predictions if no specific slice provided
     for (const [slicePosition, prediction] of activePredictions.entries()) {
-      const distance = targetSlice != null ? Math.abs(slicePosition - targetSlice) : 0;
-      const withinTolerance = targetSlice == null || distance <= SLICE_TOL_MM;
-
-      console.log(`   Checking prediction at slice ${slicePosition.toFixed(3)}: distance=${distance.toFixed(3)}, withinTolerance=${withinTolerance}`);
-
-      if (!withinTolerance) {
+      if (targetSlice != null && Math.abs(slicePosition - targetSlice) > SLICE_TOL_MM) {
         continue;
       }
       if (prediction.predictedContour && prediction.predictedContour.length >= 9) {
@@ -2672,7 +2378,7 @@ const skipNextPredictionRef = useRef(false);
           (c: any) =>
             !c.isPredicted || Math.abs(c.slicePosition - slicePosition) > SLICE_TOL_MM
         );
-
+        
         // Add the prediction as a new contour
         updatedStructure.contours.push({
           slicePosition,
@@ -2680,36 +2386,24 @@ const skipNextPredictionRef = useRef(false);
           numberOfPoints: prediction.predictedContour.length / 3
         });
         lastViewedContourSliceRef.current = slicePosition;
-
+        
         acceptedCount++;
-        console.log(`   ✓ Accepted prediction at slice ${slicePosition.toFixed(3)}`);
       }
     }
-
-    console.log(`✅ Total accepted: ${acceptedCount}`);
     
     // Clear predictions
     updateActivePredictions(new Map());
     
     // Update structures
     setLocalRTStructures(updatedStructures);
-
-    // PREDICTION FIX: Clear cache and trigger prediction regeneration after accepting predictions
-    // This ensures adjacent slices update their predictions based on newly accepted contours
-    if (brushToolState?.predictionEnabled) {
-      lastPredictionSignatureRef.current = null;
-      lastPredictionTimestampRef.current = 0;
-      setPredictionTrigger(prev => prev + 1);
-    }
-
     saveContourUpdates(updatedStructures, 'accept_prediction');
-
+    
     if (onContourUpdate) {
       onContourUpdate(updatedStructures);
     }
-
+    
     try { scheduleRender(); } catch {}
-
+    
     toast({
       title: `Accepted ${acceptedCount} prediction${acceptedCount > 1 ? 's' : ''}`,
       description: `Added ${acceptedCount} contour${acceptedCount > 1 ? 's' : ''}`
@@ -3033,30 +2727,23 @@ const skipNextPredictionRef = useRef(false);
       console.log(`Structure now has ${structure.contours.length} contours`);
       lastViewedContourSliceRef.current = payload.slicePosition;
       setLocalRTStructures(updatedStructures);
-
-      // PREDICTION FIX: Clear cache and trigger prediction regeneration after adding contour
-      if (brushToolState?.predictionEnabled) {
-        lastPredictionSignatureRef.current = null;
-        lastPredictionTimestampRef.current = 0;
-        setPredictionTrigger(prev => prev + 1);
-      }
-
+      
       // Pass updated structures to parent (for sidebar updates)
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-
+      
       // Save state to undo system
       if (seriesId) {
         undoRedoManager.saveState(seriesId, 'add_brush_stroke', payload.structureId, updatedStructures);
       }
       saveContourUpdates(updatedStructures, 'add_brush_stroke');
-
+      
       // FIX #7: Delay render to allow React state update to complete
       // Without this delay, canvas renders with OLD contours before setLocalRTStructures completes
       setTimeout(() => {
-        try {
-          scheduleRender();
+        try { 
+          scheduleRender(); 
           console.log('🎯 BRUSH FIX: Render triggered after state update');
         } catch {}
       }, 10);
@@ -3161,19 +2848,12 @@ const skipNextPredictionRef = useRef(false);
       if (false) console.log(`Structure now has ${structure.contours.length} contours after smart brush`);
       lastViewedContourSliceRef.current = payload.slicePosition;
       setLocalRTStructures(updatedStructures);
-
-      // PREDICTION FIX: Clear cache and trigger prediction regeneration after adding contour
-      if (brushToolState?.predictionEnabled) {
-        lastPredictionSignatureRef.current = null;
-        lastPredictionTimestampRef.current = 0;
-        setPredictionTrigger(prev => prev + 1);
-      }
-
+      
       // Pass updated structures to parent (for sidebar updates)
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-
+      
       // Save state to undo system
       if (seriesId) {
         undoRedoManager.saveState(seriesId, 'smart_brush_stroke', payload.structureId, updatedStructures);
@@ -3567,19 +3247,12 @@ const skipNextPredictionRef = useRef(false);
     } else if (payload.action === "update_rt_structures") {
       // Simple update after pen tool operations - structure already modified directly
       setLocalRTStructures(updatedStructures);
-
-      // PREDICTION FIX: Clear cache and trigger prediction regeneration after pen tool changes
-      if (brushToolState?.predictionEnabled) {
-        lastPredictionSignatureRef.current = null;
-        lastPredictionTimestampRef.current = 0;
-        setPredictionTrigger(prev => prev + 1);
-      }
-
+      
       // Pass updated structures to parent (for sidebar updates)
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
       }
-
+      
       // Save state to undo system
       if (seriesId && payload.structureId) {
         undoRedoManager.saveState(seriesId, 'pen_tool', payload.structureId, updatedStructures);
@@ -3735,53 +3408,23 @@ const skipNextPredictionRef = useRef(false);
       const deletedCount = originalLength - structure.contours.length;
       console.log(`Deleted ${deletedCount} contour(s) for structure ${payload.structureId} (${structure.structureName}) at slice ${payload.slicePosition}`);
       console.log(`After delete: Structure ${payload.structureId} has ${structure.contours.length} contours`);
-
+      
+      // Trigger prediction regeneration after deletion if prediction enabled
+      if (brushToolState?.predictionEnabled && deletedCount > 0) {
+        const normalizedSlice = normalizeSlicePosition(payload.slicePosition);
+        generatePredictionForCurrentSlice(payload.structureId, normalizedSlice);
+        // Force prediction update by incrementing trigger
+        setPredictionTrigger(prev => prev + 1);
+      }
+      
       // Log all structures to verify others are not affected
       console.log("All structures after delete:", updatedStructures.structures.map((s: any) => ({
         id: s.roiNumber,
         name: s.structureName,
         contourCount: s.contours.length
       })));
-
-      if (deletedCount === 0) {
-        console.log(`⚠️ Delete slice requested for ${payload.slicePosition}mm but no contour matched tolerance`);
-        return;
-      }
-
-      if (deletedCount > 0) {
-        // Skip the very next auto-prediction tick to avoid using stale contours,
-        // then clear out any transient predictions
-        skipNextPredictionRef.current = true;
-        updateActivePredictions(new Map());
-
-        // Update slice history cache for undo stack
-        if (seriesId) {
-          undoRedoManager.saveState(seriesId, 'delete_slice', payload.structureId, updatedStructures);
-        }
-
-        // Trigger prediction regeneration AFTER state update if prediction enabled.
-        if (brushToolState?.predictionEnabled) {
-          console.log(`🔄 DELETION: Scheduling prediction regeneration for slice ${payload.slicePosition}mm after deletion`);
-          lastPredictionSignatureRef.current = null;
-          lastPredictionTimestampRef.current = 0;
-        }
-      }
-
-      // Apply state immediately so the canvas reflects the removal without extra navigation
+      
       setLocalRTStructures(updatedStructures);
-
-      // Force an immediate render so the deleted contour disappears without scrolling
-      if (deletedCount > 0) {
-        try {
-          scheduleRender();
-          if (displayCurrentImageRef.current) {
-            displayCurrentImageRef.current().catch(() => {});
-          }
-        } catch (error) {
-          console.warn('Failed to schedule render after deletion', error);
-        }
-      }
-
       // Pass the full updated structures to parent
       if (onContourUpdate) {
         onContourUpdate(updatedStructures);
@@ -3798,16 +3441,6 @@ const skipNextPredictionRef = useRef(false);
             description: `Deleting this slice split ${structure.structureName} into ${blobs.length} separate parts. Use the Blob menu to manage them.`,
             duration: 5000
           });
-
-          // Refresh blob dialog data if it is currently open for this structure
-          if (blobDialogOpen && blobDialogData?.structureId === payload.structureId) {
-            const dialogBlobs = blobs.map((b, idx) => ({
-              id: idx + 1,
-              volumeCc: computeBlobVolumeCc(b, imageMetadata),
-              contours: b
-            }));
-            setBlobDialogData({ structureId: payload.structureId, blobs: dialogBlobs });
-          }
         }
       }
     } else if (payload.action === "clear_all") {
@@ -4304,42 +3937,6 @@ const skipNextPredictionRef = useRef(false);
   useEffect(() => {
     if (autoLocalizeTarget) {
       const { x, y, z } = autoLocalizeTarget;
-
-      // Navigate to the correct z-slice first
-      if (images && images.length > 0) {
-        let closestIndex = 0;
-        let closestDistance = Infinity;
-
-        images.forEach((image, index) => {
-          // Get Z position from image metadata
-          let imageZ = index; // fallback to index
-
-          if (image.imageMetadata?.imagePosition || image.imagePosition) {
-            const pos = Array.isArray(image.imagePosition)
-              ? image.imagePosition
-              : (typeof image.imagePosition === 'string' ? image.imagePosition.split("\\").map(Number) : (Array.isArray(image.imageMetadata?.imagePosition) ? image.imageMetadata.imagePosition : String(image.imageMetadata?.imagePosition||'').split("\\").map(Number)));
-            if (pos && pos.length >= 3 && isFinite(pos[2])) imageZ = pos[2];
-          } else if (image.parsedSliceLocation !== undefined && image.parsedSliceLocation !== null) {
-            imageZ = image.parsedSliceLocation;
-          } else if (image.parsedZPosition !== undefined && image.parsedZPosition !== null) {
-            imageZ = image.parsedZPosition;
-          } else if (image.imageMetadata?.sliceLocation !== undefined) {
-            imageZ = image.imageMetadata.sliceLocation;
-          } else if (image.sliceZ !== undefined) {
-            imageZ = image.sliceZ;
-          }
-
-          const distance = Math.abs(imageZ - z);
-          if (distance < closestDistance) {
-            closestDistance = distance;
-            closestIndex = index;
-          }
-        });
-
-        console.log(`🎯 Auto-localize: navigating to slice ${closestIndex} (z=${z.toFixed(1)})`);
-        setCurrentIndex(closestIndex);
-      }
-
       // Convert world coordinates to pan offsets
       // Scale the coordinates appropriately for the canvas
       const scaleFactor = 0.1; // Adjust this value as needed
@@ -4347,7 +3944,6 @@ const skipNextPredictionRef = useRef(false);
       setPanY(-y * scaleFactor);
       setLastPanX(-x * scaleFactor);
       setLastPanY(-y * scaleFactor);
-
       if (images.length > 0) {
         scheduleRender();
       }
@@ -4628,7 +4224,7 @@ const skipNextPredictionRef = useRef(false);
             metadataMap.set(meta.sopInstanceUID, meta);
           });
           
-          // Merge batch metadata with series images (including spatial metadata for MPR)
+          // Merge batch metadata with series images
           imagesWithMetadata = seriesImages.map((img: any) => {
             const metadata = metadataMap.get(img.sopInstanceUID);
             if (metadata && !metadata.error) {
@@ -4637,14 +4233,6 @@ const skipNextPredictionRef = useRef(false);
                 parsedSliceLocation: metadata.parsedSliceLocation,
                 parsedZPosition: metadata.parsedZPosition,
                 parsedInstanceNumber: metadata.parsedInstanceNumber ?? img.instanceNumber,
-                imagePosition: metadata.imagePosition,
-                imageOrientation: metadata.imageOrientation,
-                pixelSpacing: metadata.pixelSpacing,
-                imageMetadata: {
-                  imagePosition: metadata.imagePosition,
-                  imageOrientation: metadata.imageOrientation,
-                  pixelSpacing: metadata.pixelSpacing,
-                },
               };
             } else {
               return {
@@ -5046,6 +4634,7 @@ const skipNextPredictionRef = useRef(false);
         if (onImageMetadataChange) {
           onImageMetadataChange(metadata);
         }
+
         // Frame of Reference UIDs are verified during data import
       }
     } catch (error) {
@@ -7817,33 +7406,7 @@ const skipNextPredictionRef = useRef(false);
 
           {/* Floating MPR windows for sagittal and coronal views */}
           {orientation === 'axial' && images.length > 0 && mprVisible && (
-            <div className="absolute right-4 top-16 flex flex-col gap-3" style={{ zIndex: 50 }}>
-              {/* Coronal view */}
-              <div className="mpr-window">
-                <div className="mpr-window-header flex justify-between items-center">
-                  <span>Coronal</span>
-                </div>
-                <div className="mpr-canvas-container">
-                  <MPRFloating
-                    images={images}
-                    orientation="coronal"
-                    sliceIndex={Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1))}
-                    windowWidth={currentWindowLevel.width}
-                    windowCenter={currentWindowLevel.center}
-                    crosshairPos={crosshairPos}
-                    rtStructures={rtStructures}
-                    structureVisibility={structureVisibility}
-                    currentZIndex={currentIndex}
-                    onClick={handleCoronalClick}
-                  />
-                  {isLoadingMPR && (
-                    <div className="mpr-loading">
-                      <div className="mpr-loading-spinner" />
-                    </div>
-                  )}
-                </div>
-              </div>
-              
+            <div className="absolute right-4 top-16 flex flex-col gap-3">
               {/* Sagittal view */}
               <div className="mpr-window">
                 <div className="mpr-window-header flex justify-between items-center">
@@ -7858,9 +7421,33 @@ const skipNextPredictionRef = useRef(false);
                     windowCenter={currentWindowLevel.center}
                     crosshairPos={crosshairPos}
                     rtStructures={rtStructures}
-                    structureVisibility={structureVisibility}
                     currentZIndex={currentIndex}
                     onClick={handleSagittalClick}
+                  />
+                  {isLoadingMPR && (
+                    <div className="mpr-loading">
+                      <div className="mpr-loading-spinner" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Coronal view */}
+              <div className="mpr-window">
+                <div className="mpr-window-header flex justify-between items-center">
+                  <span>Coronal</span>
+                </div>
+                <div className="mpr-canvas-container">
+                  <MPRFloating
+                    images={images}
+                    orientation="coronal"
+                    sliceIndex={Math.max(0, Math.min(crosshairPos.y, (images[0]?.rows || 512) - 1))}
+                    windowWidth={currentWindowLevel.width}
+                    windowCenter={currentWindowLevel.center}
+                    crosshairPos={crosshairPos}
+                    rtStructures={rtStructures}
+                    currentZIndex={currentIndex}
+                    onClick={handleCoronalClick}
                   />
                   {isLoadingMPR && (
                     <div className="mpr-loading">
