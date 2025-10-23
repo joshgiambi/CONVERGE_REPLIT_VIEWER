@@ -27,6 +27,7 @@ import {
 import { fusionManifestService } from './fusion/manifest-service';
 import { FuseboxVolumeResampler } from './fusion/resampler.ts';
 import { loadDicomMetadata } from './fusion/dicom-metadata.ts';
+import segvolRouter from './segvol-api';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -6112,6 +6113,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to get storage overview" });
     }
   });
+
+  // Register SegVol API routes
+  app.use('/api', segvolRouter);
 
   return { close: () => {} } as Server;
 }

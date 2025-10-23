@@ -6,11 +6,12 @@
  */
 
 import { PredictionHistoryManager, type ContourSnapshot, type TrendAnalysis } from './prediction-history-manager';
-import { 
-  refineContourWithImageData, 
-  type ImageData, 
-  type RegionCharacteristics 
+import {
+  refineContourWithImageData,
+  type ImageData,
+  type RegionCharacteristics
 } from './image-aware-prediction';
+import { segvolClient, type SegVolPredictionRequest } from './segvol-client';
 
 export type PropagationMode = 'conservative' | 'moderate' | 'aggressive';
 
@@ -19,7 +20,7 @@ export interface PredictionParams {
   currentSlicePosition: number;
   targetSlicePosition: number;
   anatomicalRegion?: 'head' | 'neck' | 'thorax' | 'abdomen' | 'pelvis';
-  predictionMode?: 'simple' | 'adaptive' | 'trend-based';
+  predictionMode?: 'simple' | 'adaptive' | 'trend-based' | 'segvol';
   confidenceThreshold?: number; // 0-1, determines when to stop propagating
   historyManager?: PredictionHistoryManager;
   allContours?: Map<number, number[]>; // All contours in the structure by slice position
@@ -483,9 +484,99 @@ function trendBasedPredictionFromSnapshot(
 }
 
 /**
+ * SegVol-based prediction using AI model
+ */
+async function segvolPrediction(
+  currentContour: number[],
+  currentSlicePosition: number,
+  targetSlicePosition: number,
+  imageData?: {
+    currentSlice?: ImageData;
+    targetSlice?: ImageData;
+  },
+  coordinateTransforms?: {
+    worldToPixel: (x: number, y: number) => [number, number];
+    pixelToWorld: (x: number, y: number) => [number, number];
+  },
+  spacing?: [number, number, number]
+): Promise<PredictionResult> {
+  try {
+    // Validate required data
+    if (!imageData?.currentSlice || !imageData?.targetSlice) {
+      throw new Error('SegVol requires image data for both slices');
+    }
+
+    if (!coordinateTransforms) {
+      throw new Error('SegVol requires coordinate transforms');
+    }
+
+    // Convert contour from [x,y,z,...] to [[x,y],...]
+    const contour2D: number[][] = [];
+    for (let i = 0; i < currentContour.length; i += 3) {
+      const x = currentContour[i];
+      const y = currentContour[i + 1];
+
+      // Convert to pixel coordinates
+      const [px, py] = coordinateTransforms.worldToPixel(x, y);
+      contour2D.push([Math.round(px), Math.round(py)]);
+    }
+
+    // Prepare SegVol request
+    const request: SegVolPredictionRequest = {
+      reference_contour: contour2D,
+      reference_slice_data: Array.from(imageData.currentSlice.pixelData),
+      target_slice_data: Array.from(imageData.targetSlice.pixelData),
+      reference_slice_position: currentSlicePosition,
+      target_slice_position: targetSlicePosition,
+      image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number],
+      spacing: spacing || [1.0, 1.0, 1.0],
+    };
+
+    // Call SegVol API
+    const result = await segvolClient.predictNextSlice(request);
+
+    // Convert predicted contour back to [x,y,z,...] format
+    const predictedContour: number[] = [];
+    for (const [px, py] of result.predicted_contour) {
+      // Convert from pixel to world coordinates
+      const [x, y] = coordinateTransforms.pixelToWorld(px, py);
+      predictedContour.push(x, y, targetSlicePosition);
+    }
+
+    return {
+      predictedContour,
+      confidence: result.confidence,
+      adjustments: {
+        scale: 1.0, // SegVol handles this internally
+        centerShift: { x: 0, y: 0 },
+        deformation: 0,
+      },
+      metadata: {
+        method: result.method,
+        historySize: 0,
+        ...result.metadata,
+      },
+    };
+  } catch (error: any) {
+    console.error('SegVol prediction failed:', error);
+    // Return empty result on failure
+    return {
+      predictedContour: [],
+      confidence: 0,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: {
+        method: 'segvol_failed',
+        historySize: 0,
+        notes: error.message,
+      },
+    };
+  }
+}
+
+/**
  * Main prediction function that orchestrates different prediction modes
  */
-export function predictNextSliceContour(params: PredictionParams): PredictionResult {
+export async function predictNextSliceContour(params: PredictionParams): Promise<PredictionResult> {
   const {
     currentContour,
     currentSlicePosition,
@@ -530,7 +621,7 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
     case 'simple':
       result = simplePrediction(currentContour, sliceDistance, targetSlicePosition, anatomicalRegion);
       break;
-      
+
     case 'adaptive': {
       // Try to find previous contour for adaptive prediction
       let previousContour: number[] | null = null;
@@ -540,7 +631,7 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
       result = adaptivePrediction(currentContour, previousContour, sliceDistance, targetSlicePosition);
       break;
     }
-      
+
     case 'trend-based': {
       // Use history manager for trend-based prediction
       if (historyManager && historyManager.size() >= 2) {
@@ -552,14 +643,49 @@ export function predictNextSliceContour(params: PredictionParams): PredictionRes
       }
       break;
     }
-      
+
+    case 'segvol': {
+      // AI-powered prediction using SegVol model
+      // Extract spacing from image data if available
+      const spacing: [number, number, number] | undefined = imageData?.currentSlice
+        ? [
+            imageData.currentSlice.pixelSpacing?.[0] || 1.0,
+            imageData.currentSlice.pixelSpacing?.[1] || 1.0,
+            imageData.currentSlice.sliceThickness || 1.0,
+          ]
+        : undefined;
+
+      result = await segvolPrediction(
+        currentContour,
+        currentSlicePosition,
+        targetSlicePosition,
+        imageData,
+        coordinateTransforms,
+        spacing
+      );
+
+      // If SegVol fails, fall back to geometric prediction
+      if (result.predictedContour.length === 0 || result.confidence === 0) {
+        console.warn('SegVol prediction failed, falling back to adaptive prediction');
+        const fallbackContour = findNearestContour();
+        result = adaptivePrediction(currentContour, fallbackContour, sliceDistance, targetSlicePosition);
+        if (result.metadata) {
+          result.metadata.fallbackApplied = true;
+          result.metadata.notes = 'SegVol failed, used geometric fallback';
+        }
+      }
+      break;
+    }
+
     default:
       result = simplePrediction(currentContour, sliceDistance, targetSlicePosition, anatomicalRegion);
   }
   
   // Apply image-aware refinement if enabled and image data available
-  if (enableImageRefinement && 
-      imageData?.targetSlice && 
+  // Skip refinement for segvol mode as it handles this internally
+  if (enableImageRefinement &&
+      predictionMode !== 'segvol' &&
+      imageData?.targetSlice &&
       coordinateTransforms &&
       result.predictedContour.length > 0) {
     

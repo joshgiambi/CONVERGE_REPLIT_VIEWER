@@ -1991,7 +1991,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   }, [images]);
 
   // Generate prediction for current slice only (on-demand)
-  const generatePredictionForCurrentSlice = useCallback((structureId: number, slicePosition: number) => {
+  const generatePredictionForCurrentSlice = useCallback(async (structureId: number, slicePosition: number) => {
     if (!rtStructures || !rtStructures.structures) {
       updateActivePredictions(new Map());
       return;
@@ -2197,7 +2197,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     });
     
     // Generate single prediction for current slice with optional image refinement
-    let prediction = predictNextSliceContour({
+    let prediction = await predictNextSliceContour({
       currentContour: referenceSnapshot.contour,
       currentSlicePosition: referenceSnapshot.slicePosition,
       targetSlicePosition: slicePosition,
