@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Ruler, Target, Trash2, X } from "lucide-react";
 import { SimpleBrushTool } from "./simple-brush-tool";
+import { AITumorTool } from "./ai-tumor-tool";
 import { PenToolUnifiedV2 } from "./pen-tool-unified-v2";
 import { EclipsePlanarContourTool } from "./eclipse-planar-contour-tool";
 import { PenTool } from "./pen-tool";
@@ -52,6 +53,8 @@ import type { RegistrationAssociation, RegistrationTransformCandidate, Registrat
 import { useToast } from '@/hooks/use-toast';
 import { BlobManagementDialog } from './blob-management-dialog';
 import { groupStructureBlobs, computeBlobVolumeCc, createContourKey, type Blob, type BlobContour } from '@/lib/blob-operations';
+
+const PREDICTION_DEBUG = false;
 
 const normalizeSlicePosition = (value: number): number => {
   if (!Number.isFinite(value)) return value;
@@ -130,6 +133,8 @@ interface WorkingViewerProps {
     isActive: boolean;
     predictionEnabled?: boolean;
     smartBrushEnabled?: boolean;
+    predictionMode?: 'fast' | 'balanced' | 'segvol' | 'monai' | 'mem3d';
+    mem3dParams?: import('@/lib/fast-slice-prediction').PredictionParams;
   };
   selectedForEdit?: number | null;
   selectedStructures?: Set<number>;
@@ -140,6 +145,8 @@ interface WorkingViewerProps {
     isActive: boolean;
     predictionEnabled?: boolean;
     smartBrushEnabled?: boolean;
+    predictionMode?: 'fast' | 'balanced' | 'segvol' | 'monai' | 'mem3d';
+    mem3dParams?: import('@/lib/fast-slice-prediction').PredictionParams;
   }) => void;
   onContourUpdate?: (updatedStructures: any) => void;
   onRTStructureUpdate?: (structures: any) => Promise<void>;
@@ -1968,24 +1975,48 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
 
   // Helper to extract image data for prediction
   const extractImageDataForPrediction = useCallback((imageIndex: number) => {
-    if (!images || imageIndex < 0 || imageIndex >= images.length) return null;
-    
+    if (!images || imageIndex < 0 || imageIndex >= images.length) {
+      console.warn(`📊 Pixel data extraction failed: Invalid index ${imageIndex} (images length: ${images?.length || 0})`);
+      return null;
+    }
+
     const img = images[imageIndex];
-    if (!img?.pixelData) return null;
-    
+    if (!img?.sopInstanceUID) {
+      console.warn(`📊 Pixel data extraction failed: Image at index ${imageIndex} has no sopInstanceUID`);
+      return null;
+    }
+
+    // Get the cached image data with pixel data
+    const cachedImage = imageCacheRef.current.get(img.sopInstanceUID);
+    if (!cachedImage || !cachedImage.data) {
+      console.warn(`📊 Pixel data extraction failed: Image at index ${imageIndex} has no pixelData property in cache (cached: ${!!cachedImage}, has data: ${!!cachedImage?.data})`);
+      return null;
+    }
+
     try {
-      // Extract pixel data and metadata
+      // Extract pixel data and metadata from cached image
+      const pixelData = cachedImage.data;
+      const width = cachedImage.columns || cachedImage.width || 512;
+      const height = cachedImage.rows || cachedImage.height || 512;
+
+      if (PREDICTION_DEBUG) {
+        const sample = Array.from(pixelData.slice(0, 100));
+        const minVal = Math.min(...sample);
+        const maxVal = Math.max(...sample);
+        console.log(`📊 Pixel data extracted for image ${imageIndex}: ${pixelData.length} pixels, range: [${minVal.toFixed(1)}, ${maxVal.toFixed(1)}]`);
+      }
+
       return {
-        pixels: img.pixelData, // Float32Array or Uint16Array
-        width: img.width || img.columns || 512,
-        height: img.height || img.rows || 512,
-        rescaleSlope: img.rescaleSlope || 1,
-        rescaleIntercept: img.rescaleIntercept || 0,
-        windowCenter: img.windowCenter,
-        windowWidth: img.windowWidth
+        pixels: pixelData, // Float32Array or Uint16Array
+        width: width,
+        height: height,
+        rescaleSlope: cachedImage.rescaleSlope || 1,
+        rescaleIntercept: cachedImage.rescaleIntercept || 0,
+        windowCenter: cachedImage.windowCenter,
+        windowWidth: cachedImage.windowWidth
       };
     } catch (error) {
-      console.warn('Failed to extract image data for prediction:', error);
+      console.warn('📊 Failed to extract image data for prediction:', error);
       return null;
     }
   }, [images]);
@@ -2122,7 +2153,12 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
           }
         }
         if (bestIndex === -1 || bestDiff > tolerance) {
+          console.warn(`📊 No image found for slice ${targetSlice} (bestDiff=${bestDiff}, tolerance=${tolerance})`);
           return null;
+        }
+        const imgZ = images[bestIndex].sliceZ || images[bestIndex].parsedSliceLocation || images[bestIndex].parsedZPosition;
+        if (PREDICTION_DEBUG) {
+          console.log(`📊 Found image for slice ${targetSlice}: index=${bestIndex}, actualZ=${imgZ}, diff=${bestDiff}`);
         }
         return extractImageDataForPrediction(bestIndex);
       };
@@ -2149,17 +2185,13 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
         }
       });
 
-      if (targetImageData) {
-        imageData = {
-          targetSlice: targetImageData,
-          referenceSlices: referenceSlicesData
-        };
-        
-        // Create coordinate transforms
+      // Get current slice image data (for the reference contour)
+      const currentImageData = getImageDataForSlice(referenceSnapshot.slicePosition);
+
+      // Create coordinate transforms (even without pixel data, we need these for mask creation!)
+      if (imageMetadata) {
         coordinateTransforms = {
           worldToPixel: (x: number, y: number): [number, number] => {
-            if (!imageMetadata) return [0, 0];
-            
             const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
             const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
             
@@ -2169,8 +2201,6 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
             return [pixelX, pixelY];
           },
           pixelToWorld: (px: number, py: number): [number, number] => {
-            if (!imageMetadata) return [0, 0];
-            
             const [imagePositionX, imagePositionY] = imageMetadata.imagePosition.split("\\").map(parseFloat);
             const [rowSpacing, colSpacing] = imageMetadata.pixelSpacing.split("\\").map(parseFloat);
             
@@ -2181,12 +2211,46 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
           }
         };
       }
-    }
-    
-    if (!imageData || !coordinateTransforms) {
-      console.warn('⚠️ Prediction skipped: required DICOM greyscale data unavailable for slice', slicePosition);
-      updateActivePredictions(new Map());
-      return;
+      
+      if (targetImageData) {
+        // Extract ~50 slices around reference and target for SegVol (to avoid payload size issues)
+        const volumeSlices: any[] = [];
+        const volumePositions: number[] = [];
+
+        // Find min and max Z positions we care about
+        const minZ = Math.min(referenceSnapshot.slicePosition, slicePosition);
+        const maxZ = Math.max(referenceSnapshot.slicePosition, slicePosition);
+        const range = maxZ - minZ;
+        const expandedMin = minZ - range * 2; // Expand 2x on each side
+        const expandedMax = maxZ + range * 2;
+
+        for (let idx = 0; idx < images.length; idx++) {
+          const img = images[idx];
+          const imgZ = img.sliceZ || img.parsedSliceLocation || img.parsedZPosition;
+          if (imgZ == null) continue;
+
+          // Only include slices in the expanded range
+          if (imgZ >= expandedMin && imgZ <= expandedMax) {
+            const imgData = extractImageDataForPrediction(idx);
+            if (imgData?.pixels) {
+              volumeSlices.push(imgData);
+              volumePositions.push(imgZ);
+            }
+          }
+        }
+
+        if (PREDICTION_DEBUG) {
+          console.log(`📊 Extracted ${volumeSlices.length} DICOM slices for volume context (range: ${expandedMin.toFixed(1)} to ${expandedMax.toFixed(1)})`);
+        }
+
+        imageData = {
+          currentSlice: currentImageData || undefined,
+          targetSlice: targetImageData,
+          referenceSlices: referenceSlicesData,
+          volumeSlices: volumeSlices.length >= 32 ? volumeSlices : undefined,
+          volumePositions: volumePositions.length >= 32 ? volumePositions : undefined
+        };
+      }
     }
     
     const allContoursMap = new Map<number, number[]>();
@@ -2197,8 +2261,16 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     });
     
     // Map UI prediction mode to algorithm mode
-    const uiMode = brushToolState?.predictionMode || 'balanced';
-    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'mem3d' | 'segvol' = 'adaptive';
+    const rawPredictionMode = brushToolState?.predictionMode;
+    const uiMode: 'fast' | 'balanced' | 'segvol' | 'monai' | 'mem3d' =
+      rawPredictionMode === 'fast' ||
+      rawPredictionMode === 'balanced' ||
+      rawPredictionMode === 'segvol' ||
+      rawPredictionMode === 'monai' ||
+      rawPredictionMode === 'mem3d'
+        ? rawPredictionMode
+        : (rawPredictionMode ? 'segvol' : 'balanced');
+    let algorithmMode: 'simple' | 'adaptive' | 'trend-based' | 'segvol' | 'monai' | 'mem3d' = 'adaptive';
 
     switch (uiMode) {
       case 'fast':
@@ -2209,20 +2281,30 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
         // Use trend-based if enough history, else adaptive
         algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
         break;
-      case 'mem3d':
-        // Use Mem3D memory-augmented AI model (primary AI)
-        algorithmMode = 'mem3d';
-        break;
       case 'segvol':
         // Use SegVol volumetric AI model (advanced)
         algorithmMode = 'segvol';
         break;
-      case 'smart':
-        // Auto-select: Try Mem3D first (primary AI), has built-in fallback
+      case 'monai':
+        algorithmMode = 'monai';
+        break;
+      case 'mem3d':
         algorithmMode = 'mem3d';
         break;
       default:
         algorithmMode = historyManager.size() >= 2 ? 'trend-based' : 'adaptive';
+    }
+    
+    // SegVol requires image data - don't fallback, fail clearly
+    if (algorithmMode === 'segvol' && (!imageData || !coordinateTransforms)) {
+      console.error(`❌ SegVol prediction unavailable: DICOM pixel data not accessible. Images must be loaded first.`);
+      updateActivePredictions(new Map());
+      return;
+    }
+    if (algorithmMode === 'monai' && (!imageData || !imageData.currentSlice?.pixels || !imageData.targetSlice?.pixels || !coordinateTransforms)) {
+      console.error(`❌ MONAI prediction unavailable: DICOM pixel data not accessible. Images must be loaded first.`);
+      updateActivePredictions(new Map());
+      return;
     }
 
     // Generate single prediction for current slice with optional image refinement
@@ -2236,22 +2318,25 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       imageData,
       coordinateTransforms,
       enableImageRefinement: true,
-      allContours: allContoursMap
+      allContours: allContoursMap,
+      mem3dParams: brushToolState?.mem3dParams
     });
     
     if (!prediction.predictedContour || prediction.predictedContour.length < 9) {
-      console.warn('⚠️ Prediction skipped: refinement could not produce a valid contour for slice', slicePosition);
+      console.warn(`⚠️ Prediction skipped: refinement could not produce a valid contour for slice ${slicePosition} (length: ${prediction.predictedContour?.length || 0}, confidence: ${prediction.confidence?.toFixed(3) || 0})`);
       updateActivePredictions(new Map());
       return;
     }
-    
+
+    console.log(`✅ Prediction accepted for slice ${slicePosition}: ${prediction.predictedContour.length / 3} points, confidence: ${prediction.confidence.toFixed(3)}, method: ${prediction.metadata?.method}`);
+
     // Store prediction for current slice
     const normalizedSlice = normalizeSlicePosition(slicePosition);
     const predictions = new Map<number, PredictionResult>();
     if (prediction.predictedContour.length >= 9) {
       predictions.set(normalizedSlice, prediction);
     }
-    
+
     updateActivePredictions(predictions);
     
     scheduleRender();
@@ -2260,6 +2345,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   // Auto-regenerate prediction when slice changes (if prediction enabled)
   useEffect(() => {
     // Debug helper
+    const selectedStructure = rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit);
     (window as any).predictionDebug = {
       enabled: brushToolState?.predictionEnabled,
       selectedForEdit,
@@ -2268,14 +2354,20 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       hasImages: images?.length > 0,
       currentIndex,
       activePredictions: activePredictions.size,
-      trigger: predictionTrigger
+      trigger: predictionTrigger,
+      selectedStructureName: selectedStructure?.structureName,
+      selectedStructureContours: selectedStructure?.contours?.length || 0,
+      predictionMode: brushToolState?.predictionMode
     };
     
     if (!brushToolState?.predictionEnabled || !selectedForEdit || !rtStructures?.structures) {
-      updateActivePredictions(new Map());
+      // Don't clear predictions - let them persist even when prediction mode is toggled
+      // This prevents flashing/disappearing predictions
+      // updateActivePredictions(new Map());
       return;
     }
     if (!images || images.length === 0 || !images[currentIndex]) {
+      // Only clear if we have no images at all
       updateActivePredictions(new Map());
       return;
     }
@@ -2410,8 +2502,259 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     });
   };
 
+  // Handle 3D mask application from AI tumor tool
+  const handleApply3DMask = async (payload: {
+    structureId: number;
+    mask: number[][][];
+    confidence: number;
+    startSlice?: number;
+    downsampleFactor?: number;
+  }) => {
+    if (!rtStructures || !rtStructures.structures) return;
+
+    const { structureId, mask, confidence, startSlice = 0, downsampleFactor = 1 } = payload;
+    const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!structure) return;
+
+    log.debug(`Converting 3D mask to contours for structure ${structureId} (downsample: ${downsampleFactor}x)`, 'viewer');
+    log.debug(`Mask shape: [${mask.length}, ${mask[0]?.length || 0}, ${mask[0]?.[0]?.length || 0}], startSlice: ${startSlice}`, 'viewer');
+
+    // Create updated structures
+    const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+    const updatedStructure = updatedStructures.structures.find((s: any) => s.roiNumber === structureId);
+    if (!updatedStructure) {
+      log.error(`Structure ${structureId} not found in updated structures`, 'viewer');
+      return;
+    }
+
+    let contoursAdded = 0;
+    let slicesProcessed = 0;
+    let slicesWithMask = 0;
+
+    console.log(`🧠 Starting to process ${mask.length} slices for structure ${structureId}`);
+
+    // Process each slice in the mask
+    for (let z = 0; z < mask.length; z++) {
+      slicesProcessed++;
+      const sliceMask = mask[z];
+      if (!sliceMask || sliceMask.length === 0) {
+        log.debug(`Slice ${z}: Empty mask`, 'viewer');
+        continue;
+      }
+
+      const height = sliceMask.length;
+      const width = sliceMask[0]?.length || 0;
+      if (width === 0) {
+        log.debug(`Slice ${z}: Zero width`, 'viewer');
+        continue;
+      }
+
+      // Convert 2D array to Uint8Array for marching squares
+      const maskData = new Uint8Array(width * height);
+      let nonZeroPixels = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const value = sliceMask[y][x] > 0 ? 1 : 0;
+          maskData[x + y * width] = value;
+          if (value > 0) nonZeroPixels++;
+        }
+      }
+
+      if (nonZeroPixels === 0) {
+        log.debug(`Slice ${z}: No positive mask pixels`, 'viewer');
+        continue;
+      }
+
+      slicesWithMask++;
+      console.log(`🧠 Slice ${z}: ${width}x${height}, ${nonZeroPixels} positive pixels`);
+      log.debug(`Slice ${z}: ${width}x${height}, ${nonZeroPixels} positive pixels`, 'viewer');
+
+      // Find contours using marching squares algorithm
+      const pixelContours = marchingSquares(maskData, width, height);
+      console.log(`🧠 Slice ${z}: marchingSquares returned ${pixelContours.length / 2} points`);
+
+      if (pixelContours.length < 6) {
+        console.log(`🧠 Slice ${z}: Contour too small (${pixelContours.length / 2} points), skipping`);
+        log.debug(`Slice ${z}: Contour too small (${pixelContours.length / 2} points)`, 'viewer');
+        continue;
+      }
+
+      console.log(`🧠 Slice ${z}: Found contour with ${pixelContours.length / 2} points`);
+      log.debug(`Slice ${z}: Found contour with ${pixelContours.length / 2} points`, 'viewer');
+
+      // Get the actual image for this slice to get correct Z position AND coordinate metadata
+      const imageIndex = startSlice + z;
+      if (!images || imageIndex >= images.length) {
+        log.error(`Image index ${imageIndex} out of bounds (total: ${images?.length})`, 'viewer');
+        continue;
+      }
+
+      const sliceImage = images[imageIndex];
+      const slicePosition = sliceImage.sliceZ ?? sliceImage.parsedSliceLocation ?? sliceImage.parsedZPosition ?? 0;
+
+      // Get metadata for THIS specific slice (not the global imageMetadata)
+      const slicePixelSpacing = sliceImage.pixelSpacing || [1, 1];
+      const sliceImagePosition = sliceImage.imagePosition || [0, 0, slicePosition];
+      
+      if (contoursAdded === 0 && slicesWithMask === 1) {
+        // Log metadata for first slice with tumor
+        console.log(`🧠 First tumor slice (${z}) metadata:`, {
+          imageIndex,
+          slicePosition,
+          pixelSpacing: slicePixelSpacing,
+          imagePosition: sliceImagePosition
+        });
+      }
+
+      log.debug(`Slice ${z}: Image index ${imageIndex}, slicePosition: ${slicePosition}`, 'viewer');
+
+      // Convert pixel coordinates to world coordinates
+      // Need to account for downsampling - mask is at lower resolution
+      const worldContour: number[] = [];
+      for (let i = 0; i < pixelContours.length; i += 2) {
+        const downsampledPixelX = pixelContours[i];
+        const downsampledPixelY = pixelContours[i + 1];
+
+        // Upsample back to original resolution
+        const pixelX = downsampledPixelX * downsampleFactor;
+        const pixelY = downsampledPixelY * downsampleFactor;
+
+        // Convert to world coordinates using THIS slice's metadata
+        // pixelSpacing[0] = row spacing (Y), pixelSpacing[1] = column spacing (X)
+        const worldX = sliceImagePosition[0] + pixelX * slicePixelSpacing[1];
+        const worldY = sliceImagePosition[1] + pixelY * slicePixelSpacing[0];
+        const worldZ = slicePosition;
+
+        worldContour.push(worldX, worldY, worldZ);
+      }
+      
+      // Add contour to structure
+      updatedStructure.contours.push({
+        slicePosition,
+        points: worldContour,
+        numberOfPoints: worldContour.length / 3
+      });
+
+      contoursAdded++;
+    }
+
+    console.log(`🧠 Processed ${slicesProcessed} slices, ${slicesWithMask} had masks, added ${contoursAdded} contours`);
+    log.debug(`Processed ${slicesProcessed} slices, ${slicesWithMask} had masks, added ${contoursAdded} contours`, 'viewer');
+
+    if (contoursAdded === 0) {
+      console.error('🧠 No contours were created from the mask!');
+      log.error('No contours were created from the mask!', 'viewer');
+      toast({
+        title: `Segmentation failed`,
+        description: `No contours created from mask. Check console for details.`,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    console.log(`🧠 Updating RT structures with ${contoursAdded} new contours...`);
+    console.log(`🧠 Updated structure ${structureId} now has ${updatedStructure.contours.length} total contours`);
+    
+    // Update structures
+    setLocalRTStructures(updatedStructures);
+    console.log(`🧠 setLocalRTStructures called`);
+    
+    saveContourUpdates(updatedStructures, 'apply_3d_mask');
+    console.log(`🧠 saveContourUpdates called`);
+
+    if (onContourUpdate) {
+      onContourUpdate(updatedStructures);
+      console.log(`🧠 onContourUpdate (parent) called`);
+    }
+
+    try { 
+      scheduleRender(); 
+      console.log(`🧠 scheduleRender called`);
+    } catch (e) {
+      console.error(`🧠 scheduleRender failed:`, e);
+    }
+
+    toast({
+      title: `Segmentation applied`,
+      description: `Added ${contoursAdded} contours (confidence: ${(confidence * 100).toFixed(1)}%)`
+    });
+  };
+
+  // Marching squares algorithm for contour tracing
+  function marchingSquares(data: Uint8Array, width: number, height: number): number[] {
+    const contours: number[] = [];
+    const visited = new Uint8Array(width * height);
+
+    // Find first boundary pixel
+    let startX = -1, startY = -1;
+    for (let y = 0; y < height && startX === -1; y++) {
+      for (let x = 0; x < width && startX === -1; x++) {
+        const index = x + y * width;
+        if (data[index] === 1 && !visited[index]) {
+          // Check if it's a boundary pixel
+          if (x === 0 || x === width - 1 || y === 0 || y === height - 1 ||
+              data[index - 1] === 0 || data[index + 1] === 0 ||
+              data[index - width] === 0 || data[index + width] === 0) {
+            startX = x;
+            startY = y;
+          }
+        }
+      }
+    }
+
+    if (startX === -1) return contours;
+
+    // Trace boundary using Moore neighborhood
+    let x = startX, y = startY;
+    let dir = 0;
+    const maxSteps = width * height;
+    let steps = 0;
+
+    do {
+      contours.push(x, y);
+      visited[x + y * width] = 1;
+
+      // Find next boundary pixel
+      let found = false;
+      for (let i = 0; i < 8; i++) {
+        const newDir = (dir + 6 + i) % 8;
+        let nx = x, ny = y;
+
+        switch (newDir) {
+          case 0: nx++; break;
+          case 1: nx++; ny++; break;
+          case 2: ny++; break;
+          case 3: nx--; ny++; break;
+          case 4: nx--; break;
+          case 5: nx--; ny--; break;
+          case 6: ny--; break;
+          case 7: nx++; ny--; break;
+        }
+
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const nIndex = nx + ny * width;
+          if (data[nIndex] === 1) {
+            x = nx;
+            y = ny;
+            dir = newDir;
+            found = true;
+            break;
+          }
+        }
+      }
+
+      if (!found) break;
+      steps++;
+    } while ((x !== startX || y !== startY) && steps < maxSteps);
+
+    return contours;
+  }
+
   // Handle contour updates from brush tool and other contour editing operations
   const handleContourUpdate = async (payload: any) => {
+    console.log('🔵 WorkingViewer.handleContourUpdate received:', payload);
+    console.log('🔵 Payload.action:', payload?.action);
+    
     // Handle margin toolbar operations
     if (payload && payload.type && payload.type.includes('margin')) {
       if (payload.preview) {
@@ -2497,7 +2840,16 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       await handleRejectPredictions(payload);
       return;
     }
-    
+
+    // Handle 3D mask application from AI tumor tool
+    if (payload && payload.action === "apply_3d_mask") {
+      console.log('🧠 WorkingViewer: Received apply_3d_mask action for structure', payload.structureId);
+      log.debug('Applying 3D segmentation mask', 'viewer');
+      await handleApply3DMask(payload);
+      console.log('🧠 WorkingViewer: handleApply3DMask completed');
+      return;
+    }
+
     // Special handling for undo/redo results which return full RT structures
     if (payload && payload.structures && !payload.action) {
       console.log('Applying undo/redo result with', payload.structures.length, 'structures');
@@ -4526,7 +4878,9 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
           failedCount += (batchUIDs.length - batchResults.size);
           
           const progress = Math.round((loadedCount / imageList.length) * 100);
+        if (PREDICTION_DEBUG) {
           console.log(`📊 Prefetch progress: ${loadedCount}/${imageList.length} (${progress}%)`);
+        }
           setPrefetchProgress({ loaded: loadedCount, total: imageList.length });
           
         } catch (error: any) {
@@ -5837,54 +6191,45 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       console.warn("No image metadata available for contour drawing");
       return;
     }
-    
-    // Debug logging disabled unless DEBUG is true
-    if (DEBUG && contour.points.length >= 6) {
-      console.log('Drawing contour with metadata:', {
-        imagePosition: imgMetadata.imagePosition,
-        pixelSpacing: imgMetadata.pixelSpacing,
-        firstWorldPoint: [contour.points[0], contour.points[1], contour.points[2]],
-        canvasSize: [canvasWidth, canvasHeight],
-        zoom: zoom,
-        pan: [panX, panY]
-      });
-    }
 
-    // Parse DICOM metadata
+    // Parse DICOM metadata with defensive checks
     const imagePosition = imgMetadata.imagePosition
       ?.split("\\")
-      .map(Number) || [-300, -300, 0];
+      .map(Number)
+      .filter((n: number) => Number.isFinite(n)) || [-300, -300, 0];
+
     const pixelSpacing = imgMetadata.pixelSpacing
       ?.split("\\")
-      .map(Number) || [1.171875, 1.171875];
+      .map(Number)
+      .filter((n: number) => Number.isFinite(n)) || [1.171875, 1.171875];
 
-    // Image dimensions
-    const imageWidth = 512;
-    const imageHeight = 512;
+    // Clamp spacing to avoid zeros
+    const EPSILON = 1e-6;
+    const rowSpacing = Math.abs(pixelSpacing[0]) > EPSILON ? pixelSpacing[0] : 1;
+    const columnSpacing = Math.abs(pixelSpacing[1]) > EPSILON ? pixelSpacing[1] : 1;
 
-    // Calculate scale with zoom factor
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    // For a 512x512 image in 1024x1024 canvas, baseScale = 2
-    
-    // Apply zoom factor to base scale
-    const totalScale = baseScale * zoom;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
-    
-    // Center the image on canvas with pan offset (same as render16BitImage)
-    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+    // Get image dimensions from metadata or use defaults
+    const imageWidth = Number(imgMetadata.columns || imgMetadata.width) || 512;
+    const imageHeight = Number(imgMetadata.rows || imgMetadata.height) || 512;
+
+    // REUSE the transform established by render16BitImage instead of recalculating
+    const transform = ctTransform.current ?? {
+      scale: Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom,
+      offsetX: (canvasWidth - imageWidth * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panX,
+      offsetY: (canvasHeight - imageHeight * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panY,
+      imageWidth,
+      imageHeight
+    };
 
     // Set up animated dashed line for predicted contours
     if (contour.isPredicted && animationTime !== undefined) {
       const dashLength = 8;
       const gapLength = 6;
-      const animationSpeed = 0.002; // Adjust for speed
+      const animationSpeed = 0.002;
       const offset = (animationTime * animationSpeed) % (dashLength + gapLength);
       ctx.setLineDash([dashLength, gapLength]);
       ctx.lineDashOffset = -offset;
     } else {
-      // Solid line for confirmed contours
       ctx.setLineDash([]);
       ctx.lineDashOffset = 0;
     }
@@ -5896,12 +6241,12 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
 
       // Convert world coordinates to pixel coordinates
       // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-      const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
-      const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
-      
-      // Apply the same transformation as the image
-      const canvasX = imageX + (pixelX * totalScale);
-      const canvasY = imageY + (pixelY * totalScale);
+      const pixelX = (worldX - imagePosition[0]) / columnSpacing;
+      const pixelY = (worldY - imagePosition[1]) / rowSpacing;
+
+      // Apply the established transform to map pixel coordinates to canvas
+      const canvasX = transform.offsetX + (pixelX * transform.scale);
+      const canvasY = transform.offsetY + (pixelY * transform.scale);
 
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
@@ -5923,10 +6268,10 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
         baseOpacity: rippleAnimationState.baseOpacity,
         progress: rippleAnimationState.progress,
         imagePosition,
-        pixelSpacing,
-        imageX,
-        imageY,
-        totalScale
+        pixelSpacing: [rowSpacing, columnSpacing],
+        imageX: transform.offsetX,
+        imageY: transform.offsetY,
+        totalScale: transform.scale
       });
     } else {
       // Normal rendering (no animation)
@@ -5942,7 +6287,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       } else {
         ctx.fill();
       }
-      
+
       ctx.stroke();
     }
 
@@ -6111,10 +6456,11 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Check if any drawing tool or measurement tool is active - if so, skip pan functionality
     const isDrawingToolActive =
-      (brushToolState?.isActive && 
-       (brushToolState?.tool === "brush" || 
-        brushToolState?.tool === "pen" || 
-        brushToolState?.tool === "planar-contour")) ||
+      (brushToolState?.isActive &&
+       (brushToolState?.tool === "brush" ||
+        brushToolState?.tool === "pen" ||
+        brushToolState?.tool === "planar-contour" ||
+        brushToolState?.tool === "interactive-tumor")) ||
       isMeasurementToolActive;
 
     // Only prevent default and stop propagation if drawing/measurement tool is NOT active
@@ -6196,10 +6542,11 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Skip pan functionality if any drawing tool or measurement tool is active
     const isDrawingToolActive =
-      (brushToolState?.isActive && 
-       (brushToolState?.tool === "brush" || 
-        brushToolState?.tool === "pen" || 
-        brushToolState?.tool === "planar-contour")) ||
+      (brushToolState?.isActive &&
+       (brushToolState?.tool === "brush" ||
+        brushToolState?.tool === "pen" ||
+        brushToolState?.tool === "planar-contour" ||
+        brushToolState?.tool === "interactive-tumor")) ||
       isMeasurementToolActive;
 
     // NOTE: Crosshair position is now only updated on click when in crosshair mode,
@@ -6217,10 +6564,11 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   const handleCanvasMouseUp = () => {
     // Skip pan functionality if any drawing tool or measurement tool is active
     const isDrawingToolActive =
-      (brushToolState?.isActive && 
-       (brushToolState?.tool === "brush" || 
-        brushToolState?.tool === "pen" || 
-        brushToolState?.tool === "planar-contour")) ||
+      (brushToolState?.isActive &&
+       (brushToolState?.tool === "brush" ||
+        brushToolState?.tool === "pen" ||
+        brushToolState?.tool === "planar-contour" ||
+        brushToolState?.tool === "interactive-tumor")) ||
       isMeasurementToolActive;
 
     if (!isDrawingToolActive) {
@@ -7312,7 +7660,57 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
                 imageMetadata={imageMetadata}
               />
             )}
-            
+
+          {/* AI Tumor Tool - Interactive 3D segmentation with scribbles */}
+          {brushToolState?.isActive &&
+            brushToolState?.tool === "interactive-tumor" && selectedForEdit && (
+              <AITumorTool
+                canvasRef={canvasRef}
+                isActive={brushToolState.isActive}
+                brushSize={brushToolState.brushSize}
+                selectedStructure={
+                  rtStructures?.structures?.find((s: any) => s.roiNumber === selectedForEdit) ||
+                  { structureName: 'Unknown', color: [255, 255, 255], roiNumber: selectedForEdit }
+                }
+                currentSlicePosition={(() => {
+                  if (images.length === 0 || !images[currentIndex]) return currentIndex;
+                  const rawSlicePos =
+                    images[currentIndex].sliceZ ??
+                    images[currentIndex].parsedSliceLocation ??
+                    images[currentIndex].parsedZPosition ??
+                    currentIndex;
+                  const parsedSlicePos =
+                    typeof rawSlicePos === "string"
+                      ? parseFloat(rawSlicePos)
+                      : rawSlicePos;
+                  return normalizeSlicePosition(
+                    Number.isFinite(parsedSlicePos) ? parsedSlicePos : currentIndex
+                  );
+                })()}
+                zoom={zoom}
+                panX={panX}
+                panY={panY}
+                imageMetadata={imageMetadata}
+                onContourUpdate={(payload: any) => {
+                  handleContourUpdate(payload);
+                }}
+                dicomImages={images}
+                currentIndex={currentIndex}
+                ctTransform={ctTransform.current || { scale: 1, offsetX: 0, offsetY: 0 }}
+                worldToCanvas={worldToCanvas}
+                canvasToWorld={canvasToWorld}
+                imageCacheRef={imageCacheRef}
+                secondarySeriesId={secondarySeriesId}
+                registrationMatrix={registrationMatrix}
+                onShowPrimarySeries={() => {
+                  // Switch back to primary series to show CT contours
+                  if (onSecondarySeriesChange) {
+                    onSecondarySeriesChange(null);
+                  }
+                }}
+              />
+            )}
+
           {/* Measurement Tool overlay */}
           {isMeasurementToolActive && (
             <MeasurementTool

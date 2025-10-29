@@ -126,9 +126,145 @@ export function sortImagesByInstance(images: DICOMImage[]): DICOMImage[] {
 export function calculateWindowLevel(windowCenter: string, windowWidth: string): WindowLevel {
   const center = parseFloat(windowCenter) || 40;
   const width = parseFloat(windowWidth) || 400;
-  
+
   return {
     level: center,
     window: width
+  };
+}
+
+/**
+ * Helper functions for safe metadata parsing
+ * These ensure MRI and CT metadata are handled consistently
+ */
+
+/**
+ * Parse a value (string or array) into a numeric array
+ * @param value - String with backslash delimiters or array of values
+ * @param expectedLength - Expected number of elements
+ * @returns Array of finite numbers or null if parsing fails
+ */
+export function parseNumericArray(value: unknown, expectedLength?: number): number[] | null {
+  if (Array.isArray(value)) {
+    const parsed = value.map((component) => Number(component)).filter((component) => Number.isFinite(component));
+    if (!parsed.length) return null;
+    if (expectedLength && parsed.length < expectedLength) return null;
+    return parsed;
+  }
+  if (typeof value === 'string') {
+    const parsed = value
+      .split('\\')
+      .map((component) => Number(component.trim()))
+      .filter((component) => Number.isFinite(component));
+    if (!parsed.length) return null;
+    if (expectedLength && parsed.length < expectedLength) return null;
+    return parsed;
+  }
+  return null;
+}
+
+/**
+ * Parse a value into a single finite number
+ * @param value - Value to parse
+ * @returns Finite number or null
+ */
+export function parseNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * Normalize metadata for contour rendering
+ * Walks through metadata candidates and defensively parses values
+ * @param metadataCandidates - Array of potential metadata sources
+ * @returns Normalized metadata with safe defaults
+ */
+export interface NormalizedMetadata {
+  imagePosition: number[];
+  pixelSpacing: number[];
+  imageOrientation: number[];
+  columns: number;
+  rows: number;
+}
+
+const EPSILON = 1e-6; // Minimum value for spacing to avoid division by zero
+
+export function normalizeMetadata(metadataCandidates: any[]): NormalizedMetadata {
+  let imagePosition: number[] | null = null;
+  let pixelSpacing: number[] | null = null;
+  let imageOrientation: number[] | null = null;
+  let columns: number | null = null;
+  let rows: number | null = null;
+
+  // Walk through candidates to find valid values
+  for (const meta of metadataCandidates) {
+    if (!meta) continue;
+
+    if (!imagePosition) {
+      imagePosition =
+        parseNumericArray(meta.imagePosition, 3) ||
+        parseNumericArray(meta.imagePositionPatient, 3);
+    }
+    if (!pixelSpacing) {
+      pixelSpacing =
+        parseNumericArray(meta.pixelSpacing, 2) ||
+        parseNumericArray(meta.pixelSpacingXY, 2);
+    }
+    if (!imageOrientation) {
+      imageOrientation =
+        parseNumericArray(meta.imageOrientation, 6) ||
+        parseNumericArray(meta.imageOrientationPatient, 6);
+    }
+    if (columns == null) {
+      columns = parseNumber(meta.columns) ?? parseNumber(meta.width) ?? null;
+    }
+    if (rows == null) {
+      rows = parseNumber(meta.rows) ?? parseNumber(meta.height) ?? null;
+    }
+
+    if (imagePosition && pixelSpacing && imageOrientation && columns != null && rows != null) {
+      break;
+    }
+  }
+
+  // Apply safe defaults
+  if (!imagePosition) {
+    imagePosition = [0, 0, 0];
+  }
+  if (!pixelSpacing || pixelSpacing.length < 2) {
+    pixelSpacing = [1, 1];
+  }
+  if (!imageOrientation || imageOrientation.length < 6) {
+    imageOrientation = [1, 0, 0, 0, 1, 0]; // Identity orientation
+  }
+
+  // Clamp spacing to avoid zeros (use epsilon as minimum)
+  const rowSpacing = Math.abs(pixelSpacing[0]) > EPSILON ? pixelSpacing[0] : 1;
+  const columnSpacing = Math.abs(pixelSpacing[1]) > EPSILON ? pixelSpacing[1] : 1;
+
+  // Normalize orientation vectors to unit length
+  const normalizeVector = (vec: number[]): number[] => {
+    const mag = Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+    if (mag < EPSILON) return vec; // Return as-is if too small
+    return [vec[0] / mag, vec[1] / mag, vec[2] / mag];
+  };
+
+  const rowCosines = normalizeVector([
+    imageOrientation[0],
+    imageOrientation[1],
+    imageOrientation[2],
+  ]);
+  const colCosines = normalizeVector([
+    imageOrientation[3],
+    imageOrientation[4],
+    imageOrientation[5],
+  ]);
+
+  return {
+    imagePosition,
+    pixelSpacing: [rowSpacing, columnSpacing],
+    imageOrientation: [...rowCosines, ...colCosines],
+    columns: columns ?? 512,
+    rows: rows ?? 512,
   };
 }

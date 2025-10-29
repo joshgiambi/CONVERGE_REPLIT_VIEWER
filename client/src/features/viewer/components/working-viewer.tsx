@@ -84,6 +84,30 @@ const matricesEqual = (a: number[] | null, b: number[] | null) => {
   return true;
 };
 
+const toNumericArray = (value: unknown, expectedLength?: number): number[] | null => {
+  if (Array.isArray(value)) {
+    const parsed = value.map((component) => Number(component)).filter((component) => Number.isFinite(component));
+    if (!parsed.length) return null;
+    if (expectedLength && parsed.length < expectedLength) return null;
+    return parsed;
+  }
+  if (typeof value === 'string') {
+    const parsed = value
+      .split('\\')
+      .map((component) => Number(component.trim()))
+      .filter((component) => Number.isFinite(component));
+    if (!parsed.length) return null;
+    if (expectedLength && parsed.length < expectedLength) return null;
+    return parsed;
+  }
+  return null;
+};
+
+const toNumber = (value: unknown): number | null => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 // Using doPolygonsIntersectSimple from simple-polygon-operations for consistency
 
 interface WorkingViewerProps {
@@ -1140,6 +1164,144 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     } catch (error) {
       log.error(`Error performing ${operation} op: ${String(error)}`, 'viewer');
+    }
+  };
+
+  // Handle applying 3D mask from AI segmentation
+  const handleApply3DMask = async (payload: any) => {
+    if (!rtStructures) {
+      log.error('RT structures not available for 3D mask application', 'viewer');
+      return;
+    }
+
+    const { structureId, mask, confidence } = payload;
+    log.info(`🧠 Applying 3D mask to structure ${structureId} (confidence: ${confidence})`, 'viewer');
+
+    // Create a deep copy of RT structures
+    const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
+
+    // Find the target structure
+    const structure = updatedRTStructures.structures?.find(
+      (s: any) => s.roiNumber === structureId,
+    );
+
+    if (!structure) {
+      log.error(`Structure ${structureId} not found for 3D mask application`, 'viewer');
+      return;
+    }
+
+    try {
+      // mask is in format [D][H][W] where D is depth (number of slices)
+      const depth = mask.length;
+      log.info(`Processing 3D mask with ${depth} slices`, 'viewer');
+
+      // Import contour tracing library
+      const { maskToContours } = await import('@/lib/mask-to-contours');
+
+      let contoursAdded = 0;
+      for (let sliceIdx = 0; sliceIdx < depth; sliceIdx++) {
+        const sliceMask = mask[sliceIdx];
+
+        // Check if this slice has any pixels
+        const hasPixels = sliceMask.some((row: number[]) => row.some((val: number) => val > 0));
+        if (!hasPixels) continue;
+
+        // Get the slice position - assume slices are in order matching images array
+        if (sliceIdx >= images.length) {
+          log.warn(`Slice index ${sliceIdx} exceeds images array length ${images.length}`, 'viewer');
+          continue;
+        }
+
+        const image = images[sliceIdx];
+        const slicePosition = image.parsedSliceLocation || image.parsedZPosition || sliceIdx;
+
+        // Get image metadata for coordinate conversion
+        const imgMetadata = image.imageMetadata || (sliceIdx === currentIndex ? imageMetadata : null);
+        if (!imgMetadata) {
+          log.warn(`No metadata for slice ${sliceIdx}, skipping`, 'viewer');
+          continue;
+        }
+
+        // Parse image geometry
+        const imagePosition = toNumericArray(imgMetadata.imagePosition, 3)
+          || toNumericArray(imgMetadata.imagePositionPatient, 3)
+          || [0, 0, slicePosition];
+
+        const pixelSpacingArray = toNumericArray(imgMetadata.pixelSpacing, 2) || [1, 1];
+        const rowSpacing = pixelSpacingArray[0];
+        const columnSpacing = pixelSpacingArray[1];
+
+        const orientationArray = toNumericArray(imgMetadata.imageOrientation, 6)
+          || toNumericArray(imgMetadata.imageOrientationPatient, 6)
+          || [1, 0, 0, 0, 1, 0];
+
+        const rowDir = [orientationArray[0], orientationArray[1], orientationArray[2]];
+        const colDir = [orientationArray[3], orientationArray[4], orientationArray[5]];
+
+        // Convert mask to contours (returns pixel coordinates)
+        const contourPointsPixel = await maskToContours(sliceMask);
+
+        if (contourPointsPixel.length === 0) continue;
+
+        // Remove existing contour on this slice
+        structure.contours = structure.contours.filter(
+          (c: any) => Math.abs(c.slicePosition - slicePosition) > SLICE_TOL_MM
+        );
+
+        // Add new contours for this slice
+        for (const pixelPoints of contourPointsPixel) {
+          if (pixelPoints.length < 9) continue;
+
+          // Convert pixel coordinates to world coordinates
+          const worldPoints: number[] = [];
+          for (let i = 0; i < pixelPoints.length; i += 3) {
+            const pixelX = pixelPoints[i];
+            const pixelY = pixelPoints[i + 1];
+
+            // Convert pixel to world using DICOM transformation
+            const worldX = imagePosition[0] + (rowDir[0] * columnSpacing * pixelX) + (colDir[0] * rowSpacing * pixelY);
+            const worldY = imagePosition[1] + (rowDir[1] * columnSpacing * pixelX) + (colDir[1] * rowSpacing * pixelY);
+            const worldZ = imagePosition[2] + (rowDir[2] * columnSpacing * pixelX) + (colDir[2] * rowSpacing * pixelY);
+
+            worldPoints.push(worldX, worldY, worldZ);
+          }
+
+          structure.contours.push({
+            slicePosition,
+            points: worldPoints,
+            numberOfPoints: worldPoints.length / 3,
+          });
+          contoursAdded++;
+        }
+      }
+
+      log.info(`✅ Applied 3D mask: added ${contoursAdded} contours to structure ${structure.structureName}`, 'viewer');
+
+      // Update local structures and save to server
+      setLocalRTStructures(updatedRTStructures);
+      saveContourUpdates(updatedRTStructures, 'apply_3d_mask');
+
+      // Pass the updated structures up to parent component
+      if (onContourUpdate) {
+        onContourUpdate(updatedRTStructures);
+      }
+
+      // Save state to undo system
+      if (seriesId) {
+        undoRedoManager.saveState(seriesId, 'apply_3d_mask', structureId, updatedRTStructures);
+      }
+
+      // Force a re-render to display the new contours
+      if (scheduleRenderRef.current) {
+        scheduleRenderRef.current();
+      } else if (displayCurrentImageRef.current) {
+        displayCurrentImageRef.current();
+      }
+
+      log.info('🎨 Triggered canvas re-render to display new contours', 'viewer');
+
+    } catch (error) {
+      log.error(`Error applying 3D mask: ${String(error)}`, 'viewer');
     }
   };
 
@@ -2333,7 +2495,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           const prevSlicePosition = payload.slicePosition - sliceSpacing;
           
           // Predict for next slice
-          const nextPrediction = predictNextSliceContour({
+          const nextPrediction = await predictNextSliceContour({
             currentContour: finalContour.points,
             currentSlicePosition: payload.slicePosition,
             targetSlicePosition: nextSlicePosition,
@@ -2362,7 +2524,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
           }
           
           // Also predict for previous slice
-          const prevPrediction = predictNextSliceContour({
+          const prevPrediction = await predictNextSliceContour({
             currentContour: finalContour.points,
             currentSlicePosition: payload.slicePosition,
             targetSlicePosition: prevSlicePosition,
@@ -2905,6 +3067,10 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } else if (payload.action === "boolean_operation") {
       // Handle boolean operations (combine/subtract)
       await handleBooleanOperation(payload);
+    } else if (payload.action === "apply_3d_mask") {
+      // Handle AI 3D mask application (from tumor segmentation tool)
+      console.log("🧠 Applying 3D mask from AI segmentation:", payload);
+      await handleApply3DMask(payload);
     } else if (payload.action === "delete_slice") {
       // Handle delete slice action - only delete the contour for the selected structure
       const structure = updatedStructures.structures.find(
@@ -5263,77 +5429,133 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
     ctx.beginPath();
 
-    // Get image metadata from current image
-    const imgMetadata = currentImage?.imageMetadata;
-    if (!imgMetadata) {
-      console.warn("No image metadata available for contour drawing");
-      return;
+    // Normalize metadata using defensive parsing
+    const metadataCandidates = [
+      currentImage?.imageMetadata,
+      currentImage,
+      currentImage?.metadata,
+      imageMetadata,
+    ];
+
+    // Use the existing helper functions to parse metadata
+    let imagePosition: number[] | null = null;
+    let pixelSpacingArray: number[] | null = null;
+    let orientationArray: number[] | null = null;
+    let columns: number | null = null;
+    let rows: number | null = null;
+
+    for (const meta of metadataCandidates) {
+      if (!meta) continue;
+      if (!imagePosition) {
+        imagePosition =
+          toNumericArray(meta.imagePosition, 3) ||
+          toNumericArray(meta.imagePositionPatient, 3);
+      }
+      if (!pixelSpacingArray) {
+        pixelSpacingArray =
+          toNumericArray(meta.pixelSpacing, 2) ||
+          toNumericArray(meta.pixelSpacingXY, 2);
+      }
+      if (!orientationArray) {
+        orientationArray =
+          toNumericArray(meta.imageOrientation, 6) ||
+          toNumericArray(meta.imageOrientationPatient, 6);
+      }
+      if (columns == null) {
+        columns = toNumber((meta as any).columns) ?? toNumber((meta as any).width) ?? null;
+      }
+      if (rows == null) {
+        rows = toNumber((meta as any).rows) ?? toNumber((meta as any).height) ?? null;
+      }
+      if (imagePosition && pixelSpacingArray && orientationArray && columns != null && rows != null) {
+        break;
+      }
     }
-    
-    // Debug logging disabled unless DEBUG is true
-    if (DEBUG && contour.points.length >= 6) {
-      console.log('Drawing contour with metadata:', {
-        imagePosition: imgMetadata.imagePosition,
-        pixelSpacing: imgMetadata.pixelSpacing,
-        firstWorldPoint: [contour.points[0], contour.points[1], contour.points[2]],
-        canvasSize: [canvasWidth, canvasHeight],
-        zoom: zoom,
-        pan: [panX, panY]
-      });
+
+    // Apply safe defaults
+    if (!imagePosition) {
+      imagePosition = [0, 0, 0];
+    }
+    if (!pixelSpacingArray || pixelSpacingArray.length < 2) {
+      pixelSpacingArray = [1, 1];
+    }
+    if (!orientationArray || orientationArray.length < 6) {
+      orientationArray = [1, 0, 0, 0, 1, 0]; // Identity orientation
     }
 
-    // Parse DICOM metadata
-    const imagePosition = imgMetadata.imagePosition
-      ?.split("\\")
-      .map(Number) || [-300, -300, 0];
-    const pixelSpacing = imgMetadata.pixelSpacing
-      ?.split("\\")
-      .map(Number) || [1.171875, 1.171875];
+    // Clamp spacing to avoid zeros (use epsilon as minimum)
+    const EPSILON = 1e-6;
+    const rowSpacing = Math.abs(pixelSpacingArray[0]) > EPSILON ? pixelSpacingArray[0] : 1;
+    const columnSpacing = Math.abs(pixelSpacingArray[1]) > EPSILON ? pixelSpacingArray[1] : 1;
 
-    // Image dimensions
-    const imageWidth = 512;
-    const imageHeight = 512;
+    const imageWidth = columns ?? 512;
+    const imageHeight = rows ?? 512;
 
-    // Calculate scale with zoom factor
-    const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-    // For a 512x512 image in 1024x1024 canvas, baseScale = 2
-    
-    // Apply zoom factor to base scale
-    const totalScale = baseScale * zoom;
-    const scaledWidth = imageWidth * totalScale;
-    const scaledHeight = imageHeight * totalScale;
-    
-    // Center the image on canvas with pan offset (same as render16BitImage)
-    const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-    const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+    // REUSE the transform established by render16BitImage instead of recalculating
+    const transform = ctTransform.current ?? {
+      scale: Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom,
+      offsetX: (canvasWidth - imageWidth * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panX,
+      offsetY: (canvasHeight - imageHeight * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panY,
+      imageWidth,
+      imageHeight
+    };
 
     // Set up animated dashed line for predicted contours
     if (contour.isPredicted && animationTime !== undefined) {
       const dashLength = 8;
       const gapLength = 6;
-      const animationSpeed = 0.002; // Adjust for speed
+      const animationSpeed = 0.002;
       const offset = (animationTime * animationSpeed) % (dashLength + gapLength);
       ctx.setLineDash([dashLength, gapLength]);
       ctx.lineDashOffset = -offset;
     } else {
-      // Solid line for confirmed contours
       ctx.setLineDash([]);
       ctx.lineDashOffset = 0;
     }
 
+    // Normalize orientation vectors to unit length
+    const normalizeVector = (vec: number[]): number[] => {
+      const mag = Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+      if (mag < EPSILON) return vec; // Return as-is if too small
+      return [vec[0] / mag, vec[1] / mag, vec[2] / mag];
+    };
+
+    const rowCosines = normalizeVector([
+      orientationArray[0],
+      orientationArray[1],
+      orientationArray[2],
+    ]);
+    const colCosines = normalizeVector([
+      orientationArray[3],
+      orientationArray[4],
+      orientationArray[5],
+    ]);
+
+    // Helper function for dot product
+    const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
     // Convert DICOM world coordinates to canvas coordinates
     for (let i = 0; i < contour.points.length; i += 3) {
-      const worldX = contour.points[i]; // DICOM X coordinate
-      const worldY = contour.points[i + 1]; // DICOM Y coordinate
+      const worldX = contour.points[i];
+      const worldY = contour.points[i + 1];
+      const worldZ = contour.points[i + 2];
 
-      // Convert world coordinates to pixel coordinates
-      // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-      const pixelX = (worldX - imagePosition[0]) / pixelSpacing[1]; // column spacing
-      const pixelY = (worldY - imagePosition[1]) / pixelSpacing[0]; // row spacing
-      
-      // Apply the same transformation as the image
-      const canvasX = imageX + (pixelX * totalScale);
-      const canvasY = imageY + (pixelY * totalScale);
+      // Relative position from image origin
+      const rel = [
+        worldX - imagePosition[0],
+        worldY - imagePosition[1],
+        worldZ - imagePosition[2],
+      ];
+
+      // Project onto image plane using orientation vectors
+      // DICOM standard: rowCosines = X direction, colCosines = Y direction
+      // rowCosines uses columnSpacing (pixel spacing in X), colCosines uses rowSpacing (pixel spacing in Y)
+      const pixelX = dot(rel, rowCosines) / columnSpacing;
+      const pixelY = dot(rel, colCosines) / rowSpacing;
+
+      // Apply the established transform to map pixel coordinates to canvas
+      const canvasX = transform.offsetX + (pixelX * transform.scale);
+      const canvasY = transform.offsetY + (pixelY * transform.scale);
 
       if (i === 0) {
         ctx.moveTo(canvasX, canvasY);
@@ -5357,7 +5579,7 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     } else {
       ctx.fill();
     }
-    
+
     ctx.stroke();
 
     // Reset line dash for subsequent drawing operations
